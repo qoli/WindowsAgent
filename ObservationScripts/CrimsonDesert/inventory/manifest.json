@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "id": "crimson-desert/inventory",
+  "version": 1,
+  "title": "Read raw Crimson Desert inventory records",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "outputSchema": "output.schema.json",
+  "files": {
+    "main.star": {
+      "sha256": "4f23ed4637edb00b905df50817bf04d6d37f53b345fd8dd25eb88a1ba657f70d"
+    },
+    "TASK.md": {
+      "sha256": "c88707f58d4b6f5604180d239e209d335ed94d7c344d31a9c58ab27677012407"
+    },
+    "output.schema.json": {
+      "sha256": "8354729e984a9e839cf40ec134ed13648c6684955229b0e7f0a085d6494a782f"
+    }
+  },
+  "permissions": {
+    "memory": {
+      "target": "crimson-desert/current-process",
+      "operations": [
+        "modules",
+        "scan",
+        "resolveRip",
+        "readBatch",
+        "readStrided"
+      ],
+      "maxCalls": 12,
+      "maxBytesRead": 536870912
+    },
+    "file": {
+      "roots": ["crimson-desert-saves"],
+      "operations": ["decode"],
+      "maxCalls": 1,
+      "maxBytesRead": 67108864
+    }
+  },
+  "limits": {
+    "wallTimeMs": 5000,
+    "maxSteps": 500000,
+    "maxResultBytes": 262144,
+    "maxLogBytes": 32768
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "source", "attempts", "inventory"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "processImageSha256", "saveModifiedAt", "decoder"],
+      "properties": {
+        "kind": {"enum": ["process-memory", "save-file"]},
+        "processImageSha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "saveModifiedAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "decoder": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "attempts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "status", "errorCode"],
+        "properties": {
+          "source": {"enum": ["process-memory", "save-file"]},
+          "status": {"enum": ["succeeded", "failed"]},
+          "errorCode": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recordCount", "occupiedCount", "items"],
+      "properties": {
+        "recordCount": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "occupiedCount": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "items": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slot",
+              "itemId",
+              "quantity",
+              "pairedItemId",
+              "inventoryKey",
+              "instanceId"
+            ],
+            "properties": {
+              "slot": {"type": "integer", "minimum": 0},
+              "itemId": {"type": "integer", "minimum": 1},
+              "quantity": {"type": "integer", "minimum": 0},
+              "pairedItemId": {"type": ["integer", "null"], "minimum": 0},
+              "inventoryKey": {"type": ["integer", "null"], "minimum": 0},
+              "instanceId": {"type": ["integer", "null"], "minimum": 0}
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "source": {
+          "properties": {
+            "kind": {"const": "process-memory"},
+            "processImageSha256": {"type": "string"},
+            "saveModifiedAt": {"type": "null"},
+            "decoder": {"type": "null"}
+          }
+        },
+        "attempts": {
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [
+            {
+              "properties": {
+                "source": {"const": "process-memory"},
+                "status": {"const": "succeeded"},
+                "errorCode": {"type": "null"}
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "source": {
+          "properties": {
+            "kind": {"const": "save-file"},
+            "processImageSha256": {"type": "null"},
+            "saveModifiedAt": {"type": "string"},
+            "decoder": {"const": "crimson-rs/inventory@bb730180"}
+          }
+        },
+        "attempts": {
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "properties": {
+                "source": {"const": "process-memory"},
+                "status": {"const": "failed"},
+                "errorCode": {"type": "string"}
+              }
+            },
+            {
+              "properties": {
+                "source": {"const": "save-file"},
+                "status": {"const": "succeeded"},
+                "errorCode": {"type": "null"}
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
