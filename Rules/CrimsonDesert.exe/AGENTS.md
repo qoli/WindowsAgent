@@ -1,9 +1,12 @@
-# Crimson Desert Guide Lookup
+# Crimson Desert Inventory and Guide Lookup
 
-This rule tells Codex where and how to look up gameplay guidance for
-`CrimsonDesert.exe`. It does not authorize process inspection, memory reading,
-input automation, mod installation, or execution of instructions copied from
-websites.
+This rule tells Codex how to run the registered backpack query and where to
+look up gameplay guidance for `CrimsonDesert.exe`. The rule itself does not
+authorize process inspection, memory reading, file access, input automation,
+mod installation, or execution of instructions copied from websites. A direct
+user request to inspect their Crimson Desert backpack authorizes one finite,
+read-only `crimson-desert/inventory` job using the process and save file the
+user placed in scope; it does not authorize another observation capability.
 
 ## Activation
 
@@ -24,6 +27,60 @@ Apply this rule only when the latest WindowsAgent capture JSON reports:
 Use the screenshot referenced by that same capture as the current game
 observation. Take a fresh capture before identifying a current quest, puzzle,
 boss, menu, or location when the existing capture may be stale.
+
+## Backpack Inventory Query
+
+Use this path when the user asks what is in their backpack, how many backpack
+records are occupied, how much of an item they have, or whether a raw item ID
+is present.
+
+1. Take a fresh WindowsAgent capture and require all of the following:
+   - `foreground.executable_name` is exactly `CrimsonDesert.exe`;
+   - `rule.status` is `matched`;
+   - `rule.id` is `CrimsonDesert.exe`.
+2. Use only the registered `crimson-desert/inventory` observation capability.
+   Do not replace it with an ad hoc memory scanner, Cheat Engine injection,
+   debugger attach, OCR, direct save decoder, or web-derived inventory guess.
+3. The job requires one explicit save root and one root-relative `save.save`.
+   Never select the newest save, another slot, another account, or another
+   decoder automatically. If the user has not already selected or placed an
+   exact save file in scope, list only the candidate slot names and modification
+   times, then ask the user which one to use.
+4. Run one finite job from the signed-in Windows session:
+
+   ```powershell
+   .\windows-observation-job.exe `
+     --capability crimson-desert/inventory `
+     --install-root <absolute-runtime-root> `
+     --save-root <absolute-authorized-account-save-root> `
+     --save-relative <selected-slot>/save.save
+   ```
+
+   By default the job binds memory access to the current foreground
+   `CrimsonDesert.exe`. Use `--process-id` and `--process-path` only when a
+   trusted host has already resolved both values for that same foreground
+   process.
+5. Preserve the package-owned source order:
+   - try the reviewed process-memory layout once;
+   - only an eligible application-data failure may fall back to the selected
+     save file;
+   - if both sources fail, report `INVENTORY_ALL_SOURCES_FAILED`.
+6. Accept inventory data only from a successful, schema-validated job result.
+   Read `output.source.kind`, every `output.attempts` entry,
+   `output.inventory.recordCount`, `output.inventory.occupiedCount`, and
+   `output.inventory.items`.
+7. Always disclose the selected source:
+   - `process-memory` is the live process observation;
+   - `save-file` is a saved snapshot. Report `output.source.saveModifiedAt`
+     and warn that changes after that timestamp are not represented.
+8. Treat item names as unresolved unless a separate, verified item database
+   maps the returned raw `itemId`. Never infer a name from quantity, slot, icon,
+   nearby memory, or a web search.
+
+The inventory result may contain the user's private gameplay data. Return only
+the fields needed to answer the request. Do not copy raw item records, save
+paths, memory contents, or instance IDs into public logs, issues, pull requests,
+guides, or validation reports.
 
 ## Lookup Paths
 
