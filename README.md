@@ -307,6 +307,8 @@ cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
 docs/design/                     maintained design registry
+docs/protocol/                   runtime protocol usage
+docs/testing/                    external black-box acceptance contracts
 internal/observationjob/         finite broker and Windows Job Object limits
 internal/observationlauncher/    native child-process isolation
 internal/observer/               permission-bounded memory/file backends
@@ -328,6 +330,11 @@ New or changed Script packages must follow the
 [`Script Package development contract`](docs/script-development-contract.md).
 It defines package ownership, source-transition rules, manifest validation,
 native ABI responsibility, privacy boundaries, and required validation.
+
+OpenCode model validation must follow the
+[`OpenCode black-box acceptance contract`](docs/testing/opencode-black-box-acceptance-contract.md).
+It evaluates only externally visible OpenCode inputs, tool events, request
+counts, and final-answer consistency.
 
 New capabilities should receive their own internal package and API contract
 instead of being folded into the screenshot packages.

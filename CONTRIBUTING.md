@@ -40,6 +40,11 @@ the [`Script Package development contract`](docs/script-development-contract.md)
 including real package-loader tests, explicit source ordering, manifest file
 declarations, schema validation, and signed-in Windows evidence.
 
+Changes to Agent-facing guidance should also be exercised through the
+[`OpenCode black-box acceptance contract`](docs/testing/opencode-black-box-acceptance-contract.md).
+Record the exact OpenCode executable/version and model, inspect tool events
+rather than final prose, and enforce one launcher attempt.
+
 ## Design boundaries
 
 - Do not add an alternate screenshot backend as a silent fallback.
