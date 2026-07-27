@@ -15,7 +15,10 @@ dumps, or host information.
 
 The current screenshot API has no authentication or TLS and listens on
 `0.0.0.0:8787` by default. Restrict reachability to a trusted LAN or private
-overlay network. Do not expose it directly to the public Internet.
+overlay network. Do not expose it directly to the public Internet. Capture
+metadata includes the foreground process ID, executable name and path, and
+window title; these values can disclose installed software, usernames, file
+locations, or document names.
 
 The installer does not alter Windows Firewall and does not create a traditional
 Windows service. The agent must run with the signed-in user's interactive token.

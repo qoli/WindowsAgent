@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/pixels"
 	"github.com/whiteboxsolutions/go-ole"
 	winapirt "github.com/whiteboxsolutions/winapi/winrt"
@@ -234,6 +235,15 @@ func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Res
 		}
 		defer closeAndRelease(frame)
 
+		foregroundInfo, err := foreground.Snapshot()
+		if err != nil {
+			return capture.Result{}, capture.Failure(
+				"foreground_process_unavailable",
+				"failed to identify the foreground process at capture time",
+				err,
+			)
+		}
+
 		image, width, height, err := readFrame(frame, device, context3D, pixelFormat, target.desc)
 		if err != nil {
 			return capture.Result{}, err
@@ -258,6 +268,7 @@ func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Res
 			Height:             height,
 			IncludeCursor:      includeCursor,
 			Monitor:            monitor,
+			Foreground:         foregroundInfo,
 			CapturePixelFormat: pixelFormatName,
 			ToneMapped:         monitor.HDR,
 		}, nil

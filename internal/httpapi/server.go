@@ -190,6 +190,8 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request, requestID
 		"bytes", metadata.Bytes,
 		"hdr", metadata.Monitor.HDR,
 		"tone_mapped", metadata.ToneMapped,
+		"foreground_process_id", metadata.Foreground.ProcessID,
+		"foreground_executable_name", metadata.Foreground.ExecutableName,
 	)
 	w.Header().Set("Location", "/v1/captures/"+metadata.ID)
 	writeJSON(w, http.StatusCreated, metadata)

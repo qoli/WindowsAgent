@@ -18,6 +18,7 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/foreground"
 )
 
 type fakeCapturer struct {
@@ -67,6 +68,9 @@ func TestCaptureAndDownload(t *testing.T) {
 	}
 	if metadata.IncludeCursor {
 		t.Fatal("include_cursor was not propagated")
+	}
+	if metadata.Foreground.ExecutableName != "game.exe" || metadata.Foreground.ProcessID != 42 {
+		t.Fatalf("foreground process metadata = %+v", metadata.Foreground)
 	}
 
 	contentRequest := httptest.NewRequest(http.MethodGet, metadata.ContentURL, nil)
@@ -217,10 +221,17 @@ func testResult() capture.Result {
 	monitor.Width = 1
 	monitor.Height = 1
 	return capture.Result{
-		PNG:                encoded.Bytes(),
-		Width:              1,
-		Height:             1,
-		Monitor:            monitor,
+		PNG:     encoded.Bytes(),
+		Width:   1,
+		Height:  1,
+		Monitor: monitor,
+		Foreground: foreground.Info{
+			ObservedAt:     time.Date(2026, 7, 27, 1, 2, 3, 4, time.UTC),
+			ProcessID:      42,
+			ExecutableName: "game.exe",
+			ExecutablePath: `C:\Games\game.exe`,
+			WindowTitle:    "Game",
+		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",
 	}
 }

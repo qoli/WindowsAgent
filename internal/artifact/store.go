@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/foreground"
 )
 
 const (
@@ -43,6 +44,7 @@ type Metadata struct {
 	SHA256             string          `json:"sha256"`
 	IncludeCursor      bool            `json:"include_cursor"`
 	Monitor            capture.Monitor `json:"monitor"`
+	Foreground         foreground.Info `json:"foreground"`
 	CapturePixelFormat string          `json:"capture_pixel_format"`
 	ToneMapped         bool            `json:"tone_mapped"`
 	ContentURL         string          `json:"content_url"`
@@ -167,6 +169,7 @@ func (s *Store) Commit(ctx context.Context, result capture.Result) (*Metadata, e
 		SHA256:             hex.EncodeToString(sum[:]),
 		IncludeCursor:      result.IncludeCursor,
 		Monitor:            result.Monitor,
+		Foreground:         result.Foreground,
 		CapturePixelFormat: result.CapturePixelFormat,
 		ToneMapped:         result.ToneMapped,
 		ContentURL:         "/v1/captures/" + id + "/content",
@@ -321,6 +324,9 @@ func validateResult(result capture.Result) error {
 	if result.Monitor.DeviceName == "" {
 		return errors.New("capture monitor device name is required")
 	}
+	if err := result.Foreground.Validate(); err != nil {
+		return err
+	}
 	if result.CapturePixelFormat == "" {
 		return errors.New("capture pixel format is required")
 	}
@@ -366,6 +372,9 @@ func validateMetadata(id string, metadata Metadata) error {
 		return errors.New("content_url does not match artifact ID")
 	case metadata.Monitor.HDR != metadata.ToneMapped:
 		return errors.New("HDR captures and tone_mapped must agree")
+	}
+	if err := metadata.Foreground.Validate(); err != nil {
+		return err
 	}
 	if _, err := hex.DecodeString(metadata.SHA256); err != nil {
 		return fmt.Errorf("sha256 is not hexadecimal: %w", err)

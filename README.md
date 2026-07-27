@@ -12,7 +12,9 @@ permission, and safety boundaries.
 > [!WARNING]
 > The current HTTP server listens on `0.0.0.0:8787` without authentication,
 > TLS, or CORS by default. Anyone who can reach that port can trigger and
-> download screenshots. Use it only on a trusted LAN or private overlay network.
+> download screenshots and read foreground process metadata, including window
+> titles and executable paths. Use it only on a trusted LAN or private overlay
+> network.
 
 ## Status
 
@@ -23,11 +25,13 @@ The screenshot capability is available today:
 - SDR PNG output
 - HDR scRGB capture tone-mapped to an SDR PNG preview
 - cursor inclusion selected per request
+- foreground process ID, executable name/path, window title, and observation time
+  recorded with each capture
 - SHA-256 verified artifacts and bounded retention
 - strict JSON errors with no GDI or hidden capture fallback
 - optional hidden startup through an interactive-user Scheduled Task
 
-Process and memory capabilities are not implemented yet.
+General process enumeration and memory capabilities are not implemented yet.
 
 ## Build
 
@@ -119,7 +123,31 @@ curl.exe `
 
 Only one capture can run at a time. A concurrent request receives
 `409 capture_busy`. Each completed artifact contains `capture.png` and
-`metadata.json`.
+`metadata.json`. The response and metadata include a required `foreground`
+object:
+
+```json
+{
+  "foreground": {
+    "observed_at": "2026-07-27T01:02:03.000000004Z",
+    "process_id": 4242,
+    "executable_name": "Game.exe",
+    "executable_path": "C:\\Games\\Game.exe",
+    "window_title": "Game"
+  }
+}
+```
+
+The foreground window is sampled immediately after WGC produces the captured
+frame. If Windows does not expose the foreground process or its executable
+path, the request fails explicitly with `503 foreground_process_unavailable`;
+the agent does not guess process identity or commit a partial artifact.
+
+Foreground metadata is required for every artifact under this contract.
+Artifact directories created by older builds do not contain it and fail the
+strict startup scan rather than being presented as complete captures. Preserve
+or archive those directories before installing this build with a new, empty
+data directory; there is no automatic migration.
 
 ## Project layout
 
@@ -128,6 +156,7 @@ cmd/windows-capture-agent/       screenshot capability executable
 internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
+internal/foreground/             foreground process observation
 internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
 internal/wgc/                    WGC and Direct3D 11 implementation

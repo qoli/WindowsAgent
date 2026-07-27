@@ -4,6 +4,8 @@ package capture
 import (
 	"context"
 	"fmt"
+
+	"github.com/qoli/WindowsAgent/internal/foreground"
 )
 
 type Monitor struct {
@@ -26,6 +28,7 @@ type Result struct {
 	Height             int
 	IncludeCursor      bool
 	Monitor            Monitor
+	Foreground         foreground.Info
 	CapturePixelFormat string
 	ToneMapped         bool
 }

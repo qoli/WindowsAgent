@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/foreground"
 )
 
 func TestCommitLatestAndReadContent(t *testing.T) {
@@ -105,6 +106,15 @@ func TestCommitRejectsMissingProvenance(t *testing.T) {
 	}
 }
 
+func TestCommitRejectsMissingForegroundProcess(t *testing.T) {
+	store := newTestStore(t, 100)
+	result := testResult("invalid")
+	result.Foreground = foreground.Info{}
+	if _, err := store.Commit(context.Background(), result); err == nil {
+		t.Fatal("expected missing foreground process error")
+	}
+}
+
 func newTestStore(t *testing.T, retention int) *Store {
 	t.Helper()
 	store, err := New(t.TempDir(), retention)
@@ -135,6 +145,13 @@ func testResult(content string) capture.Result {
 			Width:      1,
 			Height:     1,
 			ColorSpace: "RGB_FULL_G22_NONE_P709",
+		},
+		Foreground: foreground.Info{
+			ObservedAt:     time.Date(2026, 7, 25, 1, 2, 3, 4, time.UTC),
+			ProcessID:      42,
+			ExecutableName: "game.exe",
+			ExecutablePath: `C:\Games\game.exe`,
+			WindowTitle:    "Game",
 		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",
 	}
