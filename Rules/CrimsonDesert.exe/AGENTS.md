@@ -5,8 +5,9 @@ look up gameplay guidance for `CrimsonDesert.exe`. The rule itself does not
 authorize process inspection, memory reading, file access, input automation,
 mod installation, or execution of instructions copied from websites. A direct
 user request to inspect their Crimson Desert backpack authorizes one finite,
-read-only `crimson-desert/inventory` job using the process and save file the
-user placed in scope; it does not authorize another observation capability.
+read-only `crimson-desert/inventory` job using the foreground process and the
+latest save inside the authorized account save root; it does not authorize
+another observation capability or another account root.
 
 ## Activation
 
@@ -41,11 +42,19 @@ is present.
 2. Use only the registered `crimson-desert/inventory` observation capability.
    Do not replace it with an ad hoc memory scanner, Cheat Engine injection,
    debugger attach, OCR, direct save decoder, or web-derived inventory guess.
-3. The job requires one explicit save root and one root-relative `save.save`.
-   Never select the newest save, another slot, another account, or another
-   decoder automatically. If the user has not already selected or placed an
-   exact save file in scope, list only the candidate slot names and modification
-   times, then ask the user which one to use.
+3. Resolve one explicit, authorized account save root, then automatically
+   select its latest direct child `<slot>/save.save` by `LastWriteTimeUtc`.
+   Consider only regular `save.save` files exactly one directory below that
+   root. Do not follow reparse points, leave the authorized root, include
+   backups or temporary files, search another account root, or substitute
+   another decoder.
+   - If no valid candidate exists, fail and report that the authorized root
+     contains no selectable save.
+   - If two or more newest candidates have the same `LastWriteTimeUtc`, fail
+     and report the ambiguity; do not break the tie by slot name.
+   - Freeze the selected root-relative path before starting the job. Pass that
+     exact path as `--save-relative`; do not rescan or switch saves after the
+     memory attempt fails.
 4. Run one finite job from the signed-in Windows session:
 
    ```powershell
@@ -54,7 +63,7 @@ is present.
      --install-root <absolute-runtime-root> `
      --rules-dir <absolute-Rules-root> `
      --save-root <absolute-authorized-account-save-root> `
-     --save-relative <selected-slot>/save.save
+     --save-relative <automatically-selected-slot>/save.save
    ```
 
    By default the job binds memory access to the current foreground
@@ -73,7 +82,9 @@ is present.
 7. Always disclose the selected source:
    - `process-memory` is the live process observation;
    - `save-file` is a saved snapshot. Report `output.source.saveModifiedAt`
-     and warn that changes after that timestamp are not represented.
+     and warn that changes after that timestamp are not represented. State
+     that the job used the newest eligible save from the authorized account
+     root without exposing its absolute local path.
 8. Treat item names as unresolved unless a separate, verified item database
    maps the returned raw `itemId`. Never infer a name from quantity, slot, icon,
    nearby memory, or a web search.
