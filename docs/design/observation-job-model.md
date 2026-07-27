@@ -2,10 +2,13 @@
 
 ## Status
 
-**Landed for the registered Crimson Desert inventory job.**
+**Landed as the generic `windows-observation-v1` Starlark launcher.**
 
-One command invocation runs one finite job and produces one terminal
-schema-valid JSON result or one typed failure.
+One launch invocation resolves any uniquely registered capability, validates
+its package and request, runs one finite job, and produces one terminal
+schema-valid JSON result or one typed failure. The invocation may come from
+the bearer-protected WindowsAgent HTTP endpoint or the local launcher CLI;
+both execute the same local job command in the signed-in session.
 
 ## Process model
 
@@ -20,6 +23,12 @@ handles, and one Windows Job Object with active-process, per-process-memory,
 total-memory, deadline, and kill-on-close limits. It never launches
 PowerShell, `cmd.exe`, a native-extension worker, a polling loop, watcher, or
 HTTP observer.
+
+The launcher contains no game or capability allowlist. It derives the expected
+foreground executable from the capability's owning Rule folder, accepts only
+the runtime declared by `rule.json`, validates `inputs` against the package
+input schema, and requires exact Host bindings for every manifest file-root
+alias.
 
 The Script Runner is the trusted package execution process. If a package loads
 a native DLL, that DLL lives in the Runner process. A DLL crash may terminate
@@ -49,13 +58,22 @@ returns a random 256-bit handle. The Host records handle and size before
 returning the result to Starlark. `native.blob_path` accepts only that exact
 same-job handle. The temporary root is removed after job processes exit.
 
-## Crimson inventory registration
+## Generic launch request
 
-The current command resolves one registered package and one explicit process
-identity plus save root/relative path. The package itself owns the source order
-and Crimson ABI. This command-level registration is the only permitted
-Crimson-specific exception in the Job command; `internal/observationjob`
-remains provider-neutral.
+The trusted caller supplies one absolute strict-JSON request file:
+
+```json
+{
+  "inputs": {},
+  "fileRoots": {
+    "declared-alias": "C:\\absolute\\authorized\\root"
+  }
+}
+```
+
+`inputs` is package-defined and schema-validated. `fileRoots` is Host-owned:
+missing, extra, relative, or undeclared bindings fail before execution.
+Machine-specific paths never belong in the distributable Rule plugin.
 
 See [Observation Script Package](observation-script-package.md) and
 [Script Runner native-library FFI](native-library-ffi.md).

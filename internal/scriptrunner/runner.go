@@ -91,6 +91,9 @@ func (r *Runner) Run(ctx context.Context, pkg *scriptpackage.Package, inputs map
 	if ctx == nil {
 		return nil, &Error{Code: "SCRIPT_RUNTIME_FAILED", Stage: "starting-script", Cause: errors.New("context is required")}
 	}
+	if err := pkg.ValidateInputs(inputs); err != nil {
+		return nil, &Error{Code: "SCRIPT_INPUT_INVALID", Stage: "validating-inputs", Cause: err}
+	}
 	runContext, cancel := context.WithTimeout(ctx, time.Duration(pkg.Manifest.Limits.WallTimeMS)*time.Millisecond)
 	defer cancel()
 

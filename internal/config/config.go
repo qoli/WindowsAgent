@@ -13,13 +13,14 @@ import (
 )
 
 type Config struct {
-	Listen         string
-	DataDir        string
-	RulesDir       string
-	CaptureTimeout time.Duration
-	Retention      int
-	LogLevel       slog.Level
-	LogFile        string
+	Listen          string
+	DataDir         string
+	RulesDir        string
+	ScriptTokenFile string
+	CaptureTimeout  time.Duration
+	Retention       int
+	LogLevel        slog.Level
+	LogFile         string
 }
 
 func Parse(args []string, localAppData string) (Config, error) {
@@ -34,6 +35,7 @@ func Parse(args []string, localAppData string) (Config, error) {
 	flagSet.StringVar(&cfg.Listen, "listen", "0.0.0.0:8787", "HTTP listen address")
 	flagSet.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "artifact data directory")
 	flagSet.StringVar(&cfg.RulesDir, "rules-dir", "", "absolute external Rule plugin directory; empty uses <data-dir>/Rules")
+	flagSet.StringVar(&cfg.ScriptTokenFile, "script-api-token-file", "", "absolute bearer-token file; empty uses <data-dir>/script-api.token")
 	flagSet.DurationVar(&cfg.CaptureTimeout, "capture-timeout", 5*time.Second, "maximum time for one capture")
 	flagSet.IntVar(&cfg.Retention, "retention", 100, "maximum number of screenshot artifacts")
 	flagSet.StringVar(&level, "log-level", "info", "debug, info, warn, or error")
@@ -54,6 +56,11 @@ func Parse(args []string, localAppData string) (Config, error) {
 		cfg.RulesDir = filepath.Join(cfg.DataDir, "Rules")
 	} else if !filepath.IsAbs(cfg.RulesDir) {
 		return Config{}, errors.New("--rules-dir must be empty or an absolute path")
+	}
+	if cfg.ScriptTokenFile == "" {
+		cfg.ScriptTokenFile = filepath.Join(cfg.DataDir, "script-api.token")
+	} else if !filepath.IsAbs(cfg.ScriptTokenFile) {
+		return Config{}, errors.New("--script-api-token-file must be empty or an absolute path")
 	}
 	if cfg.CaptureTimeout <= 0 {
 		return Config{}, errors.New("--capture-timeout must be positive")

@@ -46,12 +46,17 @@ declarations, schema validation, and signed-in Windows evidence.
 - Keep each Windows capability behind an explicit package and API boundary.
 - Keep observation calls finite and single-shot; do not add polling, file
   watching, or a general remote observer endpoint.
+- Keep the Go observation command capability-neutral. It may route a declared
+  runtime, bind the owning Rule process, validate input schemas and resource
+  grants, snapshot a package, and broker primitives; it must not name or
+  allowlist a game capability.
 - A trusted Script Package may load only a `nativeLibraries` alias whose
   package-relative artifact is declared in the package manifest.
 - Keep the Script Runner FFI provider-neutral. Game-specific exports, structs,
   return codes, and conversion logic belong in the owning `main.star`, never
   in the Observer, Job Host, or generic Go FFI.
 - Preserve stable JSON error codes.
-- Do not add authentication, privilege escalation, process-memory writes, or
-  remote-control behavior without a documented threat model and review.
+- Do not weaken the documented bearer-token boundary, add privilege
+  escalation, process-memory writes, or broaden remote-control behavior
+  without a documented threat model and review.
 - Never run WGC capture as a traditional Session 0 service.

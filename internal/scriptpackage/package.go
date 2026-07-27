@@ -29,6 +29,7 @@ type Manifest struct {
 	Title           string                   `json:"title"`
 	Entrypoint      string                   `json:"entrypoint"`
 	TaskDocument    string                   `json:"taskDocument"`
+	InputSchema     string                   `json:"inputSchema"`
 	OutputSchema    string                   `json:"outputSchema"`
 	Files           []string                 `json:"files"`
 	Permissions     Permissions              `json:"permissions"`
@@ -80,7 +81,9 @@ type Package struct {
 	Identity       Identity
 	Script         []byte
 	Task           []byte
+	InputSchema    []byte
 	OutputSchema   []byte
+	compiledInput  *jsonschema.Schema
 	compiledSchema *jsonschema.Schema
 }
 
@@ -144,8 +147,13 @@ func Load(root, capabilityID string) (*Package, error) {
 	if len(bytes.TrimSpace(task)) == 0 {
 		return nil, errors.New("TASK.md must not be empty")
 	}
+	inputSchemaBytes := contents[manifest.InputSchema]
+	compiledInput, err := compileSchema(inputSchemaBytes, "input.schema.json")
+	if err != nil {
+		return nil, fmt.Errorf("compile input schema: %w", err)
+	}
 	schemaBytes := contents[manifest.OutputSchema]
-	compiledSchema, err := compileSchema(schemaBytes)
+	compiledSchema, err := compileSchema(schemaBytes, "output.schema.json")
 	if err != nil {
 		return nil, fmt.Errorf("compile output schema: %w", err)
 	}
@@ -158,9 +166,21 @@ func Load(root, capabilityID string) (*Package, error) {
 		},
 		Script:         script,
 		Task:           task,
+		InputSchema:    inputSchemaBytes,
 		OutputSchema:   schemaBytes,
+		compiledInput:  compiledInput,
 		compiledSchema: compiledSchema,
 	}, nil
+}
+
+func (p *Package) ValidateInputs(value any) error {
+	if p == nil || p.compiledInput == nil {
+		return errors.New("compiled input schema is required")
+	}
+	if err := p.compiledInput.Validate(value); err != nil {
+		return fmt.Errorf("input schema validation failed: %w", err)
+	}
+	return nil
 }
 
 func (p *Package) ValidateOutput(value any) error {
@@ -193,14 +213,19 @@ func validateManifest(manifest Manifest) error {
 		}
 		declaredFiles[name] = struct{}{}
 	}
-	requiredFiles := []string{manifest.Entrypoint, manifest.TaskDocument, manifest.OutputSchema}
+	requiredFiles := []string{
+		manifest.Entrypoint,
+		manifest.TaskDocument,
+		manifest.InputSchema,
+		manifest.OutputSchema,
+	}
 	seen := make(map[string]struct{}, len(requiredFiles))
 	for _, name := range requiredFiles {
 		if err := validateRelativeName(name); err != nil {
 			return err
 		}
 		if _, duplicate := seen[name]; duplicate {
-			return errors.New("entrypoint, taskDocument, and outputSchema must be distinct")
+			return errors.New("entrypoint, taskDocument, inputSchema, and outputSchema must be distinct")
 		}
 		seen[name] = struct{}{}
 		if !containsFile(manifest.Files, name) {
@@ -213,6 +238,9 @@ func validateManifest(manifest Manifest) error {
 	if manifest.TaskDocument != "TASK.md" {
 		return errors.New("taskDocument must equal TASK.md in V2")
 	}
+	if filepath.Ext(manifest.InputSchema) != ".json" {
+		return errors.New("inputSchema must be a JSON file")
+	}
 	if filepath.Ext(manifest.OutputSchema) != ".json" {
 		return errors.New("outputSchema must be a JSON file")
 	}
@@ -223,6 +251,9 @@ func validateManifest(manifest Manifest) error {
 		if memory.Target == "" || memory.MaxCalls == 0 || memory.MaxBytesRead == 0 {
 			return errors.New("memory target, maxCalls, and maxBytesRead are required")
 		}
+		if memory.Target != "rule/current-process" {
+			return fmt.Errorf("unsupported memory target %q", memory.Target)
+		}
 		if err := validateOperations("memory", memory.Operations, []string{"modules", "regions", "scan", "resolveRip", "readBatch", "readStrided"}); err != nil {
 			return err
 		}
@@ -230,6 +261,16 @@ func validateManifest(manifest Manifest) error {
 	if file := manifest.Permissions.File; file != nil {
 		if len(file.Roots) == 0 || file.MaxCalls == 0 || file.MaxBytesRead == 0 {
 			return errors.New("file roots, maxCalls, and maxBytesRead are required")
+		}
+		seenRoots := make(map[string]struct{}, len(file.Roots))
+		for _, root := range file.Roots {
+			if !resourceAliasPattern.MatchString(root) {
+				return fmt.Errorf("file root alias %q is not canonical", root)
+			}
+			if _, duplicate := seenRoots[root]; duplicate {
+				return fmt.Errorf("duplicate file root alias %q", root)
+			}
+			seenRoots[root] = struct{}{}
 		}
 		if err := validateOperations("file", file.Operations, []string{"stat", "read", "hash", "openBlob"}); err != nil {
 			return err
@@ -260,10 +301,11 @@ func validateManifest(manifest Manifest) error {
 		}
 	}
 	if manifest.Limits.WallTimeMS == 0 ||
+		manifest.Limits.WallTimeMS > 60_000 ||
 		manifest.Limits.MaxSteps == 0 ||
 		manifest.Limits.MaxResultBytes == 0 ||
 		manifest.Limits.MaxLogBytes == 0 {
-		return errors.New("all script limits must be positive")
+		return errors.New("script limits must be positive and wallTimeMs must not exceed 60000")
 	}
 	return nil
 }
@@ -279,6 +321,7 @@ func containsFile(files []string, name string) bool {
 
 var nativeAliasPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 var nativePlatformPattern = regexp.MustCompile(`^[a-z0-9]+-[a-z0-9]+$`)
+var resourceAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 
 func validateOperations(namespace string, operations, allowed []string) error {
 	if len(operations) == 0 {
@@ -403,7 +446,7 @@ func (denyingLoader) Load(url string) (any, error) {
 	return nil, fmt.Errorf("external schema resource is forbidden: %s", url)
 }
 
-func compileSchema(data []byte) (*jsonschema.Schema, error) {
+func compileSchema(data []byte, name string) (*jsonschema.Schema, error) {
 	if err := strictjson.Validate(data); err != nil {
 		return nil, err
 	}
@@ -414,7 +457,7 @@ func compileSchema(data []byte) (*jsonschema.Schema, error) {
 	compiler := jsonschema.NewCompiler()
 	compiler.DefaultDraft(jsonschema.Draft2020)
 	compiler.UseLoader(denyingLoader{})
-	const schemaURL = "https://windowsagent.invalid/output.schema.json"
+	schemaURL := "https://windowsagent.invalid/" + name
 	if err := compiler.AddResource(schemaURL, document); err != nil {
 		return nil, err
 	}

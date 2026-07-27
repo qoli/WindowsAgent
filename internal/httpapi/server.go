@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,19 +19,29 @@ import (
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/rules"
+	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
+	"github.com/qoli/WindowsAgent/internal/scriptpackage"
+	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
-const maxRequestBody = 4 << 10
+const (
+	maxRequestBody       = 4 << 10
+	maxScriptRequestBody = scriptlaunch.MaxRequestBytes + 4<<10
+	scriptRequestTimeout = 80 * time.Second
+)
 
 type Server struct {
-	capturer capture.Capturer
-	store    *artifact.Store
-	rules    *rules.Store
-	timeout  time.Duration
-	version  string
-	logger   *slog.Logger
-	gate     chan struct{}
-	sequence atomic.Uint64
+	capturer    capture.Capturer
+	store       *artifact.Store
+	rules       *rules.Store
+	scripts     scriptlaunch.Executor
+	scriptToken string
+	timeout     time.Duration
+	version     string
+	logger      *slog.Logger
+	gate        chan struct{}
+	scriptGate  chan struct{}
+	sequence    atomic.Uint64
 }
 
 type ErrorEnvelope struct {
@@ -55,7 +67,37 @@ type statusResponse struct {
 	Latest        *artifact.Metadata `json:"latest,omitempty"`
 }
 
-func New(capturer capture.Capturer, store *artifact.Store, ruleStore *rules.Store, timeout time.Duration, version string, logger *slog.Logger) (*Server, error) {
+type scriptCatalogResponse struct {
+	RuleID  string                     `json:"ruleId"`
+	Scripts []scriptCapabilityResponse `json:"scripts"`
+}
+
+type scriptCapabilityResponse struct {
+	ID           string          `json:"id"`
+	Runtime      string          `json:"runtime"`
+	Title        string          `json:"title"`
+	Version      uint32          `json:"version"`
+	InputSchema  json.RawMessage `json:"inputSchema"`
+	OutputSchema json.RawMessage `json:"outputSchema"`
+	Launcher     scriptLauncher  `json:"launcher"`
+}
+
+type scriptLauncher struct {
+	Method         string `json:"method"`
+	URL            string `json:"url"`
+	Authentication string `json:"authentication"`
+}
+
+func New(
+	capturer capture.Capturer,
+	store *artifact.Store,
+	ruleStore *rules.Store,
+	scriptExecutor scriptlaunch.Executor,
+	scriptToken string,
+	timeout time.Duration,
+	version string,
+	logger *slog.Logger,
+) (*Server, error) {
 	if capturer == nil {
 		return nil, errors.New("capturer is required")
 	}
@@ -64,6 +106,12 @@ func New(capturer capture.Capturer, store *artifact.Store, ruleStore *rules.Stor
 	}
 	if ruleStore == nil {
 		return nil, errors.New("rule store is required")
+	}
+	if scriptExecutor == nil {
+		return nil, errors.New("Script executor is required")
+	}
+	if len(scriptToken) != 64 {
+		return nil, errors.New("64-character Script API token is required")
 	}
 	if timeout <= 0 {
 		return nil, errors.New("capture timeout must be positive")
@@ -75,13 +123,16 @@ func New(capturer capture.Capturer, store *artifact.Store, ruleStore *rules.Stor
 		return nil, errors.New("logger is required")
 	}
 	return &Server{
-		capturer: capturer,
-		store:    store,
-		rules:    ruleStore,
-		timeout:  timeout,
-		version:  version,
-		logger:   logger,
-		gate:     make(chan struct{}, 1),
+		capturer:    capturer,
+		store:       store,
+		rules:       ruleStore,
+		scripts:     scriptExecutor,
+		scriptToken: scriptToken,
+		timeout:     timeout,
+		version:     version,
+		logger:      logger,
+		gate:        make(chan struct{}, 1),
+		scriptGate:  make(chan struct{}, 1),
 	}, nil
 }
 
@@ -119,9 +170,54 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleCaptureResource(recorder, r, requestID)
 	case strings.HasPrefix(r.URL.Path, "/v1/rules/"):
 		s.handleRuleResource(recorder, r, requestID)
+	case r.URL.Path == "/v1/scripts/run":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleScriptRun)
 	default:
 		writeError(recorder, requestID, http.StatusNotFound, "route_not_found", "route not found")
 	}
+}
+
+func (s *Server) handleScriptRun(w http.ResponseWriter, r *http.Request, requestID string) {
+	provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if provided == r.Header.Get("Authorization") ||
+		len(provided) != len(s.scriptToken) ||
+		subtle.ConstantTimeCompare([]byte(provided), []byte(s.scriptToken)) != 1 {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeError(w, requestID, http.StatusUnauthorized, "script_auth_required", "valid Script API bearer token is required")
+		return
+	}
+	invocation, err := decodeScriptInvocation(w, r)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_script_request", err.Error())
+		return
+	}
+	select {
+	case s.scriptGate <- struct{}{}:
+		defer func() { <-s.scriptGate }()
+	default:
+		writeError(w, requestID, http.StatusConflict, "script_busy", "another Script is already running")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), scriptRequestTimeout)
+	defer cancel()
+	result, err := s.scripts.Run(ctx, invocation)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, requestID, http.StatusGatewayTimeout, "script_timeout", "Script launch timed out")
+			return
+		}
+		if errors.Is(err, context.Canceled) {
+			writeError(w, requestID, http.StatusRequestTimeout, "request_canceled", "request was canceled")
+			return
+		}
+		writeError(w, requestID, http.StatusUnprocessableEntity, "script_launch_failed", err.Error())
+		return
+	}
+	s.logger.InfoContext(r.Context(), "script_completed",
+		"request_id", requestID,
+		"capability", invocation.Capability,
+	)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) requireMethod(w http.ResponseWriter, r *http.Request, requestID, method string, handler func(http.ResponseWriter, *http.Request, string)) {
@@ -221,11 +317,22 @@ func (s *Server) handleRuleResource(w http.ResponseWriter, r *http.Request, requ
 	}
 	remainder := strings.TrimPrefix(r.URL.Path, "/v1/rules/")
 	parts := strings.Split(remainder, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] != "AGENTS.md" {
+	if len(parts) != 2 || parts[0] == "" {
 		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
 		return
 	}
-	content, resolution, err := s.rules.ReadAGENTS(parts[0])
+	switch parts[1] {
+	case rules.AgentsFilename:
+		s.handleRuleAGENTS(w, r, requestID, parts[0])
+	case "scripts":
+		s.handleRuleScripts(w, requestID, parts[0])
+	default:
+		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
+	}
+}
+
+func (s *Server) handleRuleAGENTS(w http.ResponseWriter, _ *http.Request, requestID, ruleID string) {
+	content, resolution, err := s.rules.ReadAGENTS(ruleID)
 	if errors.Is(err, fs.ErrNotExist) {
 		writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
 		return
@@ -239,6 +346,53 @@ func (s *Server) handleRuleResource(w http.ResponseWriter, r *http.Request, requ
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
+}
+
+func (s *Server) handleRuleScripts(w http.ResponseWriter, requestID, ruleID string) {
+	scripts, resolution, err := s.rules.ReadScripts(ruleID)
+	if errors.Is(err, fs.ErrNotExist) {
+		writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
+		return
+	}
+	if err != nil {
+		s.writeMappedError(w, requestID, err)
+		return
+	}
+	response := scriptCatalogResponse{
+		RuleID:  resolution.ID,
+		Scripts: make([]scriptCapabilityResponse, 0, len(scripts)),
+	}
+	for _, script := range scripts {
+		if script.Runtime != rules.ObservationRuntimeV1 {
+			writeError(
+				w,
+				requestID,
+				http.StatusUnprocessableEntity,
+				"unsupported_script_runtime",
+				fmt.Sprintf("unsupported script runtime %q for capability %q", script.Runtime, script.ID),
+			)
+			return
+		}
+		pkg, err := scriptpackage.Load(script.Root, script.ID)
+		if err != nil {
+			writeError(w, requestID, http.StatusUnprocessableEntity, "script_package_invalid", err.Error())
+			return
+		}
+		response.Scripts = append(response.Scripts, scriptCapabilityResponse{
+			ID:           script.ID,
+			Runtime:      script.Runtime,
+			Title:        pkg.Manifest.Title,
+			Version:      pkg.Manifest.Version,
+			InputSchema:  json.RawMessage(pkg.InputSchema),
+			OutputSchema: json.RawMessage(pkg.OutputSchema),
+			Launcher: scriptLauncher{
+				Method:         http.MethodPost,
+				URL:            "/v1/scripts/run",
+				Authentication: "bearer",
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request, requestID string) {
@@ -355,6 +509,32 @@ func decodeCaptureRequest(w http.ResponseWriter, r *http.Request) (captureReques
 		return captureRequest{}, errors.New("include_cursor is required")
 	}
 	return request, nil
+}
+
+func decodeScriptInvocation(w http.ResponseWriter, r *http.Request) (scriptlaunch.Invocation, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxScriptRequestBody)
+	defer r.Body.Close()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return scriptlaunch.Invocation{}, fmt.Errorf("read JSON body: %w", err)
+	}
+	if err := strictjson.Validate(data); err != nil {
+		return scriptlaunch.Invocation{}, fmt.Errorf("validate JSON body: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var invocation scriptlaunch.Invocation
+	if err := decoder.Decode(&invocation); err != nil {
+		return scriptlaunch.Invocation{}, fmt.Errorf("decode JSON body: %w", err)
+	}
+	if invocation.Capability == "" ||
+		strings.TrimSpace(invocation.Capability) != invocation.Capability {
+		return scriptlaunch.Invocation{}, errors.New("capability is required and must be canonical")
+	}
+	if invocation.Inputs == nil || invocation.FileRoots == nil {
+		return scriptlaunch.Invocation{}, errors.New("inputs and fileRoots objects are required")
+	}
+	return invocation, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

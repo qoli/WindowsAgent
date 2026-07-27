@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +23,10 @@ import (
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/rules"
+	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
+
+const testScriptToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 type fakeCapturer struct {
 	status      capture.Status
@@ -32,6 +36,19 @@ type fakeCapturer struct {
 	started     chan struct{}
 	release     chan struct{}
 	once        sync.Once
+}
+
+type fakeScriptExecutor struct {
+	result     json.RawMessage
+	err        error
+	invocation scriptlaunch.Invocation
+	calls      int
+}
+
+func (f *fakeScriptExecutor) Run(_ context.Context, invocation scriptlaunch.Invocation) (json.RawMessage, error) {
+	f.calls++
+	f.invocation = invocation
+	return f.result, f.err
 }
 
 func (f *fakeCapturer) Status(context.Context) (capture.Status, error) {
@@ -164,9 +181,134 @@ func TestCaptureReportsUnmatchedRuleExplicitly(t *testing.T) {
 	if metadata.Rule.Status != rules.StatusUnmatched ||
 		metadata.Rule.Description != rules.UnmatchedDescription ||
 		metadata.Rule.ID != "" ||
-		metadata.Rule.Agents != nil {
+		metadata.Rule.Agents != nil ||
+		metadata.Rule.Scripts != nil {
 		t.Fatalf("rule navigation = %+v", metadata.Rule)
 	}
+}
+
+func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
+	server, _, ruleRoot := newTestServerAndRuleRoot(
+		t,
+		&fakeCapturer{status: testStatus(), result: testResult()},
+		time.Second,
+	)
+	scriptRoot := filepath.Join(ruleRoot, "Scripts", "status")
+	writeTestScriptPackage(t, scriptRoot)
+	descriptor := `{
+	  "schemaVersion": 1,
+	  "description": "Read the live Rule before acting.",
+	  "scripts": {
+	    "game/status": {
+	      "path": "Scripts/status",
+	      "runtime": "windows-observation-v1"
+	    }
+	  }
+	}`
+	if err := os.WriteFile(filepath.Join(ruleRoot, rules.RuleFilename), []byte(descriptor), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/v1/rules/game.exe/scripts", nil),
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var catalog scriptCatalogResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if catalog.RuleID != "game.exe" || len(catalog.Scripts) != 1 {
+		t.Fatalf("catalog = %+v", catalog)
+	}
+	script := catalog.Scripts[0]
+	if script.ID != "game/status" ||
+		script.Runtime != rules.ObservationRuntimeV1 ||
+		script.Title != "Read game status" ||
+		script.Version != 1 ||
+		script.Launcher.Method != http.MethodPost ||
+		script.Launcher.URL != "/v1/scripts/run" ||
+		script.Launcher.Authentication != "bearer" {
+		t.Fatalf("script = %+v", script)
+	}
+	var inputSchema map[string]any
+	if err := json.Unmarshal(script.InputSchema, &inputSchema); err != nil {
+		t.Fatal(err)
+	}
+	if inputSchema["type"] != "object" {
+		t.Fatalf("input schema = %#v", inputSchema)
+	}
+}
+
+func TestScriptRunRequiresBearerTokenAndUsesGenericInvocation(t *testing.T) {
+	executor := &fakeScriptExecutor{
+		result: json.RawMessage(`{"ok":true,"capability":"game/status","output":{"ready":true}}`),
+	}
+	server, _ := newTestServerWithExecutor(
+		t,
+		&fakeCapturer{status: testStatus(), result: testResult()},
+		time.Second,
+		executor,
+	)
+	body := `{"capability":"game/status","inputs":{"detail":true},"fileRoots":{}}`
+	unauthorized := httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		unauthorized,
+		httptest.NewRequest(http.MethodPost, "/v1/scripts/run", strings.NewReader(body)),
+	)
+	if unauthorized.Code != http.StatusUnauthorized || executor.calls != 0 {
+		t.Fatalf("unauthorized status = %d, calls = %d", unauthorized.Code, executor.calls)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/scripts/run", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+testScriptToken)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if executor.calls != 1 ||
+		executor.invocation.Capability != "game/status" ||
+		executor.invocation.Inputs["detail"] != true {
+		t.Fatalf("executor = %+v", executor)
+	}
+}
+
+func TestScriptRunRejectsDuplicateJSONAndReportsLaunchFailure(t *testing.T) {
+	executor := &fakeScriptExecutor{err: errors.New("owning Rule process mismatch")}
+	server, _ := newTestServerWithExecutor(
+		t,
+		&fakeCapturer{status: testStatus(), result: testResult()},
+		time.Second,
+		executor,
+	)
+	duplicate := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/scripts/run",
+		strings.NewReader(`{"capability":"one","capability":"two","inputs":{},"fileRoots":{}}`),
+	)
+	duplicate.Header.Set("Authorization", "Bearer "+testScriptToken)
+	duplicateResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(duplicateResponse, duplicate)
+	if duplicateResponse.Code != http.StatusBadRequest || executor.calls != 0 {
+		t.Fatalf("duplicate status = %d, calls = %d", duplicateResponse.Code, executor.calls)
+	}
+
+	failed := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/scripts/run",
+		strings.NewReader(`{"capability":"game/status","inputs":{},"fileRoots":{}}`),
+	)
+	failed.Header.Set("Authorization", "Bearer "+testScriptToken)
+	failedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(failedResponse, failed)
+	if failedResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("failure status = %d, body = %s", failedResponse.Code, failedResponse.Body.String())
+	}
+	assertErrorCode(t, failedResponse.Body.Bytes(), "script_launch_failed")
 }
 
 func TestRuleDocumentRejectsUnknownAndNonCanonicalIDs(t *testing.T) {
@@ -287,7 +429,33 @@ func newTestServerWithTimeout(t *testing.T, capturer capture.Capturer, timeout t
 	return server, store
 }
 
+func newTestServerWithExecutor(
+	t *testing.T,
+	capturer capture.Capturer,
+	timeout time.Duration,
+	executor scriptlaunch.Executor,
+) (*Server, *artifact.Store) {
+	t.Helper()
+	server, store, _ := newTestServerAndRuleRootWithExecutor(t, capturer, timeout, executor)
+	return server, store
+}
+
 func newTestServerAndRuleRoot(t *testing.T, capturer capture.Capturer, timeout time.Duration) (*Server, *artifact.Store, string) {
+	t.Helper()
+	return newTestServerAndRuleRootWithExecutor(
+		t,
+		capturer,
+		timeout,
+		&fakeScriptExecutor{result: json.RawMessage(`{"ok":true}`)},
+	)
+}
+
+func newTestServerAndRuleRootWithExecutor(
+	t *testing.T,
+	capturer capture.Capturer,
+	timeout time.Duration,
+	executor scriptlaunch.Executor,
+) (*Server, *artifact.Store, string) {
 	t.Helper()
 	store, err := artifact.New(t.TempDir(), 100)
 	if err != nil {
@@ -313,7 +481,16 @@ func newTestServerAndRuleRoot(t *testing.T, capturer capture.Capturer, timeout t
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(capturer, store, ruleStore, timeout, "test", logger)
+	server, err := New(
+		capturer,
+		store,
+		ruleStore,
+		executor,
+		testScriptToken,
+		timeout,
+		"test",
+		logger,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,5 +543,53 @@ func assertErrorCode(t *testing.T, body []byte, want string) {
 	}
 	if envelope.Error.Code != want {
 		t.Fatalf("error code = %q, want %q", envelope.Error.Code, want)
+	}
+}
+
+func writeTestScriptPackage(t *testing.T, root string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"manifest.json": `{
+		  "schemaVersion": 2,
+		  "version": 1,
+		  "title": "Read game status",
+		  "entrypoint": "main.star",
+		  "taskDocument": "TASK.md",
+		  "inputSchema": "input.schema.json",
+		  "outputSchema": "output.schema.json",
+		  "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json"],
+		  "permissions": {
+		    "memory": null,
+		    "file": {
+		      "roots": ["game-files"],
+		      "operations": ["stat"],
+		      "maxCalls": 1,
+		      "maxBytesRead": 1024
+		    }
+		  },
+		  "limits": {
+		    "wallTimeMs": 1000,
+		    "maxSteps": 1000,
+		    "maxResultBytes": 1024,
+		    "maxLogBytes": 1024
+		  }
+		}`,
+		"main.star":         "def main(ctx):\n    return {\"ok\": True}\n",
+		"TASK.md":           "# Read status\n",
+		"input.schema.json": `{"type":"object","additionalProperties":false}`,
+		"output.schema.json": `{
+		  "type": "object",
+		  "additionalProperties": false,
+		  "required": ["ok"],
+		  "properties": {"ok": {"type": "boolean"}}
+		}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

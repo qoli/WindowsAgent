@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/qoli/WindowsAgent/internal/strictjson"
@@ -25,6 +26,7 @@ const (
 	RuleFilename         = "rule.json"
 	AgentsFilename       = "AGENTS.md"
 	AgentsMediaType      = "text/markdown; charset=utf-8"
+	ScriptsMediaType     = "application/json; charset=utf-8"
 	ObservationRuntimeV1 = "windows-observation-v1"
 	maxRuleJSONBytes     = 64 << 10
 	maxAgentsBytes       = 1 << 20
@@ -40,6 +42,7 @@ type Resolution struct {
 	Description string    `json:"description"`
 	ID          string    `json:"id,omitempty"`
 	Agents      *Document `json:"agents,omitempty"`
+	Scripts     *Document `json:"scripts,omitempty"`
 }
 
 func (r Resolution) Validate() error {
@@ -48,8 +51,8 @@ func (r Resolution) Validate() error {
 		if r.Description != UnmatchedDescription {
 			return errors.New("unmatched rule description is invalid")
 		}
-		if r.ID != "" || r.Agents != nil {
-			return errors.New("unmatched rule must not contain an ID or AGENTS document")
+		if r.ID != "" || r.Agents != nil || r.Scripts != nil {
+			return errors.New("unmatched rule must not contain an ID, AGENTS document, or Scripts catalog")
 		}
 		return nil
 	case StatusMatched:
@@ -67,6 +70,15 @@ func (r Resolution) Validate() error {
 		}
 		if r.Agents.ContentType != AgentsMediaType {
 			return errors.New("matched rule AGENTS content type is invalid")
+		}
+		if r.Scripts == nil {
+			return errors.New("matched rule requires a Scripts catalog")
+		}
+		if r.Scripts.URL != scriptsURL(r.ID) {
+			return errors.New("matched rule Scripts URL does not match rule ID")
+		}
+		if r.Scripts.ContentType != ScriptsMediaType {
+			return errors.New("matched rule Scripts content type is invalid")
 		}
 		return nil
 	default:
@@ -214,6 +226,48 @@ func (s *Store) ResolveScript(capabilityID string) (Script, error) {
 		return Script{}, fs.ErrNotExist
 	}
 	return *matched, nil
+}
+
+func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
+	if s == nil {
+		return nil, Resolution{}, errors.New("rule store is required")
+	}
+	canonicalID, found, err := s.findRule(id, true)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if !found {
+		return nil, Resolution{}, fs.ErrNotExist
+	}
+	descriptor, err := s.readDescriptor(canonicalID)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if _, err := s.readAgents(canonicalID); err != nil {
+		return nil, Resolution{}, err
+	}
+	capabilityIDs := make([]string, 0, len(descriptor.Scripts))
+	for capabilityID := range descriptor.Scripts {
+		capabilityIDs = append(capabilityIDs, capabilityID)
+	}
+	sort.Strings(capabilityIDs)
+	scripts := make([]Script, 0, len(capabilityIDs))
+	for _, capabilityID := range capabilityIDs {
+		script, err := s.ResolveScript(capabilityID)
+		if err != nil {
+			return nil, Resolution{}, fmt.Errorf("resolve script %s: %w", capabilityID, err)
+		}
+		if script.RuleID != canonicalID {
+			return nil, Resolution{}, fmt.Errorf(
+				"script %s resolved to Rule %s, expected %s",
+				capabilityID,
+				script.RuleID,
+				canonicalID,
+			)
+		}
+		scripts = append(scripts, script)
+	}
+	return scripts, matchedResolution(canonicalID, descriptor.Description), nil
 }
 
 func (s *Store) findRule(executableName string, requireCanonical bool) (string, bool, error) {
@@ -418,6 +472,10 @@ func matchedResolution(id, description string) Resolution {
 			URL:         agentsURL(id),
 			ContentType: AgentsMediaType,
 		},
+		Scripts: &Document{
+			URL:         scriptsURL(id),
+			ContentType: ScriptsMediaType,
+		},
 	}
 }
 
@@ -427,4 +485,8 @@ func normalizeExecutable(name string) string {
 
 func agentsURL(id string) string {
 	return "/v1/rules/" + url.PathEscape(id) + "/" + AgentsFilename
+}
+
+func scriptsURL(id string) string {
+	return "/v1/rules/" + url.PathEscape(id) + "/scripts"
 }

@@ -6,8 +6,8 @@
 
 An Observation Script Package is one package below a Rule plugin's generic
 `Scripts/` directory. It has one finite Starlark entrypoint, human task
-description, output schema, Observer permissions, optional native DLL
-artifacts, and explicit limits.
+description, input and output schemas, Observer permissions, optional native
+DLL artifacts, and explicit limits.
 
 ## Layout
 
@@ -16,6 +16,7 @@ package/
 |-- manifest.json
 |-- TASK.md
 |-- main.star
+|-- input.schema.json
 |-- output.schema.json
 `-- native/
     `-- windows-amd64/
@@ -36,16 +37,18 @@ plugin content is authoritative; no member digest is required.
   "title": "Read one value",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "files": [
     "main.star",
     "TASK.md",
+    "input.schema.json",
     "output.schema.json",
     "native/windows-amd64/decoder.dll"
   ],
   "permissions": {
     "memory": {
-      "target": "explicit/current-process",
+      "target": "rule/current-process",
       "operations": ["modules", "scan", "resolveRip", "readBatch", "readStrided"],
       "maxCalls": 12,
       "maxBytesRead": 536870912
@@ -73,6 +76,15 @@ plugin content is authoritative; no member digest is required.
   }
 }
 ```
+
+`inputSchema` is the complete machine-readable input contract. The generic
+launcher validates it before creating child processes, and the Script Runner
+validates it again before Starlark execution. `rule/current-process` binds
+memory access to the executable named by the owning
+`Rules/<Executable.exe>/` folder; a package cannot name another executable.
+Manifest file-root entries are aliases. The launcher request must bind every
+declared alias to one absolute authorized Host path and must not add undeclared
+aliases.
 
 `nativeLibraries` is an executable boundary declaration, not a provider
 registry. It contains no provider, version, operation, export, or ABI
@@ -108,8 +120,10 @@ memory followed by one user-selected save file.
 
 ## Output and failure
 
-`main(ctx)` must return one JSON-compatible value accepted by the loaded output
-schema and `maxResultBytes`. Package-load failures, native artifact failures,
+`main(ctx)` receives only input accepted by the loaded input schema and must
+return one JSON-compatible value accepted by the loaded output schema and
+`maxResultBytes`. Package-load failures, input failures, missing or extra Host
+bindings, native artifact failures,
 platform mismatch, missing exports, invalid signatures, native limits,
 deadline expiry, and schema failures are explicit. No missing artifact,
 version, export, or source is substituted.

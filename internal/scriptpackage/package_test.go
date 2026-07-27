@@ -50,8 +50,27 @@ func TestLoadCrimsonInventoryPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if pkg.Identity.ID != "crimson-desert/inventory" || pkg.Identity.Version != 2 {
+	if pkg.Identity.ID != "crimson-desert/inventory" || pkg.Identity.Version != 3 {
 		t.Fatalf("unexpected identity: %#v", pkg.Identity)
+	}
+	validInputs := map[string]any{
+		"save": map[string]any{
+			"root":     "crimson-desert-saves",
+			"relative": "slot1/save.save",
+		},
+	}
+	if err := pkg.ValidateInputs(validInputs); err != nil {
+		t.Fatalf("ValidateInputs: %v", err)
+	}
+	for _, invalid := range []map[string]any{
+		{},
+		{"unknown": true},
+		{"save": map[string]any{"root": "other", "relative": "slot1/save.save"}},
+		{"save": map[string]any{"root": "crimson-desert-saves", "relative": "../save.save"}},
+	} {
+		if err := pkg.ValidateInputs(invalid); err == nil {
+			t.Fatalf("ValidateInputs accepted %#v", invalid)
+		}
 	}
 }
 
@@ -151,5 +170,15 @@ func TestLoadRejectsManifestV1(t *testing.T) {
 	}
 	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
 		t.Fatal("Load accepted manifest schema V1")
+	}
+}
+
+func TestLoadRejectsMissingInputSchema(t *testing.T) {
+	root := copyInventoryPackage(t)
+	if err := os.Remove(filepath.Join(root, "input.schema.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
+		t.Fatal("Load accepted a missing input schema")
 	}
 }

@@ -26,6 +26,7 @@ Rules/
             |-- manifest.json
             |-- TASK.md
             |-- main.star
+            |-- input.schema.json
             |-- output.schema.json
             `-- native/                 # optional
                 `-- windows-amd64/
@@ -47,13 +48,14 @@ The package owns:
 
 WindowsAgent Core owns only generic execution: package validation, bounded
 Starlark, permission enforcement, read-only Observer calls, job-scoped blobs,
-generic Windows amd64 FFI, process isolation, deadlines, accounting, and
-provenance.
+generic Windows amd64 FFI, owning-Rule process binding, exact Host resource
+bindings, process isolation, deadlines, accounting, and provenance.
 
 Do not move package knowledge into `internal/observer`,
 `internal/observationjob`, `internal/scriptrunner`, or a command merely to make
-one package easier to implement. A command may register and bind a capability,
-but it must not own that package's decoder ABI or observation logic.
+one package easier to implement. The generic launcher resolves the capability
+from `rule.json`; it must not allowlist a capability or own that package's
+inputs, decoder ABI, or observation logic.
 
 ## Required package members
 
@@ -75,6 +77,17 @@ understand the task without reverse-engineering `main.star`. Include:
 Do not describe polling, watching, automatic latest-file selection, inferred
 paths, retries, or alternate decoders unless that behavior is an explicitly
 approved part of the task contract and is implemented visibly.
+
+### `input.schema.json`
+
+The input schema is the machine-readable launch contract. It must use JSON
+Schema Draft 2020-12, close objects with `additionalProperties: false`, require
+every semantic input, and bound strings, arrays, and numeric values. Inputs
+must use logical resource aliases rather than package paths, executable names,
+or private absolute Host paths.
+
+The generic launcher validates inputs before creating child processes. The
+Script Runner validates the same input again before executing `main.star`.
 
 ### `output.schema.json`
 
@@ -103,7 +116,8 @@ The manifest is the executable package contract. V2 requires:
 
 - `schemaVersion: 2`;
 - a positive integer `version`;
-- distinct `entrypoint`, `taskDocument`, and `outputSchema` members;
+- distinct `entrypoint`, `taskDocument`, `inputSchema`, and `outputSchema`
+  members;
 - `taskDocument: "TASK.md"`;
 - every regular package file declared exactly once in the `files` path list;
 - least-privilege Observer permissions;
@@ -130,6 +144,12 @@ declared operations, exposed in snake case, for example `resolveRip` becomes
 Permission targets and file-root names are logical bindings. They must describe
 what the trusted Host is expected to bind; they are not executable paths and
 must not encode a private machine identity.
+
+The implemented memory target is exactly `rule/current-process`. The launcher
+derives its executable from the owning `Rules/<Executable.exe>/` folder.
+File-root aliases must be canonical and unique. A launch request must bind
+every declared alias to one absolute Host path and cannot add undeclared
+aliases.
 
 Set limits from reviewed worst-case behavior, not from the largest convenient
 number:
@@ -342,7 +362,7 @@ Use a bounded fake Broker to test:
 - each application-level validation failure;
 - approved source transition order, if any;
 - terminal propagation of non-fallback-eligible Observer errors;
-- missing inputs and exhausted limits;
+- input-schema failures, missing Host bindings, and exhausted limits;
 - native call count, argument layout, return-code handling, and cleanup when
   native code is used.
 
@@ -395,8 +415,8 @@ credentials, screenshots, or raw diagnostic logs.
 A package is ready only when all answers are yes:
 
 - [ ] Does one leaf directory own exactly one finite task?
-- [ ] Do `TASK.md`, `main.star`, `output.schema.json`, and `manifest.json`
-      describe the same inputs, sources, success, and failures?
+- [ ] Do `TASK.md`, `main.star`, `input.schema.json`, `output.schema.json`, and
+      `manifest.json` describe the same inputs, sources, success, and failures?
 - [ ] Is every regular file declared exactly once?
 - [ ] Are Observer operations and byte/call limits least-privilege and finite?
 - [ ] Are all process-build, pointer, size, count, and ABI assumptions checked?
@@ -415,6 +435,7 @@ example:
 
 - [`inventory/TASK.md`](../Rules/CrimsonDesert.exe/Scripts/inventory/TASK.md)
 - [`inventory/main.star`](../Rules/CrimsonDesert.exe/Scripts/inventory/main.star)
+- [`inventory/input.schema.json`](../Rules/CrimsonDesert.exe/Scripts/inventory/input.schema.json)
 - [`inventory/output.schema.json`](../Rules/CrimsonDesert.exe/Scripts/inventory/output.schema.json)
 - [`Crimson Desert inventory walkthrough`](examples/crimson-desert-inventory-job.md)
 

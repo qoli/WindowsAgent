@@ -15,6 +15,23 @@ The Host launches only the Runner and Observer. All framed messages are
 bounded, strict JSON over inherited pipes. No shell, PowerShell, polling,
 watcher, HTTP observer, or native worker participates.
 
+The launcher is capability-neutral. It resolves the capability through the
+live Rule registry, requires `runtime: windows-observation-v1`, derives the
+expected foreground executable from the owning Rule folder, validates the
+package input schema, and binds exactly the manifest-declared file-root
+aliases.
+
+One launch request has this generic shape:
+
+```json
+{
+  "inputs": {},
+  "fileRoots": {
+    "manifest-root-alias": "C:\\absolute\\authorized\\root"
+  }
+}
+```
+
 ## Package execution
 
 The Host snapshots the currently registered Script Package for one job. The
@@ -77,7 +94,8 @@ unbounded diagnostics.
 
 ## Terminal behavior
 
-Missing DLLs, platform mismatch, missing exports, invalid
-FFI signatures, forged blobs, call/memory/result limits, Runner crash, and
-deadline expiry fail explicitly. No alternative artifact, version, export,
-decoder, save, or source is chosen.
+Unknown capabilities or runtimes, invalid input, missing or extra resource
+bindings, owning-Rule process mismatch, missing DLLs, platform mismatch,
+missing exports, invalid FFI signatures, forged blobs, call/memory/result
+limits, Runner crash, and deadline expiry fail explicitly. No alternative
+artifact, version, export, decoder, save, or source is chosen.

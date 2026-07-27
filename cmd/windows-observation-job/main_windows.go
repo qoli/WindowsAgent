@@ -12,15 +12,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/observationjob"
 	"github.com/qoli/WindowsAgent/internal/observer"
 	"github.com/qoli/WindowsAgent/internal/rules"
+	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
 
-const crimsonInventoryCapability = "crimson-desert/inventory"
+const launcherDeadline = 75 * time.Second
 
 func main() {
 	if err := run(); err != nil {
@@ -33,15 +35,14 @@ func main() {
 func run() error {
 	flags := flag.NewFlagSet("windows-observation-job", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	var capability, installRoot, rulesDir, saveRoot, saveRelative, processPath string
+	var capability, installRoot, rulesDir, requestFile, processPath string
 	var processID uint
 	flags.StringVar(&capability, "capability", "", "registered observation capability ID")
 	flags.StringVar(&installRoot, "install-root", "", "absolute WindowsAgent observation runtime root")
 	flags.StringVar(&rulesDir, "rules-dir", "", "absolute external Rule plugin directory")
-	flags.StringVar(&saveRoot, "save-root", "", "authorized absolute save root")
-	flags.StringVar(&saveRelative, "save-relative", "", "selected root-relative save file")
-	flags.UintVar(&processID, "process-id", 0, "host-resolved process ID; zero uses foreground")
-	flags.StringVar(&processPath, "process-path", "", "absolute image path required with process-id")
+	flags.StringVar(&requestFile, "request-file", "", "absolute strict-JSON launcher request file")
+	flags.UintVar(&processID, "process-id", 0, "host-resolved owning Rule process ID; zero uses foreground")
+	flags.StringVar(&processPath, "process-path", "", "absolute owning Rule image path required with process-id")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
@@ -56,8 +57,12 @@ func run() error {
 		installRoot = filepath.Dir(executable)
 	}
 	if !filepath.IsAbs(installRoot) || !filepath.IsAbs(rulesDir) ||
-		!filepath.IsAbs(saveRoot) || saveRelative == "" {
-		return errors.New("install-root, rules-dir, save-root, and save-relative must identify explicit paths")
+		!filepath.IsAbs(requestFile) {
+		return errors.New("install-root, rules-dir, and request-file must be absolute paths")
+	}
+	request, err := scriptlaunch.ReadRequest(requestFile)
+	if err != nil {
+		return err
 	}
 	ruleStore, err := rules.New(rulesDir)
 	if err != nil {
@@ -70,26 +75,32 @@ func run() error {
 	if script.Runtime != rules.ObservationRuntimeV1 {
 		return fmt.Errorf("unsupported script runtime %q for capability %q", script.Runtime, capability)
 	}
-	if capability != crimsonInventoryCapability {
-		return fmt.Errorf("unsupported registered observation capability %q", capability)
-	}
-
 	var resolvedProcessID uint32
 	var resolvedProcessPath string
 	if processID == 0 {
+		if processPath != "" {
+			return errors.New("process-path requires process-id")
+		}
 		foregroundInfo, err := foreground.Snapshot()
 		if err != nil {
 			return fmt.Errorf("resolve foreground process: %w", err)
 		}
-		if foregroundInfo.ExecutableName != "CrimsonDesert.exe" {
-			return fmt.Errorf("foreground executable is %q, expected CrimsonDesert.exe", foregroundInfo.ExecutableName)
+		if !strings.EqualFold(foregroundInfo.ExecutableName, script.RuleID) {
+			return fmt.Errorf(
+				"foreground executable is %q, expected owning Rule %q",
+				foregroundInfo.ExecutableName,
+				script.RuleID,
+			)
 		}
 		resolvedProcessID = foregroundInfo.ProcessID
 		resolvedProcessPath = foregroundInfo.ExecutablePath
 	} else {
 		if processID > uint(^uint32(0)) || !filepath.IsAbs(processPath) ||
-			filepath.Base(processPath) != "CrimsonDesert.exe" {
-			return errors.New("process-id requires an absolute CrimsonDesert.exe process-path")
+			!strings.EqualFold(filepath.Base(processPath), script.RuleID) {
+			return fmt.Errorf(
+				"process-id requires an absolute owning Rule %s process-path",
+				script.RuleID,
+			)
 		}
 		resolvedProcessID = uint32(processID)
 		resolvedProcessPath = processPath
@@ -102,7 +113,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(launcherDeadline)
 	result, err := observationjob.Run(context.Background(), observationjob.Spec{
 		JobID:                  jobID,
 		Deadline:               deadline,
@@ -111,15 +122,8 @@ func run() error {
 		ScriptRunnerExecutable: filepath.Join(installRoot, "windows-observation-script-runner.exe"),
 		ObserverExecutable:     filepath.Join(installRoot, "windows-observer.exe"),
 		Process:                &process,
-		FileRoots: map[string]string{
-			"crimson-desert-saves": saveRoot,
-		},
-		Inputs: map[string]any{
-			"save": map[string]any{
-				"root":     "crimson-desert-saves",
-				"relative": saveRelative,
-			},
-		},
+		FileRoots:              request.FileRoots,
+		Inputs:                 request.Inputs,
 	})
 	if err != nil {
 		return err
@@ -128,6 +132,7 @@ func run() error {
 		"ok":         true,
 		"jobId":      jobID,
 		"capability": capability,
+		"ruleId":     script.RuleID,
 		"output":     result.Output,
 		"provenance": result.Provenance,
 	})

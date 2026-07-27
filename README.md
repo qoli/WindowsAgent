@@ -34,11 +34,14 @@ The screenshot capability is available today:
 - strict JSON errors with no GDI or hidden capture fallback
 - optional hidden startup through an interactive-user Scheduled Task
 
-One observation job is registered and live-verified today:
+The generic Starlark launcher and one Script capability are available today:
 
 - `crimson-desert/inventory` performs a finite memory attempt and, only when
   that attempt cannot produce a valid inventory, decodes one explicitly
   selected save file
+- the Go launcher resolves any registered `windows-observation-v1` capability
+  from its owning Rule, validates its input schema and host resource bindings,
+  and never contains a capability allowlist
 - the job returns one schema-validated JSON result with per-call provenance
 - the Go host launches only the runner and observer directly under one bounded
   Windows Job Object; it does not use PowerShell or a polling loop
@@ -46,8 +49,9 @@ One observation job is registered and live-verified today:
 - the save file becomes a job-scoped opaque blob; the Script Runner resolves
   that blob and loads only the package-declared DLL alias
 
-This is not a general remote memory API. The observation host is a local
-command with one registered capability and no HTTP listener.
+This is not a general remote memory API. HTTP exposes a live read-only Script
+catalog; the bearer-protected run endpoint delegates one request to the local
+launcher inside the signed-in Windows session.
 
 ## Build
 
@@ -96,6 +100,7 @@ Available options:
 --listen              HTTP listen address (default 0.0.0.0:8787)
 --data-dir            artifact and log root
 --rules-dir           external Rule plugin directory (default <data-dir>/Rules)
+--script-api-token-file bearer-token file (default <data-dir>/script-api.token)
 --capture-timeout     per-request timeout (default 5s)
 --retention           number of artifacts to retain (default 100)
 --log-level           debug, info, warn, or error
@@ -105,24 +110,40 @@ Available options:
 The process must not run as a traditional Session 0 Windows service because WGC
 requires access to the interactive desktop.
 
-Run the registered Crimson Desert inventory job from the signed-in session:
+Create one strict launcher request outside the Rule plugin:
+
+```json
+{
+  "inputs": {
+    "save": {
+      "root": "crimson-desert-saves",
+      "relative": "slot1/save.save"
+    }
+  },
+  "fileRoots": {
+    "crimson-desert-saves": "C:\\Users\\user\\AppData\\Local\\Pearl Abyss\\CD\\save\\<account-id>"
+  }
+}
+```
+
+Run the registered capability through the generic launcher from the signed-in
+session:
 
 ```powershell
 .\.build\windows-observation-job.exe `
   --capability crimson-desert/inventory `
   --install-root (Resolve-Path .\.build) `
   --rules-dir (Resolve-Path .\.build\Rules) `
-  --save-root "$env:LOCALAPPDATA\Pearl Abyss\CD\save\<account-id>" `
-  --save-relative "slot1/save.save"
+  --request-file (Resolve-Path .\inventory-request.json)
 ```
 
-The selected save path is explicit; the job does not watch a directory or pick
-the newest file. Replace `<account-id>` with the numeric account folder below
-the game's `save` directory. By default the job binds memory access to the
-current foreground `CrimsonDesert.exe`. The `--process-id` and
-`--process-path` flags exist for a trusted local host that already resolved the
-exact process; the observer still revalidates its path, creation time, and
-executable SHA-256.
+`inputSchema` belongs to the Script Package; `fileRoots` supplies exact
+host-authorized bindings for the aliases requested by its manifest. Missing,
+extra, relative, or undeclared bindings fail. The launcher derives the expected
+foreground executable from the capability's owning Rule folder. The
+`--process-id` and `--process-path` flags exist only for a trusted local host
+that already resolved that same owning-Rule process; the observer still
+revalidates its path, creation time, and executable SHA-256.
 
 The package declares native-library alias `save-decoder`, its
 `windows-amd64` artifact, call limit, and native-memory limit. Starlark
@@ -140,14 +161,17 @@ From the repository root in PowerShell:
   -RulesPath .\.build\Rules
 ```
 
-The installer copies the executable and external Rule plugins under the current
-user's `%LOCALAPPDATA%`, registers an interactive-token at-logon Scheduled
-Task, starts it, and verifies `/healthz`. It does not create an SCM service or
-modify Windows Firewall.
+The installer copies the capture executable, generic Starlark launcher,
+Script Runner, Observer, and external Rule plugins under the current user's
+`%LOCALAPPDATA%`, registers an interactive-token at-logon Scheduled Task,
+starts it, and verifies `/healthz`. All four executables must be present
+beside the selected build artifact before installation. The installer does
+not create an SCM service or modify Windows Firewall.
 
-Builds that stored `rule.agents.sha256` used an incompatible capture metadata
-contract. The installer detects those captures before stopping the current
-task and refuses the migration unless explicitly asked to preserve them:
+Builds that stored `rule.agents.sha256`, or matched Rule metadata without
+`rule.scripts`, use an incompatible capture metadata contract. The installer
+detects those captures before stopping the current task and refuses the
+migration unless explicitly asked to preserve them:
 
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
@@ -184,6 +208,8 @@ GET  /v1/captures/latest/content
 GET  /v1/captures/{id}
 GET  /v1/captures/{id}/content
 GET  /v1/rules/{rule-id}/AGENTS.md
+GET  /v1/rules/{rule-id}/scripts
+POST /v1/scripts/run
 ```
 
 Create a capture:
@@ -203,6 +229,36 @@ curl.exe `
   http://127.0.0.1:8787/v1/captures/latest/content
 ```
 
+Discover the current Script contracts for a matched Rule:
+
+```powershell
+curl.exe http://127.0.0.1:8787/v1/rules/CrimsonDesert.exe/scripts
+```
+
+The catalog returns each capability's ID, declared runtime, title, package
+version, input schema, output schema, and authenticated launcher endpoint. It
+is read-only and does not execute a Script.
+
+Run one registered Script from the signed-in agent session:
+
+```powershell
+$token = [IO.File]::ReadAllText(
+  "$env:LOCALAPPDATA\gameGuide\windows-capture-agent\script-api.token"
+)
+curl.exe `
+  -H "Authorization: Bearer $token" `
+  -H "Content-Type: application/json" `
+  --data-binary "@inventory-invocation.json" `
+  http://127.0.0.1:8787/v1/scripts/run
+```
+
+The invocation body contains `capability`, `inputs`, and `fileRoots`; it uses
+the same input and binding contract as the local launcher request. The
+installer creates the token once, preserves it across upgrades, stores only
+its path in task configuration, and never places its value in Rule content or
+HTTP discovery responses. Script execution is serialized and does not upload,
+rewrite, or reload a Rule plugin.
+
 Only one capture can run at a time. A concurrent request receives
 `409 capture_busy`. Each completed artifact contains `capture.png` and
 `metadata.json`. The response and metadata include a required `foreground`
@@ -219,11 +275,15 @@ object:
   },
   "rule": {
     "status": "matched",
-    "description": "The executing agent must read rule.agents.url before taking any rule-specific action.",
+    "description": "The executing agent must read rule.agents.url and rule.scripts.url before taking any rule-specific action.",
     "id": "Game.exe",
     "agents": {
       "url": "/v1/rules/Game.exe/AGENTS.md",
       "content_type": "text/markdown; charset=utf-8"
+    },
+    "scripts": {
+      "url": "/v1/rules/Game.exe/scripts",
+      "content_type": "application/json; charset=utf-8"
     }
   }
 }
@@ -234,8 +294,11 @@ frame. The same response resolves its executable name against the current
 external folders under `Rules/`; this keeps the capture JSON as Codex's single
 Windows perception entry point. Each request reloads `rule.json` and
 `AGENTS.md`, so a completed Rule plugin replacement requires no agent reload or
-task restart. Codex can follow `rule.agents.url` to read the matched process
-guidance. An executable without a rule reports
+task restart. Codex follows `rule.agents.url` for policy and
+`rule.scripts.url` for the current machine-readable capability, input, output,
+and launcher contract. Script package validation occurs only when that catalog
+or capability is requested; capture remains independent from Script package
+health. An executable without a rule reports
 `rule.status=unmatched` with a description that no rule guidance is available,
 without inventing a substitute.
 
@@ -253,7 +316,7 @@ this build with a new, empty data directory; there is no automatic migration.
 
 ```text
 cmd/windows-capture-agent/       screenshot capability executable
-cmd/windows-observation-job/     registered local observation job host
+cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
 docs/design/                     maintained design registry
@@ -268,6 +331,7 @@ internal/foreground/             foreground process observation
 internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
+internal/scriptlaunch/           strict generic launcher request contract
 internal/wgc/                    WGC and Direct3D 11 implementation
 Rules/<Executable.exe>/          distributable rule.json, AGENTS.md, and Scripts
 scripts/                         Windows installation helpers

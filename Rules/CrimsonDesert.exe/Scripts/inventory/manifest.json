@@ -1,19 +1,21 @@
 {
   "schemaVersion": 2,
-  "version": 2,
+  "version": 3,
   "title": "Read raw Crimson Desert inventory records",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "files": [
     "main.star",
     "TASK.md",
+    "input.schema.json",
     "output.schema.json",
     "native/windows-amd64/crimson-rs.inventory.bb730180.dll"
   ],
   "permissions": {
     "memory": {
-      "target": "crimson-desert/current-process",
+      "target": "rule/current-process",
       "operations": [
         "modules",
         "scan",

@@ -39,6 +39,17 @@ $sourceExecutable = [IO.Path]::GetFullPath($ExecutablePath)
 if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
     throw "agent executable does not exist: $sourceExecutable"
 }
+$sourceBinDir = Split-Path -Parent $sourceExecutable
+$runtimeSources = [ordered]@{
+    "windows-observation-job.exe" = Join-Path $sourceBinDir "windows-observation-job.exe"
+    "windows-observation-script-runner.exe" = Join-Path $sourceBinDir "windows-observation-script-runner.exe"
+    "windows-observer.exe" = Join-Path $sourceBinDir "windows-observer.exe"
+}
+foreach ($runtime in $runtimeSources.GetEnumerator()) {
+    if (-not (Test-Path -LiteralPath $runtime.Value -PathType Leaf)) {
+        throw "required Starlark launcher runtime does not exist: $($runtime.Value)"
+    }
+}
 $sourceRules = [IO.Path]::GetFullPath($RulesPath)
 if (-not (Test-Path -LiteralPath $sourceRules -PathType Container)) {
     throw "Rules directory does not exist: $sourceRules"
@@ -59,14 +70,32 @@ if (Test-Path -LiteralPath $capturesDir -PathType Container) {
         } catch {
             throw "could not inspect existing capture metadata '$($metadataFile.FullName)': $($_.Exception.Message)"
         }
-        if ($null -ne $metadata.rule -and $null -ne $metadata.rule.agents -and `
-            @($metadata.rule.agents.PSObject.Properties.Name) -contains "sha256") {
+        $metadataProperties = @($metadata.PSObject.Properties.Name)
+        $hasRule = $metadataProperties -contains "rule" -and $null -ne $metadata.rule
+        $ruleProperties = @()
+        if ($hasRule) {
+            $ruleProperties = @($metadata.rule.PSObject.Properties.Name)
+        }
+        $hasAgents = $hasRule -and $ruleProperties -contains "agents"
+        $usesRemovedAgentSHA = $false
+        if ($hasAgents -and $null -ne $metadata.rule.agents) {
+            $usesRemovedAgentSHA = (
+                @($metadata.rule.agents.PSObject.Properties.Name) -contains "sha256"
+            )
+        }
+        $missingScriptNavigation = (
+            $hasRule -and
+            $ruleProperties -contains "status" -and
+            $metadata.rule.status -eq "matched" -and
+            -not ($ruleProperties -contains "scripts")
+        )
+        if ($usesRemovedAgentSHA -or $missingScriptNavigation) {
             $incompatibleCaptureMetadata += $metadataFile.FullName
         }
     }
 }
 if ($incompatibleCaptureMetadata.Count -ne 0 -and -not $ArchiveIncompatibleCaptures) {
-    throw ("existing captures use the removed rule.agents.sha256 contract; " +
+    throw ("existing captures use an incompatible Rule navigation contract; " +
         "rerun with -ArchiveIncompatibleCaptures to preserve them outside the active capture store")
 }
 $captureTimeoutArgument = ([long][Math]::Ceiling($CaptureTimeout.TotalMilliseconds)).ToString() + "ms"
@@ -90,8 +119,29 @@ $logDir = Join-Path $resolvedDataDir "logs"
 $installedExecutable = Join-Path $binDir "windows-capture-agent.exe"
 $installedRules = Join-Path $resolvedDataDir "Rules"
 $logFile = Join-Path $logDir "agent.jsonl"
+$scriptAPITokenFile = Join-Path $resolvedDataDir "script-api.token"
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+if (Test-Path -LiteralPath $scriptAPITokenFile -PathType Leaf) {
+    $scriptAPIToken = [IO.File]::ReadAllText($scriptAPITokenFile)
+    if ($scriptAPIToken -notmatch "^[0-9a-fA-F]{64}$") {
+        throw "existing Script API token must contain exactly 64 hexadecimal characters"
+    }
+} else {
+    $tokenBytes = New-Object byte[] 32
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $random.GetBytes($tokenBytes)
+    } finally {
+        $random.Dispose()
+    }
+    $scriptAPIToken = -join ($tokenBytes | ForEach-Object { $_.ToString("x2") })
+    [IO.File]::WriteAllText(
+        $scriptAPITokenFile,
+        $scriptAPIToken,
+        (New-Object Text.UTF8Encoding($false))
+    )
+}
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
@@ -128,6 +178,9 @@ if ($incompatibleCaptureMetadata.Count -ne 0) {
 if ($sourceExecutable -ne $installedExecutable) {
     Copy-Item -LiteralPath $sourceExecutable -Destination $installedExecutable -Force
 }
+foreach ($runtime in $runtimeSources.GetEnumerator()) {
+    Copy-Item -LiteralPath $runtime.Value -Destination (Join-Path $binDir $runtime.Key) -Force
+}
 New-Item -ItemType Directory -Path $installedRules -Force | Out-Null
 $sourceRuleDirectories = @(Get-ChildItem -LiteralPath $sourceRules -Directory)
 if ($sourceRuleDirectories.Count -eq 0) {
@@ -151,6 +204,7 @@ $agentArguments = @(
     "--listen", (ConvertTo-NativeQuotedArgument $Listen),
     "--data-dir", (ConvertTo-NativeQuotedArgument $resolvedDataDir),
     "--rules-dir", (ConvertTo-NativeQuotedArgument $installedRules),
+    "--script-api-token-file", (ConvertTo-NativeQuotedArgument $scriptAPITokenFile),
     "--capture-timeout", (ConvertTo-NativeQuotedArgument $captureTimeoutArgument),
     "--retention", (ConvertTo-NativeQuotedArgument $Retention.ToString()),
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
@@ -213,8 +267,12 @@ if ($process.SessionId -eq 0) {
     task_name = $TaskName
     task_state = (Get-ScheduledTask -TaskName $TaskName).State.ToString()
     executable = $installedExecutable
+    script_launcher = (Join-Path $binDir "windows-observation-job.exe")
+    script_runner = (Join-Path $binDir "windows-observation-script-runner.exe")
+    observer = (Join-Path $binDir "windows-observer.exe")
     data_dir = $resolvedDataDir
     rules_dir = $installedRules
+    script_api_token_file = $scriptAPITokenFile
     capture_archive = $captureArchive
     log_file = $logFile
     listen = $Listen

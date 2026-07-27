@@ -114,7 +114,12 @@ func TestCrimsonInventoryPackageFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := runner.Run(context.Background(), pkg, nil)
+	output, err := runner.Run(context.Background(), pkg, map[string]any{
+		"save": map[string]any{
+			"root":     "crimson-desert-saves",
+			"relative": "slot/save.save",
+		},
+	})
 	if err != nil {
 		t.Fatalf("run package: %v", err)
 	}
@@ -558,7 +563,12 @@ func TestNonEligibleBrokerFailureDoesNotFallback(t *testing.T) {
 	}
 	broker := &failingBroker{}
 	runner, _ := New(broker)
-	_, err = runner.Run(context.Background(), pkg, nil)
+	_, err = runner.Run(context.Background(), pkg, map[string]any{
+		"save": map[string]any{
+			"root":     "crimson-desert-saves",
+			"relative": "slot/save.save",
+		},
+	})
 	var runError *Error
 	if !errors.As(err, &runError) {
 		t.Fatalf("error = %T %v, want *Error", err, err)
@@ -571,7 +581,7 @@ func TestNonEligibleBrokerFailureDoesNotFallback(t *testing.T) {
 	}
 }
 
-func TestMissingSaveInputIsScriptFailureNotSourceFailure(t *testing.T) {
+func TestMissingSaveInputFailsBeforeScriptExecution(t *testing.T) {
 	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Scripts", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
@@ -583,7 +593,7 @@ func TestMissingSaveInputIsScriptFailureNotSourceFailure(t *testing.T) {
 	if !errors.As(err, &runError) {
 		t.Fatalf("error = %T %v, want *Error", err, err)
 	}
-	if runError.Code != "SCRIPT_RUNTIME_FAILED" {
+	if runError.Code != "SCRIPT_INPUT_INVALID" {
 		t.Fatalf("code = %q", runError.Code)
 	}
 }

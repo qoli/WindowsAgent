@@ -8,6 +8,9 @@ The package lives at
 `Rules/CrimsonDesert.exe/Scripts/inventory`. It owns the
 game-specific process layout, save-decoder DLL, ABI declarations, record
 layout, return codes, backpack filter, output conversion, and source order.
+The generic Go launcher knows none of those details. It derives
+`CrimsonDesert.exe` from the owning Rule and validates the request against the
+package's `input.schema.json`.
 
 ## Finite source order
 
@@ -22,6 +25,24 @@ layout, return codes, backpack filter, output conversion, and source order.
 
 There is no polling, file watch, newest-save selection, DLL/version fallback,
 decoder fallback, hidden retry, or alternate source.
+
+## Launcher request
+
+```json
+{
+  "inputs": {
+    "save": {
+      "root": "crimson-desert-saves",
+      "relative": "slot1/save.save"
+    }
+  },
+  "fileRoots": {
+    "crimson-desert-saves": "C:\\absolute\\authorized\\account-root"
+  }
+}
+```
+
+The absolute root is Host state and is not distributed in the plugin.
 
 ## Native declaration
 

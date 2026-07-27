@@ -11,16 +11,16 @@ Implemented:
   plugin folders;
 - a matched response exposes the plugin-owned description and HTTP URL for
   the rule's `AGENTS.md`;
+- a matched response exposes a live Script catalog URL without loading a
+  Script package during capture;
 - an unmatched executable is represented explicitly;
-- Crimson Desert is the first rule and contains only a draft `AGENTS.md`.
+- Crimson Desert is the first Rule plugin and registers one Script capability.
 
 Explicitly out of scope:
 
-- rule-specific scripts;
+- unauthenticated Script execution;
 - guide-source registries and lookup APIs;
-- process inspection, memory observation, game-state extraction, and input
-  control;
-- any Codex-facing transport beyond the HTTP navigation contract.
+- input control.
 
 ## Problem / Background
 
@@ -47,6 +47,7 @@ This document owns:
 - rule discovery timing;
 - capture JSON navigation fields;
 - the read-only `AGENTS.md` HTTP surface;
+- the read-only live Script catalog HTTP surface;
 - matched and unmatched semantics.
 
 It does not authorize arbitrary script execution, website instructions,
@@ -86,11 +87,15 @@ A matched capture includes:
   },
   "rule": {
     "status": "matched",
-    "description": "The executing agent must read rule.agents.url before taking any rule-specific action.",
+    "description": "The executing agent must read rule.agents.url and rule.scripts.url before taking any rule-specific action.",
     "id": "CrimsonDesert.exe",
     "agents": {
       "url": "/v1/rules/CrimsonDesert.exe/AGENTS.md",
       "content_type": "text/markdown; charset=utf-8"
+    },
+    "scripts": {
+      "url": "/v1/rules/CrimsonDesert.exe/scripts",
+      "content_type": "application/json; charset=utf-8"
     }
   }
 }
@@ -114,20 +119,27 @@ not prevent the screenshot from being committed.
 
 ```text
 GET /v1/rules/{canonical-rule-id}/AGENTS.md
+GET /v1/rules/{canonical-rule-id}/scripts
 ```
 
-The endpoint returns the current external Markdown with `Cache-Control:
-no-store`. Unknown IDs and non-canonical casing return `404 rule_not_found`.
-The endpoint does not accept arbitrary file paths.
+Both endpoints return current external content with `Cache-Control: no-store`.
+The Script catalog loads and validates the packages registered by the current
+`rule.json`, then exposes capability ID, runtime, title, version, input schema,
+output schema, and the authenticated launcher contract. Unknown IDs and
+non-canonical casing return `404 rule_not_found`. Neither endpoint accepts
+arbitrary file paths or launches a Script. The separate bearer-protected
+`POST /v1/scripts/run` endpoint consumes the catalog contract and launches the
+generic local runtime from the signed-in agent session.
 
 ### Invariants
 
 - Rule resolution uses the foreground executable from the same captured frame.
 - Window titles and executable path substrings never select a rule.
 - A normalized executable matches at most one rule.
-- A matched result always includes the canonical ID, URL, media type, and the
-  current plugin-owned description.
-- An unmatched result includes a description but no ID or document link.
+- A matched result always includes the canonical ID, both navigation URLs and
+  media types, and the current plugin-owned description.
+- An unmatched result includes a description but no ID or document/catalog
+  link.
 - Empty, duplicate, malformed, or missing matched Rule documents fail the
   request explicitly.
 - Rule content is not cached. A later request observes a completed external
@@ -142,16 +154,8 @@ The endpoint does not accept arbitrary file paths.
   Script registry for that explicitly matched executable.
 - This registry owns maturity; folder placement owns rule identity.
 
-## Open Questions
+## Codex execution
 
-- What common API shape should future rule-specific resources use?
-- Which explicit permissions should gate process, memory, network, and input
-  capabilities?
-- Should a future Codex integration consume these HTTP links directly or expose
-  a thin MCP adapter?
-
-## Suggested Next Steps
-
-After the capture navigation contract is proven in the signed-in Windows
-session, define one bounded Crimson Desert capability and its permission model
-before adding scripts or guide sources.
+Codex may call `POST /v1/scripts/run` after the user authorizes the named
+capability. The bearer token is operator configuration, never plugin content.
+Unauthenticated remote execution is not part of this design.

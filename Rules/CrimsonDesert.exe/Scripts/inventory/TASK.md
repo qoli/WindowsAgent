@@ -14,7 +14,10 @@ retry invisibly, or substitute a decoder/version/source.
 ## Preconditions
 
 - The process identity and executable SHA-256 are resolved by the trusted Host.
-- The save root and relative file are explicitly supplied by the user.
+- `inputs` passes `input.schema.json`.
+- The `crimson-desert-saves` grant is bound by the Host to one authorized
+  absolute root, while the package receives only its alias and the selected
+  root-relative file.
 - The package-native artifact is
   `native/windows-amd64/crimson-rs.inventory.bb730180.dll`.
 - Its manifest alias is `save-decoder`.

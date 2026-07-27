@@ -28,6 +28,10 @@ func TestStoreResolvesLiveRuleAndReadsAGENTS(t *testing.T) {
 		resolution.Agents.URL != "/v1/rules/CrimsonDesert.exe/AGENTS.md" {
 		t.Fatalf("AGENTS navigation = %+v", resolution.Agents)
 	}
+	if resolution.Scripts == nil ||
+		resolution.Scripts.URL != "/v1/rules/CrimsonDesert.exe/scripts" {
+		t.Fatalf("Scripts navigation = %+v", resolution.Scripts)
+	}
 	content, readResolution, err := store.ReadAGENTS("CrimsonDesert.exe")
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +69,8 @@ func TestStoreReportsUnmatchedExplicitly(t *testing.T) {
 	if resolution.Status != StatusUnmatched ||
 		resolution.Description != UnmatchedDescription ||
 		resolution.ID != "" ||
-		resolution.Agents != nil {
+		resolution.Agents != nil ||
+		resolution.Scripts != nil {
 		t.Fatalf("resolution = %+v", resolution)
 	}
 	if err := resolution.Validate(); err != nil {
@@ -94,6 +99,36 @@ func TestStoreResolvesRegisteredScript(t *testing.T) {
 	if script.RuleID != "CrimsonDesert.exe" || script.Runtime != ObservationRuntimeV1 ||
 		script.Root != canonicalScriptRoot {
 		t.Fatalf("script = %+v", script)
+	}
+}
+
+func TestStoreReadsRuleScriptsInCanonicalOrder(t *testing.T) {
+	root := testRulesRoot(t)
+	writeRule(t, root, "CrimsonDesert.exe", "Read the live Rule before acting.", "# Guidance\n", map[string]ScriptDeclaration{
+		"zeta/capability":          {Path: "Scripts/zeta", Runtime: ObservationRuntimeV1},
+		"crimson-desert/inventory": {Path: "Scripts/inventory", Runtime: ObservationRuntimeV1},
+	})
+	for _, name := range []string{"inventory", "zeta"} {
+		if err := os.MkdirAll(filepath.Join(root, "CrimsonDesert.exe", "Scripts", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripts, resolution, err := store.ReadScripts("CrimsonDesert.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts) != 2 ||
+		scripts[0].ID != "crimson-desert/inventory" ||
+		scripts[1].ID != "zeta/capability" {
+		t.Fatalf("scripts = %+v", scripts)
+	}
+	if resolution.Scripts == nil ||
+		resolution.Scripts.ContentType != ScriptsMediaType {
+		t.Fatalf("resolution = %+v", resolution)
 	}
 }
 

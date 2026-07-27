@@ -174,6 +174,10 @@ func testResult(content string) capture.Result {
 				URL:         "/v1/rules/game.exe/AGENTS.md",
 				ContentType: "text/markdown; charset=utf-8",
 			},
+			Scripts: &rules.Document{
+				URL:         "/v1/rules/game.exe/scripts",
+				ContentType: "application/json; charset=utf-8",
+			},
 		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",
 	}
