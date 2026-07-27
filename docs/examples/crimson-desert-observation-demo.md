@@ -2,7 +2,7 @@
 
 ## Status
 
-**Superseded by the fixture-verified inventory package.**
+**Superseded by the live-verified inventory package.**
 
 The child runtime, package runner, and observer core now exist. Use
 [Crimson Desert Inventory Script](crimson-desert-inventory-job.md) for the

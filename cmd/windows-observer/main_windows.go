@@ -24,6 +24,7 @@ type initializeParams struct {
 	Permissions     scriptpackage.Permissions `json:"permissions"`
 	Process         *observer.ProcessIdentity `json:"process"`
 	FileRoots       map[string]string         `json:"fileRoots"`
+	BlobRoot        string                    `json:"blobRoot"`
 }
 
 func main() {
@@ -77,7 +78,7 @@ func run() error {
 		}
 	}
 	if params.Permissions.File != nil {
-		router.File, err = observer.NewFileBackend(params.FileRoots)
+		router.File, err = observer.NewFileBackendWithBlobRoot(params.FileRoots, params.BlobRoot)
 		if err != nil {
 			router.Close()
 			writeError(conn, first.ID, -32011, "initialize file observer", err)

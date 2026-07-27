@@ -46,6 +46,46 @@ func NewMemoryBackend(expected ProcessIdentity, maxBytesPerCall uint64) (*Memory
 	return backend, nil
 }
 
+func ResolveProcessIdentity(pid uint32, expectedImagePath string) (ProcessIdentity, error) {
+	if pid == 0 || expectedImagePath == "" || !filepath.IsAbs(expectedImagePath) {
+		return ProcessIdentity{}, errors.New("PID and absolute expected image path are required")
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("open process for identity: %w", err)
+	}
+	defer windows.CloseHandle(handle)
+
+	buffer := make([]uint16, 32768)
+	size := uint32(len(buffer))
+	if err := windows.QueryFullProcessImageName(handle, 0, &buffer[0], &size); err != nil {
+		return ProcessIdentity{}, fmt.Errorf("query process image path: %w", err)
+	}
+	actualPath := windows.UTF16ToString(buffer[:size])
+	if !strings.EqualFold(filepath.Clean(actualPath), filepath.Clean(expectedImagePath)) {
+		return ProcessIdentity{}, errors.New("resolved process image path does not match foreground identity")
+	}
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+		return ProcessIdentity{}, fmt.Errorf("query process creation time: %w", err)
+	}
+	file, err := os.Open(actualPath)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("open process image for identity hash: %w", err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return ProcessIdentity{}, fmt.Errorf("hash process image: %w", err)
+	}
+	return ProcessIdentity{
+		PID:                 pid,
+		CreationTimeWindows: uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime),
+		ImagePath:           actualPath,
+		ImageSHA256:         hex.EncodeToString(hash.Sum(nil)),
+	}, nil
+}
+
 func (b *MemoryBackend) Close() error {
 	return windows.CloseHandle(b.handle)
 }
@@ -266,6 +306,8 @@ func (b *MemoryBackend) regions(arguments map[string]any) (BackendResult, error)
 }
 
 func (b *MemoryBackend) scan(ctx context.Context, arguments map[string]any) (BackendResult, error) {
+	const scanChunkBytes = uint64(4 << 20)
+
 	patternText, ok := arguments["pattern"].(string)
 	if !ok {
 		return BackendResult{}, errors.New("pattern must be a string")
@@ -307,16 +349,36 @@ func (b *MemoryBackend) scan(ctx context.Context, arguments map[string]any) (Bac
 	matches := make([]any, 0, maxMatches)
 	var bytesRead uint64
 	for _, region := range parsed {
-		if err := ctx.Err(); err != nil {
-			return BackendResult{}, err
-		}
-		data, count, err := b.read(region.base, region.size)
-		bytesRead += uint64(count)
-		if err != nil {
-			return BackendResult{}, err
-		}
-		for _, offset := range scanPattern(data, pattern, int(maxMatches)-len(matches)) {
-			matches = append(matches, map[string]any{"address": formatAddress(region.base + uint64(offset))})
+		var tail []byte
+		for offset := uint64(0); offset < region.size; {
+			if err := ctx.Err(); err != nil {
+				return BackendResult{}, err
+			}
+			chunkSize := min(scanChunkBytes, region.size-offset)
+			chunk, count, err := b.read(region.base+offset, chunkSize)
+			bytesRead += uint64(count)
+			if err != nil {
+				return BackendResult{}, err
+			}
+			window := make([]byte, 0, len(tail)+len(chunk))
+			window = append(window, tail...)
+			window = append(window, chunk...)
+			windowBase := region.base + offset - uint64(len(tail))
+			found, err := scanPatternContext(ctx, window, pattern, int(maxMatches)-len(matches))
+			if err != nil {
+				return BackendResult{}, err
+			}
+			for _, matchOffset := range found {
+				matches = append(matches, map[string]any{
+					"address": formatAddress(windowBase + uint64(matchOffset)),
+				})
+			}
+			if len(matches) == int(maxMatches) {
+				break
+			}
+			tailLength := min(len(pattern.bytes)-1, len(window))
+			tail = append(tail[:0], window[len(window)-tailLength:]...)
+			offset += chunkSize
 		}
 		if len(matches) == int(maxMatches) {
 			break

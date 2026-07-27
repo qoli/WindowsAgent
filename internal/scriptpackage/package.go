@@ -10,7 +10,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -25,16 +27,17 @@ const (
 )
 
 type Manifest struct {
-	SchemaVersion uint32                  `json:"schemaVersion"`
-	ID            string                  `json:"id"`
-	Version       uint32                  `json:"version"`
-	Title         string                  `json:"title"`
-	Entrypoint    string                  `json:"entrypoint"`
-	TaskDocument  string                  `json:"taskDocument"`
-	OutputSchema  string                  `json:"outputSchema"`
-	Files         map[string]FileIdentity `json:"files"`
-	Permissions   Permissions             `json:"permissions"`
-	Limits        Limits                  `json:"limits"`
+	SchemaVersion   uint32                   `json:"schemaVersion"`
+	ID              string                   `json:"id"`
+	Version         uint32                   `json:"version"`
+	Title           string                   `json:"title"`
+	Entrypoint      string                   `json:"entrypoint"`
+	TaskDocument    string                   `json:"taskDocument"`
+	OutputSchema    string                   `json:"outputSchema"`
+	Files           map[string]FileIdentity  `json:"files"`
+	Permissions     Permissions              `json:"permissions"`
+	NativeLibraries map[string]NativeLibrary `json:"nativeLibraries,omitempty"`
+	Limits          Limits                   `json:"limits"`
 }
 
 type FileIdentity struct {
@@ -58,6 +61,14 @@ type FilePermissions struct {
 	Operations   []string `json:"operations"`
 	MaxCalls     uint32   `json:"maxCalls"`
 	MaxBytesRead uint64   `json:"maxBytesRead"`
+}
+
+type NativeLibrary struct {
+	Platform             string `json:"platform"`
+	Artifact             string `json:"artifact"`
+	SHA256               string `json:"sha256"`
+	MaxCalls             uint32 `json:"maxCalls"`
+	MaxNativeMemoryBytes uint64 `json:"maxNativeMemoryBytes"`
 }
 
 type Limits struct {
@@ -132,7 +143,7 @@ func Load(root string) (*Package, error) {
 		manifest.Entrypoint,
 		script,
 		func(name string) bool {
-			return name == "observer" || name == "job"
+			return name == "observer" || name == "native" || name == "job"
 		},
 	)
 	if err != nil {
@@ -192,9 +203,6 @@ func validateManifest(manifest Manifest) error {
 		return errors.New("title is required")
 	}
 	requiredFiles := []string{manifest.Entrypoint, manifest.TaskDocument, manifest.OutputSchema}
-	if len(manifest.Files) != len(requiredFiles) {
-		return errors.New("files must contain exactly entrypoint, taskDocument, and outputSchema")
-	}
 	seen := make(map[string]struct{}, len(requiredFiles))
 	for _, name := range requiredFiles {
 		if err := validateRelativeName(name); err != nil {
@@ -221,8 +229,8 @@ func validateManifest(manifest Manifest) error {
 	if filepath.Ext(manifest.OutputSchema) != ".json" {
 		return errors.New("outputSchema must be a JSON file")
 	}
-	if manifest.Permissions.Memory == nil && manifest.Permissions.File == nil {
-		return errors.New("at least one observer permission is required")
+	if manifest.Permissions.Memory == nil && manifest.Permissions.File == nil && len(manifest.NativeLibraries) == 0 {
+		return errors.New("at least one observer permission or native library is required")
 	}
 	if memory := manifest.Permissions.Memory; memory != nil {
 		if memory.Target == "" || memory.MaxCalls == 0 || memory.MaxBytesRead == 0 {
@@ -236,8 +244,36 @@ func validateManifest(manifest Manifest) error {
 		if len(file.Roots) == 0 || file.MaxCalls == 0 || file.MaxBytesRead == 0 {
 			return errors.New("file roots, maxCalls, and maxBytesRead are required")
 		}
-		if err := validateOperations("file", file.Operations, []string{"stat", "read", "hash", "decode"}); err != nil {
+		if err := validateOperations("file", file.Operations, []string{"stat", "read", "hash", "openBlob"}); err != nil {
 			return err
+		}
+	}
+	if len(manifest.NativeLibraries) > 4 {
+		return errors.New("at most four native libraries may be declared")
+	}
+	for alias, library := range manifest.NativeLibraries {
+		if !nativeAliasPattern.MatchString(alias) {
+			return fmt.Errorf("native library alias %q is not canonical", alias)
+		}
+		if !nativePlatformPattern.MatchString(library.Platform) {
+			return fmt.Errorf("native library %q platform is not canonical", alias)
+		}
+		if err := validateRelativeName(library.Artifact); err != nil {
+			return fmt.Errorf("native library %q artifact: %w", alias, err)
+		}
+		if filepath.Ext(library.Artifact) != ".dll" {
+			return fmt.Errorf("native library %q artifact must be a DLL", alias)
+		}
+		if err := validateSHA256(library.SHA256); err != nil {
+			return fmt.Errorf("native library %q SHA-256: %w", alias, err)
+		}
+		file, exists := manifest.Files[library.Artifact]
+		if !exists || file.SHA256 != library.SHA256 {
+			return fmt.Errorf("native library %q artifact must be digest-declared in files", alias)
+		}
+		if library.MaxCalls == 0 || library.MaxCalls > 1024 ||
+			library.MaxNativeMemoryBytes == 0 || library.MaxNativeMemoryBytes > 1<<30 {
+			return fmt.Errorf("native library %q call or memory limit is invalid", alias)
 		}
 	}
 	if manifest.Limits.WallTimeMS == 0 ||
@@ -248,6 +284,9 @@ func validateManifest(manifest Manifest) error {
 	}
 	return nil
 }
+
+var nativeAliasPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+var nativePlatformPattern = regexp.MustCompile(`^[a-z0-9]+-[a-z0-9]+$`)
 
 func validateOperations(namespace string, operations, allowed []string) error {
 	if len(operations) == 0 {
@@ -274,7 +313,8 @@ func validateOperations(namespace string, operations, allowed []string) error {
 }
 
 func validateRelativeName(name string) error {
-	if name == "" || filepath.IsAbs(name) || filepath.Clean(name) != name || strings.Contains(name, `\`) {
+	if name == "" || filepath.IsAbs(name) || path.Clean(name) != name ||
+		strings.Contains(name, `\`) || strings.Contains(name, ":") {
 		return fmt.Errorf("package path %q is not canonical and relative", name)
 	}
 	if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
@@ -340,7 +380,7 @@ func rejectUndeclaredFiles(root string, expected map[string]struct{}) error {
 		}
 		name := filepath.ToSlash(relative)
 		if entry.IsDir() {
-			return fmt.Errorf("package directories are unsupported in V1: %q", name)
+			return nil
 		}
 		if _, ok := expected[name]; !ok {
 			return fmt.Errorf("undeclared package file %q", name)

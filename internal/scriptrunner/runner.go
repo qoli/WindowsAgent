@@ -19,6 +19,19 @@ import (
 
 type Broker interface {
 	Call(ctx context.Context, namespace, operation string, arguments map[string]any) (any, error)
+	BlobPath(ctx context.Context, reference map[string]any) (string, error)
+	RecordNative(ctx context.Context, record NativeRecord) error
+}
+
+type NativeRecord struct {
+	Alias             string `json:"alias"`
+	Action            string `json:"action"`
+	Function          string `json:"function,omitempty"`
+	Phase             string `json:"phase"`
+	CallsUsed         uint32 `json:"callsUsed"`
+	NativeMemoryBytes uint64 `json:"nativeMemoryBytes"`
+	ResultBytes       uint64 `json:"resultBytes"`
+	ErrorKind         string `json:"errorKind,omitempty"`
 }
 
 // BrokerError preserves the observer error classification across the broker
@@ -60,14 +73,15 @@ func (e *Error) Unwrap() error {
 }
 
 type Runner struct {
-	broker Broker
+	broker        Broker
+	nativeBackend nativeBackend
 }
 
 func New(broker Broker) (*Runner, error) {
 	if broker == nil {
 		return nil, errors.New("broker is required")
 	}
-	return &Runner{broker: broker}, nil
+	return &Runner{broker: broker, nativeBackend: newNativeBackend()}, nil
 }
 
 func (r *Runner) Run(ctx context.Context, pkg *scriptpackage.Package, inputs map[string]any) ([]byte, error) {
@@ -81,6 +95,8 @@ func (r *Runner) Run(ctx context.Context, pkg *scriptpackage.Package, inputs map
 	defer cancel()
 
 	host := &host{ctx: runContext, broker: r.broker, pkg: pkg, inputs: cloneInputs(inputs)}
+	host.native = newNativeHost(runContext, pkg, r.broker, r.nativeBackend)
+	defer host.native.close()
 	predeclared, err := host.predeclared()
 	if err != nil {
 		return nil, &Error{Code: "SCRIPT_RUNTIME_FAILED", Stage: "building-api", Cause: err}
@@ -169,6 +185,10 @@ func classifyRuntimeError(ctx context.Context, err error) error {
 		}
 		return &Error{Code: code, Stage: "brokering-observer-call", Cause: brokerFailure}
 	}
+	var nativeFailure *nativeError
+	if errors.As(err, &nativeFailure) {
+		return &Error{Code: nativeFailure.code, Stage: nativeFailure.stage, Cause: nativeFailure.cause}
+	}
 	return &Error{Code: "SCRIPT_RUNTIME_FAILED", Stage: "executing-script", Cause: err}
 }
 
@@ -202,6 +222,7 @@ type host struct {
 	broker Broker
 	pkg    *scriptpackage.Package
 	inputs map[string]any
+	native *nativeHost
 }
 
 func (h *host) predeclared() (starlark.StringDict, error) {
@@ -233,6 +254,7 @@ func (h *host) predeclared() (starlark.StringDict, error) {
 	})
 	return starlark.StringDict{
 		"observer": starlarkstruct.FromStringDict(starlark.String("observer"), observerFields),
+		"native":   h.native.module(),
 		"job":      job,
 	}, nil
 }

@@ -2,6 +2,7 @@ package observer
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,18 +16,14 @@ import (
 
 type FileBackend struct {
 	roots    map[string]string
-	decoders map[string]FileDecoder
-}
-
-type FileDecoder interface {
-	Decode(ctx context.Context, data []byte, options map[string]any) (any, error)
+	blobRoot string
 }
 
 func NewFileBackend(roots map[string]string) (*FileBackend, error) {
-	return NewFileBackendWithDecoders(roots, nil)
+	return NewFileBackendWithBlobRoot(roots, "")
 }
 
-func NewFileBackendWithDecoders(roots map[string]string, decoders map[string]FileDecoder) (*FileBackend, error) {
+func NewFileBackendWithBlobRoot(roots map[string]string, blobRoot string) (*FileBackend, error) {
 	if len(roots) == 0 {
 		return nil, errors.New("at least one logical file root is required")
 	}
@@ -48,14 +45,25 @@ func NewFileBackendWithDecoders(roots map[string]string, decoders map[string]Fil
 		}
 		canonical[id] = resolved
 	}
-	registered := make(map[string]FileDecoder, len(decoders))
-	for id, decoder := range decoders {
-		if id == "" || decoder == nil {
-			return nil, errors.New("decoder IDs and implementations must not be empty")
+	canonicalBlobRoot := ""
+	if blobRoot != "" {
+		if !filepath.IsAbs(blobRoot) {
+			return nil, errors.New("blob root must be absolute")
 		}
-		registered[id] = decoder
+		resolvedBlobRoot, err := filepath.EvalSymlinks(blobRoot)
+		if err != nil {
+			return nil, fmt.Errorf("resolve blob root: %w", err)
+		}
+		canonicalBlobRoot = resolvedBlobRoot
+		info, err := os.Stat(canonicalBlobRoot)
+		if err != nil {
+			return nil, fmt.Errorf("stat blob root: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, errors.New("blob root must be a directory")
+		}
 	}
-	return &FileBackend{roots: canonical, decoders: registered}, nil
+	return &FileBackend{roots: canonical, blobRoot: canonicalBlobRoot}, nil
 }
 
 func (b *FileBackend) Call(ctx context.Context, namespace, operation string, arguments map[string]any) (BackendResult, error) {
@@ -88,8 +96,8 @@ func (b *FileBackend) Call(ctx context.Context, namespace, operation string, arg
 		return b.read(path, rootID, relative, arguments)
 	case "hash":
 		return b.hash(ctx, path, rootID, relative, arguments)
-	case "decode":
-		return b.decode(ctx, path, rootID, relative, arguments)
+	case "openBlob":
+		return b.openBlob(ctx, path, rootID, relative)
 	default:
 		return BackendResult{}, fmt.Errorf("unsupported file operation %q", operation)
 	}
@@ -121,7 +129,7 @@ func (b *FileBackend) Estimate(namespace, operation string, arguments map[string
 			return 0, 0, err
 		}
 		return 0, uint64(length), nil
-	case "hash", "decode":
+	case "hash", "openBlob":
 		info, err := os.Stat(path)
 		if err != nil {
 			return 0, 0, err
@@ -130,50 +138,6 @@ func (b *FileBackend) Estimate(namespace, operation string, arguments map[string
 	default:
 		return 0, 0, fmt.Errorf("unsupported file operation %q", operation)
 	}
-}
-
-func (b *FileBackend) decode(ctx context.Context, path, rootID, relative string, arguments map[string]any) (BackendResult, error) {
-	decoderID, ok := arguments["decoder"].(string)
-	if !ok || decoderID == "" {
-		return BackendResult{}, errors.New("decoder must be a non-empty registered decoder ID")
-	}
-	decoder, ok := b.decoders[decoderID]
-	if !ok {
-		return BackendResult{}, fmt.Errorf("decoder %q is not registered", decoderID)
-	}
-	options := map[string]any{}
-	if supplied := arguments["options"]; supplied != nil {
-		var valid bool
-		options, valid = supplied.(map[string]any)
-		if !valid {
-			return BackendResult{}, errors.New("options must be an object")
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return BackendResult{}, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return BackendResult{}, err
-	}
-	value, err := decoder.Decode(ctx, data, options)
-	if err != nil {
-		return BackendResult{}, fmt.Errorf("decoder %q failed: %w", decoderID, err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return BackendResult{}, err
-	}
-	return BackendResult{
-		Value: map[string]any{
-			"path":       map[string]any{"root": rootID, "relative": relative},
-			"decoder":    decoderID,
-			"size":       len(data),
-			"modifiedAt": info.ModTime().UTC().Format("2006-01-02T15:04:05.000000000Z"),
-			"value":      value,
-		},
-		FileBytesRead: uint64(len(data)),
-	}, nil
 }
 
 func (b *FileBackend) resolve(rootID, relative string) (string, error) {
@@ -209,6 +173,72 @@ func (b *FileBackend) resolve(rootID, relative string) (string, error) {
 		return "", errors.New("file operation requires a regular file")
 	}
 	return resolved, nil
+}
+
+func (b *FileBackend) openBlob(ctx context.Context, path, rootID, relative string) (_ BackendResult, resultErr error) {
+	if b.blobRoot == "" {
+		return BackendResult{}, errors.New("job blob root is not configured")
+	}
+	var random [32]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return BackendResult{}, fmt.Errorf("generate blob handle: %w", err)
+	}
+	handle := hex.EncodeToString(random[:])
+	target := filepath.Join(b.blobRoot, handle+".blob")
+	source, err := os.Open(path)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return BackendResult{}, fmt.Errorf("create job blob: %w", err)
+	}
+	defer func() {
+		if closeErr := destination.Close(); resultErr == nil && closeErr != nil {
+			resultErr = closeErr
+		}
+		if resultErr != nil {
+			_ = os.Remove(target)
+		}
+	}()
+	buffer := make([]byte, 64<<10)
+	var total uint64
+	for {
+		if err := ctx.Err(); err != nil {
+			return BackendResult{}, err
+		}
+		count, readErr := source.Read(buffer)
+		if count > 0 {
+			written, writeErr := destination.Write(buffer[:count])
+			total += uint64(written)
+			if writeErr != nil {
+				return BackendResult{}, writeErr
+			}
+			if written != count {
+				return BackendResult{}, io.ErrShortWrite
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return BackendResult{}, readErr
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	return BackendResult{
+		Value: map[string]any{
+			"path":       map[string]any{"root": rootID, "relative": relative},
+			"blob":       map[string]any{"blobHandle": handle},
+			"size":       total,
+			"modifiedAt": info.ModTime().UTC().Format("2006-01-02T15:04:05.000000000Z"),
+		},
+		FileBytesRead: total,
+	}, nil
 }
 
 func (b *FileBackend) stat(path, rootID, relative string) (BackendResult, error) {

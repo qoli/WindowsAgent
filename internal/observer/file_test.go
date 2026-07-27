@@ -4,21 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 )
 
-type fixtureDecoder struct{}
-
-func (fixtureDecoder) Decode(_ context.Context, data []byte, options map[string]any) (any, error) {
-	return map[string]any{
-		"bytes": len(data),
-		"scope": options["scope"],
-	}, nil
-}
-
 func TestFileBackendReadAndRejectEscape(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "save.dat"), []byte("inventory"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "save.dat"), []byte("payload09"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	backend, err := NewFileBackend(map[string]string{"saves": root})
@@ -43,22 +35,18 @@ func TestFileBackendReadAndRejectEscape(t *testing.T) {
 	}
 }
 
-func TestFileBackendDecodeUsesRegisteredDecoder(t *testing.T) {
+func TestFileBackendOpenBlobCopiesAuthorizedFileWithoutReturningBytes(t *testing.T) {
 	root := t.TempDir()
+	blobRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "save.save"), []byte("encoded-save"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	backend, err := NewFileBackendWithDecoders(
-		map[string]string{"saves": root},
-		map[string]FileDecoder{"fixture/inventory": fixtureDecoder{}},
-	)
+	backend, err := NewFileBackendWithBlobRoot(map[string]string{"saves": root}, blobRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := backend.Call(context.Background(), "file", "decode", map[string]any{
-		"path":    map[string]any{"root": "saves", "relative": "save.save"},
-		"decoder": "fixture/inventory",
-		"options": map[string]any{"scope": "inventory"},
+	result, err := backend.Call(context.Background(), "file", "openBlob", map[string]any{
+		"path": map[string]any{"root": "saves", "relative": "save.save"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,9 +54,25 @@ func TestFileBackendDecodeUsesRegisteredDecoder(t *testing.T) {
 	if result.FileBytesRead != uint64(len("encoded-save")) {
 		t.Fatalf("bytes read = %d", result.FileBytesRead)
 	}
+	value := result.Value.(map[string]any)
+	blob := value["blob"].(map[string]any)
+	handle := blob["blobHandle"].(string)
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(handle) {
+		t.Fatalf("handle = %q", handle)
+	}
+	content, err := os.ReadFile(filepath.Join(blobRoot, handle+".blob"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "encoded-save" {
+		t.Fatalf("blob content = %q", content)
+	}
+	if _, exists := value["data"]; exists {
+		t.Fatal("openBlob returned file bytes in the JSON value")
+	}
 }
 
-func TestFileBackendDecodeRejectsUnknownDecoder(t *testing.T) {
+func TestFileBackendOpenBlobRequiresHostConfiguredRoot(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "save.save"), []byte("encoded-save"), 0o600); err != nil {
 		t.Fatal(err)
@@ -77,10 +81,9 @@ func TestFileBackendDecodeRejectsUnknownDecoder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backend.Call(context.Background(), "file", "decode", map[string]any{
-		"path":    map[string]any{"root": "saves", "relative": "save.save"},
-		"decoder": "unregistered/inventory",
+	if _, err := backend.Call(context.Background(), "file", "openBlob", map[string]any{
+		"path": map[string]any{"root": "saves", "relative": "save.save"},
 	}); err == nil {
-		t.Fatal("unknown decoder was accepted")
+		t.Fatal("openBlob succeeded without a host-configured blob root")
 	}
 }

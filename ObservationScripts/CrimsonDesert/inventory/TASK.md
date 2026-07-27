@@ -1,79 +1,58 @@
 # Crimson Desert Inventory Read
 
-## Question
+## Purpose
 
-Return the raw occupied inventory records from the first valid source in this
-strict order:
+Return raw occupied backpack records from the first valid source in this exact
+order:
 
-1. the current live `CrimsonDesert.exe` process;
-2. one explicitly selected `save.save` snapshot.
+1. the explicitly bound current `CrimsonDesert.exe` process;
+2. one user-selected save file.
 
-If both sources fail validation, the job fails.
+This is one finite job. It does not poll, watch files, select the newest save,
+retry invisibly, or substitute a decoder/version/source.
 
 ## Preconditions
 
-- The bound process image SHA-256 is
-  `d55a45f0dda3dc9dc40146d62cd02609941f14c07bc1aa9083d67c0a4807109f`
-  (`1.0.0.2145`).
-- The inventory UI is open.
-- The job input `save` identifies one authorized logical-root-relative file;
-  the script never chooses “latest save”.
-- The registered save decoder identity is
-  `crimson-rs/inventory@bb730180`.
+- The process identity and executable SHA-256 are resolved by the trusted Host.
+- The save root and relative file are explicitly supplied by the user.
+- The package-native artifact is
+  `native/windows-amd64/crimson-rs.inventory.bb730180.dll`.
+- Its manifest alias is `save-decoder` and its SHA-256 is
+  `c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c`.
 
-## Observer Calls
+## Memory attempt
 
-The first attempt performs one bounded module query, one module-range signature
-scan, one RIP-relative resolution, finite pointer/header reads, and one
-strided record read. The record stride is `0xC8`; the raw item ID, quantity,
-and paired ID fields are read at offsets `0x08`, `0x10`, and `0x90`.
+`main.star` validates the reviewed executable hash, locates one manager
+signature, resolves the fixed pointer chain, reads the bounded array header,
+and performs one strided record read. Missing, ambiguous, or invalid
+application data makes the memory source attempt fail.
 
-Only when that attempt returns a typed source failure, the script calls
-`file.decode` once for the selected save. The decoder must verify the save
-container, decrypt, authenticate, decompress, deserialize, and enumerate the
-active character inventory before returning normalized records.
+## Save attempt
 
-It performs no write, hook, debugger attach, thread suspension, injection,
-timer, watch, retry, implicit file selection, OCR, or third-source lookup.
+Only after memory fails, `observer.file.open_blob` copies the explicitly
+selected save into the current job blob and accounts the bytes.
+`native.blob_path` resolves that same-job reference. The trusted Starlark then:
 
-## Output
+1. loads `native.load_library("save-decoder")`;
+2. binds `crimson_save_load_from_file`;
+3. binds `crimson_save_list_inventory_items`;
+4. binds `crimson_save_free`;
+5. declares the eight-`u32` plus two-`u64` 48-byte record;
+6. queries count, reads one fixed record array, filters `inventoryKey = 2`,
+   converts to JSON, and frees the save handle.
 
-The output is one JSON value. `source.kind` states whether the result came from
-`process-memory` or `save-file`; `attempts` makes the fallback visible.
-`recordCount` is the bounded source count. `occupiedCount` counts records whose
-raw primary item ID is nonzero. Each item contains its slot, raw item ID,
-unsigned quantity, and source-supported identity fields. Unsupported
-source-specific fields are explicitly null.
+All Crimson exports, return codes, struct fields, and conversion logic live in
+this Script Package, not WindowsAgent Core.
 
-For a save result, `saveModifiedAt` is the file timestamp and therefore the
-freshness boundary. Save data is not described as current live state. No
-localized name, rarity, description, category, icon, or market value is
-inferred.
+## Failure and output
 
-## Failure
+Application-level failure of both memory and save produces
+`INVENTORY_ALL_SOURCES_FAILED`. Package digest failure, platform mismatch,
+undeclared alias, missing export, forged blob, FFI limit, deadline, protocol,
+or process failure is terminal infrastructure failure and does not activate
+another source or decoder.
 
-Unsupported executable identity, missing or ambiguous signature, unreadable
-pointer-chain step, and invalid memory header are eligible to proceed to the
-save attempt. Save container authentication, decryption, decompression,
-deserialization, or inventory enumeration failure makes that source attempt
-invalid.
-
-Missing save input, path authorization, permission, protocol, deadline,
-step/output limit, and package identity failures are infrastructure or contract
-failures and terminate immediately. When both source attempts fail, the
-terminal code is `INVENTORY_ALL_SOURCES_FAILED` and identifies both source
-error codes.
-
-The live 2026-07-27 verification found the signature but the static pointer
-chain was not readable even with the inventory UI open. That is the concrete
-condition for which the user-authorized save fallback exists.
-
-The fallback is fixture-verified only until the pinned `crimson-rs` decoder is
-packaged and registered in WindowsAgent. An unknown or absent decoder fails;
-the observer never substitutes a different parser.
-
-## Privacy And Retention
-
-Only the schema-accepted raw inventory result and bounded provenance are
-eligible for persistence. Raw process buffers, memory dumps, screenshots, and
-interpreter state are not output and must not be retained by the job.
+The terminal JSON must pass `output.schema.json`. Reports may include source
+kind, attempts, counts, native alias/function accounting, and Observer
+accounting. They must not contain private save paths, save bytes, item details,
+raw memory, or sensitive local diagnostics.

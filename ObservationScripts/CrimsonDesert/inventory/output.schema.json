@@ -8,7 +8,7 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "processImageSha256", "saveModifiedAt", "decoder"],
+      "required": ["kind", "processImageSha256", "saveModifiedAt", "nativeLibrary"],
       "properties": {
         "kind": {"enum": ["process-memory", "save-file"]},
         "processImageSha256": {
@@ -19,7 +19,7 @@
           "type": ["string", "null"],
           "format": "date-time"
         },
-        "decoder": {
+        "nativeLibrary": {
           "type": ["string", "null"]
         }
       }
@@ -81,7 +81,7 @@
             "kind": {"const": "process-memory"},
             "processImageSha256": {"type": "string"},
             "saveModifiedAt": {"type": "null"},
-            "decoder": {"type": "null"}
+            "nativeLibrary": {"type": "null"}
           }
         },
         "attempts": {
@@ -106,7 +106,7 @@
             "kind": {"const": "save-file"},
             "processImageSha256": {"type": "null"},
             "saveModifiedAt": {"type": "string"},
-            "decoder": {"const": "crimson-rs/inventory@bb730180"}
+            "nativeLibrary": {"const": "save-decoder"}
           }
         },
         "attempts": {

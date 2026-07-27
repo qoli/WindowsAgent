@@ -8,13 +8,16 @@
   "outputSchema": "output.schema.json",
   "files": {
     "main.star": {
-      "sha256": "4f23ed4637edb00b905df50817bf04d6d37f53b345fd8dd25eb88a1ba657f70d"
+      "sha256": "b32284d1340d993eef6a4aedaaf27ec87adb4fca999e3e77c6892bffb2af97b0"
     },
     "TASK.md": {
-      "sha256": "c88707f58d4b6f5604180d239e209d335ed94d7c344d31a9c58ab27677012407"
+      "sha256": "b6565f1b24bff474e6dcb0c633c7bfb263ab4e00d743d32cc5ca6863491adaf7"
     },
     "output.schema.json": {
-      "sha256": "8354729e984a9e839cf40ec134ed13648c6684955229b0e7f0a085d6494a782f"
+      "sha256": "2ae96b9c74c5ec9690502dfd1531c879540a18e0958693537c47da5917e03c9e"
+    },
+    "native/windows-amd64/crimson-rs.inventory.bb730180.dll": {
+      "sha256": "c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c"
     }
   },
   "permissions": {
@@ -32,9 +35,18 @@
     },
     "file": {
       "roots": ["crimson-desert-saves"],
-      "operations": ["decode"],
+      "operations": ["openBlob"],
       "maxCalls": 1,
       "maxBytesRead": 67108864
+    }
+  },
+  "nativeLibraries": {
+    "save-decoder": {
+      "platform": "windows-amd64",
+      "artifact": "native/windows-amd64/crimson-rs.inventory.bb730180.dll",
+      "sha256": "c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c",
+      "maxCalls": 4,
+      "maxNativeMemoryBytes": 536870912
     }
   },
   "limits": {

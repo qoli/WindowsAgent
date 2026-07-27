@@ -227,6 +227,66 @@ func (b *broker) Call(_ context.Context, namespace, operation string, arguments 
 	return value, nil
 }
 
+func (b *broker) BlobPath(_ context.Context, reference map[string]any) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.next++
+	id := "blob-path-" + strconv.FormatUint(b.next, 10)
+	params, err := json.Marshal(map[string]any{"jobId": b.jobID, "blob": reference})
+	if err != nil {
+		return "", err
+	}
+	if err := b.conn.Write(observationprotocol.Message{
+		ID: id, Method: "broker/blobPath", Params: params,
+	}); err != nil {
+		return "", err
+	}
+	response, err := b.conn.Read()
+	if err != nil {
+		return "", err
+	}
+	if response.ID != id || response.Method != "" {
+		return "", errors.New("blob path response does not match pending request")
+	}
+	if response.Error != nil {
+		return "", errors.New(response.Error.Message)
+	}
+	var result struct {
+		Path string `json:"path"`
+	}
+	if err := decodeParams(response.Result, &result); err != nil {
+		return "", err
+	}
+	if result.Path == "" || !filepath.IsAbs(result.Path) {
+		return "", errors.New("broker returned an invalid blob path")
+	}
+	return result.Path, nil
+}
+
+func (b *broker) RecordNative(_ context.Context, record scriptrunner.NativeRecord) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.next++
+	id := "native-record-" + strconv.FormatUint(b.next, 10)
+	params, err := json.Marshal(map[string]any{"jobId": b.jobID, "record": record})
+	if err != nil {
+		return err
+	}
+	if err := b.conn.Write(observationprotocol.Message{
+		ID: id, Method: "broker/nativeRecord", Params: params,
+	}); err != nil {
+		return err
+	}
+	response, err := b.conn.Read()
+	if err != nil {
+		return err
+	}
+	if response.ID != id || response.Method != "" || response.Error != nil {
+		return errors.New("native provenance response does not acknowledge pending record")
+	}
+	return nil
+}
+
 func decodeParams(data json.RawMessage, target any) error {
 	if len(data) == 0 {
 		return errors.New("params are required")

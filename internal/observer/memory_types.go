@@ -1,6 +1,8 @@
 package observer
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -57,19 +59,63 @@ func (p bytePattern) matches(data []byte) bool {
 }
 
 func scanPattern(data []byte, pattern bytePattern, maxMatches int) []int {
+	result, _ := scanPatternContext(context.Background(), data, pattern, maxMatches)
+	return result
+}
+
+func scanPatternContext(ctx context.Context, data []byte, pattern bytePattern, maxMatches int) ([]int, error) {
 	if len(pattern.bytes) > len(data) || maxMatches <= 0 {
-		return nil
+		return nil, nil
 	}
 	result := make([]int, 0, maxMatches)
-	for offset := 0; offset <= len(data)-len(pattern.bytes); offset++ {
-		if pattern.matches(data[offset : offset+len(pattern.bytes)]) {
-			result = append(result, offset)
-			if len(result) == maxMatches {
-				break
+	anchorOffset, anchor := pattern.longestKnownRun()
+	if len(anchor) == 0 {
+		for offset := 0; offset <= len(data)-len(pattern.bytes) && len(result) < maxMatches; offset++ {
+			if offset&0xffff == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 			}
+			result = append(result, offset)
 		}
+		return result, nil
 	}
-	return result
+	searchStart := 0
+	for searchStart <= len(data)-len(anchor) && len(result) < maxMatches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		found := bytes.Index(data[searchStart:], anchor)
+		if found < 0 {
+			break
+		}
+		anchorAt := searchStart + found
+		candidate := anchorAt - anchorOffset
+		if candidate >= 0 && candidate+len(pattern.bytes) <= len(data) &&
+			pattern.matches(data[candidate:candidate+len(pattern.bytes)]) {
+			result = append(result, candidate)
+		}
+		searchStart = anchorAt + 1
+	}
+	return result, nil
+}
+
+func (p bytePattern) longestKnownRun() (int, []byte) {
+	bestStart, bestLength := 0, 0
+	for start := 0; start < len(p.known); {
+		for start < len(p.known) && !p.known[start] {
+			start++
+		}
+		end := start
+		for end < len(p.known) && p.known[end] {
+			end++
+		}
+		if end-start > bestLength {
+			bestStart, bestLength = start, end-start
+		}
+		start = end + 1
+	}
+	return bestStart, p.bytes[bestStart : bestStart+bestLength]
 }
 
 func parseAddress(value any, name string) (uint64, error) {

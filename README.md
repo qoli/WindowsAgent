@@ -4,10 +4,12 @@ WindowsAgent is an extensible Go agent for capabilities that must run inside a
 signed-in Windows user's interactive session.
 
 Its first capability is primary-monitor still capture through Windows Graphics
-Capture (WGC). The project is intentionally broader than screenshots: future
-process inspection, memory observation, value scanning, and other
-Cheat Engine-inspired capabilities can be added behind explicit package, API,
-permission, and safety boundaries.
+Capture (WGC). It also includes a finite, read-only observation-job runtime
+that brokers digest-pinned, locally trusted Starlark Script Packages to a
+unified memory/file observer process. Script Packages may carry
+manifest-declared native DLLs and call them through the Script Runner's generic
+Windows amd64 FFI. Every capability remains behind an explicit package, API,
+permission, and integrity boundary.
 
 > [!WARNING]
 > The current HTTP server listens on `0.0.0.0:8787` without authentication,
@@ -32,7 +34,20 @@ The screenshot capability is available today:
 - strict JSON errors with no GDI or hidden capture fallback
 - optional hidden startup through an interactive-user Scheduled Task
 
-General process enumeration and memory capabilities are not implemented yet.
+One observation job is registered and live-verified today:
+
+- `crimson-desert/inventory` performs a finite memory attempt and, only when
+  that attempt cannot produce a valid inventory, decodes one explicitly
+  selected save file
+- the job returns one schema-validated JSON result with per-call provenance
+- the Go host launches only the runner and observer directly under one bounded
+  Windows Job Object; it does not use PowerShell or a polling loop
+- `windows-observer.exe` remains game-neutral and never loads DLLs
+- the save file becomes a job-scoped opaque blob; the Script Runner resolves
+  that blob and loads only the package-declared, digest-verified DLL alias
+
+This is not a general remote memory API. The observation host is a local
+command with one registered capability and no HTTP listener.
 
 ## Build
 
@@ -49,6 +64,19 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -ldflags "-H=windowsgui" \
   -o .build/windows-capture-agent-background.exe \
   ./cmd/windows-capture-agent
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath \
+  -o .build/windows-observer.exe \
+  ./cmd/windows-observer
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath \
+  -o .build/windows-observation-script-runner.exe \
+  ./cmd/windows-observation-script-runner
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath \
+  -o .build/windows-observation-job.exe \
+  ./cmd/windows-observation-job
+cp -R ObservationScripts .build/
 ```
 
 The GUI-subsystem build runs without a console window.
@@ -74,6 +102,30 @@ Available options:
 
 The process must not run as a traditional Session 0 Windows service because WGC
 requires access to the interactive desktop.
+
+Run the registered Crimson Desert inventory job from the signed-in session:
+
+```powershell
+.\.build\windows-observation-job.exe `
+  --capability crimson-desert/inventory `
+  --install-root (Resolve-Path .\.build) `
+  --save-root "$env:LOCALAPPDATA\Pearl Abyss\CD\save\<account-id>" `
+  --save-relative "slot1/save.save"
+```
+
+The selected save path is explicit; the job does not watch a directory or pick
+the newest file. Replace `<account-id>` with the numeric account folder below
+the game's `save` directory. By default the job binds memory access to the
+current foreground `CrimsonDesert.exe`. The `--process-id` and
+`--process-path` flags exist for a trusted local host that already resolved the
+exact process; the observer still revalidates its path, creation time, and
+executable SHA-256.
+
+The package declares native-library alias `save-decoder`, its
+`windows-amd64` artifact, SHA-256, call limit, and native-memory limit. Starlark
+loads only that alias through `native.load_library("save-decoder")`; it owns the
+crimson-rs export signatures, record layout, return codes, and JSON conversion.
+`load_library` is used because `load` is a reserved Starlark keyword.
 
 ## Optional persistent startup
 
@@ -172,7 +224,14 @@ this build with a new, empty data directory; there is no automatic migration.
 
 ```text
 cmd/windows-capture-agent/       screenshot capability executable
+cmd/windows-observation-job/     registered local observation job host
+cmd/windows-observation-script-runner/ isolated Starlark runner
+cmd/windows-observer/            unified read-only memory/file observer
 docs/design/                     maintained design registry
+internal/observationjob/         finite broker and Windows Job Object limits
+internal/observationlauncher/    native child-process isolation
+internal/observer/               permission-bounded memory/file backends
+internal/scriptrunner/           Starlark runtime and generic Windows native FFI
 internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
@@ -182,6 +241,7 @@ internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  executable rule registry and navigation
 internal/wgc/                    WGC and Direct3D 11 implementation
 Rules/                           trusted per-process Codex guidance
+ObservationScripts/              digest-pinned tasks, schemas, and native artifacts
 scripts/                         Windows installation helpers
 ```
 

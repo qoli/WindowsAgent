@@ -1,7 +1,24 @@
 SUPPORTED_IMAGE_SHA256 = "d55a45f0dda3dc9dc40146d62cd02609941f14c07bc1aa9083d67c0a4807109f"
 INVENTORY_MANAGER_PATTERN = "?? 89 ?? ?? ?? ?? ?? ?? 8D ?? 30 01 00 00 ?? 89 ?? ?? ?? ?? ?? ?? 8D ?? B0 01 00 00 ?? 89 ?? ?? ?? ?? ?? ?? 88"
-SAVE_DECODER = "crimson-rs/inventory@bb730180"
+SAVE_LIBRARY = "save-decoder"
 ITEM_STRIDE = 0xC8
+CRIMSON_OK = 0
+CRIMSON_BUFFER_TOO_SMALL = -11
+MAX_SAVE_RECORDS = 100000
+BACKPACK_INVENTORY_KEY = 2
+
+CRIMSON_RECORD = native.struct(fields = [
+    {"name": "blockIndex", "type": native.u32()},
+    {"name": "inventoryElementIndex", "type": native.u32()},
+    {"name": "itemElementIndex", "type": native.u32()},
+    {"name": "inventoryKey", "type": native.u32()},
+    {"name": "itemKey", "type": native.u32()},
+    {"name": "transferredItemKey", "type": native.u32()},
+    {"name": "slotNumber", "type": native.u32()},
+    {"name": "flags", "type": native.u32()},
+    {"name": "itemNumber", "type": native.u64()},
+    {"name": "stackCount", "type": native.u64()},
+])
 
 def hex_address(value):
     return "0x%x" % value
@@ -102,7 +119,7 @@ def read_from_memory():
             "kind": "process-memory",
             "processImageSha256": process["imageSha256"],
             "saveModifiedAt": None,
-            "decoder": None,
+            "nativeLibrary": None,
         },
         "inventory": {
             "recordCount": count,
@@ -112,33 +129,101 @@ def read_from_memory():
     }
 
 def read_from_save():
-    decoded = observer.file.decode(
+    blob = observer.file.open_blob(
         path = job.input(name = "save"),
-        decoder = SAVE_DECODER,
-        options = {"scope": "active-character-inventory"},
     )
-    payload = decoded["value"]
+    blob_path = native.blob_path(blob = blob["blob"])
+    decoder = native.load_library(SAVE_LIBRARY)
+    load_file = decoder.bind(
+        name = "crimson_save_load_from_file",
+        parameters = [native.c_string(), native.out(native.handle())],
+        result = native.i32(),
+    )
+    list_count = decoder.bind(
+        name = "crimson_save_list_inventory_items",
+        parameters = [
+            native.handle(),
+            native.pointer(),
+            native.usize(),
+            native.out(native.usize()),
+            native.out(native.u64()),
+        ],
+        result = native.i32(),
+    )
+    free_save = decoder.bind(
+        name = "crimson_save_free",
+        parameters = [native.handle()],
+        result = native.void(),
+    )
+
+    loaded = load_file.call(blob_path)
+    if loaded["result"] != CRIMSON_OK or loaded["out"][0] == 0:
+        return job.fail(
+            code = "SAVE_LOAD_FAILED",
+            message = "crimson-rs could not load the authorized save blob",
+        )
+    save_handle = loaded["out"][0]
+    query = list_count.call(save_handle, native.null(), 0)
+    count = query["out"][0]
+    if query["result"] != CRIMSON_OK and query["result"] != CRIMSON_BUFFER_TOO_SMALL:
+        free_save.call(save_handle)
+        return job.fail(
+            code = "SAVE_INVENTORY_QUERY_FAILED",
+            message = "crimson-rs could not query inventory record count",
+        )
+    if count > MAX_SAVE_RECORDS:
+        free_save.call(save_handle)
+        return job.fail(
+            code = "SAVE_INVENTORY_COUNT_INVALID",
+            message = "save inventory record count exceeds the reviewed bound",
+        )
+
+    list_records = decoder.bind(
+        name = "crimson_save_list_inventory_items",
+        parameters = [
+            native.handle(),
+            native.out(native.array(CRIMSON_RECORD, count)),
+            native.usize(),
+            native.out(native.usize()),
+            native.out(native.u64()),
+        ],
+        result = native.i32(),
+    )
+    listed = list_records.call(save_handle, count)
+    free_save.call(save_handle)
+    if listed["result"] != CRIMSON_OK:
+        return job.fail(
+            code = "SAVE_INVENTORY_READ_FAILED",
+            message = "crimson-rs could not read inventory records",
+        )
+    if listed["out"][1] > count:
+        return job.fail(
+            code = "SAVE_INVENTORY_CHANGED",
+            message = "save inventory record count grew during the fixed read",
+        )
+
+    records = listed["out"][0]
     items = []
-    for record in payload["items"]:
-        if record["itemId"] == 0:
+    for record in records:
+        if record["inventoryKey"] != BACKPACK_INVENTORY_KEY or record["itemKey"] == 0:
             continue
         items.append({
-            "slot": record["slot"],
-            "itemId": record["itemId"],
-            "quantity": record["quantity"],
+            "slot": record["slotNumber"],
+            "itemId": record["itemKey"],
+            "quantity": record["stackCount"],
             "pairedItemId": None,
             "inventoryKey": record["inventoryKey"],
-            "instanceId": record["instanceId"],
+            "instanceId": record["itemNumber"],
         })
     return {
         "source": {
             "kind": "save-file",
             "processImageSha256": None,
-            "saveModifiedAt": decoded["modifiedAt"],
-            "decoder": decoded["decoder"],
+            "saveModifiedAt": blob["modifiedAt"],
+            "nativeLibrary": SAVE_LIBRARY,
         },
         "inventory": {
-            "recordCount": payload["recordCount"],
+            "recordCount": listed["out"][1],
             "occupiedCount": len(items),
             "items": items,
         },

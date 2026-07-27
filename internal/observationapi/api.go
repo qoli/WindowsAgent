@@ -5,10 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
+
+func ValidateBlobHandle(value string) error {
+	if len(value) != 64 || strings.ToLower(value) != value {
+		return errors.New("blob handle must be 64 lowercase hexadecimal characters")
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return errors.New("blob handle must be hexadecimal")
+		}
+	}
+	return nil
+}
 
 const ProtocolVersion = "2026-07-27"
 
@@ -19,7 +32,7 @@ const (
 
 var operations = map[string][]string{
 	NamespaceMemory: {"modules", "regions", "scan", "resolveRip", "readBatch", "readStrided"},
-	NamespaceFile:   {"stat", "read", "hash", "decode"},
+	NamespaceFile:   {"stat", "read", "hash", "openBlob"},
 }
 
 func OperationAllowed(namespace, operation string) bool {
