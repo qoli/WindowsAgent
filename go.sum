@@ -1,0 +1,10 @@
+github.com/lxn/win v0.0.0-20210218163916-a377121e959e h1:H+t6A/QJMbhCSEH5rAuRxh+CtW96g0Or0Fxa9IKr4uc=
+github.com/lxn/win v0.0.0-20210218163916-a377121e959e/go.mod h1:KxxjdtRkfNoYDCUP5ryK7XJJNTnpC8atvtmTheChOtk=
+github.com/whiteboxsolutions/go-ole v1.0.7 h1:DZ59kOllQCeXz6PFNcCWMMmUEBO6nAqye/ZfWAcYLTA=
+github.com/whiteboxsolutions/go-ole v1.0.7/go.mod h1:xsWH4kRDWcVcbhfPKcXFt/62F3W3cVcnC9QA9W3vMig=
+github.com/whiteboxsolutions/winapi v1.0.24 h1:tOhHTU8oYiLtL/eli4+/uSQrV7eR+aZI5hFwYep32mM=
+github.com/whiteboxsolutions/winapi v1.0.24/go.mod h1:RPftuquwsi1zt4slrxgj8CqbzTLGmuYQvBESS1ezBqQ=
+golang.org/x/sys v0.0.0-20201018230417-eeed37f84f13/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.22.0 h1:RI27ohtqKCnwULzJLqkv897zojh5/DwS/ENaMzUOaWI=
+golang.org/x/sys v0.22.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=
