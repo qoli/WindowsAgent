@@ -9,4 +9,7 @@ func TestFileDecodeIsNotAnObserverOperation(t *testing.T) {
 	if !OperationAllowed(NamespaceFile, "openBlob") {
 		t.Fatal("generic file.openBlob is unavailable")
 	}
+	if !OperationAllowed(NamespaceFile, "list") {
+		t.Fatal("generic bounded file.list is unavailable")
+	}
 }

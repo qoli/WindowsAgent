@@ -15,34 +15,30 @@ package's `input.schema.json`.
 ## Finite source order
 
 1. Read the reviewed process-memory chain once.
-2. If that source cannot produce a valid result, open the one save path
-   explicitly supplied by the user.
-3. Resolve the resulting same-job blob.
-4. Load manifest alias `save-decoder` in the Script Runner.
-5. Bind and call the three pinned crimson-rs exports from Starlark.
-6. If both application sources fail, return
+2. If that source cannot produce a valid result, list the package-declared
+   Crimson Desert LocalAppData root once.
+3. Require one account directory and select the uniquely newest regular
+   `<slot>/save.save`.
+4. Resolve the resulting same-job blob.
+5. Load manifest alias `save-decoder` in the Script Runner.
+6. Bind and call the three pinned crimson-rs exports from Starlark.
+7. If both application sources fail, return
    `INVENTORY_ALL_SOURCES_FAILED`.
 
-There is no polling, file watch, newest-save selection, DLL/version fallback,
+There is no caller-supplied path, polling, file watch, DLL/version fallback,
 decoder fallback, hidden retry, or alternate source.
 
 ## Launcher request
 
 ```json
 {
-  "inputs": {
-    "save": {
-      "root": "crimson-desert-saves",
-      "relative": "slot1/save.save"
-    }
-  },
-  "fileRoots": {
-    "crimson-desert-saves": "C:\\absolute\\authorized\\account-root"
-  }
+  "inputs": {}
 }
 ```
 
-The absolute root is Host state and is not distributed in the plugin.
+The package declares its logical root through the portable LocalAppData
+resolver. The Host resolves it locally; the caller never supplies or sees an
+absolute root.
 
 ## Native declaration
 
@@ -84,8 +80,8 @@ limits stay below the 1 MiB framed-protocol boundary.
 
 ## Verification boundary
 
-Tests prove memory-first behavior, explicit save fallback, two-stage record
-query, 48-byte/8-byte-aligned layout, generic FFI scalar/out handling,
+Tests prove memory-first behavior, package-owned save discovery and selection,
+two-stage record query, 48-byte/8-byte-aligned layout, generic FFI scalar/out handling,
 declared-artifact loading, alias-only load, missing export failure, native
 limits, forged blob rejection, and schema-valid output.
 

@@ -54,9 +54,16 @@ plugin content is authoritative; no member digest is required.
       "maxBytesRead": 536870912
     },
     "file": {
-      "roots": ["explicit-root"],
-      "operations": ["openBlob"],
-      "maxCalls": 1,
+      "roots": [{
+        "id": "declared-root",
+        "resolver": {
+          "kind": "windows-known-folder",
+          "knownFolder": "LocalAppData",
+          "relative": "Publisher/Game/save"
+        }
+      }],
+      "operations": ["list", "openBlob"],
+      "maxCalls": 2,
       "maxBytesRead": 67108864
     }
   },
@@ -82,9 +89,9 @@ launcher validates it before creating child processes, and the Script Runner
 validates it again before Starlark execution. `rule/current-process` binds
 memory access to the executable named by the owning
 `Rules/<Executable.exe>/` folder; a package cannot name another executable.
-Manifest file-root entries are aliases. The launcher request must bind every
-declared alias to one absolute authorized Host path and must not add undeclared
-aliases.
+Manifest file-root entries combine a logical alias with a supported portable
+resolver. The Host resolves them locally; launcher callers cannot bind or
+override an absolute path.
 
 `nativeLibraries` is an executable boundary declaration, not a provider
 registry. It contains no provider, version, operation, export, or ABI
@@ -114,16 +121,17 @@ path, and runtime:
 - `job.input`, `job.attempt`, and `job.fail` own finite task flow.
 
 The runtime provides no network API, process launcher, environment access,
-filesystem enumeration, polling, watch, timer, sleep, or hidden source
-selection. A package may describe an explicitly required source order, such as
-memory followed by one user-selected save file.
+unbounded filesystem enumeration, polling, watch, timer, sleep, or hidden
+source selection. A package may request bounded `file.list` and describe an
+explicit source and file-selection policy, such as memory followed by the
+newest unambiguous save under one declared root.
 
 ## Output and failure
 
 `main(ctx)` receives only input accepted by the loaded input schema and must
 return one JSON-compatible value accepted by the loaded output schema and
-`maxResultBytes`. Package-load failures, input failures, missing or extra Host
-bindings, native artifact failures,
+`maxResultBytes`. Package-load failures, input failures, invalid or
+unresolvable known-folder declarations, native artifact failures,
 platform mismatch, missing exports, invalid signatures, native limits,
 deadline expiry, and schema failures are explicit. No missing artifact,
 version, export, or source is substituted.

@@ -6,7 +6,65 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 )
+
+func TestResolveFileRootsUsesPackageKnownFolderDeclaration(t *testing.T) {
+	localAppData := t.TempDir()
+	roots, err := ResolveFileRoots(&scriptpackage.FilePermissions{
+		Roots: []scriptpackage.FileRoot{{
+			ID: "game-saves",
+			Resolver: scriptpackage.FileRootResolver{
+				Kind:        "windows-known-folder",
+				KnownFolder: "LocalAppData",
+				Relative:    "Publisher/Game/save",
+			},
+		}},
+	}, localAppData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roots["game-saves"] != filepath.Join(localAppData, "Publisher", "Game", "save") {
+		t.Fatalf("roots = %#v", roots)
+	}
+}
+
+func TestFileBackendListReturnsBoundedMetadataWithoutFollowingSymlinks(t *testing.T) {
+	root := t.TempDir()
+	slot := filepath.Join(root, "account", "slot")
+	if err := os.MkdirAll(slot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slot, "save.save"), []byte("save"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(slot, filepath.Join(root, "linked-slot")); err != nil {
+		t.Fatal(err)
+	}
+	backend, err := NewFileBackend(map[string]string{"saves": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := backend.Call(context.Background(), "file", "list", map[string]any{
+		"path":       map[string]any{"root": "saves", "relative": "."},
+		"maxDepth":   int64(3),
+		"maxEntries": int64(16),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := result.Value.(map[string]any)["entries"].([]map[string]any)
+	kinds := map[string]string{}
+	for _, entry := range entries {
+		kinds[entry["relative"].(string)] = entry["kind"].(string)
+	}
+	if kinds["account"] != "directory" ||
+		kinds["account/slot/save.save"] != "file" ||
+		kinds["linked-slot"] != "reparse-point" {
+		t.Fatalf("listed kinds = %#v", kinds)
+	}
+}
 
 func TestFileBackendReadAndRejectEscape(t *testing.T) {
 	root := t.TempDir()

@@ -56,7 +56,8 @@ declarations, schema validation, and signed-in Windows evidence.
   return codes, and conversion logic belong in the owning `main.star`, never
   in the Observer, Job Host, or generic Go FFI.
 - Preserve stable JSON error codes.
-- Do not weaken the documented bearer-token boundary, add privilege
-  escalation, process-memory writes, or broaden remote-control behavior
-  without a documented threat model and review.
+- Do not weaken manifest permission, schema, process-identity, path, resource,
+  or single-job boundaries; add privilege escalation, process-memory writes,
+  or broaden remote-control behavior without a documented threat model and
+  review.
 - Never run WGC capture as a traditional Session 0 service.

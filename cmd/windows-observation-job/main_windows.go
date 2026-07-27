@@ -122,7 +122,7 @@ func run() error {
 		ScriptRunnerExecutable: filepath.Join(installRoot, "windows-observation-script-runner.exe"),
 		ObserverExecutable:     filepath.Join(installRoot, "windows-observer.exe"),
 		Process:                &process,
-		FileRoots:              request.FileRoots,
+		LocalAppData:           os.Getenv("LOCALAPPDATA"),
 		Inputs:                 request.Inputs,
 	})
 	if err != nil {

@@ -134,22 +134,22 @@ The current allowed permission operations are:
 
 ```text
 memory: modules, regions, scan, resolveRip, readBatch, readStrided
-file:   stat, read, hash, openBlob
+file:   list, stat, read, hash, openBlob
 ```
 
 Manifest operations use the camel-case names above. Starlark receives only
 declared operations, exposed in snake case, for example `resolveRip` becomes
 `observer.memory.resolve_rip`.
 
-Permission targets and file-root names are logical bindings. They must describe
-what the trusted Host is expected to bind; they are not executable paths and
-must not encode a private machine identity.
+Permission targets and file-root names are logical bindings. File-root
+declarations use a supported portable resolver such as
+`windows-known-folder/LocalAppData` plus a canonical relative path. They must
+not encode a private machine identity or absolute path.
 
 The implemented memory target is exactly `rule/current-process`. The launcher
 derives its executable from the owning `Rules/<Executable.exe>/` folder.
-File-root aliases must be canonical and unique. A launch request must bind
-every declared alias to one absolute Host path and cannot add undeclared
-aliases.
+File-root aliases must be canonical and unique. The Host resolves every
+declaration locally. Launch requests cannot bind, override, or add roots.
 
 Set limits from reviewed worst-case behavior, not from the largest convenient
 number:
@@ -181,9 +181,11 @@ def main(ctx):
 
 Its returned value must contain only JSON-compatible Starlark values. Starlark
 `load` statements are forbidden. The runtime does not provide network access,
-process launch, environment access, directory enumeration, timers, sleep,
-polling, or file watching. `print` output is discarded so stdout remains a
-framed protocol channel.
+process launch, environment access, unbounded directory enumeration, timers,
+sleep, polling, or file watching. A package receives `observer.file.list` only
+when explicitly declared, and every call must include bounded depth and entry
+limits. `print` output is discarded so stdout remains a framed protocol
+channel.
 
 Package code must:
 
@@ -218,7 +220,7 @@ if primary["ok"]:
 
 secondary = job.attempt(
     source = "save-file",
-    function = read_from_explicit_save,
+    function = discover_and_read_save,
 )
 ```
 
@@ -235,7 +237,8 @@ They must not activate another source.
 
 Forbidden hidden fallback includes:
 
-- choosing the newest, largest, or first discovered file;
+- choosing a file without an explicit, deterministic package-owned selection
+  contract;
 - selecting another process, module, save slot, artifact, DLL version, export,
   decoder, signature, offset set, or algorithm;
 - substituting cached, placeholder, guessed, or partial data;
@@ -257,13 +260,20 @@ Build-specific reads must first validate the executable identity expected by
 the package. Prefer bounded batch or strided reads over repeated scalar calls,
 while preserving readable invariants and correct byte accounting.
 
-File access must use a user- or Host-selected relative file below a declared
-logical root. A package must not enumerate a directory or select a file by
-timestamp. Use `observer.file.open_blob` when a native DLL needs file content:
+File access must remain below a package-declared logical root. Bounded
+`observer.file.list` may provide metadata for a deterministic package-owned
+selection policy; it never follows reparse points or returns file content.
+Use `observer.file.open_blob` when a native DLL needs selected file content:
 
 ```python
+listing = observer.file.list(
+    path = {"root": "declared-root", "relative": "."},
+    maxDepth = 3,
+    maxEntries = 4096,
+)
+selected = select_one_file(listing)
 blob = observer.file.open_blob(
-    path = job.input(name = "save"),
+    path = selected,
 )
 blob_path = native.blob_path(blob = blob["blob"])
 ```

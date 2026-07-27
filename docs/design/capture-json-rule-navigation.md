@@ -18,7 +18,6 @@ Implemented:
 
 Explicitly out of scope:
 
-- unauthenticated Script execution;
 - guide-source registries and lookup APIs;
 - input control.
 
@@ -125,11 +124,12 @@ GET /v1/rules/{canonical-rule-id}/scripts
 Both endpoints return current external content with `Cache-Control: no-store`.
 The Script catalog loads and validates the packages registered by the current
 `rule.json`, then exposes capability ID, runtime, title, version, input schema,
-output schema, and the authenticated launcher contract. Unknown IDs and
+output schema, and the launcher contract. Unknown IDs and
 non-canonical casing return `404 rule_not_found`. Neither endpoint accepts
-arbitrary file paths or launches a Script. The separate bearer-protected
+arbitrary file paths or launches a Script. The separate unauthenticated
 `POST /v1/scripts/run` endpoint consumes the catalog contract and launches the
-generic local runtime from the signed-in agent session.
+generic local runtime from the signed-in agent session. Network reachability
+is the deployment trust boundary.
 
 ### Invariants
 
@@ -157,5 +157,6 @@ generic local runtime from the signed-in agent session.
 ## Codex execution
 
 Codex may call `POST /v1/scripts/run` after the user authorizes the named
-capability. The bearer token is operator configuration, never plugin content.
-Unauthenticated remote execution is not part of this design.
+capability. The endpoint requires no bearer token or other HTTP credential;
+the capability registry, owning Rule process, manifest permissions, schemas,
+Host bindings, resource limits, and single-job gate remain mandatory.

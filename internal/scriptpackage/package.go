@@ -50,10 +50,21 @@ type MemoryPermissions struct {
 }
 
 type FilePermissions struct {
-	Roots        []string `json:"roots"`
-	Operations   []string `json:"operations"`
-	MaxCalls     uint32   `json:"maxCalls"`
-	MaxBytesRead uint64   `json:"maxBytesRead"`
+	Roots        []FileRoot `json:"roots"`
+	Operations   []string   `json:"operations"`
+	MaxCalls     uint32     `json:"maxCalls"`
+	MaxBytesRead uint64     `json:"maxBytesRead"`
+}
+
+type FileRoot struct {
+	ID       string           `json:"id"`
+	Resolver FileRootResolver `json:"resolver"`
+}
+
+type FileRootResolver struct {
+	Kind        string `json:"kind"`
+	KnownFolder string `json:"knownFolder"`
+	Relative    string `json:"relative"`
 }
 
 type NativeLibrary struct {
@@ -264,15 +275,24 @@ func validateManifest(manifest Manifest) error {
 		}
 		seenRoots := make(map[string]struct{}, len(file.Roots))
 		for _, root := range file.Roots {
-			if !resourceAliasPattern.MatchString(root) {
-				return fmt.Errorf("file root alias %q is not canonical", root)
+			if !resourceAliasPattern.MatchString(root.ID) {
+				return fmt.Errorf("file root alias %q is not canonical", root.ID)
 			}
-			if _, duplicate := seenRoots[root]; duplicate {
-				return fmt.Errorf("duplicate file root alias %q", root)
+			if _, duplicate := seenRoots[root.ID]; duplicate {
+				return fmt.Errorf("duplicate file root alias %q", root.ID)
 			}
-			seenRoots[root] = struct{}{}
+			seenRoots[root.ID] = struct{}{}
+			if root.Resolver.Kind != "windows-known-folder" {
+				return fmt.Errorf("unsupported file root resolver %q", root.Resolver.Kind)
+			}
+			if root.Resolver.KnownFolder != "LocalAppData" {
+				return fmt.Errorf("unsupported Windows known folder %q", root.Resolver.KnownFolder)
+			}
+			if err := validateRelativeName(root.Resolver.Relative); err != nil {
+				return fmt.Errorf("file root %q resolver path: %w", root.ID, err)
+			}
 		}
-		if err := validateOperations("file", file.Operations, []string{"stat", "read", "hash", "openBlob"}); err != nil {
+		if err := validateOperations("file", file.Operations, []string{"list", "stat", "read", "hash", "openBlob"}); err != nil {
 			return err
 		}
 	}

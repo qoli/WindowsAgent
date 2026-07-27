@@ -16,14 +16,12 @@ import (
 const MaxRequestBytes = 64 << 10
 
 type Request struct {
-	Inputs    map[string]any    `json:"inputs"`
-	FileRoots map[string]string `json:"fileRoots"`
+	Inputs map[string]any `json:"inputs"`
 }
 
 type Invocation struct {
-	Capability string            `json:"capability"`
-	Inputs     map[string]any    `json:"inputs"`
-	FileRoots  map[string]string `json:"fileRoots"`
+	Capability string         `json:"capability"`
+	Inputs     map[string]any `json:"inputs"`
 }
 
 type Executor interface {
@@ -54,9 +52,6 @@ func ReadRequest(name string) (Request, error) {
 	}
 	if request.Inputs == nil {
 		return Request{}, errors.New("request inputs object is required")
-	}
-	if request.FileRoots == nil {
-		return Request{}, errors.New("request fileRoots object is required")
 	}
 	return request, nil
 }

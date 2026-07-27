@@ -11,12 +11,45 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 )
 
 type FileBackend struct {
 	roots    map[string]string
 	blobRoot string
+}
+
+func ResolveFileRoots(permission *scriptpackage.FilePermissions, localAppData string) (map[string]string, error) {
+	if permission == nil {
+		return nil, nil
+	}
+	if localAppData == "" || !filepath.IsAbs(localAppData) {
+		return nil, errors.New("LOCALAPPDATA must be an absolute path for declared file roots")
+	}
+	roots := make(map[string]string, len(permission.Roots))
+	for _, declaration := range permission.Roots {
+		if declaration.Resolver.Kind != "windows-known-folder" ||
+			declaration.Resolver.KnownFolder != "LocalAppData" {
+			return nil, fmt.Errorf(
+				"unsupported resolver for file root %q",
+				declaration.ID,
+			)
+		}
+		root := filepath.Join(
+			localAppData,
+			filepath.FromSlash(declaration.Resolver.Relative),
+		)
+		within, err := filepath.Rel(localAppData, root)
+		if err != nil || within == ".." ||
+			strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("file root %q escapes LocalAppData", declaration.ID)
+		}
+		roots[declaration.ID] = root
+	}
+	return roots, nil
 }
 
 func NewFileBackend(roots map[string]string) (*FileBackend, error) {
@@ -27,23 +60,12 @@ func NewFileBackendWithBlobRoot(roots map[string]string, blobRoot string) (*File
 	if len(roots) == 0 {
 		return nil, errors.New("at least one logical file root is required")
 	}
-	canonical := make(map[string]string, len(roots))
+	configured := make(map[string]string, len(roots))
 	for id, root := range roots {
 		if id == "" || root == "" || !filepath.IsAbs(root) {
 			return nil, fmt.Errorf("root %q must have a non-empty ID and absolute path", id)
 		}
-		resolved, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			return nil, fmt.Errorf("resolve root %q: %w", id, err)
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return nil, fmt.Errorf("stat root %q: %w", id, err)
-		}
-		if !info.IsDir() {
-			return nil, fmt.Errorf("root %q is not a directory", id)
-		}
-		canonical[id] = resolved
+		configured[id] = filepath.Clean(root)
 	}
 	canonicalBlobRoot := ""
 	if blobRoot != "" {
@@ -63,7 +85,7 @@ func NewFileBackendWithBlobRoot(roots map[string]string, blobRoot string) (*File
 			return nil, errors.New("blob root must be a directory")
 		}
 	}
-	return &FileBackend{roots: canonical, blobRoot: canonicalBlobRoot}, nil
+	return &FileBackend{roots: configured, blobRoot: canonicalBlobRoot}, nil
 }
 
 func (b *FileBackend) Call(ctx context.Context, namespace, operation string, arguments map[string]any) (BackendResult, error) {
@@ -85,18 +107,32 @@ func (b *FileBackend) Call(ctx context.Context, namespace, operation string, arg
 	if !ok {
 		return BackendResult{}, errors.New("path.relative must be a string")
 	}
-	path, err := b.resolve(rootID, relative)
-	if err != nil {
-		return BackendResult{}, err
-	}
 	switch operation {
+	case "list":
+		return b.list(ctx, rootID, relative, arguments)
 	case "stat":
+		path, err := b.resolveFile(rootID, relative)
+		if err != nil {
+			return BackendResult{}, err
+		}
 		return b.stat(path, rootID, relative)
 	case "read":
+		path, err := b.resolveFile(rootID, relative)
+		if err != nil {
+			return BackendResult{}, err
+		}
 		return b.read(path, rootID, relative, arguments)
 	case "hash":
+		path, err := b.resolveFile(rootID, relative)
+		if err != nil {
+			return BackendResult{}, err
+		}
 		return b.hash(ctx, path, rootID, relative, arguments)
 	case "openBlob":
+		path, err := b.resolveFile(rootID, relative)
+		if err != nil {
+			return BackendResult{}, err
+		}
 		return b.openBlob(ctx, path, rootID, relative)
 	default:
 		return BackendResult{}, fmt.Errorf("unsupported file operation %q", operation)
@@ -116,20 +152,31 @@ func (b *FileBackend) Estimate(namespace, operation string, arguments map[string
 	if !rootOK || !relativeOK {
 		return 0, 0, errors.New("path.root and path.relative must be strings")
 	}
-	path, err := b.resolve(rootID, relative)
-	if err != nil {
-		return 0, 0, err
-	}
 	switch operation {
+	case "list":
+		if _, _, err := listBounds(arguments); err != nil {
+			return 0, 0, err
+		}
+		return 0, 0, nil
 	case "stat":
+		if _, err := b.resolveFile(rootID, relative); err != nil {
+			return 0, 0, err
+		}
 		return 0, 0, nil
 	case "read":
+		if _, err := b.resolveFile(rootID, relative); err != nil {
+			return 0, 0, err
+		}
 		length, err := positiveInt64(arguments["length"], "length")
 		if err != nil {
 			return 0, 0, err
 		}
 		return 0, uint64(length), nil
 	case "hash", "openBlob":
+		path, err := b.resolveFile(rootID, relative)
+		if err != nil {
+			return 0, 0, err
+		}
 		info, err := os.Stat(path)
 		if err != nil {
 			return 0, 0, err
@@ -140,10 +187,40 @@ func (b *FileBackend) Estimate(namespace, operation string, arguments map[string
 	}
 }
 
-func (b *FileBackend) resolve(rootID, relative string) (string, error) {
+func (b *FileBackend) canonicalRoot(rootID string) (string, error) {
 	root, ok := b.roots[rootID]
 	if !ok {
 		return "", fmt.Errorf("unknown logical root %q", rootID)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("logical file root must not be a reparse point")
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" &&
+		!strings.EqualFold(filepath.Clean(root), filepath.Clean(resolved)) {
+		return "", errors.New("logical file root path contains a reparse point")
+	}
+	info, err = os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", errors.New("logical file root must be a directory")
+	}
+	return resolved, nil
+}
+
+func (b *FileBackend) resolveFile(rootID, relative string) (string, error) {
+	root, err := b.canonicalRoot(rootID)
+	if err != nil {
+		return "", err
 	}
 	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, `\`) ||
 		strings.Contains(relative, ":") || filepath.Clean(relative) != filepath.FromSlash(relative) {
@@ -157,6 +234,9 @@ func (b *FileBackend) resolve(rootID, relative string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
 		return "", err
+	}
+	if !strings.EqualFold(filepath.Clean(candidate), filepath.Clean(resolved)) {
+		return "", errors.New("file path contains a reparse point")
 	}
 	within, err := filepath.Rel(root, resolved)
 	if err != nil {
@@ -173,6 +253,120 @@ func (b *FileBackend) resolve(rootID, relative string) (string, error) {
 		return "", errors.New("file operation requires a regular file")
 	}
 	return resolved, nil
+}
+
+func (b *FileBackend) list(
+	ctx context.Context,
+	rootID, relative string,
+	arguments map[string]any,
+) (BackendResult, error) {
+	maxDepth, maxEntries, err := listBounds(arguments)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	root, err := b.canonicalRoot(rootID)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, `\`) ||
+		strings.Contains(relative, ":") || filepath.Clean(relative) != filepath.FromSlash(relative) ||
+		relative == ".." || strings.HasPrefix(relative, "../") ||
+		strings.Contains(relative, "/../") {
+		return BackendResult{}, errors.New("path.relative must be a canonical slash-separated relative directory path")
+	}
+	start := root
+	if relative != "." {
+		start = filepath.Join(root, filepath.FromSlash(relative))
+	}
+	startInfo, err := os.Lstat(start)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if startInfo.Mode()&os.ModeSymlink != 0 || !startInfo.IsDir() {
+		return BackendResult{}, errors.New("list path must be a regular directory, not a reparse point")
+	}
+	entries := make([]map[string]any, 0)
+	err = filepath.WalkDir(start, func(name string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if name == start {
+			return nil
+		}
+		fromStart, err := filepath.Rel(start, name)
+		if err != nil {
+			return err
+		}
+		depth := int64(strings.Count(fromStart, string(filepath.Separator)) + 1)
+		if depth > maxDepth {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if int64(len(entries)) >= maxEntries {
+			return fmt.Errorf("directory listing exceeds maxEntries %d", maxEntries)
+		}
+		fromRoot, err := filepath.Rel(root, name)
+		if err != nil {
+			return err
+		}
+		kind := "file"
+		if entry.Type()&os.ModeSymlink != 0 {
+			kind = "reparse-point"
+		} else if entry.IsDir() {
+			kind = "directory"
+		} else if !entry.Type().IsRegular() {
+			kind = "other"
+		}
+		value := map[string]any{
+			"relative": filepath.ToSlash(fromRoot),
+			"kind":     kind,
+		}
+		if kind == "file" || kind == "directory" {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			value["modifiedAt"] = info.ModTime().UTC().Format("2006-01-02T15:04:05.000000000Z")
+			if kind == "file" {
+				value["size"] = info.Size()
+			}
+		}
+		entries = append(entries, value)
+		if kind == "reparse-point" && entry.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return BackendResult{}, err
+	}
+	return BackendResult{Value: map[string]any{
+		"path":    map[string]any{"root": rootID, "relative": relative},
+		"entries": entries,
+	}}, nil
+}
+
+func listBounds(arguments map[string]any) (int64, int64, error) {
+	maxDepth, err := positiveInt64(arguments["maxDepth"], "maxDepth")
+	if err != nil {
+		return 0, 0, err
+	}
+	maxEntries, err := positiveInt64(arguments["maxEntries"], "maxEntries")
+	if err != nil {
+		return 0, 0, err
+	}
+	if maxDepth > 8 {
+		return 0, 0, errors.New("maxDepth must not exceed 8")
+	}
+	if maxEntries > 4096 {
+		return 0, 0, errors.New("maxEntries must not exceed 4096")
+	}
+	return maxDepth, maxEntries, nil
 }
 
 func (b *FileBackend) openBlob(ctx context.Context, path, rootID, relative string) (_ BackendResult, resultErr error) {

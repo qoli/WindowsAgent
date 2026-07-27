@@ -11,7 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
+
+	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/rules"
+	"golang.org/x/sys/windows"
 )
 
 const maxLauncherOutputBytes = 1 << 20
@@ -56,8 +62,27 @@ func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.Ra
 		strings.TrimSpace(invocation.Capability) != invocation.Capability {
 		return nil, errors.New("capability is required and must be canonical")
 	}
-	if invocation.Inputs == nil || invocation.FileRoots == nil {
-		return nil, errors.New("inputs and fileRoots objects are required")
+	if invocation.Inputs == nil {
+		return nil, errors.New("inputs object is required")
+	}
+	ruleStore, err := rules.New(e.rulesDir)
+	if err != nil {
+		return nil, fmt.Errorf("initialize Rule store: %w", err)
+	}
+	script, err := ruleStore.ResolveScript(invocation.Capability)
+	if err != nil {
+		return nil, fmt.Errorf("resolve capability %q: %w", invocation.Capability, err)
+	}
+	foregroundInfo, err := foreground.Snapshot()
+	if err != nil {
+		return nil, fmt.Errorf("resolve foreground process before Script launch: %w", err)
+	}
+	if !strings.EqualFold(foregroundInfo.ExecutableName, script.RuleID) {
+		return nil, fmt.Errorf(
+			"foreground executable is %q, expected owning Rule %q",
+			foregroundInfo.ExecutableName,
+			script.RuleID,
+		)
 	}
 	requestRoot, err := os.MkdirTemp("", "windowsagent-script-request-")
 	if err != nil {
@@ -65,10 +90,7 @@ func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.Ra
 	}
 	defer os.RemoveAll(requestRoot)
 	requestPath := filepath.Join(requestRoot, "request.json")
-	requestBytes, err := json.Marshal(Request{
-		Inputs:    invocation.Inputs,
-		FileRoots: invocation.FileRoots,
-	})
+	requestBytes, err := json.Marshal(Request{Inputs: invocation.Inputs})
 	if err != nil {
 		return nil, fmt.Errorf("encode Script request: %w", err)
 	}
@@ -87,7 +109,13 @@ func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.Ra
 		"--capability", invocation.Capability,
 		"--rules-dir", e.rulesDir,
 		"--request-file", requestPath,
+		"--process-id", strconv.FormatUint(uint64(foregroundInfo.ProcessID), 10),
+		"--process-path", foregroundInfo.ExecutablePath,
 	)
+	command.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NO_WINDOW,
+	}
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	runErr := command.Run()

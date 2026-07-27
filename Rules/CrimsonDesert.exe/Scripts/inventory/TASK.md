@@ -6,18 +6,18 @@ Return raw occupied backpack records from the first valid source in this exact
 order:
 
 1. the explicitly bound current `CrimsonDesert.exe` process;
-2. one user-selected save file.
+2. the newest unambiguous save file discovered inside the package-declared
+   Crimson Desert LocalAppData root.
 
-This is one finite job. It does not poll, watch files, select the newest save,
-retry invisibly, or substitute a decoder/version/source.
+This is one finite job. It does not poll, watch files, accept a caller-supplied
+filesystem root, retry invisibly, or substitute a decoder/version/source.
 
 ## Preconditions
 
 - The process identity and executable SHA-256 are resolved by the trusted Host.
 - `inputs` passes `input.schema.json`.
-- The `crimson-desert-saves` grant is bound by the Host to one authorized
-  absolute root, while the package receives only its alias and the selected
-  root-relative file.
+- The package declares `crimson-desert-saves` using the generic
+  `LocalAppData/Pearl Abyss/CD/save` known-folder resolver.
 - The package-native artifact is
   `native/windows-amd64/crimson-rs.inventory.bb730180.dll`.
 - Its manifest alias is `save-decoder`.
@@ -31,8 +31,11 @@ application data makes the memory source attempt fail.
 
 ## Save attempt
 
-Only after memory fails, `observer.file.open_blob` copies the explicitly
-selected save into the current job blob and accounts the bytes.
+Only after memory fails, Starlark performs one bounded directory listing. It
+rejects reparse points, zero or multiple account directories, missing
+`<slot>/save.save` candidates, and an equal newest timestamp. It then passes
+the selected root-relative file to `observer.file.open_blob`, which copies it
+into the current job blob and accounts the bytes.
 `native.blob_path` resolves that same-job reference. The trusted Starlark then:
 
 1. loads `native.load_library("save-decoder")`;

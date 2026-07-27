@@ -18,17 +18,14 @@ watcher, HTTP observer, or native worker participates.
 The launcher is capability-neutral. It resolves the capability through the
 live Rule registry, requires `runtime: windows-observation-v1`, derives the
 expected foreground executable from the owning Rule folder, validates the
-package input schema, and binds exactly the manifest-declared file-root
-aliases.
+package input schema, and locally resolves exactly the manifest-declared
+file-root aliases.
 
 One launch request has this generic shape:
 
 ```json
 {
-  "inputs": {},
-  "fileRoots": {
-    "manifest-root-alias": "C:\\absolute\\authorized\\root"
-  }
+  "inputs": {}
 }
 ```
 
@@ -44,6 +41,7 @@ observer.memory.scan(...)
 observer.memory.resolve_rip(...)
 observer.memory.read_batch(...)
 observer.memory.read_strided(...)
+observer.file.list(...)
 observer.file.stat(...)
 observer.file.open_blob(path = ...)
 
@@ -65,7 +63,13 @@ signatures.
 ## Authorized save flow
 
 ```python
-blob = observer.file.open_blob(path = job.input(name = "save"))
+listing = observer.file.list(
+    path = {"root": "manifest-root-alias", "relative": "."},
+    maxDepth = 3,
+    maxEntries = 4096,
+)
+selected = select_one_file(listing)
+blob = observer.file.open_blob(path = selected)
 path = native.blob_path(blob = blob["blob"])
 library = native.load_library("save-decoder")
 function = library.bind(
@@ -76,9 +80,11 @@ function = library.bind(
 result = function.call(path)
 ```
 
-`open_blob` copies exactly one explicitly selected authorized file into the
-Host-created job blob root and accounts the bytes. `blob_path` accepts only the
-opaque handle issued for the same job. Large save bytes do not cross JSON.
+`list` is manifest-permission-gated, depth/entry bounded, returns metadata
+without file content, and never follows reparse points. Package Starlark owns
+selection. `open_blob` copies exactly that selected file into the Host-created
+job blob root and accounts the bytes. `blob_path` accepts only the opaque
+handle issued for the same job. Large save bytes do not cross JSON.
 
 ## Provenance
 

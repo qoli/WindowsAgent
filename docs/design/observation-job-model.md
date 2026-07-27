@@ -7,7 +7,7 @@
 One launch invocation resolves any uniquely registered capability, validates
 its package and request, runs one finite job, and produces one terminal
 schema-valid JSON result or one typed failure. The invocation may come from
-the bearer-protected WindowsAgent HTTP endpoint or the local launcher CLI;
+the unauthenticated WindowsAgent HTTP endpoint or the local launcher CLI;
 both execute the same local job command in the signed-in session.
 
 ## Process model
@@ -27,8 +27,9 @@ HTTP observer.
 The launcher contains no game or capability allowlist. It derives the expected
 foreground executable from the capability's owning Rule folder, accepts only
 the runtime declared by `rule.json`, validates `inputs` against the package
-input schema, and requires exact Host bindings for every manifest file-root
-alias.
+input schema, and resolves each manifest file-root declaration through its
+supported local Windows known-folder resolver. HTTP and CLI callers cannot
+provide absolute Host paths.
 
 The Script Runner is the trusted package execution process. If a package loads
 a native DLL, that DLL lives in the Runner process. A DLL crash may terminate
@@ -64,16 +65,14 @@ The trusted caller supplies one absolute strict-JSON request file:
 
 ```json
 {
-  "inputs": {},
-  "fileRoots": {
-    "declared-alias": "C:\\absolute\\authorized\\root"
-  }
+  "inputs": {}
 }
 ```
 
-`inputs` is package-defined and schema-validated. `fileRoots` is Host-owned:
-missing, extra, relative, or undeclared bindings fail before execution.
-Machine-specific paths never belong in the distributable Rule plugin.
+`inputs` is package-defined and schema-validated. File-root aliases, known
+folder identity, and package-relative root paths are declared by the package;
+the Host resolves them locally. Machine-specific absolute paths never belong
+in the request or distributable Rule plugin.
 
 See [Observation Script Package](observation-script-package.md) and
 [Script Runner native-library FFI](native-library-ffi.md).

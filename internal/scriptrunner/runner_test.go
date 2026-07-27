@@ -114,12 +114,7 @@ func TestCrimsonInventoryPackageFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output, err := runner.Run(context.Background(), pkg, map[string]any{
-		"save": map[string]any{
-			"root":     "crimson-desert-saves",
-			"relative": "slot/save.save",
-		},
-	})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
 	if err != nil {
 		t.Fatalf("run package: %v", err)
 	}
@@ -279,9 +274,7 @@ func TestBothSourceFailuresHaveTerminalCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner, _ := New(&ambiguousBroker{})
-	_, err = runner.Run(context.Background(), pkg, map[string]any{
-		"save": map[string]any{"root": "crimson-desert-saves", "relative": "slot/save.save"},
-	})
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
 	var runError *Error
 	if !errors.As(err, &runError) {
 		t.Fatalf("error = %T %v, want *Error", err, err)
@@ -301,6 +294,30 @@ func (b *saveFallbackBroker) Call(ctx context.Context, namespace, operation stri
 		})
 		return map[string]any{"matches": []any{}}, nil
 	}
+	if operation == "list" {
+		b.calls = append(b.calls, namespace+"."+operation)
+		b.observerCalls = append(b.observerCalls, fixtureObserverCall{
+			namespace: namespace, operation: operation, arguments: arguments,
+		})
+		return map[string]any{"entries": []any{
+			map[string]any{
+				"relative":   "account",
+				"kind":       "directory",
+				"modifiedAt": "2026-07-27T13:00:00.000000000Z",
+			},
+			map[string]any{
+				"relative":   "account/slot",
+				"kind":       "directory",
+				"modifiedAt": "2026-07-27T13:30:00.000000000Z",
+			},
+			map[string]any{
+				"relative":   "account/slot/save.save",
+				"kind":       "file",
+				"size":       int64(1024),
+				"modifiedAt": "2026-07-27T13:42:00.000000000Z",
+			},
+		}}, nil
+	}
 	if operation == "openBlob" {
 		b.calls = append(b.calls, namespace+"."+operation)
 		b.observerCalls = append(b.observerCalls, fixtureObserverCall{
@@ -317,6 +334,26 @@ func (b *saveFallbackBroker) Call(ctx context.Context, namespace, operation stri
 func (b *saveFallbackBroker) BlobPath(_ context.Context, _ map[string]any) (string, error) {
 	b.calls = append(b.calls, "native.blob_path")
 	return `C:\job\blob.save`, nil
+}
+
+type saveSelectionBroker struct {
+	saveFallbackBroker
+	entries []any
+}
+
+func (b *saveSelectionBroker) Call(
+	ctx context.Context,
+	namespace, operation string,
+	arguments map[string]any,
+) (any, error) {
+	if operation == "list" {
+		b.calls = append(b.calls, namespace+"."+operation)
+		b.observerCalls = append(b.observerCalls, fixtureObserverCall{
+			namespace: namespace, operation: operation, arguments: arguments,
+		})
+		return map[string]any{"entries": b.entries}, nil
+	}
+	return b.saveFallbackBroker.Call(ctx, namespace, operation, arguments)
 }
 
 type fixtureNativeBackend struct{}
@@ -432,7 +469,7 @@ func (p fixtureNativeProcedure) call(frame nativeCallFrame) (uintptr, error) {
 	}
 }
 
-func TestMemoryFailureFallsBackToExplicitSave(t *testing.T) {
+func TestMemoryFailureUsesPackageSelectedSave(t *testing.T) {
 	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Scripts", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
@@ -441,9 +478,7 @@ func TestMemoryFailureFallsBackToExplicitSave(t *testing.T) {
 	broker := &saveFallbackBroker{}
 	runner, _ := New(broker)
 	runner.nativeBackend = fixtureNativeBackend{}
-	output, err := runner.Run(context.Background(), pkg, map[string]any{
-		"save": map[string]any{"root": "crimson-desert-saves", "relative": "slot/save.save"},
-	})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
 	if err != nil {
 		t.Fatalf("run package: %v", err)
 	}
@@ -471,20 +506,28 @@ func TestMemoryFailureFallsBackToExplicitSave(t *testing.T) {
 		attempts[1].(map[string]any)["status"] != "succeeded" {
 		t.Fatalf("attempts = %#v", attempts)
 	}
-	if len(broker.calls) < 4 ||
-		!reflect.DeepEqual(broker.calls[:4], []string{
-			"memory.modules", "memory.scan", "file.openBlob", "native.blob_path",
+	if len(broker.calls) < 5 ||
+		!reflect.DeepEqual(broker.calls[:5], []string{
+			"memory.modules", "memory.scan", "file.list", "file.openBlob", "native.blob_path",
 		}) {
 		t.Fatalf("call prefix = %#v", broker.calls)
 	}
 	wantOpenBlob := map[string]any{
 		"path": map[string]any{
 			"root":     "crimson-desert-saves",
-			"relative": "slot/save.save",
+			"relative": "account/slot/save.save",
 		},
 	}
 	if got := broker.observerCalls[len(broker.observerCalls)-1].arguments; !reflect.DeepEqual(got, wantOpenBlob) {
 		t.Fatalf("openBlob arguments = %#v, want %#v", got, wantOpenBlob)
+	}
+	wantList := map[string]any{
+		"path":       map[string]any{"root": "crimson-desert-saves", "relative": "."},
+		"maxDepth":   int64(3),
+		"maxEntries": int64(4096),
+	}
+	if got := broker.observerCalls[2].arguments; !reflect.DeepEqual(got, wantList) {
+		t.Fatalf("list arguments = %#v, want %#v", got, wantList)
 	}
 	nativeCompleted := 0
 	for _, call := range broker.calls {
@@ -494,6 +537,66 @@ func TestMemoryFailureFallsBackToExplicitSave(t *testing.T) {
 	}
 	if nativeCompleted != 4 {
 		t.Fatalf("completed native calls = %d, want 4; calls=%#v", nativeCompleted, broker.calls)
+	}
+}
+
+func TestPackageOwnedSaveSelectionRejectsAmbiguity(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []any
+		code    string
+	}{
+		{
+			name: "no account",
+			code: "ACCOUNT_SAVE_ROOT_NOT_FOUND",
+		},
+		{
+			name: "multiple accounts",
+			entries: []any{
+				map[string]any{"relative": "one", "kind": "directory", "modifiedAt": "2026-07-27T13:00:00.000000000Z"},
+				map[string]any{"relative": "two", "kind": "directory", "modifiedAt": "2026-07-27T13:00:00.000000000Z"},
+			},
+			code: "ACCOUNT_SAVE_ROOT_AMBIGUOUS",
+		},
+		{
+			name: "missing candidate",
+			entries: []any{
+				map[string]any{"relative": "account", "kind": "directory", "modifiedAt": "2026-07-27T13:00:00.000000000Z"},
+			},
+			code: "SAVE_CANDIDATE_NOT_FOUND",
+		},
+		{
+			name: "newest timestamp tie",
+			entries: []any{
+				map[string]any{"relative": "account", "kind": "directory", "modifiedAt": "2026-07-27T13:00:00.000000000Z"},
+				map[string]any{"relative": "account/one/save.save", "kind": "file", "size": int64(1), "modifiedAt": "2026-07-27T13:42:00.000000000Z"},
+				map[string]any{"relative": "account/two/save.save", "kind": "file", "size": int64(1), "modifiedAt": "2026-07-27T13:42:00.000000000Z"},
+			},
+			code: "NEWEST_SAVE_TIMESTAMP_TIE",
+		},
+		{
+			name: "reparse point",
+			entries: []any{
+				map[string]any{"relative": "account", "kind": "directory", "modifiedAt": "2026-07-27T13:00:00.000000000Z"},
+				map[string]any{"relative": "account/link", "kind": "reparse-point"},
+			},
+			code: "SAVE_REPARSE_POINT_FOUND",
+		},
+	}
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Scripts", "inventory"))
+	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			broker := &saveSelectionBroker{entries: test.entries}
+			runner, _ := New(broker)
+			_, runErr := runner.Run(context.Background(), pkg, map[string]any{})
+			if runErr == nil || !strings.Contains(runErr.Error(), test.code) {
+				t.Fatalf("error = %v, want code %s", runErr, test.code)
+			}
+		})
 	}
 }
 
@@ -520,9 +623,7 @@ func TestSaveApplicationFailuresAreExplicitAndReleaseHandle(t *testing.T) {
 			state := &failureNativeState{mode: test.mode}
 			runner, _ := New(broker)
 			runner.nativeBackend = failureNativeBackend{state: state}
-			_, runErr := runner.Run(context.Background(), pkg, map[string]any{
-				"save": map[string]any{"root": "crimson-desert-saves", "relative": "slot/save.save"},
-			})
+			_, runErr := runner.Run(context.Background(), pkg, map[string]any{})
 			if runErr == nil || !strings.Contains(runErr.Error(), test.code) {
 				t.Fatalf("error = %v, want code %s", runErr, test.code)
 			}
@@ -563,12 +664,7 @@ func TestNonEligibleBrokerFailureDoesNotFallback(t *testing.T) {
 	}
 	broker := &failingBroker{}
 	runner, _ := New(broker)
-	_, err = runner.Run(context.Background(), pkg, map[string]any{
-		"save": map[string]any{
-			"root":     "crimson-desert-saves",
-			"relative": "slot/save.save",
-		},
-	})
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
 	var runError *Error
 	if !errors.As(err, &runError) {
 		t.Fatalf("error = %T %v, want *Error", err, err)
@@ -581,20 +677,26 @@ func TestNonEligibleBrokerFailureDoesNotFallback(t *testing.T) {
 	}
 }
 
-func TestMissingSaveInputFailsBeforeScriptExecution(t *testing.T) {
+func TestCallerSuppliedSaveInputFailsBeforeScriptExecution(t *testing.T) {
 	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Scripts", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, _ := New(&ambiguousBroker{})
-	_, err = runner.Run(context.Background(), pkg, nil)
+	broker := &ambiguousBroker{}
+	runner, _ := New(broker)
+	_, err = runner.Run(context.Background(), pkg, map[string]any{
+		"save": map[string]any{"relative": "caller-selected.save"},
+	})
 	var runError *Error
 	if !errors.As(err, &runError) {
 		t.Fatalf("error = %T %v, want *Error", err, err)
 	}
 	if runError.Code != "SCRIPT_INPUT_INVALID" {
 		t.Fatalf("code = %q", runError.Code)
+	}
+	if len(broker.calls) != 0 {
+		t.Fatalf("broker calls = %d, want 0", len(broker.calls))
 	}
 }
 
@@ -656,9 +758,7 @@ func TestMemoryValidationFailuresAreVisibleBeforeExplicitSave(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			broker := &memoryValidationBroker{mode: test.mode}
 			runner, _ := New(broker)
-			_, runErr := runner.Run(context.Background(), pkg, map[string]any{
-				"save": map[string]any{"root": "crimson-desert-saves", "relative": "slot/save.save"},
-			})
+			_, runErr := runner.Run(context.Background(), pkg, map[string]any{})
 			if runErr == nil || !strings.Contains(runErr.Error(), test.code) {
 				t.Fatalf("error = %v, want code %s", runErr, test.code)
 			}

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 3,
+  "version": 4,
   "title": "Read raw Crimson Desert inventory records",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
@@ -27,9 +27,18 @@
       "maxBytesRead": 536870912
     },
     "file": {
-      "roots": ["crimson-desert-saves"],
-      "operations": ["openBlob"],
-      "maxCalls": 1,
+      "roots": [
+        {
+          "id": "crimson-desert-saves",
+          "resolver": {
+            "kind": "windows-known-folder",
+            "knownFolder": "LocalAppData",
+            "relative": "Pearl Abyss/CD/save"
+          }
+        }
+      ],
+      "operations": ["list", "openBlob"],
+      "maxCalls": 2,
       "maxBytesRead": 67108864
     }
   },

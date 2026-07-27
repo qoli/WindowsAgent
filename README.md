@@ -37,10 +37,11 @@ The screenshot capability is available today:
 The generic Starlark launcher and one Script capability are available today:
 
 - `crimson-desert/inventory` performs a finite memory attempt and, only when
-  that attempt cannot produce a valid inventory, decodes one explicitly
-  selected save file
+  that attempt cannot produce a valid inventory, discovers and decodes the
+  newest unambiguous save file inside its package-declared LocalAppData root
 - the Go launcher resolves any registered `windows-observation-v1` capability
-  from its owning Rule, validates its input schema and host resource bindings,
+  from its owning Rule, validates its input schema and package resource
+  declarations,
   and never contains a capability allowlist
 - the job returns one schema-validated JSON result with per-call provenance
 - the Go host launches only the runner and observer directly under one bounded
@@ -50,8 +51,8 @@ The generic Starlark launcher and one Script capability are available today:
   that blob and loads only the package-declared DLL alias
 
 This is not a general remote memory API. HTTP exposes a live read-only Script
-catalog; the bearer-protected run endpoint delegates one request to the local
-launcher inside the signed-in Windows session.
+catalog; the unauthenticated run endpoint delegates one strictly validated
+request to the local launcher inside the signed-in Windows session.
 
 ## Build
 
@@ -100,7 +101,6 @@ Available options:
 --listen              HTTP listen address (default 0.0.0.0:8787)
 --data-dir            artifact and log root
 --rules-dir           external Rule plugin directory (default <data-dir>/Rules)
---script-api-token-file bearer-token file (default <data-dir>/script-api.token)
 --capture-timeout     per-request timeout (default 5s)
 --retention           number of artifacts to retain (default 100)
 --log-level           debug, info, warn, or error
@@ -114,15 +114,7 @@ Create one strict launcher request outside the Rule plugin:
 
 ```json
 {
-  "inputs": {
-    "save": {
-      "root": "crimson-desert-saves",
-      "relative": "slot1/save.save"
-    }
-  },
-  "fileRoots": {
-    "crimson-desert-saves": "C:\\Users\\user\\AppData\\Local\\Pearl Abyss\\CD\\save\\<account-id>"
-  }
+  "inputs": {}
 }
 ```
 
@@ -137,9 +129,10 @@ session:
   --request-file (Resolve-Path .\inventory-request.json)
 ```
 
-`inputSchema` belongs to the Script Package; `fileRoots` supplies exact
-host-authorized bindings for the aliases requested by its manifest. Missing,
-extra, relative, or undeclared bindings fail. The launcher derives the expected
+`inputSchema` belongs to the Script Package. File roots are also package
+declarations: the Host resolves only supported Windows known folders and never
+accepts absolute roots from the caller. The inventory Starlark owns its bounded
+account, slot, and newest-save selection. The launcher derives the expected
 foreground executable from the capability's owning Rule folder. The
 `--process-id` and `--process-path` flags exist only for a trusted local host
 that already resolved that same owning-Rule process; the observer still
@@ -236,27 +229,21 @@ curl.exe http://127.0.0.1:8787/v1/rules/CrimsonDesert.exe/scripts
 ```
 
 The catalog returns each capability's ID, declared runtime, title, package
-version, input schema, output schema, and authenticated launcher endpoint. It
+version, input schema, output schema, and launcher endpoint. It
 is read-only and does not execute a Script.
 
 Run one registered Script from the signed-in agent session:
 
 ```powershell
-$token = [IO.File]::ReadAllText(
-  "$env:LOCALAPPDATA\gameGuide\windows-capture-agent\script-api.token"
-)
 curl.exe `
-  -H "Authorization: Bearer $token" `
   -H "Content-Type: application/json" `
   --data-binary "@inventory-invocation.json" `
   http://127.0.0.1:8787/v1/scripts/run
 ```
 
-The invocation body contains `capability`, `inputs`, and `fileRoots`; it uses
-the same input and binding contract as the local launcher request. The
-installer creates the token once, preserves it across upgrades, stores only
-its path in task configuration, and never places its value in Rule content or
-HTTP discovery responses. Script execution is serialized and does not upload,
+The invocation body contains only `capability` and package-defined `inputs`;
+Host filesystem roots are never caller input. No bearer token or other HTTP
+credential is required. Script execution is serialized and does not upload,
 rewrite, or reload a Rule plugin.
 
 Only one capture can run at a time. A concurrent request receives

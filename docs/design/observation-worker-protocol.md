@@ -29,16 +29,18 @@ Supported capability surface:
 - `memory.resolveRip`
 - `memory.readBatch`
 - `memory.readStrided`
+- `file.list`
 - `file.stat`
 - `file.openBlob`
 
 The generic file backend also retains its explicitly declared read/hash
-implementation where permitted, but the inventory package uses only
-`openBlob`.
+implementation where permitted. The inventory package uses bounded `list`
+followed by `openBlob`.
 
 The Observer does not load DLLs, bind native exports, decode saves, know game
-schemas, poll, watch files, select the newest file, or expose an HTTP API.
-There is no legacy `file.decode`.
+schemas, poll, watch files, choose a file, or expose an HTTP API. It returns
+bounded directory metadata; package Starlark owns selection. There is no
+legacy `file.decode`.
 
 ## Accounting and errors
 

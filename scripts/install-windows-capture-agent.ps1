@@ -119,29 +119,9 @@ $logDir = Join-Path $resolvedDataDir "logs"
 $installedExecutable = Join-Path $binDir "windows-capture-agent.exe"
 $installedRules = Join-Path $resolvedDataDir "Rules"
 $logFile = Join-Path $logDir "agent.jsonl"
-$scriptAPITokenFile = Join-Path $resolvedDataDir "script-api.token"
+$legacyScriptAPITokenFile = Join-Path $resolvedDataDir "script-api.token"
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-if (Test-Path -LiteralPath $scriptAPITokenFile -PathType Leaf) {
-    $scriptAPIToken = [IO.File]::ReadAllText($scriptAPITokenFile)
-    if ($scriptAPIToken -notmatch "^[0-9a-fA-F]{64}$") {
-        throw "existing Script API token must contain exactly 64 hexadecimal characters"
-    }
-} else {
-    $tokenBytes = New-Object byte[] 32
-    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $random.GetBytes($tokenBytes)
-    } finally {
-        $random.Dispose()
-    }
-    $scriptAPIToken = -join ($tokenBytes | ForEach-Object { $_.ToString("x2") })
-    [IO.File]::WriteAllText(
-        $scriptAPITokenFile,
-        $scriptAPIToken,
-        (New-Object Text.UTF8Encoding($false))
-    )
-}
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
@@ -149,6 +129,11 @@ if ($existingTask) {
         throw "scheduled task '$TaskName' exists but is not owned by windows-capture-agent"
     }
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+$legacyScriptAPITokenRemoved = $false
+if (Test-Path -LiteralPath $legacyScriptAPITokenFile -PathType Leaf) {
+    Remove-Item -LiteralPath $legacyScriptAPITokenFile -Force
+    $legacyScriptAPITokenRemoved = $true
 }
 
 $portDeadline = [DateTime]::UtcNow.AddSeconds(10)
@@ -204,7 +189,6 @@ $agentArguments = @(
     "--listen", (ConvertTo-NativeQuotedArgument $Listen),
     "--data-dir", (ConvertTo-NativeQuotedArgument $resolvedDataDir),
     "--rules-dir", (ConvertTo-NativeQuotedArgument $installedRules),
-    "--script-api-token-file", (ConvertTo-NativeQuotedArgument $scriptAPITokenFile),
     "--capture-timeout", (ConvertTo-NativeQuotedArgument $captureTimeoutArgument),
     "--retention", (ConvertTo-NativeQuotedArgument $Retention.ToString()),
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
@@ -272,7 +256,7 @@ if ($process.SessionId -eq 0) {
     observer = (Join-Path $binDir "windows-observer.exe")
     data_dir = $resolvedDataDir
     rules_dir = $installedRules
-    script_api_token_file = $scriptAPITokenFile
+    legacy_script_api_token_removed = $legacyScriptAPITokenRemoved
     capture_archive = $captureArchive
     log_file = $logFile
     listen = $Listen

@@ -33,7 +33,7 @@ type Spec struct {
 	ScriptRunnerExecutable string
 	ObserverExecutable     string
 	Process                *observer.ProcessIdentity
-	FileRoots              map[string]string
+	LocalAppData           string
 	Inputs                 map[string]any
 }
 
@@ -90,6 +90,10 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 	if err := validateBindings(pkg, spec); err != nil {
 		return Result{}, &Error{Code: "JOB_INVALID", Stage: "validating-bindings", Cause: err}
 	}
+	fileRoots, err := observer.ResolveFileRoots(pkg.Manifest.Permissions.File, spec.LocalAppData)
+	if err != nil {
+		return Result{}, &Error{Code: "JOB_INVALID", Stage: "resolving-file-roots", Cause: err}
+	}
 	runContext, cancel := context.WithDeadline(ctx, spec.Deadline)
 	defer cancel()
 	blobRoot, err := os.MkdirTemp("", "windowsagent-observation-blob-")
@@ -136,7 +140,7 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 		return Result{}, err
 	}
 
-	if err := initializeObserver(observerConn, spec, pkg, blobRoot); err != nil {
+	if err := initializeObserver(observerConn, spec, pkg, fileRoots, blobRoot); err != nil {
 		return Result{}, withDiagnostics("OBSERVER_INITIALIZE_FAILED", "initializing-observer", err, observerDiagnostics)
 	}
 	if err := initializeScriptRunner(scriptConn, spec, pkg); err != nil {
@@ -206,37 +210,6 @@ func validateBindings(pkg *scriptpackage.Package, spec Spec) error {
 	if memory := pkg.Manifest.Permissions.Memory; memory != nil {
 		if memory.Target != "rule/current-process" {
 			return fmt.Errorf("unsupported memory target %q", memory.Target)
-		}
-	}
-	file := pkg.Manifest.Permissions.File
-	if file == nil {
-		if len(spec.FileRoots) != 0 {
-			return errors.New("file roots are forbidden without file permission")
-		}
-		return nil
-	}
-	if len(spec.FileRoots) != len(file.Roots) {
-		return fmt.Errorf("file root binding count is %d, want %d", len(spec.FileRoots), len(file.Roots))
-	}
-	for _, alias := range file.Roots {
-		root, ok := spec.FileRoots[alias]
-		if !ok {
-			return fmt.Errorf("missing file root binding %q", alias)
-		}
-		if root == "" || !filepath.IsAbs(root) {
-			return fmt.Errorf("file root binding %q must be absolute", alias)
-		}
-	}
-	for alias := range spec.FileRoots {
-		found := false
-		for _, declared := range file.Roots {
-			if alias == declared {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("undeclared file root binding %q", alias)
 		}
 	}
 	return nil
@@ -315,15 +288,21 @@ func snapshotPackage(source string) (string, error) {
 	return target, nil
 }
 
-func initializeObserver(conn *observationprotocol.Conn, spec Spec, pkg *scriptpackage.Package, blobRoot string) error {
+func initializeObserver(
+	conn *observationprotocol.Conn,
+	spec Spec,
+	pkg *scriptpackage.Package,
+	fileRoots map[string]string,
+	blobRoot string,
+) error {
 	params, _ := json.Marshal(map[string]any{
-		"protocolVersion": observationapi.ProtocolVersion,
-		"jobId":           spec.JobID,
-		"deadline":        spec.Deadline,
-		"permissions":     pkg.Manifest.Permissions,
-		"process":         spec.Process,
-		"fileRoots":       spec.FileRoots,
-		"blobRoot":        blobRoot,
+		"protocolVersion":   observationapi.ProtocolVersion,
+		"jobId":             spec.JobID,
+		"deadline":          spec.Deadline,
+		"permissions":       pkg.Manifest.Permissions,
+		"process":           spec.Process,
+		"resolvedFileRoots": fileRoots,
+		"blobRoot":          blobRoot,
 	})
 	if err := conn.Write(observationprotocol.Message{ID: "observer-initialize", Method: "initialize", Params: params}); err != nil {
 		return err

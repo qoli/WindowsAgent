@@ -9,7 +9,8 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 )
 
-func TestValidateBindingsUsesPackageContract(t *testing.T) {
+func inventoryPackage(t *testing.T) *scriptpackage.Package {
+	t.Helper()
 	root, err := filepath.Abs(filepath.Join(
 		"..",
 		"..",
@@ -25,43 +26,20 @@ func TestValidateBindingsUsesPackageContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return pkg
+}
+
+func TestValidateBindingsUsesPackageOwnedInputs(t *testing.T) {
 	spec := Spec{
-		Process:   &observer.ProcessIdentity{PID: 42},
-		FileRoots: map[string]string{"crimson-desert-saves": t.TempDir()},
-		Inputs: map[string]any{
-			"save": map[string]any{
-				"root":     "crimson-desert-saves",
-				"relative": "slot1/save.save",
-			},
-		},
+		Process: &observer.ProcessIdentity{PID: 42},
+		Inputs:  map[string]any{},
 	}
-	if err := validateBindings(pkg, spec); err != nil {
+	if err := validateBindings(inventoryPackage(t), spec); err != nil {
 		t.Fatalf("validateBindings: %v", err)
 	}
 }
 
-func TestValidateBindingsRejectsMissingOrUndeclaredState(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join(
-		"..",
-		"..",
-		"Rules",
-		"CrimsonDesert.exe",
-		"Scripts",
-		"inventory",
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
-	if err != nil {
-		t.Fatal(err)
-	}
-	validInputs := map[string]any{
-		"save": map[string]any{
-			"root":     "crimson-desert-saves",
-			"relative": "slot1/save.save",
-		},
-	}
+func TestValidateBindingsRejectsMissingProcessOrCallerInputs(t *testing.T) {
 	tests := []struct {
 		name string
 		spec Spec
@@ -70,45 +48,22 @@ func TestValidateBindingsRejectsMissingOrUndeclaredState(t *testing.T) {
 		{
 			name: "missing process",
 			spec: Spec{
-				FileRoots: map[string]string{"crimson-desert-saves": t.TempDir()},
-				Inputs:    validInputs,
+				Inputs: map[string]any{},
 			},
 			want: "process",
 		},
 		{
-			name: "missing root",
-			spec: Spec{
-				Process:   &observer.ProcessIdentity{PID: 42},
-				FileRoots: map[string]string{},
-				Inputs:    validInputs,
-			},
-			want: "binding count",
-		},
-		{
-			name: "extra root",
+			name: "caller supplied inventory state",
 			spec: Spec{
 				Process: &observer.ProcessIdentity{PID: 42},
-				FileRoots: map[string]string{
-					"crimson-desert-saves": t.TempDir(),
-					"other":                t.TempDir(),
-				},
-				Inputs: validInputs,
-			},
-			want: "binding count",
-		},
-		{
-			name: "invalid inputs",
-			spec: Spec{
-				Process:   &observer.ProcessIdentity{PID: 42},
-				FileRoots: map[string]string{"crimson-desert-saves": t.TempDir()},
-				Inputs:    map[string]any{},
+				Inputs:  map[string]any{"save": "caller-owned"},
 			},
 			want: "input schema",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := validateBindings(pkg, test.spec); err == nil ||
+			if err := validateBindings(inventoryPackage(t), test.spec); err == nil ||
 				!strings.Contains(err.Error(), test.want) {
 				t.Fatalf("validateBindings() error = %v, want %q", err, test.want)
 			}

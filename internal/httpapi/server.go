@@ -3,7 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,17 +30,16 @@ const (
 )
 
 type Server struct {
-	capturer    capture.Capturer
-	store       *artifact.Store
-	rules       *rules.Store
-	scripts     scriptlaunch.Executor
-	scriptToken string
-	timeout     time.Duration
-	version     string
-	logger      *slog.Logger
-	gate        chan struct{}
-	scriptGate  chan struct{}
-	sequence    atomic.Uint64
+	capturer   capture.Capturer
+	store      *artifact.Store
+	rules      *rules.Store
+	scripts    scriptlaunch.Executor
+	timeout    time.Duration
+	version    string
+	logger     *slog.Logger
+	gate       chan struct{}
+	scriptGate chan struct{}
+	sequence   atomic.Uint64
 }
 
 type ErrorEnvelope struct {
@@ -93,7 +91,6 @@ func New(
 	store *artifact.Store,
 	ruleStore *rules.Store,
 	scriptExecutor scriptlaunch.Executor,
-	scriptToken string,
 	timeout time.Duration,
 	version string,
 	logger *slog.Logger,
@@ -110,9 +107,6 @@ func New(
 	if scriptExecutor == nil {
 		return nil, errors.New("Script executor is required")
 	}
-	if len(scriptToken) != 64 {
-		return nil, errors.New("64-character Script API token is required")
-	}
 	if timeout <= 0 {
 		return nil, errors.New("capture timeout must be positive")
 	}
@@ -123,16 +117,15 @@ func New(
 		return nil, errors.New("logger is required")
 	}
 	return &Server{
-		capturer:    capturer,
-		store:       store,
-		rules:       ruleStore,
-		scripts:     scriptExecutor,
-		scriptToken: scriptToken,
-		timeout:     timeout,
-		version:     version,
-		logger:      logger,
-		gate:        make(chan struct{}, 1),
-		scriptGate:  make(chan struct{}, 1),
+		capturer:   capturer,
+		store:      store,
+		rules:      ruleStore,
+		scripts:    scriptExecutor,
+		timeout:    timeout,
+		version:    version,
+		logger:     logger,
+		gate:       make(chan struct{}, 1),
+		scriptGate: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -178,14 +171,6 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScriptRun(w http.ResponseWriter, r *http.Request, requestID string) {
-	provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if provided == r.Header.Get("Authorization") ||
-		len(provided) != len(s.scriptToken) ||
-		subtle.ConstantTimeCompare([]byte(provided), []byte(s.scriptToken)) != 1 {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		writeError(w, requestID, http.StatusUnauthorized, "script_auth_required", "valid Script API bearer token is required")
-		return
-	}
 	invocation, err := decodeScriptInvocation(w, r)
 	if err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_script_request", err.Error())
@@ -388,7 +373,7 @@ func (s *Server) handleRuleScripts(w http.ResponseWriter, requestID, ruleID stri
 			Launcher: scriptLauncher{
 				Method:         http.MethodPost,
 				URL:            "/v1/scripts/run",
-				Authentication: "bearer",
+				Authentication: "none",
 			},
 		})
 	}
@@ -531,8 +516,8 @@ func decodeScriptInvocation(w http.ResponseWriter, r *http.Request) (scriptlaunc
 		strings.TrimSpace(invocation.Capability) != invocation.Capability {
 		return scriptlaunch.Invocation{}, errors.New("capability is required and must be canonical")
 	}
-	if invocation.Inputs == nil || invocation.FileRoots == nil {
-		return scriptlaunch.Invocation{}, errors.New("inputs and fileRoots objects are required")
+	if invocation.Inputs == nil {
+		return scriptlaunch.Invocation{}, errors.New("inputs object is required")
 	}
 	return invocation, nil
 }

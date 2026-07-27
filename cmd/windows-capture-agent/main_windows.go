@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -76,10 +75,6 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
 	}
-	scriptToken, err := readScriptAPIToken(cfg.ScriptTokenFile)
-	if err != nil {
-		return fmt.Errorf("read Script API token: %w", err)
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
@@ -93,7 +88,6 @@ func run() (runErr error) {
 		store,
 		ruleStore,
 		scriptExecutor,
-		scriptToken,
 		cfg.CaptureTimeout,
 		version,
 		logger,
@@ -123,7 +117,7 @@ func run() (runErr error) {
 		"retention", cfg.Retention,
 		"capture_timeout", cfg.CaptureTimeout.String(),
 		"rules_root", ruleStore.Root(),
-		"script_api_auth", "bearer-token",
+		"script_api_auth", "none",
 	)
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -153,30 +147,6 @@ func run() (runErr error) {
 		logger.Info("capture_agent_stopped")
 		return nil
 	}
-}
-
-func readScriptAPIToken(name string) (string, error) {
-	if name == "" || !filepath.IsAbs(name) {
-		return "", errors.New("absolute Script API token file is required")
-	}
-	info, err := os.Stat(name)
-	if err != nil {
-		return "", err
-	}
-	if !info.Mode().IsRegular() {
-		return "", errors.New("Script API token file must be a regular file")
-	}
-	if info.Size() != 64 {
-		return "", errors.New("Script API token must contain exactly 64 hexadecimal characters")
-	}
-	data, err := os.ReadFile(name)
-	if err != nil {
-		return "", err
-	}
-	if _, err := hex.DecodeString(string(data)); err != nil {
-		return "", fmt.Errorf("Script API token is not hexadecimal: %w", err)
-	}
-	return string(data), nil
 }
 
 type slogWriter struct {

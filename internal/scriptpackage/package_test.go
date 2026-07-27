@@ -50,23 +50,15 @@ func TestLoadCrimsonInventoryPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if pkg.Identity.ID != "crimson-desert/inventory" || pkg.Identity.Version != 3 {
+	if pkg.Identity.ID != "crimson-desert/inventory" || pkg.Identity.Version != 4 {
 		t.Fatalf("unexpected identity: %#v", pkg.Identity)
 	}
-	validInputs := map[string]any{
-		"save": map[string]any{
-			"root":     "crimson-desert-saves",
-			"relative": "slot1/save.save",
-		},
-	}
+	validInputs := map[string]any{}
 	if err := pkg.ValidateInputs(validInputs); err != nil {
 		t.Fatalf("ValidateInputs: %v", err)
 	}
 	for _, invalid := range []map[string]any{
-		{},
 		{"unknown": true},
-		{"save": map[string]any{"root": "other", "relative": "slot1/save.save"}},
-		{"save": map[string]any{"root": "crimson-desert-saves", "relative": "../save.save"}},
 	} {
 		if err := pkg.ValidateInputs(invalid); err == nil {
 			t.Fatalf("ValidateInputs accepted %#v", invalid)
@@ -170,6 +162,31 @@ func TestLoadRejectsManifestV1(t *testing.T) {
 	}
 	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
 		t.Fatal("Load accepted manifest schema V1")
+	}
+}
+
+func TestLoadRejectsCallerBoundFileRootManifestShape(t *testing.T) {
+	root := copyInventoryPackage(t)
+	manifestBytes, err := os.ReadFile(filepath.Join(root, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	permissions := manifest["permissions"].(map[string]any)
+	file := permissions["file"].(map[string]any)
+	file["roots"] = []any{"crimson-desert-saves"}
+	manifestBytes, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), manifestBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
+		t.Fatal("Load accepted legacy caller-bound file root declarations")
 	}
 }
 

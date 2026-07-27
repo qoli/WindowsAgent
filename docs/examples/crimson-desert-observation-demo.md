@@ -8,9 +8,9 @@ The child runtime, package runner, and observer core now exist. Use
 [Crimson Desert Inventory Script](crimson-desert-inventory-job.md) for the
 implemented example and its explicit live limitation.
 
-This demo shows why one unified observer is useful. A task may combine current
-memory state with an explicitly selected save-file snapshot while still
-producing one JSON result.
+This retired sketch shows why one unified observer is useful. It is not a
+current launch contract. The implemented inventory package now owns bounded
+save discovery and selection instead of accepting a caller-selected path.
 
 ## Package
 
@@ -36,7 +36,12 @@ def main(ctx):
     modules = observer.memory.modules()
     player = locate_and_read_player(modules)
 
-    selected_save = job.input("save")
+    listing = observer.file.list(
+        path = {"root": "declared-save-root", "relative": "."},
+        maxDepth = 3,
+        maxEntries = 4096,
+    )
+    selected_save = select_save(listing)
     save_stat = observer.file.stat(selected_save)
     save_hash = observer.file.hash(selected_save, "sha256")
 
@@ -58,8 +63,9 @@ def main(ctx):
 Helper functions above are illustrative local functions in `main.star`, not
 dynamic modules.
 
-The script does not ask the observer to choose the “latest” save. The job input
-must already identify an authorized logical file. There is no directory watch
+This obsolete sketch used a caller-selected logical file. The implemented
+inventory package instead uses permission-gated bounded listing and a
+deterministic newest-save policy in Starlark. There is still no directory watch
 or recurring memory sampling.
 
 ## Execution

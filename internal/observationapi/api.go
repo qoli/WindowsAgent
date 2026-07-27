@@ -23,7 +23,7 @@ func ValidateBlobHandle(value string) error {
 	return nil
 }
 
-const ProtocolVersion = "2026-07-27"
+const ProtocolVersion = "2026-07-28"
 
 const (
 	NamespaceMemory = "memory"
@@ -32,7 +32,7 @@ const (
 
 var operations = map[string][]string{
 	NamespaceMemory: {"modules", "regions", "scan", "resolveRip", "readBatch", "readStrided"},
-	NamespaceFile:   {"stat", "read", "hash", "openBlob"},
+	NamespaceFile:   {"list", "stat", "read", "hash", "openBlob"},
 }
 
 func OperationAllowed(namespace, operation string) bool {

@@ -12,8 +12,7 @@ import (
 func TestReadRequest(t *testing.T) {
 	name := filepath.Join(t.TempDir(), "request.json")
 	if err := os.WriteFile(name, []byte(`{
-	  "inputs": {"value": 7},
-	  "fileRoots": {"game-saves": "/absolute/root"}
+	  "inputs": {"value": 7}
 	}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -21,8 +20,7 @@ func TestReadRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.Inputs["value"] != float64(7) ||
-		request.FileRoots["game-saves"] != "/absolute/root" {
+	if request.Inputs["value"] != float64(7) {
 		t.Fatalf("request = %#v", request)
 	}
 }
@@ -33,10 +31,10 @@ func TestReadRequestRejectsInvalidContract(t *testing.T) {
 		body string
 		want string
 	}{
-		{name: "missing inputs", body: `{"fileRoots":{}}`, want: "inputs"},
-		{name: "missing roots", body: `{"inputs":{}}`, want: "fileRoots"},
-		{name: "unknown field", body: `{"inputs":{},"fileRoots":{},"extra":true}`, want: "unknown"},
-		{name: "duplicate key", body: `{"inputs":{},"inputs":{},"fileRoots":{}}`, want: "duplicate"},
+		{name: "missing inputs", body: `{}`, want: "inputs"},
+		{name: "removed roots", body: `{"inputs":{},"fileRoots":{}}`, want: "unknown"},
+		{name: "unknown field", body: `{"inputs":{},"extra":true}`, want: "unknown"},
+		{name: "duplicate key", body: `{"inputs":{},"inputs":{}}`, want: "duplicate"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

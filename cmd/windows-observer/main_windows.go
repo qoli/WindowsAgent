@@ -18,13 +18,13 @@ import (
 )
 
 type initializeParams struct {
-	ProtocolVersion string                    `json:"protocolVersion"`
-	JobID           string                    `json:"jobId"`
-	Deadline        time.Time                 `json:"deadline"`
-	Permissions     scriptpackage.Permissions `json:"permissions"`
-	Process         *observer.ProcessIdentity `json:"process"`
-	FileRoots       map[string]string         `json:"fileRoots"`
-	BlobRoot        string                    `json:"blobRoot"`
+	ProtocolVersion   string                    `json:"protocolVersion"`
+	JobID             string                    `json:"jobId"`
+	Deadline          time.Time                 `json:"deadline"`
+	Permissions       scriptpackage.Permissions `json:"permissions"`
+	Process           *observer.ProcessIdentity `json:"process"`
+	ResolvedFileRoots map[string]string         `json:"resolvedFileRoots"`
+	BlobRoot          string                    `json:"blobRoot"`
 }
 
 func main() {
@@ -78,7 +78,7 @@ func run() error {
 		}
 	}
 	if params.Permissions.File != nil {
-		router.File, err = observer.NewFileBackendWithBlobRoot(params.FileRoots, params.BlobRoot)
+		router.File, err = observer.NewFileBackendWithBlobRoot(params.ResolvedFileRoots, params.BlobRoot)
 		if err != nil {
 			router.Close()
 			writeError(conn, first.ID, -32011, "initialize file observer", err)

@@ -13,31 +13,27 @@ dumps, or host information.
 
 ## Deployment warning
 
-The current screenshot API has no authentication or TLS and listens on
-`0.0.0.0:8787` by default. Restrict reachability to a trusted LAN or private
-overlay network. Do not expose it directly to the public Internet. Capture
-metadata includes the foreground process ID, executable name and path, and
-window title; these values can disclose installed software, usernames, file
-locations, or document names.
+The HTTP API has no authentication or TLS and listens on `0.0.0.0:8787` by
+default. Restrict reachability to a trusted LAN or private overlay network. Do
+not expose it directly to the public Internet. Capture metadata includes the
+foreground process ID, executable name and path, and window title; these values
+can disclose installed software, usernames, file locations, or document names.
 
 The HTTP Script catalog is read-only and may disclose installed capability
-IDs, titles, schemas, and runtime names. Script execution uses
-`POST /v1/scripts/run` and requires the exact bearer token stored in
-`<data-dir>/script-api.token`. The token is not returned by status, capture,
-Rule, catalog, job output, or logs.
+IDs, titles, schemas, and runtime names. `POST /v1/scripts/run` is also
+unauthenticated. Any client that can reach the listener can invoke any
+currently registered Script capability with its manifest-declared read-only
+observation permissions and receive its bounded result. Network reachability
+is therefore the deployment trust boundary for screenshots and Script
+execution alike.
 
-Possession of that token authorizes execution of any currently registered
-Script capability and its manifest-declared observation permissions. Treat it
-as a credential. HTTP does not provide TLS, so use the Script API only through
-loopback or a trusted encrypted private overlay; a plain trusted LAN is not
-sufficient protection for the bearer token. Do not include it in Rule
-plugins, AGENTS documents, shell history, screenshots, issues, or reports.
-
-The Script endpoint accepts logical inputs and exact Host file-root bindings,
-not package paths, runtime overrides, DLL paths, or arbitrary executable
-selectors. The launcher derives the process selector from the owning Rule,
-snapshots the package, validates input/output schemas and permissions, runs
-one job at a time, and performs no Rule upload, rewrite, or reload.
+The Script endpoint accepts only a capability ID and schema-valid logical
+inputs, not Host file roots, package paths, runtime overrides, DLL paths, or
+arbitrary executable selectors. File roots come from validated package
+known-folder declarations and are resolved locally by the Host. The launcher
+derives the process selector from the owning Rule, snapshots the package,
+validates input/output schemas and permissions, runs one job at a time, and
+performs no Rule upload, rewrite, or reload.
 
 Rule instruction documents served by the API come from the external `Rules/`
 tree. Local Rule plugin content is authoritative and intentionally reloadable

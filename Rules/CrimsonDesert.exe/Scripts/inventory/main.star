@@ -128,9 +128,74 @@ def read_from_memory():
         },
     }
 
+def select_save_path():
+    listing = observer.file.list(
+        path = {
+            "root": "crimson-desert-saves",
+            "relative": ".",
+        },
+        maxDepth = 3,
+        maxEntries = 4096,
+    )
+    accounts = []
+    for entry in listing["entries"]:
+        if entry["kind"] == "reparse-point":
+            return job.fail(
+                code = "SAVE_REPARSE_POINT_FOUND",
+                message = "Crimson Desert save root contains a reparse point",
+            )
+        parts = entry["relative"].split("/")
+        if entry["kind"] == "directory" and len(parts) == 1:
+            accounts.append(entry["relative"])
+    if len(accounts) == 0:
+        return job.fail(
+            code = "ACCOUNT_SAVE_ROOT_NOT_FOUND",
+            message = "Crimson Desert save root contains no account directory",
+        )
+    if len(accounts) != 1:
+        return job.fail(
+            code = "ACCOUNT_SAVE_ROOT_AMBIGUOUS",
+            message = "Crimson Desert save root must contain exactly one account directory",
+        )
+
+    account = accounts[0]
+    candidates = []
+    for entry in listing["entries"]:
+        parts = entry["relative"].split("/")
+        if (
+            entry["kind"] == "file" and
+            len(parts) == 3 and
+            parts[0] == account and
+            parts[2] == "save.save"
+        ):
+            candidates.append(entry)
+    if len(candidates) == 0:
+        return job.fail(
+            code = "SAVE_CANDIDATE_NOT_FOUND",
+            message = "account save root contains no <slot>/save.save candidate",
+        )
+
+    newest = candidates[0]
+    tied = False
+    for candidate in candidates[1:]:
+        if candidate["modifiedAt"] > newest["modifiedAt"]:
+            newest = candidate
+            tied = False
+        elif candidate["modifiedAt"] == newest["modifiedAt"]:
+            tied = True
+    if tied:
+        return job.fail(
+            code = "NEWEST_SAVE_TIMESTAMP_TIE",
+            message = "newest save timestamp is shared by multiple candidates",
+        )
+    return {
+        "root": "crimson-desert-saves",
+        "relative": newest["relative"],
+    }
+
 def read_from_save():
     blob = observer.file.open_blob(
-        path = job.input(name = "save"),
+        path = select_save_path(),
     )
     blob_path = native.blob_path(blob = blob["blob"])
     decoder = native.load_library(SAVE_LIBRARY)

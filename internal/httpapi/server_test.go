@@ -26,8 +26,6 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
 
-const testScriptToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-
 type fakeCapturer struct {
 	status      capture.Status
 	result      capture.Result
@@ -231,7 +229,7 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 		script.Version != 1 ||
 		script.Launcher.Method != http.MethodPost ||
 		script.Launcher.URL != "/v1/scripts/run" ||
-		script.Launcher.Authentication != "bearer" {
+		script.Launcher.Authentication != "none" {
 		t.Fatalf("script = %+v", script)
 	}
 	var inputSchema map[string]any
@@ -243,7 +241,7 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	}
 }
 
-func TestScriptRunRequiresBearerTokenAndUsesGenericInvocation(t *testing.T) {
+func TestScriptRunUsesGenericInvocationWithoutAuthentication(t *testing.T) {
 	executor := &fakeScriptExecutor{
 		result: json.RawMessage(`{"ok":true,"capability":"game/status","output":{"ready":true}}`),
 	}
@@ -253,18 +251,8 @@ func TestScriptRunRequiresBearerTokenAndUsesGenericInvocation(t *testing.T) {
 		time.Second,
 		executor,
 	)
-	body := `{"capability":"game/status","inputs":{"detail":true},"fileRoots":{}}`
-	unauthorized := httptest.NewRecorder()
-	server.Handler().ServeHTTP(
-		unauthorized,
-		httptest.NewRequest(http.MethodPost, "/v1/scripts/run", strings.NewReader(body)),
-	)
-	if unauthorized.Code != http.StatusUnauthorized || executor.calls != 0 {
-		t.Fatalf("unauthorized status = %d, calls = %d", unauthorized.Code, executor.calls)
-	}
-
+	body := `{"capability":"game/status","inputs":{"detail":true}}`
 	request := httptest.NewRequest(http.MethodPost, "/v1/scripts/run", strings.NewReader(body))
-	request.Header.Set("Authorization", "Bearer "+testScriptToken)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -288,21 +276,30 @@ func TestScriptRunRejectsDuplicateJSONAndReportsLaunchFailure(t *testing.T) {
 	duplicate := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/scripts/run",
-		strings.NewReader(`{"capability":"one","capability":"two","inputs":{},"fileRoots":{}}`),
+		strings.NewReader(`{"capability":"one","capability":"two","inputs":{}}`),
 	)
-	duplicate.Header.Set("Authorization", "Bearer "+testScriptToken)
 	duplicateResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(duplicateResponse, duplicate)
 	if duplicateResponse.Code != http.StatusBadRequest || executor.calls != 0 {
 		t.Fatalf("duplicate status = %d, calls = %d", duplicateResponse.Code, executor.calls)
 	}
 
+	removedRoots := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/scripts/run",
+		strings.NewReader(`{"capability":"game/status","inputs":{},"fileRoots":{"caller":"C:\\data"}}`),
+	)
+	removedRootsResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(removedRootsResponse, removedRoots)
+	if removedRootsResponse.Code != http.StatusBadRequest || executor.calls != 0 {
+		t.Fatalf("removed roots status = %d, calls = %d", removedRootsResponse.Code, executor.calls)
+	}
+
 	failed := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/scripts/run",
-		strings.NewReader(`{"capability":"game/status","inputs":{},"fileRoots":{}}`),
+		strings.NewReader(`{"capability":"game/status","inputs":{}}`),
 	)
-	failed.Header.Set("Authorization", "Bearer "+testScriptToken)
 	failedResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(failedResponse, failed)
 	if failedResponse.Code != http.StatusUnprocessableEntity {
@@ -486,7 +483,6 @@ func newTestServerAndRuleRootWithExecutor(
 		store,
 		ruleStore,
 		executor,
-		testScriptToken,
 		timeout,
 		"test",
 		logger,
@@ -564,7 +560,14 @@ func writeTestScriptPackage(t *testing.T, root string) {
 		  "permissions": {
 		    "memory": null,
 		    "file": {
-		      "roots": ["game-files"],
+		      "roots": [{
+		        "id": "game-files",
+		        "resolver": {
+		          "kind": "windows-known-folder",
+		          "knownFolder": "LocalAppData",
+		          "relative": "Game/files"
+		        }
+		      }],
 		      "operations": ["stat"],
 		      "maxCalls": 1,
 		      "maxBytesRead": 1024
