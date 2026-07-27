@@ -9,16 +9,19 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/rules"
 )
 
 type fakeCapturer struct {
@@ -72,6 +75,24 @@ func TestCaptureAndDownload(t *testing.T) {
 	if metadata.Foreground.ExecutableName != "game.exe" || metadata.Foreground.ProcessID != 42 {
 		t.Fatalf("foreground process metadata = %+v", metadata.Foreground)
 	}
+	if metadata.Rule.Status != rules.StatusMatched || metadata.Rule.ID != "game.exe" || metadata.Rule.Agents == nil {
+		t.Fatalf("rule navigation = %+v", metadata.Rule)
+	}
+	if metadata.Rule.Description != rules.MatchedDescription {
+		t.Fatalf("rule description = %q", metadata.Rule.Description)
+	}
+
+	agentsRequest := httptest.NewRequest(http.MethodGet, metadata.Rule.Agents.URL, nil)
+	agentsResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(agentsResponse, agentsRequest)
+	if agentsResponse.Code != http.StatusOK {
+		t.Fatalf("AGENTS status = %d, body = %s", agentsResponse.Code, agentsResponse.Body.String())
+	}
+	if agentsResponse.Header().Get("Content-Type") != "text/markdown; charset=utf-8" ||
+		agentsResponse.Header().Get("ETag") != `"`+metadata.Rule.Agents.SHA256+`"` ||
+		agentsResponse.Body.String() != "# Game guidance\n" {
+		t.Fatal("AGENTS response does not match capture navigation")
+	}
 
 	contentRequest := httptest.NewRequest(http.MethodGet, metadata.ContentURL, nil)
 	contentResponse := httptest.NewRecorder()
@@ -84,6 +105,43 @@ func TestCaptureAndDownload(t *testing.T) {
 	}
 	if !bytes.Equal(contentResponse.Body.Bytes(), testResult().PNG) {
 		t.Fatal("downloaded content differs from capture")
+	}
+}
+
+func TestCaptureReportsUnmatchedRuleExplicitly(t *testing.T) {
+	result := testResult()
+	result.Foreground.ExecutableName = "explorer.exe"
+	result.Foreground.ExecutablePath = `C:\Windows\explorer.exe`
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: result})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/captures", bytes.NewBufferString(`{"include_cursor":true}`)))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var metadata artifact.Metadata
+	if err := json.Unmarshal(response.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Rule.Status != rules.StatusUnmatched ||
+		metadata.Rule.Description != rules.UnmatchedDescription ||
+		metadata.Rule.ID != "" ||
+		metadata.Rule.Agents != nil {
+		t.Fatalf("rule navigation = %+v", metadata.Rule)
+	}
+}
+
+func TestRuleDocumentRejectsUnknownAndNonCanonicalIDs(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	for _, path := range []string{
+		"/v1/rules/unknown.exe/AGENTS.md",
+		"/v1/rules/GAME.EXE/AGENTS.md",
+	} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("path %q status = %d, want 404", path, response.Code)
+		}
+		assertErrorCode(t, response.Body.Bytes(), "rule_not_found")
 	}
 }
 
@@ -191,7 +249,13 @@ func newTestServerWithTimeout(t *testing.T, capturer capture.Capturer, timeout t
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server, err := New(capturer, store, timeout, "test", logger)
+	ruleRegistry, err := rules.New(fstest.MapFS{
+		"game.exe/AGENTS.md": &fstest.MapFile{Data: []byte("# Game guidance\n"), Mode: fs.FileMode(0o444)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(capturer, store, ruleRegistry, timeout, "test", logger)
 	if err != nil {
 		t.Fatal(err)
 	}

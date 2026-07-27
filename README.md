@@ -27,6 +27,7 @@ The screenshot capability is available today:
 - cursor inclusion selected per request
 - foreground process ID, executable name/path, window title, and observation time
   recorded with each capture
+- capture-time foreground rule resolution with a navigable Codex `AGENTS.md`
 - SHA-256 verified artifacts and bounded retention
 - strict JSON errors with no GDI or hidden capture fallback
 - optional hidden startup through an interactive-user Scheduled Task
@@ -102,6 +103,7 @@ GET  /v1/captures/latest
 GET  /v1/captures/latest/content
 GET  /v1/captures/{id}
 GET  /v1/captures/{id}/content
+GET  /v1/rules/{rule-id}/AGENTS.md
 ```
 
 Create a capture:
@@ -134,32 +136,52 @@ object:
     "executable_name": "Game.exe",
     "executable_path": "C:\\Games\\Game.exe",
     "window_title": "Game"
+  },
+  "rule": {
+    "status": "matched",
+    "description": "The executing agent must read rule.agents.url before taking any rule-specific action.",
+    "id": "Game.exe",
+    "agents": {
+      "url": "/v1/rules/Game.exe/AGENTS.md",
+      "content_type": "text/markdown; charset=utf-8",
+      "sha256": "..."
+    }
   }
 }
 ```
 
 The foreground window is sampled immediately after WGC produces the captured
-frame. If Windows does not expose the foreground process or its executable
+frame. The same response resolves its executable name against the trusted,
+embedded folders under `Rules/`; this keeps the capture JSON as Codex's single
+Windows perception entry point. Codex can follow `rule.agents.url` to read the
+matched process guidance. An executable without a rule reports
+`rule.status=unmatched` with a description that no rule guidance is available,
+without inventing a substitute.
+
+If Windows does not expose the foreground process or its executable
 path, the request fails explicitly with `503 foreground_process_unavailable`;
 the agent does not guess process identity or commit a partial artifact.
 
-Foreground metadata is required for every artifact under this contract.
-Artifact directories created by older builds do not contain it and fail the
-strict startup scan rather than being presented as complete captures. Preserve
-or archive those directories before installing this build with a new, empty
-data directory; there is no automatic migration.
+Foreground and rule metadata are required for every artifact under this
+contract. Artifact directories created by older builds do not contain the full
+contract and fail the strict startup scan rather than being presented as
+complete captures. Preserve or archive those directories before installing
+this build with a new, empty data directory; there is no automatic migration.
 
 ## Project layout
 
 ```text
 cmd/windows-capture-agent/       screenshot capability executable
+docs/design/                     maintained design registry
 internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
 internal/foreground/             foreground process observation
 internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
+internal/rules/                  executable rule registry and navigation
 internal/wgc/                    WGC and Direct3D 11 implementation
+Rules/                           trusted per-process Codex guidance
 scripts/                         Windows installation helpers
 ```
 

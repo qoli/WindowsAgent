@@ -17,9 +17,11 @@ import (
 	"syscall"
 	"time"
 
+	ruleassets "github.com/qoli/WindowsAgent/Rules"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/config"
 	"github.com/qoli/WindowsAgent/internal/httpapi"
+	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/wgc"
 )
 
@@ -69,7 +71,11 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize WGC capturer: %w", err)
 	}
-	api, err := httpapi.New(capturer, store, cfg.CaptureTimeout, version, logger)
+	ruleRegistry, err := rules.New(ruleassets.Documents)
+	if err != nil {
+		return fmt.Errorf("initialize rule registry: %w", err)
+	}
+	api, err := httpapi.New(capturer, store, ruleRegistry, cfg.CaptureTimeout, version, logger)
 	if err != nil {
 		return fmt.Errorf("initialize HTTP API: %w", err)
 	}
@@ -94,6 +100,7 @@ func run() (runErr error) {
 		"artifact_root", store.Root(),
 		"retention", cfg.Retention,
 		"capture_timeout", cfg.CaptureTimeout.String(),
+		"rule_count", ruleRegistry.Count(),
 	)
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

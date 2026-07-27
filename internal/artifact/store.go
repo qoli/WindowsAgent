@@ -20,6 +20,7 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/rules"
 )
 
 const (
@@ -34,20 +35,21 @@ var (
 )
 
 type Metadata struct {
-	ID                 string          `json:"id"`
-	CreatedAt          time.Time       `json:"created_at"`
-	Format             string          `json:"format"`
-	ContentType        string          `json:"content_type"`
-	Width              int             `json:"width"`
-	Height             int             `json:"height"`
-	Bytes              int64           `json:"bytes"`
-	SHA256             string          `json:"sha256"`
-	IncludeCursor      bool            `json:"include_cursor"`
-	Monitor            capture.Monitor `json:"monitor"`
-	Foreground         foreground.Info `json:"foreground"`
-	CapturePixelFormat string          `json:"capture_pixel_format"`
-	ToneMapped         bool            `json:"tone_mapped"`
-	ContentURL         string          `json:"content_url"`
+	ID                 string           `json:"id"`
+	CreatedAt          time.Time        `json:"created_at"`
+	Format             string           `json:"format"`
+	ContentType        string           `json:"content_type"`
+	Width              int              `json:"width"`
+	Height             int              `json:"height"`
+	Bytes              int64            `json:"bytes"`
+	SHA256             string           `json:"sha256"`
+	IncludeCursor      bool             `json:"include_cursor"`
+	Monitor            capture.Monitor  `json:"monitor"`
+	Foreground         foreground.Info  `json:"foreground"`
+	Rule               rules.Resolution `json:"rule"`
+	CapturePixelFormat string           `json:"capture_pixel_format"`
+	ToneMapped         bool             `json:"tone_mapped"`
+	ContentURL         string           `json:"content_url"`
 }
 
 type Store struct {
@@ -170,6 +172,7 @@ func (s *Store) Commit(ctx context.Context, result capture.Result) (*Metadata, e
 		IncludeCursor:      result.IncludeCursor,
 		Monitor:            result.Monitor,
 		Foreground:         result.Foreground,
+		Rule:               result.Rule,
 		CapturePixelFormat: result.CapturePixelFormat,
 		ToneMapped:         result.ToneMapped,
 		ContentURL:         "/v1/captures/" + id + "/content",
@@ -327,6 +330,9 @@ func validateResult(result capture.Result) error {
 	if err := result.Foreground.Validate(); err != nil {
 		return err
 	}
+	if err := result.Rule.Validate(); err != nil {
+		return err
+	}
 	if result.CapturePixelFormat == "" {
 		return errors.New("capture pixel format is required")
 	}
@@ -374,6 +380,9 @@ func validateMetadata(id string, metadata Metadata) error {
 		return errors.New("HDR captures and tone_mapped must agree")
 	}
 	if err := metadata.Foreground.Validate(); err != nil {
+		return err
+	}
+	if err := metadata.Rule.Validate(); err != nil {
 		return err
 	}
 	if _, err := hex.DecodeString(metadata.SHA256); err != nil {

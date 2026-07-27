@@ -9,11 +9,13 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/rules"
 )
 
 func TestCommitLatestAndReadContent(t *testing.T) {
@@ -25,6 +27,9 @@ func TestCommitLatestAndReadContent(t *testing.T) {
 	}
 	if metadata.ContentURL != "/v1/captures/"+metadata.ID+"/content" {
 		t.Fatalf("unexpected content URL: %s", metadata.ContentURL)
+	}
+	if metadata.Rule.Status != rules.StatusMatched || metadata.Rule.ID != "game.exe" {
+		t.Fatalf("unexpected rule navigation: %+v", metadata.Rule)
 	}
 
 	latest, err := store.Latest(context.Background())
@@ -115,6 +120,15 @@ func TestCommitRejectsMissingForegroundProcess(t *testing.T) {
 	}
 }
 
+func TestCommitRejectsMissingRuleResolution(t *testing.T) {
+	store := newTestStore(t, 100)
+	result := testResult("invalid")
+	result.Rule = rules.Resolution{}
+	if _, err := store.Commit(context.Background(), result); err == nil {
+		t.Fatal("expected missing rule resolution error")
+	}
+}
+
 func newTestStore(t *testing.T, retention int) *Store {
 	t.Helper()
 	store, err := New(t.TempDir(), retention)
@@ -152,6 +166,16 @@ func testResult(content string) capture.Result {
 			ExecutableName: "game.exe",
 			ExecutablePath: `C:\Games\game.exe`,
 			WindowTitle:    "Game",
+		},
+		Rule: rules.Resolution{
+			Status:      rules.StatusMatched,
+			Description: rules.MatchedDescription,
+			ID:          "game.exe",
+			Agents: &rules.Document{
+				URL:         "/v1/rules/game.exe/AGENTS.md",
+				ContentType: "text/markdown; charset=utf-8",
+				SHA256:      strings.Repeat("0", 64),
+			},
 		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",
 	}

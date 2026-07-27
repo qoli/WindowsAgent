@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/rules"
 )
 
 type Monitor struct {
@@ -29,6 +30,7 @@ type Result struct {
 	IncludeCursor      bool
 	Monitor            Monitor
 	Foreground         foreground.Info
+	Rule               rules.Resolution
 	CapturePixelFormat string
 	ToneMapped         bool
 }

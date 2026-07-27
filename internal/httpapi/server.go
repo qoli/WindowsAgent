@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/rules"
 )
 
 const maxRequestBody = 4 << 10
@@ -22,6 +24,7 @@ const maxRequestBody = 4 << 10
 type Server struct {
 	capturer capture.Capturer
 	store    *artifact.Store
+	rules    *rules.Registry
 	timeout  time.Duration
 	version  string
 	logger   *slog.Logger
@@ -52,12 +55,15 @@ type statusResponse struct {
 	Latest        *artifact.Metadata `json:"latest,omitempty"`
 }
 
-func New(capturer capture.Capturer, store *artifact.Store, timeout time.Duration, version string, logger *slog.Logger) (*Server, error) {
+func New(capturer capture.Capturer, store *artifact.Store, ruleRegistry *rules.Registry, timeout time.Duration, version string, logger *slog.Logger) (*Server, error) {
 	if capturer == nil {
 		return nil, errors.New("capturer is required")
 	}
 	if store == nil {
 		return nil, errors.New("artifact store is required")
+	}
+	if ruleRegistry == nil {
+		return nil, errors.New("rule registry is required")
 	}
 	if timeout <= 0 {
 		return nil, errors.New("capture timeout must be positive")
@@ -71,6 +77,7 @@ func New(capturer capture.Capturer, store *artifact.Store, timeout time.Duration
 	return &Server{
 		capturer: capturer,
 		store:    store,
+		rules:    ruleRegistry,
 		timeout:  timeout,
 		version:  version,
 		logger:   logger,
@@ -110,6 +117,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodGet, s.handleLatestContent)
 	case strings.HasPrefix(r.URL.Path, "/v1/captures/"):
 		s.handleCaptureResource(recorder, r, requestID)
+	case strings.HasPrefix(r.URL.Path, "/v1/rules/"):
+		s.handleRuleResource(recorder, r, requestID)
 	default:
 		writeError(recorder, requestID, http.StatusNotFound, "route_not_found", "route not found")
 	}
@@ -177,6 +186,11 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request, requestID
 		s.writeMappedError(w, requestID, err)
 		return
 	}
+	result.Rule, err = s.rules.Resolve(result.Foreground.ExecutableName)
+	if err != nil {
+		s.writeMappedError(w, requestID, err)
+		return
+	}
 	metadata, err := s.store.Commit(ctx, result)
 	if err != nil {
 		s.writeMappedError(w, requestID, err)
@@ -192,9 +206,45 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request, requestID
 		"tone_mapped", metadata.ToneMapped,
 		"foreground_process_id", metadata.Foreground.ProcessID,
 		"foreground_executable_name", metadata.Foreground.ExecutableName,
+		"rule_status", metadata.Rule.Status,
+		"rule_id", metadata.Rule.ID,
 	)
 	w.Header().Set("Location", "/v1/captures/"+metadata.ID)
 	writeJSON(w, http.StatusCreated, metadata)
+}
+
+func (s *Server) handleRuleResource(w http.ResponseWriter, r *http.Request, requestID string) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	remainder := strings.TrimPrefix(r.URL.Path, "/v1/rules/")
+	parts := strings.Split(remainder, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "AGENTS.md" {
+		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
+		return
+	}
+	content, resolution, err := s.rules.ReadAGENTS(parts[0])
+	if errors.Is(err, fs.ErrNotExist) {
+		writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
+		return
+	}
+	if err != nil {
+		s.writeMappedError(w, requestID, err)
+		return
+	}
+	etag := `"` + resolution.Agents.SHA256 + `"`
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", resolution.Agents.ContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 
 func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request, requestID string) {
