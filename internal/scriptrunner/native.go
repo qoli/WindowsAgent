@@ -2,13 +2,10 @@ package scriptrunner
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -101,7 +98,7 @@ func (h *nativeHost) loadBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args s
 	}
 	declaration, declared := h.pkg.Manifest.NativeLibraries[alias]
 	if !declared {
-		return nil, &nativeError{code: "NATIVE_LIBRARY_NOT_DECLARED", stage: "loading-library", cause: fmt.Errorf("native library alias %q is absent from the verified manifest", alias)}
+		return nil, &nativeError{code: "NATIVE_LIBRARY_NOT_DECLARED", stage: "loading-library", cause: fmt.Errorf("native library alias %q is absent from the loaded manifest", alias)}
 	}
 	if declaration.Platform != nativePlatform {
 		return nil, &nativeError{code: "NATIVE_PLATFORM_MISMATCH", stage: "loading-library", cause: fmt.Errorf("native library %q requires %s", alias, declaration.Platform)}
@@ -110,8 +107,8 @@ func (h *nativeHost) loadBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args s
 		return existing, nil
 	}
 	path := filepath.Join(h.pkg.Root, filepath.FromSlash(declaration.Artifact))
-	if err := verifyNativeArtifact(path, declaration.SHA256); err != nil {
-		record := NativeRecord{Alias: alias, Action: "load", Phase: "failed", ErrorKind: "NATIVE_LIBRARY_DIGEST_MISMATCH"}
+	if err := validateNativeArtifact(path); err != nil {
+		record := NativeRecord{Alias: alias, Action: "load", Phase: "failed", ErrorKind: "NATIVE_LIBRARY_INVALID"}
 		_ = h.broker.RecordNative(h.ctx, record)
 		return nil, &nativeError{code: record.ErrorKind, stage: "verifying-library", cause: err}
 	}
@@ -133,25 +130,13 @@ func (h *nativeHost) loadBuiltin(_ *starlark.Thread, _ *starlark.Builtin, args s
 	return library, nil
 }
 
-func verifyNativeArtifact(path, expectedSHA256 string) error {
+func validateNativeArtifact(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if !info.Mode().IsRegular() {
 		return errors.New("native library artifact is not a regular file")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return err
-	}
-	if hex.EncodeToString(hash.Sum(nil)) != expectedSHA256 {
-		return errors.New("native library artifact SHA-256 changed after package verification")
 	}
 	return nil
 }

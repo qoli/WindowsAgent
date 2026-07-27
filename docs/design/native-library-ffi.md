@@ -6,7 +6,7 @@
 
 Script Packages are trusted local execution units. A package may own a native
 DLL artifact, its ABI declarations, and its call logic. WindowsAgent Core owns
-only package-integrity verification, generic Windows amd64 FFI, bounded
+only package validation, generic Windows amd64 FFI, bounded
 execution, job-scoped blob resolution, and provenance.
 
 There is no Native Extension Registry, provider adapter, extension broker, or
@@ -30,16 +30,13 @@ may terminate the Script Runner and therefore the current job. No PowerShell,
 
 ```json
 {
-  "files": {
-    "native/windows-amd64/decoder.dll": {
-      "sha256": "<64 lowercase hex>"
-    }
-  },
+  "files": [
+    "native/windows-amd64/decoder.dll"
+  ],
   "nativeLibraries": {
     "save-decoder": {
       "platform": "windows-amd64",
       "artifact": "native/windows-amd64/decoder.dll",
-      "sha256": "<same digest>",
       "maxCalls": 4,
       "maxNativeMemoryBytes": 536870912
     }
@@ -47,10 +44,10 @@ may terminate the Script Runner and therefore the current job. No PowerShell,
 }
 ```
 
-The artifact is package-relative, must also appear in `files`, and therefore
-contributes to the package digest. Missing files, digest mismatches, undeclared
-files, absolute paths, traversal, symlink escape, and platform mismatch fail
-explicitly. No alternate DLL or version is selected.
+The artifact is package-relative and must also appear in `files`. Missing
+files, undeclared files, absolute paths, traversal, symlinks, and platform
+mismatch fail explicitly. Local plugin content is authoritative; no alternate
+DLL or version is selected.
 
 Starlark identifies the DLL only by alias:
 
@@ -107,6 +104,7 @@ Decoded call output is also bounded by the Script Package
 `limits.maxResultBytes`. Representative terminal codes are:
 
 - `NATIVE_LIBRARY_NOT_DECLARED`
+- `NATIVE_LIBRARY_INVALID`
 - `NATIVE_PLATFORM_MISMATCH`
 - `NATIVE_LIBRARY_LOAD_FAILED`
 - `NATIVE_EXPORT_NOT_FOUND`

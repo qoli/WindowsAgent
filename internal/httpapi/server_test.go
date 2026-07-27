@@ -9,13 +9,13 @@ import (
 	"image/color"
 	"image/png"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/artifact"
@@ -78,7 +78,7 @@ func TestCaptureAndDownload(t *testing.T) {
 	if metadata.Rule.Status != rules.StatusMatched || metadata.Rule.ID != "game.exe" || metadata.Rule.Agents == nil {
 		t.Fatalf("rule navigation = %+v", metadata.Rule)
 	}
-	if metadata.Rule.Description != rules.MatchedDescription {
+	if metadata.Rule.Description != "Read the live Rule before acting." {
 		t.Fatalf("rule description = %q", metadata.Rule.Description)
 	}
 
@@ -89,7 +89,7 @@ func TestCaptureAndDownload(t *testing.T) {
 		t.Fatalf("AGENTS status = %d, body = %s", agentsResponse.Code, agentsResponse.Body.String())
 	}
 	if agentsResponse.Header().Get("Content-Type") != "text/markdown; charset=utf-8" ||
-		agentsResponse.Header().Get("ETag") != `"`+metadata.Rule.Agents.SHA256+`"` ||
+		agentsResponse.Header().Get("ETag") != "" ||
 		agentsResponse.Body.String() != "# Game guidance\n" {
 		t.Fatal("AGENTS response does not match capture navigation")
 	}
@@ -105,6 +105,45 @@ func TestCaptureAndDownload(t *testing.T) {
 	}
 	if !bytes.Equal(contentResponse.Body.Bytes(), testResult().PNG) {
 		t.Fatal("downloaded content differs from capture")
+	}
+}
+
+func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
+	server, _, ruleRoot := newTestServerAndRuleRoot(t, &fakeCapturer{status: testStatus(), result: testResult()}, time.Second)
+	if err := os.WriteFile(
+		filepath.Join(ruleRoot, rules.RuleFilename),
+		[]byte(`{"schemaVersion":1,"description":"Updated live.","scripts":{}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ruleRoot, rules.AgentsFilename), []byte("# Updated live\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	captureResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		captureResponse,
+		httptest.NewRequest(http.MethodPost, "/v1/captures", bytes.NewBufferString(`{"include_cursor":true}`)),
+	)
+	if captureResponse.Code != http.StatusCreated {
+		t.Fatalf("capture status = %d, body = %s", captureResponse.Code, captureResponse.Body.String())
+	}
+	var metadata artifact.Metadata
+	if err := json.Unmarshal(captureResponse.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.Rule.Description != "Updated live." {
+		t.Fatalf("rule description = %q", metadata.Rule.Description)
+	}
+
+	agentsResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		agentsResponse,
+		httptest.NewRequest(http.MethodGet, metadata.Rule.Agents.URL, nil),
+	)
+	if agentsResponse.Code != http.StatusOK || agentsResponse.Body.String() != "# Updated live\n" {
+		t.Fatalf("AGENTS status = %d, body = %q", agentsResponse.Code, agentsResponse.Body.String())
 	}
 }
 
@@ -244,22 +283,41 @@ func newTestServer(t *testing.T, capturer capture.Capturer) (*Server, *artifact.
 
 func newTestServerWithTimeout(t *testing.T, capturer capture.Capturer, timeout time.Duration) (*Server, *artifact.Store) {
 	t.Helper()
+	server, store, _ := newTestServerAndRuleRoot(t, capturer, timeout)
+	return server, store
+}
+
+func newTestServerAndRuleRoot(t *testing.T, capturer capture.Capturer, timeout time.Duration) (*Server, *artifact.Store, string) {
+	t.Helper()
 	store, err := artifact.New(t.TempDir(), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ruleRegistry, err := rules.New(fstest.MapFS{
-		"game.exe/AGENTS.md": &fstest.MapFile{Data: []byte("# Game guidance\n"), Mode: fs.FileMode(0o444)},
-	})
+	rulesRoot := t.TempDir()
+	ruleRoot := filepath.Join(rulesRoot, "game.exe")
+	if err := os.Mkdir(ruleRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(ruleRoot, rules.RuleFilename),
+		[]byte(`{"schemaVersion":1,"description":"Read the live Rule before acting.","scripts":{}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ruleRoot, rules.AgentsFilename), []byte("# Game guidance\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ruleStore, err := rules.New(rulesRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(capturer, store, ruleRegistry, timeout, "test", logger)
+	server, err := New(capturer, store, ruleStore, timeout, "test", logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return server, store
+	return server, store, ruleRoot
 }
 
 func testStatus() capture.Status {

@@ -17,6 +17,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/observationjob"
 	"github.com/qoli/WindowsAgent/internal/observer"
+	"github.com/qoli/WindowsAgent/internal/rules"
 )
 
 const crimsonInventoryCapability = "crimson-desert/inventory"
@@ -32,10 +33,11 @@ func main() {
 func run() error {
 	flags := flag.NewFlagSet("windows-observation-job", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	var capability, installRoot, saveRoot, saveRelative, processPath string
+	var capability, installRoot, rulesDir, saveRoot, saveRelative, processPath string
 	var processID uint
 	flags.StringVar(&capability, "capability", "", "registered observation capability ID")
 	flags.StringVar(&installRoot, "install-root", "", "absolute WindowsAgent observation runtime root")
+	flags.StringVar(&rulesDir, "rules-dir", "", "absolute external Rule plugin directory")
 	flags.StringVar(&saveRoot, "save-root", "", "authorized absolute save root")
 	flags.StringVar(&saveRelative, "save-relative", "", "selected root-relative save file")
 	flags.UintVar(&processID, "process-id", 0, "host-resolved process ID; zero uses foreground")
@@ -46,9 +48,6 @@ func run() error {
 	if flags.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	if capability != crimsonInventoryCapability {
-		return fmt.Errorf("unsupported registered capability %q", capability)
-	}
 	if installRoot == "" {
 		executable, err := os.Executable()
 		if err != nil {
@@ -56,8 +55,23 @@ func run() error {
 		}
 		installRoot = filepath.Dir(executable)
 	}
-	if !filepath.IsAbs(installRoot) || !filepath.IsAbs(saveRoot) || saveRelative == "" {
-		return errors.New("install-root, save-root, and save-relative must identify explicit paths")
+	if !filepath.IsAbs(installRoot) || !filepath.IsAbs(rulesDir) ||
+		!filepath.IsAbs(saveRoot) || saveRelative == "" {
+		return errors.New("install-root, rules-dir, save-root, and save-relative must identify explicit paths")
+	}
+	ruleStore, err := rules.New(rulesDir)
+	if err != nil {
+		return fmt.Errorf("initialize rule store: %w", err)
+	}
+	script, err := ruleStore.ResolveScript(capability)
+	if err != nil {
+		return fmt.Errorf("resolve capability %q: %w", capability, err)
+	}
+	if script.Runtime != rules.ObservationRuntimeV1 {
+		return fmt.Errorf("unsupported script runtime %q for capability %q", script.Runtime, capability)
+	}
+	if capability != crimsonInventoryCapability {
+		return fmt.Errorf("unsupported registered observation capability %q", capability)
 	}
 
 	var resolvedProcessID uint32
@@ -92,7 +106,8 @@ func run() error {
 	result, err := observationjob.Run(context.Background(), observationjob.Spec{
 		JobID:                  jobID,
 		Deadline:               deadline,
-		PackageRoot:            filepath.Join(installRoot, "ObservationScripts", "CrimsonDesert", "inventory"),
+		CapabilityID:           capability,
+		PackageRoot:            script.Root,
 		ScriptRunnerExecutable: filepath.Join(installRoot, "windows-observation-script-runner.exe"),
 		ObserverExecutable:     filepath.Join(installRoot, "windows-observer.exe"),
 		Process:                &process,

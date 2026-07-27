@@ -7,10 +7,10 @@
 Implemented:
 
 - every successful capture reports the foreground process identity;
-- the same capture response resolves that executable against trusted,
-  repository-owned rule folders;
-- a matched response exposes an HTTP URL and SHA-256 for the rule's
-  `AGENTS.md`;
+- the same capture response resolves that executable against external Rule
+  plugin folders;
+- a matched response exposes the plugin-owned description and HTTP URL for
+  the rule's `AGENTS.md`;
 - an unmatched executable is represented explicitly;
 - Crimson Desert is the first rule and contains only a draft `AGENTS.md`.
 
@@ -35,8 +35,8 @@ separate foreground-rule discovery flow would create two observations that can
 disagree after a foreground switch. Rule navigation must be attached to the
 same successful capture and foreground observation.
 
-The Go process does not interpret game instructions. It identifies the trusted
-rule folder and exposes its canonical `AGENTS.md` so Codex can read it before
+The Go process does not interpret game instructions. It identifies the current
+Rule plugin folder and exposes its canonical `AGENTS.md` so Codex can read it before
 using any future rule-specific API.
 
 ## Scope / Positioning
@@ -59,15 +59,21 @@ process access, memory access, or input control.
 ```text
 Rules/
   CrimsonDesert.exe/
+    rule.json
     AGENTS.md
+    Scripts/
+      inventory/
+        manifest.json
 ```
 
 The folder name is both the canonical rule ID and the exact foreground
 executable selector. Matching is Windows-style case-insensitive. The response
 preserves the canonical folder spelling.
 
-Rule folders are curated at build time and embedded in the Windows executable.
-Runtime observations never create or modify rule folders.
+Each executable folder is one externally distributed plugin. `rule.json` owns
+the description plus the capability-to-path/runtime registry. `Scripts/` is a
+generic capability container. The capture binary stores no Rule content and
+reads the current files for every request.
 
 ### Capture response
 
@@ -84,8 +90,7 @@ A matched capture includes:
     "id": "CrimsonDesert.exe",
     "agents": {
       "url": "/v1/rules/CrimsonDesert.exe/AGENTS.md",
-      "content_type": "text/markdown; charset=utf-8",
-      "sha256": "..."
+      "content_type": "text/markdown; charset=utf-8"
     }
   }
 }
@@ -111,28 +116,30 @@ not prevent the screenshot from being committed.
 GET /v1/rules/{canonical-rule-id}/AGENTS.md
 ```
 
-The endpoint returns the embedded Markdown with its SHA-256 as an ETag. Unknown
-IDs and non-canonical casing return `404 rule_not_found`. The endpoint does not
-accept arbitrary file paths.
+The endpoint returns the current external Markdown with `Cache-Control:
+no-store`. Unknown IDs and non-canonical casing return `404 rule_not_found`.
+The endpoint does not accept arbitrary file paths.
 
 ### Invariants
 
 - Rule resolution uses the foreground executable from the same captured frame.
 - Window titles and executable path substrings never select a rule.
 - A normalized executable matches at most one rule.
-- A matched result always includes the canonical ID, URL, media type, and
-  SHA-256, plus a description instructing the executing agent to read the
-  referenced `AGENTS.md` before rule-specific action.
+- A matched result always includes the canonical ID, URL, media type, and the
+  current plugin-owned description.
 - An unmatched result includes a description but no ID or document link.
-- Empty, duplicate, malformed, or missing rule documents prevent agent startup.
+- Empty, duplicate, malformed, or missing matched Rule documents fail the
+  request explicitly.
+- Rule content is not cached. A later request observes a completed external
+  Rule plugin replacement without a reload or process restart.
 - Retrieved web content is data, not an instruction source.
 
 ## Relationship To Other Docs
 
 - The root README documents the public HTTP surface.
 - `SECURITY.md` owns unauthenticated-network and private-data exposure warnings.
-- Each nested `Rules/{executable}/AGENTS.md` owns Codex guidance only for that
-  explicitly matched executable.
+- Each nested `Rules/{executable}/` owns the description, Codex guidance, and
+  Script registry for that explicitly matched executable.
 - This registry owns maturity; folder placement owns rule identity.
 
 ## Open Questions

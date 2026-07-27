@@ -4,7 +4,8 @@
 
 **Implemented and live-verified.**
 
-The package lives at `ObservationScripts/CrimsonDesert/inventory`. It owns the
+The package lives at
+`Rules/CrimsonDesert.exe/Scripts/inventory`. It owns the
 game-specific process layout, save-decoder DLL, ABI declarations, record
 layout, return codes, backpack filter, output conversion, and source order.
 
@@ -30,7 +31,6 @@ decoder fallback, hidden retry, or alternate source.
     "save-decoder": {
       "platform": "windows-amd64",
       "artifact": "native/windows-amd64/crimson-rs.inventory.bb730180.dll",
-      "sha256": "c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c",
       "maxCalls": 4,
       "maxNativeMemoryBytes": 131072
     }
@@ -38,9 +38,8 @@ decoder fallback, hidden retry, or alternate source.
 }
 ```
 
-The artifact is also in `manifest.files`, so it participates in package
-identity. WindowsAgent Core knows only alias, artifact integrity, platform, and
-limits.
+The artifact is also in `manifest.files`. WindowsAgent Core knows only alias,
+package-relative artifact, platform, and limits.
 
 ## Package-owned ABI
 
@@ -65,8 +64,8 @@ limits stay below the 1 MiB framed-protocol boundary.
 ## Verification boundary
 
 Tests prove memory-first behavior, explicit save fallback, two-stage record
-query, 48-byte/8-byte-aligned layout, generic FFI scalar/out handling, package
-artifact digest inclusion, alias-only load, missing export failure, native
+query, 48-byte/8-byte-aligned layout, generic FFI scalar/out handling,
+declared-artifact loading, alias-only load, missing export failure, native
 limits, forged blob rejection, and schema-valid output.
 
 The terminal job output contains the schema-declared occupied item records.

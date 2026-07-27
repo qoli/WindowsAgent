@@ -52,6 +52,7 @@ is present.
    .\windows-observation-job.exe `
      --capability crimson-desert/inventory `
      --install-root <absolute-runtime-root> `
+     --rules-dir <absolute-Rules-root> `
      --save-root <absolute-authorized-account-save-root> `
      --save-relative <selected-slot>/save.save
    ```

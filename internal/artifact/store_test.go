@@ -9,7 +9,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -169,12 +168,11 @@ func testResult(content string) capture.Result {
 		},
 		Rule: rules.Resolution{
 			Status:      rules.StatusMatched,
-			Description: rules.MatchedDescription,
+			Description: "Read the live Rule before acting.",
 			ID:          "game.exe",
 			Agents: &rules.Document{
 				URL:         "/v1/rules/game.exe/AGENTS.md",
 				ContentType: "text/markdown; charset=utf-8",
-				SHA256:      strings.Repeat("0", 64),
 			},
 		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",

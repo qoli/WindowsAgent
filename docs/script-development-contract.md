@@ -1,9 +1,9 @@
-# ObservationScripts Development Contract
+# Script Package Development Contract
 
 ## Status and authority
 
 This document is the authoring and review contract for every package below
-`ObservationScripts/`.
+`Rules/<Executable.exe>/Scripts/`.
 
 An Observation Script Package is trusted local task code, not an untrusted
 plugin sandbox. Trust does not remove its boundaries: every input, Observer
@@ -19,21 +19,23 @@ that exists only in documentation or in a private operator environment.
 Each leaf directory owns one finite observation task:
 
 ```text
-ObservationScripts/
-`-- <product>/
-    `-- <task>/
-        |-- manifest.json
-        |-- TASK.md
-        |-- main.star
-        |-- output.schema.json
-        `-- native/                 # optional
-            `-- windows-amd64/
-                `-- <artifact>.dll
+Rules/
+`-- <Executable.exe>/
+    `-- Scripts/
+        `-- <task>/
+            |-- manifest.json
+            |-- TASK.md
+            |-- main.star
+            |-- output.schema.json
+            `-- native/                 # optional
+                `-- windows-amd64/
+                    `-- <artifact>.dll
 ```
 
 The package owns:
 
-- the task semantics and stable package ID;
+- the task semantics; the stable capability ID, path, and runtime are declared
+  by the owning Rule plugin's `rule.json`;
 - required host inputs and their meaning;
 - source ordering and any explicitly approved fallback;
 - game/application-specific process validation, signatures, offsets, and data
@@ -43,7 +45,7 @@ The package owns:
 - the terminal JSON contract and application-level error codes;
 - bounds that make every read and allocation finite.
 
-WindowsAgent Core owns only generic execution: package verification, bounded
+WindowsAgent Core owns only generic execution: package validation, bounded
 Starlark, permission enforcement, read-only Observer calls, job-scoped blobs,
 generic Windows amd64 FFI, process isolation, deadlines, accounting, and
 provenance.
@@ -97,21 +99,20 @@ pinned schema.
 
 ### `manifest.json`
 
-The manifest is the executable authority and integrity boundary. V1 requires:
+The manifest is the executable package contract. V2 requires:
 
-- `schemaVersion: 1`;
-- a canonical, stable `id` such as `product/task`;
+- `schemaVersion: 2`;
 - a positive integer `version`;
 - distinct `entrypoint`, `taskDocument`, and `outputSchema` members;
 - `taskDocument: "TASK.md"`;
-- every regular package file declared in `files` with a lowercase SHA-256;
+- every regular package file declared exactly once in the `files` path list;
 - least-privilege Observer permissions;
 - bounded script limits;
 - each optional native DLL declared in both `files` and `nativeLibraries`.
 
 Package paths use forward slashes, are relative to the package root, and may
 not contain traversal, drive letters, backslashes, or symlink escapes.
-Undeclared files, missing files, digest mismatches, unknown manifest fields,
+Undeclared files, missing files, unknown manifest fields,
 duplicate strict-JSON keys, and package members larger than 4 MiB fail loading.
 `manifest.json` itself is not listed in `files`.
 
@@ -137,15 +138,15 @@ number:
 - `maxBytesRead` must cover the maximum authorized bytes;
 - `wallTimeMs` and `maxSteps` must terminate runaway work;
 - `maxResultBytes` must fit the schema's maximum useful result;
-- `maxLogBytes` must be a positive package log budget. V1 discards Starlark
+- `maxLogBytes` must be a positive package log budget. V2 discards Starlark
   `print`; the Host separately truncates child-process stderr, and neither
   channel authorizes sensitive logging.
 
 At least one memory permission, file permission, or native library is required.
-V1 permits at most four native libraries. Each library must have a canonical
+V2 permits at most four native libraries. Each library must have a canonical
 alias, `windows-amd64`-style platform, package-relative `.dll` artifact,
-matching SHA-256, positive call limit no greater than 1024, and positive native
-memory limit no greater than 1 GiB.
+positive call limit no greater than 1024, and positive native memory limit no
+greater than 1 GiB.
 
 ### `main.star`
 
@@ -208,8 +209,8 @@ secondary = job.attempt(
   observation source.
 
 Protocol errors, invalid permissions, exhausted budgets, deadline expiry,
-invalid native signatures, missing DLLs or exports, forged blobs, digest
-mismatch, and Runner or DLL crashes remain terminal infrastructure failures.
+invalid native signatures, missing DLLs or exports, forged blobs, and Runner
+or DLL crashes remain terminal infrastructure failures.
 They must not activate another source.
 
 Forbidden hidden fallback includes:
@@ -255,7 +256,7 @@ private path.
 
 Native DLL support is package-owned generic FFI, not a provider registry.
 
-The manifest declares only alias, artifact identity, platform, call limit, and
+The manifest declares only alias, package-relative artifact, platform, call limit, and
 native-memory limit. `main.star` owns all export and ABI knowledge:
 
 ```python
@@ -272,7 +273,7 @@ Starlark may load only a declared alias; it must not supply an arbitrary DLL
 path. `native.load_library` is the API spelling because `load` is reserved
 Starlark syntax.
 
-Available V1 types are:
+Available observation-runtime V1 types are:
 
 ```text
 native.void()
@@ -291,8 +292,8 @@ native.null()
 
 For every native integration:
 
-- document the artifact origin, immutable identity, and SHA-256 without
-  embedding private source paths;
+- document the artifact origin and reviewed build identity without embedding
+  private source paths;
 - declare the exact reviewed export names and signatures in Starlark;
 - validate every return code and out value before use;
 - use an explicit maximum before constructing `native.array`;
@@ -306,37 +307,17 @@ The DLL is loaded directly into
 and the current job. Do not describe this boundary as crash isolation from the
 Runner.
 
-## Integrity and versioning workflow
+## Update and versioning workflow
 
 After changing any declared member:
 
-1. calculate the member's SHA-256;
-2. update its entry in `manifest.files`;
-3. update the matching `nativeLibraries` digest when a DLL changed;
-4. load the package through the real Go loader;
-5. review the new package identity in runtime output.
+1. keep every regular member listed in `manifest.files`;
+2. load the package through the real Go loader;
+3. run the package and negative-path tests;
+4. review the capability ID and version in runtime output.
 
-On macOS or Linux:
-
-```bash
-shasum -a 256 \
-  ObservationScripts/<product>/<task>/main.star \
-  ObservationScripts/<product>/<task>/TASK.md \
-  ObservationScripts/<product>/<task>/output.schema.json
-```
-
-On Windows:
-
-```powershell
-Get-FileHash -Algorithm SHA256 `
-  .\ObservationScripts\<product>\<task>\main.star
-```
-
-The package digest includes the manifest digest and all declared member
-digests. Any semantic, schema, permission, task-document, or native-artifact
-change therefore changes package identity.
-
-Keep `id` stable for the same task. Increment `version` when the task behavior,
+Keep the capability ID in `rule.json` stable for the same task. Increment
+`version` when the task behavior,
 required inputs, output contract, permissions, source order, native ABI, or
 artifact changes. Do not reuse a version to disguise a changed contract.
 
@@ -348,9 +329,9 @@ levels.
 ### 1. Package loading
 
 Add or update a Go test that calls `scriptpackage.Load` on the real package.
-Include targeted negative tests for any new integrity rule, permission shape,
-or native declaration. The test must fail if a declared member changes without
-updating its digest.
+Include targeted negative tests for file declaration, path boundaries,
+permission shape, or native declarations. Locally modified declared members
+remain loadable without updating a digest.
 
 ### 2. Script behavior
 
@@ -399,7 +380,7 @@ session with the exact built executables and package being reviewed. Validate:
 - the actual source selected;
 - record or result counts without publishing private records;
 - ordered attempts and terminal failure behavior;
-- package identity and schema-valid output;
+- capability ID, package version, and schema-valid output;
 - Observer call/byte accounting;
 - native alias, completed call count, memory accounting, and terminal native
   failures when applicable;
@@ -416,7 +397,7 @@ A package is ready only when all answers are yes:
 - [ ] Does one leaf directory own exactly one finite task?
 - [ ] Do `TASK.md`, `main.star`, `output.schema.json`, and `manifest.json`
       describe the same inputs, sources, success, and failures?
-- [ ] Is every regular file declared with the current digest?
+- [ ] Is every regular file declared exactly once?
 - [ ] Are Observer operations and byte/call limits least-privilege and finite?
 - [ ] Are all process-build, pointer, size, count, and ABI assumptions checked?
 - [ ] Is every fallback explicit, ordered, schema-visible, and approved?
@@ -432,14 +413,14 @@ A package is ready only when all answers are yes:
 The maintained Crimson Desert inventory package is the current end-to-end
 example:
 
-- [`CrimsonDesert/inventory/TASK.md`](CrimsonDesert/inventory/TASK.md)
-- [`CrimsonDesert/inventory/main.star`](CrimsonDesert/inventory/main.star)
-- [`CrimsonDesert/inventory/output.schema.json`](CrimsonDesert/inventory/output.schema.json)
-- [`Crimson Desert inventory walkthrough`](../docs/examples/crimson-desert-inventory-job.md)
+- [`inventory/TASK.md`](../Rules/CrimsonDesert.exe/Scripts/inventory/TASK.md)
+- [`inventory/main.star`](../Rules/CrimsonDesert.exe/Scripts/inventory/main.star)
+- [`inventory/output.schema.json`](../Rules/CrimsonDesert.exe/Scripts/inventory/output.schema.json)
+- [`Crimson Desert inventory walkthrough`](examples/crimson-desert-inventory-job.md)
 
 Architecture details remain in:
 
-- [`Observation Script Package`](../docs/design/observation-script-package.md)
-- [`Scripted observation job model`](../docs/design/observation-job-model.md)
-- [`Script Runner native-library FFI`](../docs/design/native-library-ffi.md)
-- [`Observation Job protocol usage`](../docs/protocol/observation-worker-v1-usage.md)
+- [`Observation Script Package`](design/observation-script-package.md)
+- [`Scripted observation job model`](design/observation-job-model.md)
+- [`Script Runner native-library FFI`](design/native-library-ffi.md)
+- [`Observation Job protocol usage`](protocol/observation-worker-v1-usage.md)

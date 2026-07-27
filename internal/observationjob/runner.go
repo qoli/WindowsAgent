@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,9 +23,12 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptrunner"
 )
 
+const maxScriptSnapshotMemberBytes = 4 << 20
+
 type Spec struct {
 	JobID                  string
 	Deadline               time.Time
+	CapabilityID           string
 	PackageRoot            string
 	ScriptRunnerExecutable string
 	ObserverExecutable     string
@@ -69,7 +74,16 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 	if spec.JobID == "" || spec.Deadline.IsZero() || !spec.Deadline.After(time.Now()) {
 		return Result{}, &Error{Code: "JOB_INVALID", Stage: "validating-spec", Cause: errors.New("jobId and future deadline are required")}
 	}
-	pkg, err := scriptpackage.Load(spec.PackageRoot)
+	if spec.CapabilityID == "" {
+		return Result{}, &Error{Code: "JOB_INVALID", Stage: "validating-spec", Cause: errors.New("capability ID is required")}
+	}
+	snapshotRoot, err := snapshotPackage(spec.PackageRoot)
+	if err != nil {
+		return Result{}, &Error{Code: "SCRIPT_PACKAGE_INVALID", Stage: "snapshotting-package", Cause: err}
+	}
+	defer os.RemoveAll(filepath.Dir(snapshotRoot))
+	spec.PackageRoot = snapshotRoot
+	pkg, err := scriptpackage.Load(spec.PackageRoot, spec.CapabilityID)
 	if err != nil {
 		return Result{}, &Error{Code: "SCRIPT_PACKAGE_INVALID", Stage: "loading-package", Cause: err}
 	}
@@ -96,7 +110,11 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 		group.Close()
 	}()
 
-	scriptChild, err := group.Start(spec.ScriptRunnerExecutable, "--package-root", spec.PackageRoot)
+	scriptChild, err := group.Start(
+		spec.ScriptRunnerExecutable,
+		"--package-root", spec.PackageRoot,
+		"--capability-id", spec.CapabilityID,
+	)
 	if err != nil {
 		return Result{}, &Error{Code: "LAUNCH_FAILED", Stage: "launching-script-runner", Cause: err}
 	}
@@ -173,6 +191,79 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 		}
 	}
 	return Result{Package: pkg.Identity, Output: output, Provenance: provenance}, nil
+}
+
+func snapshotPackage(source string) (string, error) {
+	if source == "" || !filepath.IsAbs(source) {
+		return "", errors.New("script package root must be absolute")
+	}
+	canonicalSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return "", fmt.Errorf("resolve script package root: %w", err)
+	}
+	parent, err := os.MkdirTemp("", "windowsagent-script-snapshot-")
+	if err != nil {
+		return "", fmt.Errorf("create script snapshot root: %w", err)
+	}
+	target := filepath.Join(parent, "package")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		os.RemoveAll(parent)
+		return "", fmt.Errorf("create script snapshot package: %w", err)
+	}
+	err = filepath.WalkDir(canonicalSource, func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(canonicalSource, name)
+		if err != nil || relative == "." {
+			return err
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("script package symlink is forbidden: %s", relative)
+		}
+		destination := filepath.Join(target, relative)
+		if entry.IsDir() {
+			return os.Mkdir(destination, 0o700)
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("script package member is not a regular file: %s", relative)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.Size() > maxScriptSnapshotMemberBytes {
+			return fmt.Errorf(
+				"script package member %s exceeds %d bytes",
+				relative,
+				maxScriptSnapshotMemberBytes,
+			)
+		}
+		input, err := os.Open(name)
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err != nil {
+			input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		inputCloseErr := input.Close()
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if inputCloseErr != nil {
+			return inputCloseErr
+		}
+		return closeErr
+	})
+	if err != nil {
+		os.RemoveAll(parent)
+		return "", fmt.Errorf("copy script package snapshot: %w", err)
+	}
+	return target, nil
 }
 
 func initializeObserver(conn *observationprotocol.Conn, spec Spec, pkg *scriptpackage.Package, blobRoot string) error {
@@ -280,7 +371,7 @@ func brokerUntilResult(
 				record.CallsUsed > library.MaxCalls ||
 				record.NativeMemoryBytes > library.MaxNativeMemoryBytes ||
 				record.ResultBytes > pkg.Manifest.Limits.MaxResultBytes {
-				return nil, provenance, nil, errors.New("script-runner native provenance exceeds verified package contract")
+				return nil, provenance, nil, errors.New("script-runner native provenance exceeds validated package contract")
 			}
 			provenance = append(provenance, Provenance{
 				Namespace: "native", Operation: record.Action,

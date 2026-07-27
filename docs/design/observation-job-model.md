@@ -11,7 +11,7 @@ schema-valid JSON result or one typed failure.
 
 ```text
 windows-observation-job.exe
-  |-- windows-observation-script-runner.exe --package-root <verified package>
+  |-- windows-observation-script-runner.exe --package-root <job snapshot>
   `-- windows-observer.exe
 ```
 
@@ -38,7 +38,7 @@ There is no `extension/call` method or compatibility route.
 Observer provenance records call ID, namespace, operation, observation time,
 and cumulative Observer accounting. Native provenance records alias, generic
 action, function name, phase, calls used, native-memory bytes, result bytes,
-and error kind. The Host validates those values against the verified package
+and error kind. The Host validates those values against the job-scoped package
 limits but does not parse provider-specific exports or signatures.
 
 ## Blob lifecycle

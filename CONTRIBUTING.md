@@ -35,10 +35,10 @@ failure codes in the pull request; do not attach private screenshots, save
 files, memory contents, inventory results, or logs containing sensitive local
 paths.
 
-New or changed packages under `ObservationScripts/` must satisfy the
-[`ObservationScripts` development contract](ObservationScripts/README.md),
-including real package-loader tests, explicit source ordering, manifest digest
-updates, schema validation, and signed-in Windows evidence.
+New or changed packages under `Rules/<Executable.exe>/Scripts/` must satisfy
+the [`Script Package development contract`](docs/script-development-contract.md),
+including real package-loader tests, explicit source ordering, manifest file
+declarations, schema validation, and signed-in Windows evidence.
 
 ## Design boundaries
 
@@ -47,7 +47,7 @@ updates, schema validation, and signed-in Windows evidence.
 - Keep observation calls finite and single-shot; do not add polling, file
   watching, or a general remote observer endpoint.
 - A trusted Script Package may load only a `nativeLibraries` alias whose
-  package-relative artifact and SHA-256 are in the verified package manifest.
+  package-relative artifact is declared in the package manifest.
 - Keep the Script Runner FFI provider-neutral. Game-specific exports, structs,
   return codes, and conversion logic belong in the owning `main.star`, never
   in the Observer, Job Host, or generic Go FFI.

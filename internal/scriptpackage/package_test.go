@@ -1,8 +1,6 @@
 package scriptpackage
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"os"
@@ -12,7 +10,7 @@ import (
 
 func inventoryPackageRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "ObservationScripts", "CrimsonDesert", "inventory"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Scripts", "inventory"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +46,11 @@ func copyInventoryPackage(t *testing.T) string {
 
 func TestLoadCrimsonInventoryPackage(t *testing.T) {
 	root := inventoryPackageRoot(t)
-	pkg, err := Load(root)
+	pkg, err := Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if pkg.Identity.ID != "crimson-desert/inventory" || pkg.Identity.PackageSHA256 == "" {
+	if pkg.Identity.ID != "crimson-desert/inventory" || pkg.Identity.Version != 2 {
 		t.Fatalf("unexpected identity: %#v", pkg.Identity)
 	}
 }
@@ -92,7 +90,7 @@ func TestLoadRejectsUndeclaredNativeLibraryPathField(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), manifestBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(root); err == nil {
+	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
 		t.Fatal("Load accepted an undeclared native library path field")
 	}
 }
@@ -103,40 +101,38 @@ func TestLoadRejectsMissingNativeLibraryArtifact(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(root); err == nil {
+	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
 		t.Fatal("Load accepted a missing native library artifact")
 	}
 }
 
-func TestLoadRejectsNativeLibraryDigestMismatch(t *testing.T) {
+func TestLoadAcceptsLocallyModifiedDeclaredNativeLibrary(t *testing.T) {
 	root := copyInventoryPackage(t)
 	path := filepath.Join(root, "native", "windows-amd64", "crimson-rs.inventory.bb730180.dll")
 	if err := os.WriteFile(path, []byte("not the declared DLL"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(root); err == nil {
-		t.Fatal("Load accepted a native library digest mismatch")
+	if _, err := Load(root, "crimson-desert/inventory"); err != nil {
+		t.Fatalf("Load rejected a locally modified declared DLL: %v", err)
 	}
 }
 
-func TestNativeLibraryArtifactChangesPackageDigest(t *testing.T) {
-	original, err := Load(inventoryPackageRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestLoadAcceptsLocallyModifiedDeclaredScript(t *testing.T) {
 	root := copyInventoryPackage(t)
-	artifact := "native/windows-amd64/crimson-rs.inventory.bb730180.dll"
-	path := filepath.Join(root, filepath.FromSlash(artifact))
-	content, err := os.ReadFile(path)
-	if err != nil {
+	if err := os.WriteFile(
+		filepath.Join(root, "main.star"),
+		[]byte("def main(ctx):\n    return {\"schemaVersion\": 1, \"source\": {\"kind\": \"save-file\", \"saveModifiedAt\": None}, \"attempts\": [], \"inventory\": {\"recordCount\": 0, \"occupiedCount\": 0, \"items\": []}}\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
-	content = append(content, 0)
-	if err := os.WriteFile(path, content, 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := Load(root, "crimson-desert/inventory"); err != nil {
+		t.Fatalf("Load rejected a locally modified declared script: %v", err)
 	}
-	sum := sha256.Sum256(content)
-	digest := hex.EncodeToString(sum[:])
+}
+
+func TestLoadRejectsManifestV1(t *testing.T) {
+	root := copyInventoryPackage(t)
 	manifestBytes, err := os.ReadFile(filepath.Join(root, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -145,8 +141,7 @@ func TestNativeLibraryArtifactChangesPackageDigest(t *testing.T) {
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	manifest["files"].(map[string]any)[artifact].(map[string]any)["sha256"] = digest
-	manifest["nativeLibraries"].(map[string]any)["save-decoder"].(map[string]any)["sha256"] = digest
+	manifest["schemaVersion"] = float64(1)
 	manifestBytes, err = json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -154,21 +149,7 @@ func TestNativeLibraryArtifactChangesPackageDigest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), manifestBytes, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed.Identity.PackageSHA256 == original.Identity.PackageSHA256 {
-		t.Fatal("native library artifact did not affect package digest")
-	}
-}
-
-func TestLoadRejectsDigestMismatch(t *testing.T) {
-	root := copyInventoryPackage(t)
-	if err := os.WriteFile(filepath.Join(root, "main.star"), []byte("def main(ctx): return {}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(root); err == nil {
-		t.Fatal("Load succeeded after script digest mismatch")
+	if _, err := Load(root, "crimson-desert/inventory"); err == nil {
+		t.Fatal("Load accepted manifest schema V1")
 	}
 }

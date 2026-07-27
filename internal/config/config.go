@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Listen         string
 	DataDir        string
+	RulesDir       string
 	CaptureTimeout time.Duration
 	Retention      int
 	LogLevel       slog.Level
@@ -32,6 +33,7 @@ func Parse(args []string, localAppData string) (Config, error) {
 	var level string
 	flagSet.StringVar(&cfg.Listen, "listen", "0.0.0.0:8787", "HTTP listen address")
 	flagSet.StringVar(&cfg.DataDir, "data-dir", defaultDataDir, "artifact data directory")
+	flagSet.StringVar(&cfg.RulesDir, "rules-dir", "", "absolute external Rule plugin directory; empty uses <data-dir>/Rules")
 	flagSet.DurationVar(&cfg.CaptureTimeout, "capture-timeout", 5*time.Second, "maximum time for one capture")
 	flagSet.IntVar(&cfg.Retention, "retention", 100, "maximum number of screenshot artifacts")
 	flagSet.StringVar(&level, "log-level", "info", "debug, info, warn, or error")
@@ -47,6 +49,11 @@ func Parse(args []string, localAppData string) (Config, error) {
 	}
 	if cfg.DataDir == "" || !filepath.IsAbs(cfg.DataDir) {
 		return Config{}, errors.New("--data-dir must be an absolute path")
+	}
+	if cfg.RulesDir == "" {
+		cfg.RulesDir = filepath.Join(cfg.DataDir, "Rules")
+	} else if !filepath.IsAbs(cfg.RulesDir) {
+		return Config{}, errors.New("--rules-dir must be empty or an absolute path")
 	}
 	if cfg.CaptureTimeout <= 0 {
 		return Config{}, errors.New("--capture-timeout must be positive")

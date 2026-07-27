@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "description": "The executing agent must read rule.agents.url before taking any rule-specific action.",
+  "scripts": {
+    "crimson-desert/inventory": {
+      "path": "Scripts/inventory",
+      "runtime": "windows-observation-v1"
+    }
+  }
+}

@@ -50,15 +50,16 @@ func main() {
 func run() error {
 	flags := flag.NewFlagSet("windows-observation-script-runner", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	var packageRoot string
+	var packageRoot, capabilityID string
 	flags.StringVar(&packageRoot, "package-root", "", "host-resolved absolute observation package root")
+	flags.StringVar(&capabilityID, "capability-id", "", "Rule-registry capability ID")
 	if err := flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || packageRoot == "" || !filepath.IsAbs(packageRoot) {
-		return errors.New("--package-root must be the only argument and must be absolute")
+	if flags.NArg() != 0 || packageRoot == "" || !filepath.IsAbs(packageRoot) || capabilityID == "" {
+		return errors.New("--package-root must be absolute and --capability-id is required")
 	}
-	pkg, err := scriptpackage.Load(packageRoot)
+	pkg, err := scriptpackage.Load(packageRoot, capabilityID)
 	if err != nil {
 		return fmt.Errorf("load observation package: %w", err)
 	}

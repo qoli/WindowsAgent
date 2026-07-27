@@ -2,47 +2,43 @@ package scriptrunner
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 	"go.starlark.net/starlark"
 )
 
-func TestNativeArtifactVerificationRejectsMissingAndChangedDLL(t *testing.T) {
+func TestNativeArtifactValidationRequiresRegularFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fixture.dll")
-	if err := verifyNativeArtifact(path, strings.Repeat("0", 64)); err == nil {
+	if err := validateNativeArtifact(path); err == nil {
 		t.Fatal("missing native artifact was accepted")
 	}
 	content := []byte("verified DLL fixture")
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(content)
-	if err := verifyNativeArtifact(path, hex.EncodeToString(sum[:])); err != nil {
+	if err := validateNativeArtifact(path); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyNativeArtifact(path, hex.EncodeToString(sum[:])); err == nil {
-		t.Fatal("changed native artifact was accepted")
+	if err := validateNativeArtifact(path); err != nil {
+		t.Fatalf("locally changed native artifact was rejected: %v", err)
 	}
 }
 
 func loadInventoryFixturePackage(t *testing.T) *scriptpackage.Package {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "ObservationScripts", "CrimsonDesert", "inventory"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Scripts", "inventory"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkg, err := scriptpackage.Load(root)
+	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
 	}

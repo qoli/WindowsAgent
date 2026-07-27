@@ -4,9 +4,10 @@
 
 **Landed.**
 
-An Observation Script Package is a trusted local execution unit with one
-finite Starlark entrypoint, human task description, output schema, Observer
-permissions, optional native DLL artifacts, and explicit limits.
+An Observation Script Package is one package below a Rule plugin's generic
+`Scripts/` directory. It has one finite Starlark entrypoint, human task
+description, output schema, Observer permissions, optional native DLL
+artifacts, and explicit limits.
 
 ## Layout
 
@@ -21,29 +22,27 @@ package/
         `-- decoder.dll
 ```
 
-Every regular file must appear in `manifest.files` with SHA-256. Directories
-are structural only. Undeclared files, symlink escape, digest mismatch, missing
-members, and files larger than the package-member limit fail package loading.
-The package identity hashes the manifest and every declared file digest, so a
-DLL change changes the package identity.
+Every regular file must appear exactly once in the `manifest.files` path list.
+Directories are structural only. Undeclared files, symlinks, missing members,
+and files larger than the package-member limit fail package loading. Local
+plugin content is authoritative; no member digest is required.
 
 ## Manifest
 
 ```json
 {
-  "schemaVersion": 1,
-  "id": "example/read",
+  "schemaVersion": 2,
   "version": 1,
   "title": "Read one value",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "outputSchema": "output.schema.json",
-  "files": {
-    "main.star": {"sha256": "..."},
-    "TASK.md": {"sha256": "..."},
-    "output.schema.json": {"sha256": "..."},
-    "native/windows-amd64/decoder.dll": {"sha256": "..."}
-  },
+  "files": [
+    "main.star",
+    "TASK.md",
+    "output.schema.json",
+    "native/windows-amd64/decoder.dll"
+  ],
   "permissions": {
     "memory": {
       "target": "explicit/current-process",
@@ -62,7 +61,6 @@ DLL change changes the package identity.
     "decoder": {
       "platform": "windows-amd64",
       "artifact": "native/windows-amd64/decoder.dll",
-      "sha256": "...",
       "maxCalls": 4,
       "maxNativeMemoryBytes": 536870912
     }
@@ -76,9 +74,23 @@ DLL change changes the package identity.
 }
 ```
 
-`nativeLibraries` is an integrity declaration, not a sandbox or provider
+`nativeLibraries` is an executable boundary declaration, not a provider
 registry. It contains no provider, version, operation, export, or ABI
-knowledge. Those details belong to the trusted package's Starlark.
+knowledge. Those details belong to the package's Starlark.
+
+The owning `rule.json` supplies the stable capability ID, package-relative
+path, and runtime:
+
+```json
+{
+  "scripts": {
+    "example/read": {
+      "path": "Scripts/read",
+      "runtime": "windows-observation-v1"
+    }
+  }
+}
+```
 
 ## Starlark surface
 
@@ -96,7 +108,7 @@ memory followed by one user-selected save file.
 
 ## Output and failure
 
-`main(ctx)` must return one JSON-compatible value accepted by the pinned output
+`main(ctx)` must return one JSON-compatible value accepted by the loaded output
 schema and `maxResultBytes`. Package-load failures, native artifact failures,
 platform mismatch, missing exports, invalid signatures, native limits,
 deadline expiry, and schema failures are explicit. No missing artifact,
@@ -105,6 +117,6 @@ version, export, or source is substituted.
 See [Script Runner native-library FFI](native-library-ffi.md) for ABI types and
 [Scripted observation job model](observation-job-model.md) for process
 lifecycle. Package authors and reviewers must also follow the
-[`ObservationScripts` development contract](../../ObservationScripts/README.md)
-for authoring, integrity, fallback, privacy, versioning, and validation
+[`Script Package development contract`](../script-development-contract.md)
+for authoring, fallback, privacy, versioning, and validation
 requirements.

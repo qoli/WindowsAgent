@@ -17,6 +17,7 @@ func TestParseDefaults(t *testing.T) {
 	}
 	if cfg.Listen != "0.0.0.0:8787" ||
 		cfg.DataDir != filepath.Join(root, "gameGuide", "windows-capture-agent") ||
+		cfg.RulesDir != filepath.Join(root, "gameGuide", "windows-capture-agent", "Rules") ||
 		cfg.CaptureTimeout != 5*time.Second ||
 		cfg.Retention != 100 ||
 		cfg.LogLevel != slog.LevelInfo ||
@@ -30,6 +31,7 @@ func TestParseOverrides(t *testing.T) {
 	cfg, err := Parse([]string{
 		"--listen", "127.0.0.1:9999",
 		"--data-dir", root,
+		"--rules-dir", filepath.Join(root, "external-rules"),
 		"--capture-timeout", "2s",
 		"--retention", "7",
 		"--log-level", "debug",
@@ -40,6 +42,7 @@ func TestParseOverrides(t *testing.T) {
 	}
 	if cfg.Listen != "127.0.0.1:9999" ||
 		cfg.DataDir != root ||
+		cfg.RulesDir != filepath.Join(root, "external-rules") ||
 		cfg.CaptureTimeout != 2*time.Second ||
 		cfg.Retention != 7 ||
 		cfg.LogLevel != slog.LevelDebug ||
@@ -57,6 +60,7 @@ func TestParseRejectsInvalidRequiredState(t *testing.T) {
 		{name: "missing local app data"},
 		{name: "empty listen", args: []string{"--listen", ""}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative data dir", args: []string{"--data-dir", "relative"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
+		{name: "relative rules dir", args: []string{"--rules-dir", "relative"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "zero timeout", args: []string{"--capture-timeout", "0s"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "zero retention", args: []string{"--retention", "0"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "unknown log level", args: []string{"--log-level", "verbose"}, localAppData: filepath.Join(string(filepath.Separator), "data")},

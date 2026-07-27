@@ -1,4 +1,4 @@
-// Package scriptrunner executes one verified Starlark observation package.
+// Package scriptrunner executes one validated Starlark observation package.
 package scriptrunner
 
 import (

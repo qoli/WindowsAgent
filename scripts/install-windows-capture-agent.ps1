@@ -4,6 +4,11 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ExecutablePath,
 
+    [Parameter(Mandatory = $true)]
+    [string]$RulesPath,
+
+    [switch]$ArchiveIncompatibleCaptures,
+
     [string]$Listen = "0.0.0.0:8787",
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA "gameGuide\windows-capture-agent"),
     [timespan]$CaptureTimeout = ([timespan]::FromSeconds(5)),
@@ -34,12 +39,35 @@ $sourceExecutable = [IO.Path]::GetFullPath($ExecutablePath)
 if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
     throw "agent executable does not exist: $sourceExecutable"
 }
+$sourceRules = [IO.Path]::GetFullPath($RulesPath)
+if (-not (Test-Path -LiteralPath $sourceRules -PathType Container)) {
+    throw "Rules directory does not exist: $sourceRules"
+}
 $resolvedDataDir = [IO.Path]::GetFullPath($DataDir)
 if (-not [IO.Path]::IsPathRooted($resolvedDataDir)) {
     throw "DataDir must be an absolute path"
 }
 if ($CaptureTimeout -le [timespan]::Zero) {
     throw "CaptureTimeout must be positive"
+}
+$capturesDir = Join-Path $resolvedDataDir "captures"
+$incompatibleCaptureMetadata = @()
+if (Test-Path -LiteralPath $capturesDir -PathType Container) {
+    foreach ($metadataFile in @(Get-ChildItem -LiteralPath $capturesDir -Filter "metadata.json" -File -Recurse)) {
+        try {
+            $metadata = Get-Content -LiteralPath $metadataFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw "could not inspect existing capture metadata '$($metadataFile.FullName)': $($_.Exception.Message)"
+        }
+        if ($null -ne $metadata.rule -and $null -ne $metadata.rule.agents -and `
+            @($metadata.rule.agents.PSObject.Properties.Name) -contains "sha256") {
+            $incompatibleCaptureMetadata += $metadataFile.FullName
+        }
+    }
+}
+if ($incompatibleCaptureMetadata.Count -ne 0 -and -not $ArchiveIncompatibleCaptures) {
+    throw ("existing captures use the removed rule.agents.sha256 contract; " +
+        "rerun with -ArchiveIncompatibleCaptures to preserve them outside the active capture store")
 }
 $captureTimeoutArgument = ([long][Math]::Ceiling($CaptureTimeout.TotalMilliseconds)).ToString() + "ms"
 
@@ -60,6 +88,7 @@ if (-not $identity) {
 $binDir = Join-Path $resolvedDataDir "bin"
 $logDir = Join-Path $resolvedDataDir "logs"
 $installedExecutable = Join-Path $binDir "windows-capture-agent.exe"
+$installedRules = Join-Path $resolvedDataDir "Rules"
 $logFile = Join-Path $logDir "agent.jsonl"
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -85,8 +114,29 @@ if ($listeners.Count -ne 0) {
     throw "Listen port $listenPort is already occupied by PID(s) $owners"
 }
 
+$captureArchive = $null
+if ($incompatibleCaptureMetadata.Count -ne 0) {
+    $captureArchive = Join-Path $resolvedDataDir (
+        "captures.pre-external-rules-" + [DateTime]::UtcNow.ToString("yyyyMMddTHHmmssZ")
+    )
+    if (Test-Path -LiteralPath $captureArchive) {
+        throw "capture archive target already exists: $captureArchive"
+    }
+    [IO.Directory]::Move($capturesDir, $captureArchive)
+}
+
 if ($sourceExecutable -ne $installedExecutable) {
     Copy-Item -LiteralPath $sourceExecutable -Destination $installedExecutable -Force
+}
+New-Item -ItemType Directory -Path $installedRules -Force | Out-Null
+$sourceRuleDirectories = @(Get-ChildItem -LiteralPath $sourceRules -Directory)
+if ($sourceRuleDirectories.Count -eq 0) {
+    throw "Rules directory must contain at least one executable Rule plugin"
+}
+foreach ($sourceRuleDirectory in $sourceRuleDirectories) {
+    & (Join-Path $PSScriptRoot "sync-windows-agent-rule.ps1") `
+        -SourceRulePath $sourceRuleDirectory.FullName `
+        -DestinationRulesDir $installedRules | Out-Null
 }
 
 function ConvertTo-NativeQuotedArgument {
@@ -100,6 +150,7 @@ function ConvertTo-NativeQuotedArgument {
 $agentArguments = @(
     "--listen", (ConvertTo-NativeQuotedArgument $Listen),
     "--data-dir", (ConvertTo-NativeQuotedArgument $resolvedDataDir),
+    "--rules-dir", (ConvertTo-NativeQuotedArgument $installedRules),
     "--capture-timeout", (ConvertTo-NativeQuotedArgument $captureTimeoutArgument),
     "--retention", (ConvertTo-NativeQuotedArgument $Retention.ToString()),
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
@@ -163,6 +214,8 @@ if ($process.SessionId -eq 0) {
     task_state = (Get-ScheduledTask -TaskName $TaskName).State.ToString()
     executable = $installedExecutable
     data_dir = $resolvedDataDir
+    rules_dir = $installedRules
+    capture_archive = $captureArchive
     log_file = $logFile
     listen = $Listen
     process_id = $process.Id

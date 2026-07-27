@@ -5,11 +5,11 @@ signed-in Windows user's interactive session.
 
 Its first capability is primary-monitor still capture through Windows Graphics
 Capture (WGC). It also includes a finite, read-only observation-job runtime
-that brokers digest-pinned, locally trusted Starlark Script Packages to a
+that brokers locally distributed Starlark Script Packages to a
 unified memory/file observer process. Script Packages may carry
 manifest-declared native DLLs and call them through the Script Runner's generic
 Windows amd64 FFI. Every capability remains behind an explicit package, API,
-permission, and integrity boundary.
+permission, and validation boundary.
 
 > [!WARNING]
 > The current HTTP server listens on `0.0.0.0:8787` without authentication,
@@ -44,7 +44,7 @@ One observation job is registered and live-verified today:
   Windows Job Object; it does not use PowerShell or a polling loop
 - `windows-observer.exe` remains game-neutral and never loads DLLs
 - the save file becomes a job-scoped opaque blob; the Script Runner resolves
-  that blob and loads only the package-declared, digest-verified DLL alias
+  that blob and loads only the package-declared DLL alias
 
 This is not a general remote memory API. The observation host is a local
 command with one registered capability and no HTTP listener.
@@ -76,7 +76,7 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
   -o .build/windows-observation-job.exe \
   ./cmd/windows-observation-job
-cp -R ObservationScripts .build/
+cp -R Rules .build/
 ```
 
 The GUI-subsystem build runs without a console window.
@@ -86,7 +86,8 @@ The GUI-subsystem build runs without a console window.
 Run the console build inside the signed-in Windows user's session:
 
 ```powershell
-.\.build\windows-capture-agent.exe
+.\.build\windows-capture-agent.exe `
+  --rules-dir (Resolve-Path .\.build\Rules)
 ```
 
 Available options:
@@ -94,6 +95,7 @@ Available options:
 ```text
 --listen              HTTP listen address (default 0.0.0.0:8787)
 --data-dir            artifact and log root
+--rules-dir           external Rule plugin directory (default <data-dir>/Rules)
 --capture-timeout     per-request timeout (default 5s)
 --retention           number of artifacts to retain (default 100)
 --log-level           debug, info, warn, or error
@@ -109,6 +111,7 @@ Run the registered Crimson Desert inventory job from the signed-in session:
 .\.build\windows-observation-job.exe `
   --capability crimson-desert/inventory `
   --install-root (Resolve-Path .\.build) `
+  --rules-dir (Resolve-Path .\.build\Rules) `
   --save-root "$env:LOCALAPPDATA\Pearl Abyss\CD\save\<account-id>" `
   --save-relative "slot1/save.save"
 ```
@@ -122,7 +125,7 @@ exact process; the observer still revalidates its path, creation time, and
 executable SHA-256.
 
 The package declares native-library alias `save-decoder`, its
-`windows-amd64` artifact, SHA-256, call limit, and native-memory limit. Starlark
+`windows-amd64` artifact, call limit, and native-memory limit. Starlark
 loads only that alias through `native.load_library("save-decoder")`; it owns the
 crimson-rs export signatures, record layout, return codes, and JSON conversion.
 `load_library` is used because `load` is a reserved Starlark keyword.
@@ -133,13 +136,38 @@ From the repository root in PowerShell:
 
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent-background.exe
+  -ExecutablePath .\.build\windows-capture-agent-background.exe `
+  -RulesPath .\.build\Rules
 ```
 
-The installer copies the executable under the current user's
-`%LOCALAPPDATA%`, registers an interactive-token at-logon Scheduled Task, starts
-it, and verifies `/healthz`. It does not create an SCM service or modify Windows
-Firewall.
+The installer copies the executable and external Rule plugins under the current
+user's `%LOCALAPPDATA%`, registers an interactive-token at-logon Scheduled
+Task, starts it, and verifies `/healthz`. It does not create an SCM service or
+modify Windows Firewall.
+
+Builds that stored `rule.agents.sha256` used an incompatible capture metadata
+contract. The installer detects those captures before stopping the current
+task and refuses the migration unless explicitly asked to preserve them:
+
+```powershell
+.\scripts\install-windows-capture-agent.ps1 `
+  -ExecutablePath .\.build\windows-capture-agent-background.exe `
+  -RulesPath .\.build\Rules `
+  -ArchiveIncompatibleCaptures
+```
+
+The switch renames the existing `captures` directory to a timestamped
+`captures.pre-external-rules-*` archive. It does not reinterpret or delete the
+old artifacts.
+
+Publish one updated Rule plugin without rebuilding the executable or restarting
+the task:
+
+```powershell
+.\scripts\sync-windows-agent-rule.ps1 `
+  -SourceRulePath .\Rules\CrimsonDesert.exe `
+  -DestinationRulesDir "$env:LOCALAPPDATA\gameGuide\windows-capture-agent\Rules"
+```
 
 For deployment compatibility, the current executable, task, and data directory
 retain their established `windows-capture-agent` names. They identify the first
@@ -195,18 +223,19 @@ object:
     "id": "Game.exe",
     "agents": {
       "url": "/v1/rules/Game.exe/AGENTS.md",
-      "content_type": "text/markdown; charset=utf-8",
-      "sha256": "..."
+      "content_type": "text/markdown; charset=utf-8"
     }
   }
 }
 ```
 
 The foreground window is sampled immediately after WGC produces the captured
-frame. The same response resolves its executable name against the trusted,
-embedded folders under `Rules/`; this keeps the capture JSON as Codex's single
-Windows perception entry point. Codex can follow `rule.agents.url` to read the
-matched process guidance. An executable without a rule reports
+frame. The same response resolves its executable name against the current
+external folders under `Rules/`; this keeps the capture JSON as Codex's single
+Windows perception entry point. Each request reloads `rule.json` and
+`AGENTS.md`, so a completed Rule plugin replacement requires no agent reload or
+task restart. Codex can follow `rule.agents.url` to read the matched process
+guidance. An executable without a rule reports
 `rule.status=unmatched` with a description that no rule guidance is available,
 without inventing a substitute.
 
@@ -238,16 +267,15 @@ internal/config/                 process configuration
 internal/foreground/             foreground process observation
 internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
-internal/rules/                  executable rule registry and navigation
+internal/rules/                  live Rule plugin loading and navigation
 internal/wgc/                    WGC and Direct3D 11 implementation
-Rules/                           trusted per-process Codex guidance
-ObservationScripts/              digest-pinned tasks, schemas, and native artifacts
+Rules/<Executable.exe>/          distributable rule.json, AGENTS.md, and Scripts
 scripts/                         Windows installation helpers
 ```
 
-New or changed observation packages must follow the
-[`ObservationScripts` development contract](ObservationScripts/README.md).
-It defines package ownership, source-transition rules, manifest integrity,
+New or changed Script packages must follow the
+[`Script Package development contract`](docs/script-development-contract.md).
+It defines package ownership, source-transition rules, manifest validation,
 native ABI responsibility, privacy boundaries, and required validation.
 
 New capabilities should receive their own internal package and API contract

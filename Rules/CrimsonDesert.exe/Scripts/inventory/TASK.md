@@ -17,8 +17,7 @@ retry invisibly, or substitute a decoder/version/source.
 - The save root and relative file are explicitly supplied by the user.
 - The package-native artifact is
   `native/windows-amd64/crimson-rs.inventory.bb730180.dll`.
-- Its manifest alias is `save-decoder` and its SHA-256 is
-  `c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c`.
+- Its manifest alias is `save-decoder`.
 
 ## Memory attempt
 
@@ -48,7 +47,7 @@ this Script Package, not WindowsAgent Core.
 ## Failure and output
 
 Application-level failure of both memory and save produces
-`INVENTORY_ALL_SOURCES_FAILED`. Package digest failure, platform mismatch,
+`INVENTORY_ALL_SOURCES_FAILED`. Missing package members, platform mismatch,
 undeclared alias, missing export, forged blob, FFI limit, deadline, protocol,
 or process failure is terminal infrastructure failure and does not activate
 another source or decoder.

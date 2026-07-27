@@ -1,5 +1,8 @@
 /.build/
 *.exe
+!Rules/
+!Rules/*.exe/
+!Rules/*.exe/**
 *.log
 *.jsonl
 .DS_Store

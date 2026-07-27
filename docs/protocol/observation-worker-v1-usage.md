@@ -8,7 +8,7 @@ Build and install these observation components together:
 windows-observation-job.exe
 windows-observation-script-runner.exe
 windows-observer.exe
-ObservationScripts/
+Rules/<Executable.exe>/Scripts/
 ```
 
 The Host launches only the Runner and Observer. All framed messages are
@@ -17,7 +17,8 @@ watcher, HTTP observer, or native worker participates.
 
 ## Package execution
 
-The Host and Runner independently load the same digest-pinned Script Package.
+The Host snapshots the currently registered Script Package for one job. The
+Host and Runner independently validate and load that same job-scoped snapshot.
 The Runner exposes:
 
 ```python
@@ -40,7 +41,7 @@ job.fail(code = "...", message = "...")
 ```
 
 `load_library` is the executable spelling because Starlark reserves `load`.
-The alias resolves only to a verified package-relative DLL declared under
+The alias resolves only to a validated package-relative DLL declared under
 `nativeLibraries`. The Host never supplies or parses export names or ABI
 signatures.
 
@@ -76,7 +77,7 @@ unbounded diagnostics.
 
 ## Terminal behavior
 
-Missing/digest-mismatched DLLs, platform mismatch, missing exports, invalid
+Missing DLLs, platform mismatch, missing exports, invalid
 FFI signatures, forged blobs, call/memory/result limits, Runner crash, and
 deadline expiry fail explicitly. No alternative artifact, version, export,
 decoder, save, or source is chosen.

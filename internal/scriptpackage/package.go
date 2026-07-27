@@ -2,8 +2,6 @@ package scriptpackage
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,7 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/qoli/WindowsAgent/internal/strictjson"
@@ -28,20 +25,15 @@ const (
 
 type Manifest struct {
 	SchemaVersion   uint32                   `json:"schemaVersion"`
-	ID              string                   `json:"id"`
 	Version         uint32                   `json:"version"`
 	Title           string                   `json:"title"`
 	Entrypoint      string                   `json:"entrypoint"`
 	TaskDocument    string                   `json:"taskDocument"`
 	OutputSchema    string                   `json:"outputSchema"`
-	Files           map[string]FileIdentity  `json:"files"`
+	Files           []string                 `json:"files"`
 	Permissions     Permissions              `json:"permissions"`
 	NativeLibraries map[string]NativeLibrary `json:"nativeLibraries,omitempty"`
 	Limits          Limits                   `json:"limits"`
-}
-
-type FileIdentity struct {
-	SHA256 string `json:"sha256"`
 }
 
 type Permissions struct {
@@ -66,7 +58,6 @@ type FilePermissions struct {
 type NativeLibrary struct {
 	Platform             string `json:"platform"`
 	Artifact             string `json:"artifact"`
-	SHA256               string `json:"sha256"`
 	MaxCalls             uint32 `json:"maxCalls"`
 	MaxNativeMemoryBytes uint64 `json:"maxNativeMemoryBytes"`
 }
@@ -79,10 +70,8 @@ type Limits struct {
 }
 
 type Identity struct {
-	ID             string `json:"id"`
-	Version        uint32 `json:"version"`
-	ManifestSHA256 string `json:"manifestSha256"`
-	PackageSHA256  string `json:"packageSha256"`
+	ID      string `json:"id"`
+	Version uint32 `json:"version"`
 }
 
 type Package struct {
@@ -95,9 +84,12 @@ type Package struct {
 	compiledSchema *jsonschema.Schema
 }
 
-func Load(root string) (*Package, error) {
+func Load(root, capabilityID string) (*Package, error) {
 	if root == "" || !filepath.IsAbs(root) {
 		return nil, errors.New("script package root must be absolute")
+	}
+	if capabilityID == "" || strings.TrimSpace(capabilityID) != capabilityID {
+		return nil, errors.New("script capability ID is required and must be canonical")
 	}
 	canonicalRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -123,15 +115,11 @@ func Load(root string) (*Package, error) {
 	}
 	expectedNames := map[string]struct{}{ManifestName: {}}
 	contents := make(map[string][]byte, len(manifest.Files))
-	for name, identity := range manifest.Files {
+	for _, name := range manifest.Files {
 		expectedNames[name] = struct{}{}
 		content, err := readPackageFile(canonicalRoot, name)
 		if err != nil {
 			return nil, fmt.Errorf("read package file %q: %w", name, err)
-		}
-		digest := sha256.Sum256(content)
-		if hex.EncodeToString(digest[:]) != identity.SHA256 {
-			return nil, fmt.Errorf("package file %q SHA-256 mismatch", name)
 		}
 		contents[name] = content
 	}
@@ -161,16 +149,12 @@ func Load(root string) (*Package, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compile output schema: %w", err)
 	}
-	manifestDigest := sha256.Sum256(manifestBytes)
-	packageDigest := computePackageDigest(manifestDigest, manifest.Files)
 	return &Package{
 		Root:     canonicalRoot,
 		Manifest: manifest,
 		Identity: Identity{
-			ID:             manifest.ID,
-			Version:        manifest.Version,
-			ManifestSHA256: hex.EncodeToString(manifestDigest[:]),
-			PackageSHA256:  hex.EncodeToString(packageDigest[:]),
+			ID:      capabilityID,
+			Version: manifest.Version,
 		},
 		Script:         script,
 		Task:           task,
@@ -190,17 +174,24 @@ func (p *Package) ValidateOutput(value any) error {
 }
 
 func validateManifest(manifest Manifest) error {
-	if manifest.SchemaVersion != 1 {
-		return fmt.Errorf("schemaVersion must equal 1, got %d", manifest.SchemaVersion)
-	}
-	if manifest.ID == "" || strings.TrimSpace(manifest.ID) != manifest.ID {
-		return errors.New("id is required and must be canonical")
+	if manifest.SchemaVersion != 2 {
+		return fmt.Errorf("schemaVersion must equal 2, got %d", manifest.SchemaVersion)
 	}
 	if manifest.Version == 0 {
 		return errors.New("version must be positive")
 	}
 	if manifest.Title == "" {
 		return errors.New("title is required")
+	}
+	declaredFiles := make(map[string]struct{}, len(manifest.Files))
+	for _, name := range manifest.Files {
+		if err := validateRelativeName(name); err != nil {
+			return err
+		}
+		if _, duplicate := declaredFiles[name]; duplicate {
+			return fmt.Errorf("duplicate file declaration %q", name)
+		}
+		declaredFiles[name] = struct{}{}
 	}
 	requiredFiles := []string{manifest.Entrypoint, manifest.TaskDocument, manifest.OutputSchema}
 	seen := make(map[string]struct{}, len(requiredFiles))
@@ -212,19 +203,15 @@ func validateManifest(manifest Manifest) error {
 			return errors.New("entrypoint, taskDocument, and outputSchema must be distinct")
 		}
 		seen[name] = struct{}{}
-		identity, ok := manifest.Files[name]
-		if !ok {
+		if !containsFile(manifest.Files, name) {
 			return fmt.Errorf("files is missing %q", name)
-		}
-		if err := validateSHA256(identity.SHA256); err != nil {
-			return fmt.Errorf("invalid SHA-256 for %q: %w", name, err)
 		}
 	}
 	if filepath.Ext(manifest.Entrypoint) != ".star" {
 		return errors.New("entrypoint must be a .star file")
 	}
 	if manifest.TaskDocument != "TASK.md" {
-		return errors.New("taskDocument must equal TASK.md in V1")
+		return errors.New("taskDocument must equal TASK.md in V2")
 	}
 	if filepath.Ext(manifest.OutputSchema) != ".json" {
 		return errors.New("outputSchema must be a JSON file")
@@ -264,12 +251,8 @@ func validateManifest(manifest Manifest) error {
 		if filepath.Ext(library.Artifact) != ".dll" {
 			return fmt.Errorf("native library %q artifact must be a DLL", alias)
 		}
-		if err := validateSHA256(library.SHA256); err != nil {
-			return fmt.Errorf("native library %q SHA-256: %w", alias, err)
-		}
-		file, exists := manifest.Files[library.Artifact]
-		if !exists || file.SHA256 != library.SHA256 {
-			return fmt.Errorf("native library %q artifact must be digest-declared in files", alias)
+		if !containsFile(manifest.Files, library.Artifact) {
+			return fmt.Errorf("native library %q artifact must be declared in files", alias)
 		}
 		if library.MaxCalls == 0 || library.MaxCalls > 1024 ||
 			library.MaxNativeMemoryBytes == 0 || library.MaxNativeMemoryBytes > 1<<30 {
@@ -283,6 +266,15 @@ func validateManifest(manifest Manifest) error {
 		return errors.New("all script limits must be positive")
 	}
 	return nil
+}
+
+func containsFile(files []string, name string) bool {
+	for _, candidate := range files {
+		if candidate == name {
+			return true
+		}
+	}
+	return false
 }
 
 var nativeAliasPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
@@ -323,21 +315,18 @@ func validateRelativeName(name string) error {
 	return nil
 }
 
-func validateSHA256(value string) error {
-	if len(value) != sha256.Size*2 || strings.ToLower(value) != value {
-		return errors.New("digest must be 64 lowercase hexadecimal characters")
-	}
-	if _, err := hex.DecodeString(value); err != nil {
-		return err
-	}
-	return nil
-}
-
 func readPackageFile(root, name string) ([]byte, error) {
 	if err := validateRelativeName(name); err != nil {
 		return nil, err
 	}
 	fullPath := filepath.Join(root, filepath.FromSlash(name))
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("package symlinks are forbidden")
+	}
 	resolved, err := filepath.EvalSymlinks(fullPath)
 	if err != nil {
 		return nil, err
@@ -387,27 +376,6 @@ func rejectUndeclaredFiles(root string, expected map[string]struct{}) error {
 		}
 		return nil
 	})
-}
-
-func computePackageDigest(manifestDigest [sha256.Size]byte, files map[string]FileIdentity) [sha256.Size]byte {
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	hash := sha256.New()
-	hash.Write([]byte("windowsagent-observation-package-v1\x00"))
-	hash.Write(manifestDigest[:])
-	for _, name := range names {
-		hash.Write([]byte{0})
-		hash.Write([]byte(name))
-		hash.Write([]byte{0})
-		digest, _ := hex.DecodeString(files[name].SHA256)
-		hash.Write(digest)
-	}
-	var result [sha256.Size]byte
-	copy(result[:], hash.Sum(nil))
-	return result
 }
 
 func decodeStrictJSON(data []byte, target any) error {

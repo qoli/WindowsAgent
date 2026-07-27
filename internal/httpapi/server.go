@@ -24,7 +24,7 @@ const maxRequestBody = 4 << 10
 type Server struct {
 	capturer capture.Capturer
 	store    *artifact.Store
-	rules    *rules.Registry
+	rules    *rules.Store
 	timeout  time.Duration
 	version  string
 	logger   *slog.Logger
@@ -55,15 +55,15 @@ type statusResponse struct {
 	Latest        *artifact.Metadata `json:"latest,omitempty"`
 }
 
-func New(capturer capture.Capturer, store *artifact.Store, ruleRegistry *rules.Registry, timeout time.Duration, version string, logger *slog.Logger) (*Server, error) {
+func New(capturer capture.Capturer, store *artifact.Store, ruleStore *rules.Store, timeout time.Duration, version string, logger *slog.Logger) (*Server, error) {
 	if capturer == nil {
 		return nil, errors.New("capturer is required")
 	}
 	if store == nil {
 		return nil, errors.New("artifact store is required")
 	}
-	if ruleRegistry == nil {
-		return nil, errors.New("rule registry is required")
+	if ruleStore == nil {
+		return nil, errors.New("rule store is required")
 	}
 	if timeout <= 0 {
 		return nil, errors.New("capture timeout must be positive")
@@ -77,7 +77,7 @@ func New(capturer capture.Capturer, store *artifact.Store, ruleRegistry *rules.R
 	return &Server{
 		capturer: capturer,
 		store:    store,
-		rules:    ruleRegistry,
+		rules:    ruleStore,
 		timeout:  timeout,
 		version:  version,
 		logger:   logger,
@@ -234,14 +234,8 @@ func (s *Server) handleRuleResource(w http.ResponseWriter, r *http.Request, requ
 		s.writeMappedError(w, requestID, err)
 		return
 	}
-	etag := `"` + resolution.Agents.SHA256 + `"`
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
 	w.Header().Set("Content-Type", resolution.Agents.ContentType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
-	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
