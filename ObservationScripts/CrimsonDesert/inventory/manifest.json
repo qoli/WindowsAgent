@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
   "id": "crimson-desert/inventory",
-  "version": 1,
+  "version": 2,
   "title": "Read raw Crimson Desert inventory records",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "outputSchema": "output.schema.json",
   "files": {
     "main.star": {
-      "sha256": "b32284d1340d993eef6a4aedaaf27ec87adb4fca999e3e77c6892bffb2af97b0"
+      "sha256": "ef150d4584d9d7114855e6217461a76ac2eb20ff982b10aa61a2f4d9d376498a"
     },
     "TASK.md": {
-      "sha256": "b6565f1b24bff474e6dcb0c633c7bfb263ab4e00d743d32cc5ca6863491adaf7"
+      "sha256": "09c9bbbf521dbc843e99f37e80001c2f34673a2fd97e150ae00b83b9c950699c"
     },
     "output.schema.json": {
-      "sha256": "2ae96b9c74c5ec9690502dfd1531c879540a18e0958693537c47da5917e03c9e"
+      "sha256": "b51d8e321b25211ac41037fa7873ce508b340ea29ff8ad3a028a0d33c2ca2eb2"
     },
     "native/windows-amd64/crimson-rs.inventory.bb730180.dll": {
       "sha256": "c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c"
@@ -46,13 +46,13 @@
       "artifact": "native/windows-amd64/crimson-rs.inventory.bb730180.dll",
       "sha256": "c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c",
       "maxCalls": 4,
-      "maxNativeMemoryBytes": 536870912
+      "maxNativeMemoryBytes": 131072
     }
   },
   "limits": {
     "wallTimeMs": 5000,
     "maxSteps": 500000,
-    "maxResultBytes": 262144,
+    "maxResultBytes": 786432,
     "maxLogBytes": 32768
   }
 }

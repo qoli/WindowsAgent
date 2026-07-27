@@ -7,15 +7,24 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/qoli/WindowsAgent/internal/observationprotocol"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 )
 
 const crimsonImageSHA256 = "d55a45f0dda3dc9dc40146d62cd02609941f14c07bc1aa9083d67c0a4807109f"
 
 type fixtureBroker struct {
-	calls []string
+	calls         []string
+	observerCalls []fixtureObserverCall
+}
+
+type fixtureObserverCall struct {
+	namespace string
+	operation string
+	arguments map[string]any
 }
 
 func (b *fixtureBroker) BlobPath(context.Context, map[string]any) (string, error) {
@@ -29,6 +38,11 @@ func (b *fixtureBroker) RecordNative(_ context.Context, record NativeRecord) err
 
 func (b *fixtureBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
 	b.calls = append(b.calls, namespace+"."+operation)
+	b.observerCalls = append(b.observerCalls, fixtureObserverCall{
+		namespace: namespace,
+		operation: operation,
+		arguments: arguments,
+	})
 	switch operation {
 	case "modules":
 		return map[string]any{
@@ -48,6 +62,13 @@ func (b *fixtureBroker) Call(_ context.Context, namespace, operation string, arg
 	case "readBatch":
 		reads := arguments["reads"].([]any)
 		if len(reads) == 2 {
+			want := []any{
+				map[string]any{"address": "0x800000", "type": "pointer"},
+				map[string]any{"address": "0x80000c", "type": "u16"},
+			}
+			if !reflect.DeepEqual(reads, want) {
+				return nil, errors.New("unexpected fixture inventory header reads")
+			}
 			return map[string]any{"reads": []any{
 				map[string]any{"value": uint64(0x900000)},
 				map[string]any{"value": uint64(3)},
@@ -122,7 +143,113 @@ func TestCrimsonInventoryPackageFixture(t *testing.T) {
 	if !reflect.DeepEqual(broker.calls, wantCalls) {
 		t.Fatalf("calls = %#v, want %#v", broker.calls, wantCalls)
 	}
+	if len(broker.observerCalls) != len(wantCalls) {
+		t.Fatalf("observer calls = %d, want %d", len(broker.observerCalls), len(wantCalls))
+	}
+	wantScan := map[string]any{
+		"pattern": inventoryManagerPatternForTest,
+		"regions": []any{map[string]any{
+			"base_address": "0x0000000140000000",
+			"size":         int64(367640576),
+		}},
+		"max_matches": int64(2),
+	}
+	if got := broker.observerCalls[1].arguments; !reflect.DeepEqual(got, wantScan) {
+		t.Fatalf("scan arguments = %#v, want %#v", got, wantScan)
+	}
+	wantStrided := map[string]any{
+		"base_address": "0x900000",
+		"count":        int64(3),
+		"stride":       int64(0xC8),
+		"fields": []any{
+			map[string]any{"name": "itemId", "offset": int64(0x08), "type": "u16"},
+			map[string]any{"name": "quantity", "offset": int64(0x10), "type": "u64"},
+			map[string]any{"name": "pairedItemId", "offset": int64(0x90), "type": "u16"},
+		},
+	}
+	if got := broker.observerCalls[len(broker.observerCalls)-1].arguments; !reflect.DeepEqual(got, wantStrided) {
+		t.Fatalf("readStrided arguments = %#v, want %#v", got, wantStrided)
+	}
 }
+
+func TestInventoryMaximumSchemaOutputFitsRunnerAndProtocolLimits(t *testing.T) {
+	root, _ := filepath.Abs(filepath.Join("..", "..", "ObservationScripts", "CrimsonDesert", "inventory"))
+	pkg, err := scriptpackage.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const maxRecords = 2048
+	items := make([]any, maxRecords)
+	for index := range items {
+		items[index] = map[string]any{
+			"slot":         uint64(4294967295),
+			"itemId":       uint64(4294967295),
+			"quantity":     uint64(18446744073709551615),
+			"pairedItemId": nil,
+			"inventoryKey": uint64(4294967295),
+			"instanceId":   uint64(18446744073709551615),
+		}
+	}
+	output := map[string]any{
+		"schemaVersion": int64(1),
+		"source": map[string]any{
+			"kind": "save-file", "processImageSha256": nil,
+			"saveModifiedAt": "2026-07-27T13:42:00Z", "nativeLibrary": "save-decoder",
+		},
+		"attempts": []any{
+			map[string]any{"source": "process-memory", "status": "failed", "errorCode": "INVENTORY_SIGNATURE_AMBIGUOUS"},
+			map[string]any{"source": "save-file", "status": "succeeded", "errorCode": nil},
+		},
+		"inventory": map[string]any{
+			"recordCount": int64(maxRecords), "occupiedCount": int64(maxRecords), "items": items,
+		},
+	}
+	if err := pkg.ValidateOutput(output); err != nil {
+		t.Fatalf("maximum declared output does not satisfy schema: %v", err)
+	}
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(len(encoded)) > pkg.Manifest.Limits.MaxResultBytes {
+		t.Fatalf("maximum schema output is %d bytes, runner limit is %d", len(encoded), pkg.Manifest.Limits.MaxResultBytes)
+	}
+	rawRecords := make([]any, maxRecords)
+	for index := range rawRecords {
+		rawRecords[index] = map[string]any{
+			"blockIndex":            uint64(4294967295),
+			"inventoryElementIndex": uint64(4294967295),
+			"itemElementIndex":      uint64(4294967295),
+			"inventoryKey":          uint64(4294967295),
+			"itemKey":               uint64(4294967295),
+			"transferredItemKey":    uint64(4294967295),
+			"slotNumber":            uint64(4294967295),
+			"flags":                 uint64(4294967295),
+			"itemNumber":            uint64(18446744073709551615),
+			"stackCount":            uint64(18446744073709551615),
+		}
+	}
+	nativeResult, err := json.Marshal(map[string]any{
+		"result": int64(0),
+		"out":    []any{rawRecords, int64(maxRecords), uint64(18446744073709551615)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(len(nativeResult)) > pkg.Manifest.Limits.MaxResultBytes {
+		t.Fatalf("maximum decoded native result is %d bytes, runner limit is %d", len(nativeResult), pkg.Manifest.Limits.MaxResultBytes)
+	}
+	const frameEnvelopeHeadroom = 4096
+	if pkg.Manifest.Limits.MaxResultBytes+frameEnvelopeHeadroom >= observationprotocol.DefaultMaxFrameBytes {
+		t.Fatalf("runner result limit %d leaves insufficient framed-protocol headroom", pkg.Manifest.Limits.MaxResultBytes)
+	}
+	library := pkg.Manifest.NativeLibraries["save-decoder"]
+	if library.MaxNativeMemoryBytes != 128<<10 {
+		t.Fatalf("native memory limit = %d, want 128 KiB", library.MaxNativeMemoryBytes)
+	}
+}
+
+const inventoryManagerPatternForTest = "?? 89 ?? ?? ?? ?? ?? ?? 8D ?? 30 01 00 00 ?? 89 ?? ?? ?? ?? ?? ?? 8D ?? B0 01 00 00 ?? 89 ?? ?? ?? ?? ?? ?? 88"
 
 type ambiguousBroker struct{ fixtureBroker }
 
@@ -164,10 +291,16 @@ type saveFallbackBroker struct{ fixtureBroker }
 func (b *saveFallbackBroker) Call(ctx context.Context, namespace, operation string, arguments map[string]any) (any, error) {
 	if operation == "scan" {
 		b.calls = append(b.calls, namespace+"."+operation)
+		b.observerCalls = append(b.observerCalls, fixtureObserverCall{
+			namespace: namespace, operation: operation, arguments: arguments,
+		})
 		return map[string]any{"matches": []any{}}, nil
 	}
 	if operation == "openBlob" {
 		b.calls = append(b.calls, namespace+"."+operation)
+		b.observerCalls = append(b.observerCalls, fixtureObserverCall{
+			namespace: namespace, operation: operation, arguments: arguments,
+		})
 		return map[string]any{
 			"modifiedAt": "2026-07-27T13:42:00Z",
 			"blob":       map[string]any{"blobHandle": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
@@ -185,6 +318,18 @@ type fixtureNativeBackend struct{}
 type fixtureNativeDLL struct{}
 type fixtureNativeProcedure struct{ name string }
 
+type failureNativeState struct {
+	mode  string
+	frees int
+}
+
+type failureNativeBackend struct{ state *failureNativeState }
+type failureNativeDLL struct{ state *failureNativeState }
+type failureNativeProcedure struct {
+	name  string
+	state *failureNativeState
+}
+
 func (fixtureNativeBackend) load(string) (nativeDLL, error) {
 	return fixtureNativeDLL{}, nil
 }
@@ -199,6 +344,58 @@ func (fixtureNativeDLL) bind(name string) (nativeProcedure, error) {
 }
 
 func (fixtureNativeDLL) close() error { return nil }
+
+func (b failureNativeBackend) load(string) (nativeDLL, error) {
+	return failureNativeDLL{state: b.state}, nil
+}
+
+func (d failureNativeDLL) bind(name string) (nativeProcedure, error) {
+	switch name {
+	case "crimson_save_load_from_file", "crimson_save_list_inventory_items", "crimson_save_free":
+		return failureNativeProcedure{name: name, state: d.state}, nil
+	default:
+		return nil, errors.New("fixture export is absent")
+	}
+}
+
+func (failureNativeDLL) close() error { return nil }
+
+func (p failureNativeProcedure) call(frame nativeCallFrame) (uintptr, error) {
+	switch p.name {
+	case "crimson_save_load_from_file":
+		result, err := (fixtureNativeProcedure{name: p.name}).call(frame)
+		if p.state.mode == "load" {
+			return 1, err
+		}
+		return result, err
+	case "crimson_save_list_inventory_items":
+		result, err := (fixtureNativeProcedure{name: p.name}).call(frame)
+		if err != nil {
+			return result, err
+		}
+		if frame.arguments[1] == 0 {
+			switch p.state.mode {
+			case "query":
+				return 1, nil
+			case "count":
+				binary.LittleEndian.PutUint64(frame.buffers[3], 2049)
+			}
+			return result, nil
+		}
+		switch p.state.mode {
+		case "read":
+			return 1, nil
+		case "changed":
+			binary.LittleEndian.PutUint64(frame.buffers[3], 3)
+		}
+		return result, nil
+	case "crimson_save_free":
+		p.state.frees++
+		return 0, nil
+	default:
+		return 0, errors.New("unexpected fixture procedure")
+	}
+}
 
 func (p fixtureNativeProcedure) call(frame nativeCallFrame) (uintptr, error) {
 	switch p.name {
@@ -275,6 +472,15 @@ func TestMemoryFailureFallsBackToExplicitSave(t *testing.T) {
 		}) {
 		t.Fatalf("call prefix = %#v", broker.calls)
 	}
+	wantOpenBlob := map[string]any{
+		"path": map[string]any{
+			"root":     "crimson-desert-saves",
+			"relative": "slot/save.save",
+		},
+	}
+	if got := broker.observerCalls[len(broker.observerCalls)-1].arguments; !reflect.DeepEqual(got, wantOpenBlob) {
+		t.Fatalf("openBlob arguments = %#v, want %#v", got, wantOpenBlob)
+	}
 	nativeCompleted := 0
 	for _, call := range broker.calls {
 		if call == "native.call.completed" {
@@ -283,6 +489,42 @@ func TestMemoryFailureFallsBackToExplicitSave(t *testing.T) {
 	}
 	if nativeCompleted != 4 {
 		t.Fatalf("completed native calls = %d, want 4; calls=%#v", nativeCompleted, broker.calls)
+	}
+}
+
+func TestSaveApplicationFailuresAreExplicitAndReleaseHandle(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		code string
+	}{
+		{name: "load return code", mode: "load", code: "SAVE_LOAD_FAILED"},
+		{name: "query return code", mode: "query", code: "SAVE_INVENTORY_QUERY_FAILED"},
+		{name: "record count", mode: "count", code: "SAVE_INVENTORY_COUNT_INVALID"},
+		{name: "read return code", mode: "read", code: "SAVE_INVENTORY_READ_FAILED"},
+		{name: "count changed", mode: "changed", code: "SAVE_INVENTORY_CHANGED"},
+	}
+	root, _ := filepath.Abs(filepath.Join("..", "..", "ObservationScripts", "CrimsonDesert", "inventory"))
+	pkg, err := scriptpackage.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			broker := &saveFallbackBroker{}
+			state := &failureNativeState{mode: test.mode}
+			runner, _ := New(broker)
+			runner.nativeBackend = failureNativeBackend{state: state}
+			_, runErr := runner.Run(context.Background(), pkg, map[string]any{
+				"save": map[string]any{"root": "crimson-desert-saves", "relative": "slot/save.save"},
+			})
+			if runErr == nil || !strings.Contains(runErr.Error(), test.code) {
+				t.Fatalf("error = %v, want code %s", runErr, test.code)
+			}
+			if state.frees != 1 {
+				t.Fatalf("free calls = %d, want 1", state.frees)
+			}
+		})
 	}
 }
 
@@ -343,5 +585,73 @@ func TestMissingSaveInputIsScriptFailureNotSourceFailure(t *testing.T) {
 	}
 	if runError.Code != "SCRIPT_RUNTIME_FAILED" {
 		t.Fatalf("code = %q", runError.Code)
+	}
+}
+
+type memoryValidationBroker struct {
+	fixtureBroker
+	mode string
+}
+
+func (b *memoryValidationBroker) Call(ctx context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+	if namespace == "file" {
+		return nil, &BrokerError{
+			Code:             "OBSERVER_CALL_FAILED",
+			FallbackEligible: true,
+			Cause:            errors.New("fixture save source unavailable"),
+		}
+	}
+	switch {
+	case b.mode == "unsupported-build" && operation == "modules":
+		return map[string]any{
+			"process": map[string]any{"imageSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			"modules": []any{},
+		}, nil
+	case b.mode == "missing-module" && operation == "modules":
+		return map[string]any{
+			"process": map[string]any{"imageSha256": crimsonImageSHA256},
+			"modules": []any{},
+		}, nil
+	case b.mode == "ambiguous-signature" && operation == "scan":
+		return map[string]any{"matches": []any{}}, nil
+	case b.mode == "invalid-header" && operation == "readBatch":
+		reads := arguments["reads"].([]any)
+		if len(reads) == 2 {
+			return map[string]any{"reads": []any{
+				map[string]any{"value": uint64(0)},
+				map[string]any{"value": uint64(2049)},
+			}}, nil
+		}
+	}
+	return b.fixtureBroker.Call(ctx, namespace, operation, arguments)
+}
+
+func TestMemoryValidationFailuresAreVisibleBeforeExplicitSave(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		code string
+	}{
+		{name: "unsupported build", mode: "unsupported-build", code: "UNSUPPORTED_BUILD"},
+		{name: "missing module", mode: "missing-module", code: "TARGET_MODULE_NOT_FOUND"},
+		{name: "ambiguous signature", mode: "ambiguous-signature", code: "INVENTORY_SIGNATURE_AMBIGUOUS"},
+		{name: "invalid header", mode: "invalid-header", code: "INVENTORY_HEADER_INVALID"},
+	}
+	root, _ := filepath.Abs(filepath.Join("..", "..", "ObservationScripts", "CrimsonDesert", "inventory"))
+	pkg, err := scriptpackage.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			broker := &memoryValidationBroker{mode: test.mode}
+			runner, _ := New(broker)
+			_, runErr := runner.Run(context.Background(), pkg, map[string]any{
+				"save": map[string]any{"root": "crimson-desert-saves", "relative": "slot/save.save"},
+			})
+			if runErr == nil || !strings.Contains(runErr.Error(), test.code) {
+				t.Fatalf("error = %v, want code %s", runErr, test.code)
+			}
+		})
 	}
 }

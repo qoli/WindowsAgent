@@ -17,10 +17,12 @@
         },
         "saveModifiedAt": {
           "type": ["string", "null"],
-          "format": "date-time"
+          "format": "date-time",
+          "maxLength": 64
         },
         "nativeLibrary": {
-          "type": ["string", "null"]
+          "type": ["string", "null"],
+          "maxLength": 64
         }
       }
     },
@@ -35,7 +37,10 @@
         "properties": {
           "source": {"enum": ["process-memory", "save-file"]},
           "status": {"enum": ["succeeded", "failed"]},
-          "errorCode": {"type": ["string", "null"]}
+          "errorCode": {
+            "type": ["string", "null"],
+            "pattern": "^[A-Z][A-Z0-9_]{0,63}$"
+          }
         }
       }
     },
@@ -44,11 +49,11 @@
       "additionalProperties": false,
       "required": ["recordCount", "occupiedCount", "items"],
       "properties": {
-        "recordCount": {"type": "integer", "minimum": 0, "maximum": 100000},
-        "occupiedCount": {"type": "integer", "minimum": 0, "maximum": 100000},
+        "recordCount": {"type": "integer", "minimum": 0, "maximum": 2048},
+        "occupiedCount": {"type": "integer", "minimum": 0, "maximum": 2048},
         "items": {
           "type": "array",
-          "maxItems": 100000,
+          "maxItems": 2048,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -61,12 +66,36 @@
               "instanceId"
             ],
             "properties": {
-              "slot": {"type": "integer", "minimum": 0},
-              "itemId": {"type": "integer", "minimum": 1},
-              "quantity": {"type": "integer", "minimum": 0},
-              "pairedItemId": {"type": ["integer", "null"], "minimum": 0},
-              "inventoryKey": {"type": ["integer", "null"], "minimum": 0},
-              "instanceId": {"type": ["integer", "null"], "minimum": 0}
+              "slot": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "itemId": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              "quantity": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "pairedItemId": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "inventoryKey": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              "instanceId": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              }
             }
           }
         }

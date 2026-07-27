@@ -4,7 +4,7 @@ SAVE_LIBRARY = "save-decoder"
 ITEM_STRIDE = 0xC8
 CRIMSON_OK = 0
 CRIMSON_BUFFER_TOO_SMALL = -11
-MAX_SAVE_RECORDS = 100000
+MAX_INVENTORY_RECORDS = 2048
 BACKPACK_INVENTORY_KEY = 2
 
 CRIMSON_RECORD = native.struct(fields = [
@@ -86,7 +86,7 @@ def read_from_memory():
     )
     records_address = header["reads"][0]["value"]
     count = header["reads"][1]["value"]
-    if records_address == 0 or count > 2048:
+    if records_address == 0 or count > MAX_INVENTORY_RECORDS:
         return job.fail(
             code = "INVENTORY_HEADER_INVALID",
             message = "inventory array pointer or item count violates reviewed bounds",
@@ -157,12 +157,15 @@ def read_from_save():
     )
 
     loaded = load_file.call(blob_path)
-    if loaded["result"] != CRIMSON_OK or loaded["out"][0] == 0:
+    loaded_handle = loaded["out"][0]
+    if loaded["result"] != CRIMSON_OK or loaded_handle == 0:
+        if loaded_handle != 0:
+            free_save.call(loaded_handle)
         return job.fail(
             code = "SAVE_LOAD_FAILED",
             message = "crimson-rs could not load the authorized save blob",
         )
-    save_handle = loaded["out"][0]
+    save_handle = loaded_handle
     query = list_count.call(save_handle, native.null(), 0)
     count = query["out"][0]
     if query["result"] != CRIMSON_OK and query["result"] != CRIMSON_BUFFER_TOO_SMALL:
@@ -171,7 +174,7 @@ def read_from_save():
             code = "SAVE_INVENTORY_QUERY_FAILED",
             message = "crimson-rs could not query inventory record count",
         )
-    if count > MAX_SAVE_RECORDS:
+    if count > MAX_INVENTORY_RECORDS:
         free_save.call(save_handle)
         return job.fail(
             code = "SAVE_INVENTORY_COUNT_INVALID",

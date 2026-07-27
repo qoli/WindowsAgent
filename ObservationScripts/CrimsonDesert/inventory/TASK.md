@@ -38,8 +38,9 @@ selected save into the current job blob and accounts the bytes.
 3. binds `crimson_save_list_inventory_items`;
 4. binds `crimson_save_free`;
 5. declares the eight-`u32` plus two-`u64` 48-byte record;
-6. queries count, reads one fixed record array, filters `inventoryKey = 2`,
-   converts to JSON, and frees the save handle.
+6. rejects a count above the shared 2,048-record task bound;
+7. reads one fixed record array, filters `inventoryKey = 2`, converts to JSON,
+   and frees the save handle.
 
 All Crimson exports, return codes, struct fields, and conversion logic live in
 this Script Package, not WindowsAgent Core.
@@ -52,7 +53,12 @@ undeclared alias, missing export, forged blob, FFI limit, deadline, protocol,
 or process failure is terminal infrastructure failure and does not activate
 another source or decoder.
 
-The terminal JSON must pass `output.schema.json`. Reports may include source
-kind, attempts, counts, native alias/function accounting, and Observer
-accounting. They must not contain private save paths, save bytes, item details,
-raw memory, or sensitive local diagnostics.
+The terminal job output must pass `output.schema.json`. It deliberately contains
+the raw occupied backpack item contract: slot, item ID, quantity, paired item
+ID, inventory key, and instance ID. It never contains the selected save path,
+save bytes, raw memory, credentials, or sensitive local diagnostics.
+
+Human validation reports, pull requests, logs, and other public evidence are a
+separate privacy surface. They may include source kind, attempts, record and
+occupied counts, native alias/function accounting, and Observer accounting.
+They must not reproduce item records or other private gameplay data.

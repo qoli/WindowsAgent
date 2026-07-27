@@ -32,7 +32,7 @@ decoder fallback, hidden retry, or alternate source.
       "artifact": "native/windows-amd64/crimson-rs.inventory.bb730180.dll",
       "sha256": "c3acb8368369a856c8e65ea546ad6a3c2147cef852f9eff79cb3869e6d97272c",
       "maxCalls": 4,
-      "maxNativeMemoryBytes": 536870912
+      "maxNativeMemoryBytes": 131072
     }
   }
 }
@@ -57,7 +57,10 @@ limits.
 The first call loads the job blob and returns a handle. The second export is
 called once with a null record pointer to obtain count, then once with
 `native.out(native.array(record_type, count))`. The fourth and final native
-call frees the save handle.
+call frees the save handle. The package rejects more than 2,048 records,
+budgets 128 KiB of cumulative native call buffers, and allows at most 768 KiB
+for either a decoded native call result or the final job output. Both result
+limits stay below the 1 MiB framed-protocol boundary.
 
 ## Verification boundary
 
@@ -66,6 +69,7 @@ query, 48-byte/8-byte-aligned layout, generic FFI scalar/out handling, package
 artifact digest inclusion, alias-only load, missing export failure, native
 limits, forged blob rejection, and schema-valid output.
 
-Live reports contain only attempts, selected source kind, record count, and
-bounded provenance. They do not contain save paths, item details, memory
-contents, or private data.
+The terminal job output contains the schema-declared occupied item records.
+Privacy-minimized live validation reports contain only attempts, selected
+source kind, record count, and bounded provenance; they do not reproduce save
+paths, item details, memory contents, or private data.
