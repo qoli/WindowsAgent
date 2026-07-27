@@ -104,4 +104,7 @@ version, export, or source is substituted.
 
 See [Script Runner native-library FFI](native-library-ffi.md) for ABI types and
 [Scripted observation job model](observation-job-model.md) for process
-lifecycle.
+lifecycle. Package authors and reviewers must also follow the
+[`ObservationScripts` development contract](../../ObservationScripts/README.md)
+for authoring, integrity, fallback, privacy, versioning, and validation
+requirements.

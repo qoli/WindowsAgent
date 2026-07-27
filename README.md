@@ -245,6 +245,11 @@ ObservationScripts/              digest-pinned tasks, schemas, and native artifa
 scripts/                         Windows installation helpers
 ```
 
+New or changed observation packages must follow the
+[`ObservationScripts` development contract](ObservationScripts/README.md).
+It defines package ownership, source-transition rules, manifest integrity,
+native ABI responsibility, privacy boundaries, and required validation.
+
 New capabilities should receive their own internal package and API contract
 instead of being folded into the screenshot packages.
 

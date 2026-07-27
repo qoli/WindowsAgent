@@ -35,6 +35,11 @@ failure codes in the pull request; do not attach private screenshots, save
 files, memory contents, inventory results, or logs containing sensitive local
 paths.
 
+New or changed packages under `ObservationScripts/` must satisfy the
+[`ObservationScripts` development contract](ObservationScripts/README.md),
+including real package-loader tests, explicit source ordering, manifest digest
+updates, schema validation, and signed-in Windows evidence.
+
 ## Design boundaries
 
 - Do not add an alternate screenshot backend as a silent fallback.
