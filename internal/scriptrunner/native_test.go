@@ -34,7 +34,7 @@ func TestNativeArtifactValidationRequiresRegularFile(t *testing.T) {
 
 func loadInventoryFixturePackage(t *testing.T) *scriptpackage.Package {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	if err != nil {
 		t.Fatal(err)
 	}

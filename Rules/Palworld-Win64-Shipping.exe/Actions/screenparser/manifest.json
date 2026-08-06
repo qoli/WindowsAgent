@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "moduleId": "screenparser/ui-elements",
-  "kind": "preprocessor",
+  "kind": "action",
   "runtime": "screenparser-onnx-dml-v1",
   "targetExecutable": "Palworld-Win64-Shipping.exe",
   "model": {

@@ -2,7 +2,12 @@
 
 ## Status
 
-**Partially landed.**
+**Retired.**
+
+This classified-module design was replaced by the
+[Action registration model](action-registration-model.md). Runtime packages are
+now Actions; Monitor and Reaction are explicit registration forms, not module
+kinds. The remainder of this document is retained as historical context.
 
 Strict Rule schema version 2 and the read-only Modules catalog are implemented.
 The Crimson Desert inventory package is registered as a `query` module. The

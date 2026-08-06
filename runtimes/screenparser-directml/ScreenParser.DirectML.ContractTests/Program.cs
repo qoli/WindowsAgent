@@ -234,7 +234,7 @@ sealed class ManifestFixture : IDisposable
         {
           "schemaVersion": 1,
           "moduleId": "screenparser/ui-elements",
-          "kind": "preprocessor",
+          "kind": "action",
           "runtime": "screenparser-onnx-dml-v1",
           "targetExecutable": "msedge.exe",
           "model": {

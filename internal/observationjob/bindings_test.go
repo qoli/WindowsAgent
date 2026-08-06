@@ -16,7 +16,7 @@ func inventoryPackage(t *testing.T) *scriptpackage.Package {
 		"..",
 		"Rules",
 		"CrimsonDesert.exe",
-		"Modules",
+		"Actions",
 		"inventory",
 	))
 	if err != nil {

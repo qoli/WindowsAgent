@@ -54,18 +54,19 @@ This is not a general remote memory API. HTTP exposes a live read-only Script
 catalog; the unauthenticated run endpoint delegates one strictly validated
 request to the local launcher inside the signed-in Windows session.
 
-The event-driven module refactor is partially landed:
+The Action registration refactor is partially landed:
 
-- Rule schema version 2 classifies `query`, `preprocessor`, `loop`, `reactor`, and `action`
-  modules independently from their runtime;
+- Rule schema version 3 declares executable Actions and separately registers
+  selected Actions as timer-driven Monitors or event-driven Reactions;
 - `windows-event-stream.exe` owns a strict append-only JSONL journal and an
   authenticated loopback append/replay API;
-- Crimson Desert inventory remains a finite registered `query` using the
-  landed v1 observation runtime;
-- `screenparser/ui-elements` is a Palworld-configured on-demand `preprocessor`
+- Crimson Desert inventory remains a finite Action using the landed v1
+  observation runtime;
+- `screenparser/ui-elements` is a Palworld-configured on-demand Action
   that transforms one caller-supplied, hash-pinned RGB24 frame through the
   verified FP16 ScreenParser v2 ONNX model and then exits;
-- no mini reaction model or Windows action runtime is shipped yet.
+- both shipped Rules have no active Monitor or Reaction registrations by
+  default; no scheduler or reaction dispatcher is shipped yet.
 
 ## Build
 
@@ -219,7 +220,7 @@ be present beside the selected capture build artifact before installation.
 The installer does not create an SCM service or modify Windows Firewall.
 
 Builds that stored `rule.agents.sha256`, or matched Rule metadata without
-`rule.scripts` or `rule.modules`, use an incompatible capture metadata
+`rule.scripts`, `rule.actions`, or `rule.registrations`, use an incompatible capture metadata
 contract. The installer detects those captures before stopping the current
 task and refuses the migration unless explicitly asked to preserve them:
 
@@ -268,7 +269,7 @@ runs:
 ```
 
 This tool accepts `fp32`, `fp16`, and `int8` only for isolated measurement. It
-does not widen the production preprocessor manifest, installer, or runtime contract.
+does not widen the production Action manifest, installer, or runtime contract.
 
 The pinned `.pt` checkpoint is a build-time input only. The ONNX exporter
 requires at least one real validation image and emits both the model and its
@@ -281,8 +282,8 @@ python3 tools/screenparser-model/export_onnx.py \
   --output-dir /absolute/empty/output
 ```
 
-Install the finite ScreenParser preprocessor with the ONNX artifact declared by
-`Rules/Palworld-Win64-Shipping.exe/Modules/screenparser/manifest.json` and the published runtime
+Install the finite ScreenParser Action with the ONNX artifact declared by
+`Rules/Palworld-Win64-Shipping.exe/Actions/screenparser/manifest.json` and the published runtime
 bundle:
 
 ```powershell
@@ -324,7 +325,8 @@ GET  /v1/captures/{id}
 GET  /v1/captures/{id}/content
 GET  /v1/rules/{rule-id}/AGENTS.md
 GET  /v1/rules/{rule-id}/scripts
-GET  /v2/rules/{rule-id}/modules
+GET  /v3/rules/{rule-id}/actions
+GET  /v3/rules/{rule-id}/registrations
 POST /v1/scripts/run
 ```
 
@@ -385,7 +387,7 @@ object:
   },
   "rule": {
     "status": "matched",
-    "description": "The executing agent must read rule.agents.url and rule.modules.url before taking any rule-specific action.",
+    "description": "The executing agent must read the Rule navigation documents before taking any rule-specific action.",
     "id": "Game.exe",
     "agents": {
       "url": "/v1/rules/Game.exe/AGENTS.md",
@@ -395,8 +397,12 @@ object:
       "url": "/v1/rules/Game.exe/scripts",
       "content_type": "application/json; charset=utf-8"
     },
-    "modules": {
-      "url": "/v2/rules/Game.exe/modules",
+    "actions": {
+      "url": "/v3/rules/Game.exe/actions",
+      "content_type": "application/json; charset=utf-8"
+    },
+    "registrations": {
+      "url": "/v3/rules/Game.exe/registrations",
       "content_type": "application/json; charset=utf-8"
     }
   }
@@ -409,8 +415,10 @@ external folders under `Rules/`; this keeps the capture JSON as Codex's single
 Windows perception entry point. Each request reloads `rule.json` and
 `AGENTS.md`, so a completed Rule plugin replacement requires no agent reload or
 task restart. Codex follows `rule.agents.url` for policy,
-`rule.modules.url` for the classified module registry, and `rule.scripts.url`
-for the current query input, output, and launcher contract. Script package validation occurs only when that catalog
+`rule.actions.url` for executable capabilities,
+`rule.registrations.url` for explicitly configured Monitor and Reaction
+instances, and `rule.scripts.url` for the current observation compatibility
+projection. Script package validation occurs only when that catalog
 or capability is requested; capture remains independent from Script package
 health. An executable without a rule reports
 `rule.status=unmatched` with a description that no rule guidance is available,
@@ -454,8 +462,8 @@ internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
 internal/wgc/                    WGC and Direct3D 11 implementation
-Rules/<Executable.exe>/          distributable Rule v2 modules and guidance
-runtimes/screenparser-directml/   finite self-contained DirectML preprocessor
+Rules/<Executable.exe>/          distributable Rule v3 Actions, registrations, and guidance
+runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
 tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter
 tools/screenparser-runtime/       reproducible Windows runtime publisher
 scripts/                         Windows installation helpers

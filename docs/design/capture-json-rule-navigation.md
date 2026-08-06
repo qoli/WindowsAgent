@@ -13,9 +13,9 @@ Implemented:
   the rule's `AGENTS.md`;
 - a matched response exposes a live Script catalog URL without loading a
   Script package during capture;
-- a matched response exposes the Rule v2 classified Modules catalog URL;
+- a matched response exposes Rule v3 Action and registration catalog URLs;
 - an unmatched executable is represented explicitly;
-- Crimson Desert is the first Rule plugin and registers one `query` module.
+- Crimson Desert is the first Rule plugin and declares one observation Action.
 
 Explicitly out of scope:
 
@@ -62,7 +62,7 @@ Rules/
   CrimsonDesert.exe/
     rule.json
     AGENTS.md
-    Modules/
+    Actions/
       inventory/
         manifest.json
 ```
@@ -72,9 +72,9 @@ executable selector. Matching is Windows-style case-insensitive. The response
 preserves the canonical folder spelling.
 
 Each executable folder is one externally distributed plugin. `rule.json` owns
-the description plus the module kind/path/runtime registry. `Modules/` is the
-query/loop container; `Reactors/` and `Actions/` own their respective module
-kinds. The capture binary stores no Rule content and
+the description, executable Action declarations, and explicit Monitor or
+Reaction registrations. Every executable package lives below `Actions/`.
+The capture binary stores no Rule content and
 reads the current files for every request.
 
 ### Capture response
@@ -88,7 +88,7 @@ A matched capture includes:
   },
   "rule": {
     "status": "matched",
-    "description": "The executing agent must read rule.agents.url and rule.modules.url before taking any rule-specific action.",
+    "description": "The executing agent must read the Rule navigation documents before taking any rule-specific action.",
     "id": "CrimsonDesert.exe",
     "agents": {
       "url": "/v1/rules/CrimsonDesert.exe/AGENTS.md",
@@ -98,8 +98,12 @@ A matched capture includes:
       "url": "/v1/rules/CrimsonDesert.exe/scripts",
       "content_type": "application/json; charset=utf-8"
     },
-    "modules": {
-      "url": "/v2/rules/CrimsonDesert.exe/modules",
+    "actions": {
+      "url": "/v3/rules/CrimsonDesert.exe/actions",
+      "content_type": "application/json; charset=utf-8"
+    },
+    "registrations": {
+      "url": "/v3/rules/CrimsonDesert.exe/registrations",
       "content_type": "application/json; charset=utf-8"
     }
   }
@@ -125,12 +129,16 @@ not prevent the screenshot from being committed.
 ```text
 GET /v1/rules/{canonical-rule-id}/AGENTS.md
 GET /v1/rules/{canonical-rule-id}/scripts
-GET /v2/rules/{canonical-rule-id}/modules
+GET /v3/rules/{canonical-rule-id}/actions
+GET /v3/rules/{canonical-rule-id}/registrations
 ```
 
 All endpoints return current external content with `Cache-Control: no-store`.
-The Script catalog loads and validates the packages registered by the current
-`rule.json`, then exposes capability ID, runtime, title, version, input schema,
+The Action catalog exposes capability ID, runtime, and declared registration
+eligibility. The registration catalog exposes only explicitly configured
+Monitor and Reaction instances. The Script compatibility catalog loads and
+validates observation packages declared by the current `rule.json`, then
+exposes capability ID, runtime, title, version, input schema,
 output schema, and the launcher contract. Unknown IDs and
 non-canonical casing return `404 rule_not_found`. Neither endpoint accepts
 arbitrary file paths or launches a Script. The separate unauthenticated
@@ -143,8 +151,8 @@ is the deployment trust boundary.
 - Rule resolution uses the foreground executable from the same captured frame.
 - Window titles and executable path substrings never select a rule.
 - A normalized executable matches at most one rule.
-- A matched result always includes the canonical ID, AGENTS, query Script, and
-  classified Modules navigation URLs/media types, plus the current plugin-owned
+- A matched result always includes the canonical ID, AGENTS, Script
+  compatibility, Actions, and registrations navigation URLs/media types, plus the current plugin-owned
   description.
 - An unmatched result includes a description but no ID or document/catalog
   link.
@@ -158,8 +166,8 @@ is the deployment trust boundary.
 
 - The root README documents the public HTTP surface.
 - `SECURITY.md` owns unauthenticated-network and private-data exposure warnings.
-- Each nested `Rules/{executable}/` owns the description, Codex guidance, and
-  Script registry for that explicitly matched executable.
+- Each nested `Rules/{executable}/` owns the description, Codex guidance,
+  Actions, and registrations for that explicitly matched executable.
 - This registry owns maturity; folder placement owns rule identity.
 
 ## Codex execution

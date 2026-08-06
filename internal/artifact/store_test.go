@@ -178,8 +178,12 @@ func testResult(content string) capture.Result {
 				URL:         "/v1/rules/game.exe/scripts",
 				ContentType: "application/json; charset=utf-8",
 			},
-			Modules: &rules.Document{
-				URL:         "/v2/rules/game.exe/modules",
+			Actions: &rules.Document{
+				URL:         "/v3/rules/game.exe/actions",
+				ContentType: "application/json; charset=utf-8",
+			},
+			Registrations: &rules.Document{
+				URL:         "/v3/rules/game.exe/registrations",
 				ContentType: "application/json; charset=utf-8",
 			},
 		},

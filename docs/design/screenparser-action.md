@@ -1,4 +1,4 @@
-# ScreenParser Preprocessor Module
+# ScreenParser Action
 
 ## Status
 
@@ -9,10 +9,14 @@ publisher, installer migration, Palworld Rule, and contract tests are
 implemented. The ScreenVLM reactor that decides when to request preprocessing
 and authors semantic events remains deferred.
 
+The Rule declares `screenparser/ui-elements` as an Action eligible for Monitor
+or Reaction registration. The Rule intentionally creates neither registration,
+so installation never starts a background loop.
+
 ## Boundary
 
-`screenparser/ui-elements` is an on-demand `preprocessor`, not an observer loop
-or event source. A trusted caller supplies one RGB24 frame artifact with its
+`screenparser/ui-elements` is an on-demand Action, not an observer loop or
+event source. A trusted caller supplies one RGB24 frame artifact with its
 absolute path, dimensions, capture time, target executable, and SHA-256. The
 runtime validates that the artifact is below the caller-declared frame root,
 runs exactly one inference, atomically creates one response, and exits.
@@ -25,7 +29,7 @@ action. Repeated or timed use belongs to the later VLM reactor or its host.
 
 ```powershell
 .\ScreenParser.DirectML.exe `
-  --config C:\Rules\Palworld-Win64-Shipping.exe\Modules\screenparser\manifest.json `
+  --config C:\Rules\Palworld-Win64-Shipping.exe\Actions\screenparser\manifest.json `
   --model C:\Models\screenparser-v2-f029e565-opset20-fp16-1280.onnx `
   --request C:\Frames\request.json `
   --frame-root C:\Frames `

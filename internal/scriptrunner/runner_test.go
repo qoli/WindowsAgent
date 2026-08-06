@@ -101,7 +101,7 @@ func (b *fixtureBroker) Call(_ context.Context, namespace, operation string, arg
 }
 
 func TestCrimsonInventoryPackageFixture(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestCrimsonInventoryPackageFixture(t *testing.T) {
 }
 
 func TestInventoryMaximumSchemaOutputFitsRunnerAndProtocolLimits(t *testing.T) {
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +268,7 @@ func (b *ambiguousBroker) Call(ctx context.Context, namespace, operation string,
 }
 
 func TestBothSourceFailuresHaveTerminalCode(t *testing.T) {
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -470,7 +470,7 @@ func (p fixtureNativeProcedure) call(frame nativeCallFrame) (uintptr, error) {
 }
 
 func TestMemoryFailureUsesPackageSelectedSave(t *testing.T) {
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -583,7 +583,7 @@ func TestPackageOwnedSaveSelectionRejectsAmbiguity(t *testing.T) {
 			code: "SAVE_REPARSE_POINT_FOUND",
 		},
 	}
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -612,7 +612,7 @@ func TestSaveApplicationFailuresAreExplicitAndReleaseHandle(t *testing.T) {
 		{name: "read return code", mode: "read", code: "SAVE_INVENTORY_READ_FAILED"},
 		{name: "count changed", mode: "changed", code: "SAVE_INVENTORY_CHANGED"},
 	}
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -657,7 +657,7 @@ func (b *failingBroker) RecordNative(context.Context, NativeRecord) error {
 }
 
 func TestNonEligibleBrokerFailureDoesNotFallback(t *testing.T) {
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -678,7 +678,7 @@ func TestNonEligibleBrokerFailureDoesNotFallback(t *testing.T) {
 }
 
 func TestCallerSuppliedSaveInputFailsBeforeScriptExecution(t *testing.T) {
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)
@@ -749,7 +749,7 @@ func TestMemoryValidationFailuresAreVisibleBeforeExplicitSave(t *testing.T) {
 		{name: "ambiguous signature", mode: "ambiguous-signature", code: "INVENTORY_SIGNATURE_AMBIGUOUS"},
 		{name: "invalid header", mode: "invalid-header", code: "INVENTORY_HEADER_INVALID"},
 	}
-	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, _ := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	pkg, err := scriptpackage.Load(root, "crimson-desert/inventory")
 	if err != nil {
 		t.Fatal(err)

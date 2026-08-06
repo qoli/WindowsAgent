@@ -6,7 +6,7 @@
 
 This document records the former autonomous loop design and its acceptance
 evidence. It is no longer an active runtime contract. The Palworld Rule now uses
-the finite [ScreenParser preprocessor module](screenparser-preprocessor-module.md),
+the finite [ScreenParser Action](screenparser-action.md),
 and installation removes the owned legacy ScreenParser and scene-reducer tasks.
 
 The repository ships the independent self-contained .NET loop runtime, strict

@@ -15,7 +15,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-throw "screen-scene-reducer is retired: ScreenParser is now an on-demand preprocessor and does not publish a raw detection event stream"
+throw "screen-scene-reducer is retired: ScreenParser is now an on-demand Action and does not publish a raw detection event stream"
 
 function Assert-ExactProperties {
     param(

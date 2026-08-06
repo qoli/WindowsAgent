@@ -12,13 +12,14 @@ The capture already tells you how to continue. Do not search `gameGuide`,
 `WindowsAgent`, or another local repository to discover Crimson Desert
 capabilities. Do not delegate a repository-exploration task.
 
-`rule.agents.url`, `rule.modules.url`, `rule.scripts.url`, and catalog launcher
+`rule.agents.url`, `rule.actions.url`, `rule.registrations.url`, `rule.scripts.url`, and catalog launcher
 URLs are HTTP paths, not local files. Resolve each relative URL against the same WindowsAgent origin
 used to create the capture:
 
 ```text
 WindowsAgent origin + rule.scripts.url
-WindowsAgent origin + rule.modules.url
+WindowsAgent origin + rule.actions.url
+WindowsAgent origin + rule.registrations.url
 WindowsAgent origin + launcher.url
 ```
 
@@ -49,17 +50,20 @@ monitoring, another capability, another executable, or another account.
 
 1. Take a fresh capture and confirm the three activation fields at the top of
    this file.
-2. GET the exact `rule.modules.url` and `rule.scripts.url` from that capture.
-3. In the Modules catalog, require exactly one
+2. GET the exact `rule.actions.url`, `rule.registrations.url`, and
+   `rule.scripts.url` from that capture.
+3. In the Actions catalog, require exactly one
    `crimson-desert/inventory` entry with:
-   - `kind: query`
    - `runtime: windows-observation-v1`
-4. In the Scripts catalog, require exactly one
+   - `registrableAs` containing `monitor` and `reaction`
+4. Confirm the Registrations catalog contains no active registration for this
+   Action. A declared registration capability is not authorization to monitor.
+5. In the Scripts catalog, require exactly one
    `crimson-desert/inventory` entry with:
    - `runtime: windows-observation-v1`
    - `launcher.method: POST`
    - `launcher.authentication: none`
-5. POST this body once to the catalog's `launcher.url`:
+6. POST this body once to the catalog's `launcher.url`:
 
    ```json
    {
@@ -70,13 +74,13 @@ monitoring, another capability, another executable, or another account.
 
    Use `Content-Type: application/json`. No bearer token or other HTTP
    credential is required.
-6. Treat the HTTP response as authoritative:
+7. Treat the HTTP response as authoritative:
    - on non-2xx, report the returned `error.code`, `error.message`, and
      `error.request_id` exactly; do not replace them with a generic wrapper
      error and do not retry;
    - on success, use the returned `output`; WindowsAgent has already validated
      the request, package permissions, and output schema.
-6. Report:
+8. Report:
    - `output.source.kind`;
    - each entry in `output.attempts`;
    - inventory record and occupied counts;

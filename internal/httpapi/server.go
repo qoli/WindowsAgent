@@ -70,9 +70,14 @@ type scriptCatalogResponse struct {
 	Scripts []scriptCapabilityResponse `json:"scripts"`
 }
 
-type moduleCatalogResponse struct {
+type actionCatalogResponse struct {
 	RuleID  string         `json:"ruleId"`
-	Modules []rules.Module `json:"modules"`
+	Actions []rules.Action `json:"actions"`
+}
+
+type registrationCatalogResponse struct {
+	RuleID        string               `json:"ruleId"`
+	Registrations []rules.Registration `json:"registrations"`
 }
 
 type scriptCapabilityResponse struct {
@@ -168,8 +173,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleCaptureResource(recorder, r, requestID)
 	case strings.HasPrefix(r.URL.Path, "/v1/rules/"):
 		s.handleRuleResource(recorder, r, requestID)
-	case strings.HasPrefix(r.URL.Path, "/v2/rules/"):
-		s.handleModuleResource(recorder, r, requestID)
+	case strings.HasPrefix(r.URL.Path, "/v3/rules/"):
+		s.handleActionResource(recorder, r, requestID)
 	case r.URL.Path == "/v1/scripts/run":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleScriptRun)
 	default:
@@ -177,19 +182,33 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleModuleResource(w http.ResponseWriter, r *http.Request, requestID string) {
+func (s *Server) handleActionResource(w http.ResponseWriter, r *http.Request, requestID string) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		writeError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		return
 	}
-	remainder := strings.TrimPrefix(r.URL.Path, "/v2/rules/")
+	remainder := strings.TrimPrefix(r.URL.Path, "/v3/rules/")
 	parts := strings.Split(remainder, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] != "modules" {
+	if len(parts) != 2 || parts[0] == "" || (parts[1] != "actions" && parts[1] != "registrations") {
 		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
 		return
 	}
-	modules, resolution, err := s.rules.ReadModules(parts[0])
+	if parts[1] == "actions" {
+		actions, resolution, err := s.rules.ReadActions(parts[0])
+		if errors.Is(err, fs.ErrNotExist) {
+			writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
+			return
+		}
+		if err != nil {
+			s.writeMappedError(w, requestID, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, actionCatalogResponse{RuleID: resolution.ID, Actions: actions})
+		return
+	}
+	registrations, resolution, err := s.rules.ReadRegistrations(parts[0])
 	if errors.Is(err, fs.ErrNotExist) {
 		writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
 		return
@@ -199,7 +218,7 @@ func (s *Server) handleModuleResource(w http.ResponseWriter, r *http.Request, re
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, moduleCatalogResponse{RuleID: resolution.ID, Modules: modules})
+	writeJSON(w, http.StatusOK, registrationCatalogResponse{RuleID: resolution.ID, Registrations: registrations})
 }
 
 func (s *Server) handleScriptRun(w http.ResponseWriter, r *http.Request, requestID string) {

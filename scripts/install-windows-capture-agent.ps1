@@ -93,13 +93,19 @@ if (Test-Path -LiteralPath $capturesDir -PathType Container) {
             $metadata.rule.status -eq "matched" -and
             -not ($ruleProperties -contains "scripts")
         )
-        $missingModuleNavigation = (
+        $missingActionNavigation = (
             $hasRule -and
             $ruleProperties -contains "status" -and
             $metadata.rule.status -eq "matched" -and
-            -not ($ruleProperties -contains "modules")
+            -not ($ruleProperties -contains "actions")
         )
-        if ($usesRemovedAgentSHA -or $missingScriptNavigation -or $missingModuleNavigation) {
+        $missingRegistrationNavigation = (
+            $hasRule -and
+            $ruleProperties -contains "status" -and
+            $metadata.rule.status -eq "matched" -and
+            -not ($ruleProperties -contains "registrations")
+        )
+        if ($usesRemovedAgentSHA -or $missingScriptNavigation -or $missingActionNavigation -or $missingRegistrationNavigation) {
             $incompatibleCaptureMetadata += $metadataFile.FullName
         }
     }

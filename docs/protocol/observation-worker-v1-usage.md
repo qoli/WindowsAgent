@@ -8,7 +8,7 @@ Build and install these observation components together:
 windows-observation-job.exe
 windows-observation-script-runner.exe
 windows-observer.exe
-Rules/<Executable.exe>/Modules/
+Rules/<Executable.exe>/Actions/
 ```
 
 The Host launches only the Runner and Observer. All framed messages are

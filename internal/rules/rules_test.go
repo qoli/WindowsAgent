@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestStoreResolvesLiveRuleAndReadsAGENTS(t *testing.T) {
+func TestStoreResolvesLiveRuleAndDocuments(t *testing.T) {
 	root := testRulesRoot(t)
 	store, err := New(root)
 	if err != nil {
@@ -21,43 +21,17 @@ func TestStoreResolvesLiveRuleAndReadsAGENTS(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resolution.Status != StatusMatched || resolution.ID != "CrimsonDesert.exe" ||
-		resolution.Description != "Read the live Rule before acting." {
+		resolution.Actions == nil || resolution.Actions.URL != "/v3/rules/CrimsonDesert.exe/actions" ||
+		resolution.Registrations == nil || resolution.Registrations.URL != "/v3/rules/CrimsonDesert.exe/registrations" {
 		t.Fatalf("resolution = %+v", resolution)
 	}
-	if resolution.Agents == nil ||
-		resolution.Agents.URL != "/v1/rules/CrimsonDesert.exe/AGENTS.md" {
-		t.Fatalf("AGENTS navigation = %+v", resolution.Agents)
-	}
-	if resolution.Scripts == nil ||
-		resolution.Scripts.URL != "/v1/rules/CrimsonDesert.exe/scripts" {
-		t.Fatalf("Scripts navigation = %+v", resolution.Scripts)
-	}
-	if resolution.Modules == nil ||
-		resolution.Modules.URL != "/v2/rules/CrimsonDesert.exe/modules" {
-		t.Fatalf("Modules navigation = %+v", resolution.Modules)
-	}
-	content, readResolution, err := store.ReadAGENTS("CrimsonDesert.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(content) != "# Guidance\n" || readResolution.Description != resolution.Description {
-		t.Fatal("read AGENTS content or description differs from resolution")
-	}
 	if err := resolution.Validate(); err != nil {
-		t.Fatalf("matched resolution rejected: %v", err)
+		t.Fatal(err)
 	}
-
-	writeRule(t, root, "CrimsonDesert.exe", "Updated without reload.", "# Updated\n", nil)
+	writeRule(t, root, "CrimsonDesert.exe", "Updated without reload.", "# Updated\n", nil, nil)
 	updated, err := store.Resolve("CrimsonDesert.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	updatedContent, _, err := store.ReadAGENTS("CrimsonDesert.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Description != "Updated without reload." || string(updatedContent) != "# Updated\n" {
-		t.Fatalf("live update was not observed: %+v %q", updated, updatedContent)
+	if err != nil || updated.Description != "Updated without reload." {
+		t.Fatalf("updated = %+v, err = %v", updated, err)
 	}
 }
 
@@ -70,23 +44,60 @@ func TestStoreReportsUnmatchedExplicitly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolution.Status != StatusUnmatched ||
-		resolution.Description != UnmatchedDescription ||
-		resolution.ID != "" ||
-		resolution.Agents != nil ||
-		resolution.Scripts != nil ||
-		resolution.Modules != nil {
+	if resolution.Status != StatusUnmatched || resolution.ID != "" || resolution.Actions != nil || resolution.Registrations != nil {
 		t.Fatalf("resolution = %+v", resolution)
 	}
 	if err := resolution.Validate(); err != nil {
-		t.Fatalf("unmatched resolution rejected: %v", err)
+		t.Fatal(err)
 	}
 }
 
-func TestStoreResolvesRegisteredScript(t *testing.T) {
+func TestStoreReadsActionsAndExplicitRegistrations(t *testing.T) {
+	root := t.TempDir()
+	actions := map[string]ActionDeclaration{
+		"game/read": {Path: "Actions/read", Runtime: ObservationRuntimeV1, RegistrableAs: []string{RegistrationMonitor, RegistrationReaction}},
+		"game/open": {Path: "Actions/open", Runtime: "windows-action-v1", RegistrableAs: []string{RegistrationReaction}},
+	}
+	registrations := map[string]RegistrationDeclaration{
+		"game/read-fast": {
+			Type: RegistrationMonitor, Action: "game/read", Input: json.RawMessage(`{}`),
+			Monitor: &MonitorTrigger{IntervalMs: 2000, Emit: EventTarget{Stream: "game.test", EventType: "game.status"}},
+		},
+		"game/open-after-ready": {
+			Type: RegistrationReaction, Action: "game/open", Input: json.RawMessage(`{"source":"${event.eventId}"}`),
+			Reaction: &ReactionTrigger{Stream: "game.test", EventType: "game.ready", Match: map[string]string{"payload.state": "^ready$"}},
+		},
+	}
+	writeRule(t, root, "Game.exe", "Actions and registrations.", "# Game\n", actions, registrations)
+	for _, name := range []string{"read", "open"} {
+		if err := os.MkdirAll(filepath.Join(root, "Game.exe", "Actions", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	available, _, err := store.ReadActions("Game.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(available) != 2 || available[0].ID != "game/open" || available[1].ID != "game/read" {
+		t.Fatalf("actions = %+v", available)
+	}
+	registered, _, err := store.ReadRegistrations("Game.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(registered) != 2 || registered[0].Type != RegistrationReaction || registered[1].Type != RegistrationMonitor {
+		t.Fatalf("registrations = %+v", registered)
+	}
+}
+
+func TestStoreProjectsObservationActionsToV1Scripts(t *testing.T) {
 	root := testRulesRoot(t)
-	scriptRoot := filepath.Join(root, "CrimsonDesert.exe", "Modules", "inventory")
-	if err := os.MkdirAll(scriptRoot, 0o700); err != nil {
+	actionRoot := filepath.Join(root, "CrimsonDesert.exe", "Actions", "inventory")
+	if err := os.MkdirAll(actionRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	store, err := New(root)
@@ -97,75 +108,16 @@ func TestStoreResolvesRegisteredScript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	canonicalScriptRoot, err := filepath.EvalSymlinks(scriptRoot)
+	canonicalActionRoot, err := filepath.EvalSymlinks(actionRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if script.RuleID != "CrimsonDesert.exe" || script.Runtime != ObservationRuntimeV1 ||
-		script.Root != canonicalScriptRoot {
+	if script.Root != canonicalActionRoot || script.Runtime != ObservationRuntimeV1 {
 		t.Fatalf("script = %+v", script)
 	}
 }
 
-func TestStoreReadsRuleScriptsInCanonicalOrder(t *testing.T) {
-	root := testRulesRoot(t)
-	writeRule(t, root, "CrimsonDesert.exe", "Read the live Rule before acting.", "# Guidance\n", map[string]ModuleDeclaration{
-		"zeta/capability":          {Kind: ModuleKindQuery, Path: "Modules/zeta", Runtime: ObservationRuntimeV1},
-		"crimson-desert/inventory": {Kind: ModuleKindQuery, Path: "Modules/inventory", Runtime: ObservationRuntimeV1},
-	})
-	for _, name := range []string{"inventory", "zeta"} {
-		if err := os.MkdirAll(filepath.Join(root, "CrimsonDesert.exe", "Modules", name), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	store, err := New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scripts, resolution, err := store.ReadScripts("CrimsonDesert.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(scripts) != 2 ||
-		scripts[0].ID != "crimson-desert/inventory" ||
-		scripts[1].ID != "zeta/capability" {
-		t.Fatalf("scripts = %+v", scripts)
-	}
-	if resolution.Scripts == nil ||
-		resolution.Scripts.ContentType != ScriptsMediaType {
-		t.Fatalf("resolution = %+v", resolution)
-	}
-}
-
-func TestStoreReadsClassifiedModulesInCanonicalOrder(t *testing.T) {
-	root := testRulesRoot(t)
-	writeRule(t, root, "CrimsonDesert.exe", "Read the live Rule before acting.", "# Guidance\n", map[string]ModuleDeclaration{
-		"screen/ui":     {Kind: ModuleKindLoop, Path: "Modules/screen-ui", Runtime: "screenparser-v2"},
-		"reaction/fast": {Kind: ModuleKindReactor, Path: "Reactors/fast", Runtime: "local-mini-model-v1"},
-		"action/dock":   {Kind: ModuleKindAction, Path: "Actions/dock", Runtime: "windows-action-v1"},
-	})
-	for _, path := range []string{"Modules/screen-ui", "Reactors/fast", "Actions/dock"} {
-		if err := os.MkdirAll(filepath.Join(root, "CrimsonDesert.exe", filepath.FromSlash(path)), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	store, err := New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modules, resolution, err := store.ReadModules("CrimsonDesert.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(modules) != 3 || modules[0].ID != "action/dock" || modules[1].ID != "reaction/fast" || modules[2].ID != "screen/ui" {
-		t.Fatalf("modules = %+v", modules)
-	}
-	if resolution.Modules == nil || resolution.Modules.ContentType != ModulesMediaType {
-		t.Fatalf("resolution = %+v", resolution)
-	}
-}
-
-func TestRepositoryCrimsonRulePluginResolves(t *testing.T) {
+func TestRepositoryRulesUseActionModelWithoutDefaultRegistrations(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
 	if err != nil {
 		t.Fatal(err)
@@ -174,99 +126,71 @@ func TestRepositoryCrimsonRulePluginResolves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolution, err := store.Resolve("CrimsonDesert.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolution.Status != StatusMatched || resolution.Description == "" {
-		t.Fatalf("resolution = %+v", resolution)
-	}
-	script, err := store.ResolveScript("crimson-desert/inventory")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if script.Runtime != ObservationRuntimeV1 {
-		t.Fatalf("script runtime = %q", script.Runtime)
-	}
-}
-
-func TestRepositoryPalworldRuleRegistersOnDemandPreprocessor(t *testing.T) {
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	modules, _, err := store.ReadModules("Palworld-Win64-Shipping.exe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(modules) != 1 || modules[0].ID != "screenparser/ui-elements" ||
-		modules[0].Kind != ModuleKindPreprocessor || modules[0].Runtime != "screenparser-onnx-dml-v1" {
-		t.Fatalf("Palworld modules = %+v", modules)
-	}
-}
-
-func TestStoreRejectsInvalidRuleDocuments(t *testing.T) {
-	tests := []struct {
-		name       string
-		ruleJSON   string
-		agents     string
-		want       string
-		scriptRoot bool
+	for _, test := range []struct {
+		rule, action, runtime string
 	}{
-		{name: "wrong schema", ruleJSON: `{"schemaVersion":1,"description":"Valid.","modules":{}}`, agents: "# A\n", want: "schemaVersion"},
-		{name: "empty description", ruleJSON: `{"schemaVersion":2,"description":"","modules":{}}`, agents: "# A\n", want: "description"},
-		{name: "missing modules", ruleJSON: `{"schemaVersion":2,"description":"Valid."}`, agents: "# A\n", want: "modules is required"},
-		{name: "unknown field", ruleJSON: `{"schemaVersion":2,"description":"Valid.","modules":{},"extra":true}`, agents: "# A\n", want: "unknown field"},
-		{name: "duplicate key", ruleJSON: `{"schemaVersion":2,"description":"One.","description":"Two.","modules":{}}`, agents: "# A\n", want: "duplicate"},
-		{name: "empty agents", ruleJSON: `{"schemaVersion":2,"description":"Valid.","modules":{}}`, agents: " \n", want: "AGENTS.md is empty"},
-		{
-			name:     "path traversal",
-			ruleJSON: `{"schemaVersion":2,"description":"Valid.","modules":{"bad":{"kind":"query","path":"Modules/../bad","runtime":"windows-observation-v1"}}}`,
-			agents:   "# A\n",
-			want:     "not canonical",
-		},
-		{
-			name:     "unknown module kind",
-			ruleJSON: `{"schemaVersion":2,"description":"Valid.","modules":{"bad":{"kind":"background","path":"Modules/bad","runtime":"windows-script-v2"}}}`,
-			agents:   "# A\n",
-			want:     "unsupported module kind",
-		},
+		{"CrimsonDesert.exe", "crimson-desert/inventory", ObservationRuntimeV1},
+		{"Palworld-Win64-Shipping.exe", "screenparser/ui-elements", "screenparser-onnx-dml-v1"},
+	} {
+		actions, _, err := store.ReadActions(test.rule)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(actions) != 1 || actions[0].ID != test.action || actions[0].Runtime != test.runtime || len(actions[0].RegistrableAs) != 2 {
+			t.Fatalf("%s actions = %+v", test.rule, actions)
+		}
+		registrations, _, err := store.ReadRegistrations(test.rule)
+		if err != nil || len(registrations) != 0 {
+			t.Fatalf("%s registrations = %+v, err = %v", test.rule, registrations, err)
+		}
+	}
+}
+
+func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
+	tests := []struct{ name, body, want string }{
+		{"old schema", `{"schemaVersion":2,"description":"Valid.","actions":{},"registrations":{}}`, "schemaVersion"},
+		{"missing actions", `{"schemaVersion":3,"description":"Valid.","registrations":{}}`, "actions is required"},
+		{"missing registrations", `{"schemaVersion":3,"description":"Valid.","actions":{}}`, "registrations is required"},
+		{"unknown field", `{"schemaVersion":3,"description":"Valid.","actions":{},"registrations":{},"extra":true}`, "unknown field"},
+		{"action path", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Modules/a","runtime":"r","registrableAs":[]}},"registrations":{}}`, "below Actions/"},
+		{"missing registrable", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r"}},"registrations":{}}`, "registrableAs"},
+		{"unknown registration type", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["timer"]}},"registrations":{}}`, "unsupported registration type"},
+		{"unknown action", `{"schemaVersion":3,"description":"Valid.","actions":{},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
+		{"not declared", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
+		{"zero interval", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["monitor"]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
+		{"invalid regex", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["reaction"]}},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			ruleRoot := filepath.Join(root, "game.exe")
+			ruleRoot := filepath.Join(root, "Game.exe")
 			if err := os.MkdirAll(ruleRoot, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(ruleRoot, RuleFilename), []byte(test.ruleJSON), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(ruleRoot, RuleFilename), []byte(test.body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(ruleRoot, AgentsFilename), []byte(test.agents), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(ruleRoot, AgentsFilename), []byte("# Game\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			store, err := New(root)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := store.Resolve("game.exe"); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Resolve() error = %v, want substring %q", err, test.want)
+			if _, err := store.Resolve("Game.exe"); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
 			}
 		})
 	}
 }
 
-func TestResolveScriptRejectsDuplicateCapability(t *testing.T) {
+func TestResolveActionRejectsDuplicateOrMissing(t *testing.T) {
 	root := testRulesRoot(t)
-	writeRule(t, root, "other.exe", "Other.", "# Other\n", map[string]ModuleDeclaration{
-		"crimson-desert/inventory": {Kind: ModuleKindQuery, Path: "Modules/inventory", Runtime: ObservationRuntimeV1},
-	})
-	for _, id := range []string{"CrimsonDesert.exe", "other.exe"} {
-		if err := os.MkdirAll(filepath.Join(root, id, "Modules", "inventory"), 0o700); err != nil {
+	writeRule(t, root, "Other.exe", "Other.", "# Other\n", map[string]ActionDeclaration{
+		"crimson-desert/inventory": {Path: "Actions/inventory", Runtime: ObservationRuntimeV1, RegistrableAs: []string{}},
+	}, map[string]RegistrationDeclaration{})
+	for _, rule := range []string{"CrimsonDesert.exe", "Other.exe"} {
+		if err := os.MkdirAll(filepath.Join(root, rule, "Actions", "inventory"), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -274,77 +198,37 @@ func TestResolveScriptRejectsDuplicateCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ResolveScript("crimson-desert/inventory"); err == nil ||
-		!strings.Contains(err.Error(), "duplicate") {
-		t.Fatalf("ResolveScript() error = %v", err)
+	if _, err := store.ResolveAction("crimson-desert/inventory"); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate error = %v", err)
 	}
-}
-
-func TestResolveScriptRejectsMissingDirectory(t *testing.T) {
-	store, err := New(testRulesRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.ResolveScript("crimson-desert/inventory"); err == nil {
-		t.Fatal("ResolveScript accepted a missing Script directory")
-	}
-}
-
-func TestResolveRejectsRuleMemberSymlinkEscape(t *testing.T) {
-	root := testRulesRoot(t)
-	outside := filepath.Join(t.TempDir(), "outside.md")
-	if err := os.WriteFile(outside, []byte("# Outside\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	agents := filepath.Join(root, "CrimsonDesert.exe", AgentsFilename)
-	if err := os.Remove(agents); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, agents); err != nil {
-		t.Skipf("symlinks are unavailable: %v", err)
-	}
-	store, err := New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Resolve("CrimsonDesert.exe"); err == nil ||
-		!strings.Contains(err.Error(), "outside") {
-		t.Fatalf("Resolve() error = %v", err)
-	}
-}
-
-func TestReadAGENTSRejectsUnknownOrNonCanonicalID(t *testing.T) {
-	store, err := New(testRulesRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"unknown.exe", "crimsondesert.exe"} {
-		if _, _, err := store.ReadAGENTS(id); !errors.Is(err, fs.ErrNotExist) {
-			t.Fatalf("ReadAGENTS(%q) error = %v, want fs.ErrNotExist", id, err)
-		}
+	if _, err := store.ResolveAction("missing/action"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("missing error = %v", err)
 	}
 }
 
 func testRulesRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeRule(t, root, "CrimsonDesert.exe", "Read the live Rule before acting.", "# Guidance\n", map[string]ModuleDeclaration{
-		"crimson-desert/inventory": {Kind: ModuleKindQuery, Path: "Modules/inventory", Runtime: ObservationRuntimeV1},
-	})
+	writeRule(t, root, "CrimsonDesert.exe", "Read the live Rule before acting.", "# Guidance\n", map[string]ActionDeclaration{
+		"crimson-desert/inventory": {Path: "Actions/inventory", Runtime: ObservationRuntimeV1, RegistrableAs: []string{RegistrationMonitor, RegistrationReaction}},
+	}, map[string]RegistrationDeclaration{})
 	return root
 }
 
-func writeRule(t *testing.T, root, id, description, agents string, modules map[string]ModuleDeclaration) {
+func writeRule(t *testing.T, root, id, description, agents string, actions map[string]ActionDeclaration, registrations map[string]RegistrationDeclaration) {
 	t.Helper()
-	if modules == nil {
-		modules = map[string]ModuleDeclaration{}
+	if actions == nil {
+		actions = map[string]ActionDeclaration{}
+	}
+	if registrations == nil {
+		registrations = map[string]RegistrationDeclaration{}
 	}
 	ruleRoot := filepath.Join(root, id)
 	if err := os.MkdirAll(ruleRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	descriptor := Descriptor{SchemaVersion: 2, Description: description, Modules: modules}
-	encoded, err := jsonMarshal(descriptor)
+	descriptor := Descriptor{SchemaVersion: 3, Description: description, Actions: actions, Registrations: registrations}
+	encoded, err := json.MarshalIndent(descriptor, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,8 +238,4 @@ func writeRule(t *testing.T, root, id, description, agents string, modules map[s
 	if err := os.WriteFile(filepath.Join(ruleRoot, AgentsFilename), []byte(agents), 0o600); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func jsonMarshal(value any) ([]byte, error) {
-	return json.MarshalIndent(value, "", "  ")
 }

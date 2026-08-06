@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -27,13 +28,11 @@ const (
 	AgentsFilename         = "AGENTS.md"
 	AgentsMediaType        = "text/markdown; charset=utf-8"
 	ScriptsMediaType       = "application/json; charset=utf-8"
-	ModulesMediaType       = "application/json; charset=utf-8"
+	ActionsMediaType       = "application/json; charset=utf-8"
+	RegistrationsMediaType = "application/json; charset=utf-8"
 	ObservationRuntimeV1   = "windows-observation-v1"
-	ModuleKindQuery        = "query"
-	ModuleKindPreprocessor = "preprocessor"
-	ModuleKindLoop         = "loop"
-	ModuleKindReactor      = "reactor"
-	ModuleKindAction       = "action"
+	RegistrationMonitor    = "monitor"
+	RegistrationReaction   = "reaction"
 	maxRuleJSONBytes       = 64 << 10
 	maxAgentsBytes         = 1 << 20
 )
@@ -44,12 +43,13 @@ type Document struct {
 }
 
 type Resolution struct {
-	Status      string    `json:"status"`
-	Description string    `json:"description"`
-	ID          string    `json:"id,omitempty"`
-	Agents      *Document `json:"agents,omitempty"`
-	Scripts     *Document `json:"scripts,omitempty"`
-	Modules     *Document `json:"modules,omitempty"`
+	Status        string    `json:"status"`
+	Description   string    `json:"description"`
+	ID            string    `json:"id,omitempty"`
+	Agents        *Document `json:"agents,omitempty"`
+	Scripts       *Document `json:"scripts,omitempty"`
+	Actions       *Document `json:"actions,omitempty"`
+	Registrations *Document `json:"registrations,omitempty"`
 }
 
 func (r Resolution) Validate() error {
@@ -58,8 +58,8 @@ func (r Resolution) Validate() error {
 		if r.Description != UnmatchedDescription {
 			return errors.New("unmatched rule description is invalid")
 		}
-		if r.ID != "" || r.Agents != nil || r.Scripts != nil || r.Modules != nil {
-			return errors.New("unmatched rule must not contain an ID, AGENTS document, Scripts catalog, or Modules catalog")
+		if r.ID != "" || r.Agents != nil || r.Scripts != nil || r.Actions != nil || r.Registrations != nil {
+			return errors.New("unmatched rule must not contain an ID or Rule documents")
 		}
 		return nil
 	case StatusMatched:
@@ -87,14 +87,17 @@ func (r Resolution) Validate() error {
 		if r.Scripts.ContentType != ScriptsMediaType {
 			return errors.New("matched rule Scripts content type is invalid")
 		}
-		if r.Modules == nil {
-			return errors.New("matched rule requires a Modules catalog")
+		if r.Actions == nil {
+			return errors.New("matched rule requires an Actions catalog")
 		}
-		if r.Modules.URL != modulesURL(r.ID) {
-			return errors.New("matched rule Modules URL does not match rule ID")
+		if r.Actions.URL != actionsURL(r.ID) || r.Actions.ContentType != ActionsMediaType {
+			return errors.New("matched rule Actions document is invalid")
 		}
-		if r.Modules.ContentType != ModulesMediaType {
-			return errors.New("matched rule Modules content type is invalid")
+		if r.Registrations == nil {
+			return errors.New("matched rule requires a Registrations catalog")
+		}
+		if r.Registrations.URL != registrationsURL(r.ID) || r.Registrations.ContentType != RegistrationsMediaType {
+			return errors.New("matched rule Registrations document is invalid")
 		}
 		return nil
 	default:
@@ -102,24 +105,59 @@ func (r Resolution) Validate() error {
 	}
 }
 
-type ModuleDeclaration struct {
-	Kind    string `json:"kind"`
-	Path    string `json:"path"`
-	Runtime string `json:"runtime"`
+type ActionDeclaration struct {
+	Path          string   `json:"path"`
+	Runtime       string   `json:"runtime"`
+	RegistrableAs []string `json:"registrableAs"`
 }
 
 type Descriptor struct {
-	SchemaVersion uint32                       `json:"schemaVersion"`
-	Description   string                       `json:"description"`
-	Modules       map[string]ModuleDeclaration `json:"modules"`
+	SchemaVersion uint32                             `json:"schemaVersion"`
+	Description   string                             `json:"description"`
+	Actions       map[string]ActionDeclaration       `json:"actions"`
+	Registrations map[string]RegistrationDeclaration `json:"registrations"`
 }
 
-type Module struct {
-	ID      string `json:"id"`
-	RuleID  string `json:"ruleId"`
-	Kind    string `json:"kind"`
-	Runtime string `json:"runtime"`
-	Root    string `json:"-"`
+type Action struct {
+	ID            string   `json:"id"`
+	RuleID        string   `json:"ruleId"`
+	Runtime       string   `json:"runtime"`
+	RegistrableAs []string `json:"registrableAs"`
+	Root          string   `json:"-"`
+}
+
+type EventTarget struct {
+	Stream    string `json:"stream"`
+	EventType string `json:"eventType"`
+}
+
+type MonitorTrigger struct {
+	IntervalMs uint32      `json:"intervalMs"`
+	Emit       EventTarget `json:"emit"`
+}
+
+type ReactionTrigger struct {
+	Stream    string            `json:"stream"`
+	EventType string            `json:"eventType"`
+	Match     map[string]string `json:"match"`
+}
+
+type RegistrationDeclaration struct {
+	Type     string           `json:"type"`
+	Action   string           `json:"action"`
+	Input    json.RawMessage  `json:"input"`
+	Monitor  *MonitorTrigger  `json:"monitor,omitempty"`
+	Reaction *ReactionTrigger `json:"reaction,omitempty"`
+}
+
+type Registration struct {
+	ID       string           `json:"id"`
+	RuleID   string           `json:"ruleId"`
+	Type     string           `json:"type"`
+	ActionID string           `json:"actionId"`
+	Input    json.RawMessage  `json:"input"`
+	Monitor  *MonitorTrigger  `json:"monitor,omitempty"`
+	Reaction *ReactionTrigger `json:"reaction,omitempty"`
 }
 
 type Script struct {
@@ -213,54 +251,54 @@ func (s *Store) ReadAGENTS(id string) ([]byte, Resolution, error) {
 }
 
 func (s *Store) ResolveScript(capabilityID string) (Script, error) {
-	module, err := s.ResolveModule(capabilityID)
+	action, err := s.ResolveAction(capabilityID)
 	if err != nil {
 		return Script{}, err
 	}
-	if module.Kind != ModuleKindQuery {
-		return Script{}, fmt.Errorf("module %q has kind %q, expected %q", capabilityID, module.Kind, ModuleKindQuery)
+	if action.Runtime != ObservationRuntimeV1 {
+		return Script{}, fmt.Errorf("action %q runtime %q is not supported by the v1 Script launcher", capabilityID, action.Runtime)
 	}
-	return Script{ID: module.ID, RuleID: module.RuleID, Runtime: module.Runtime, Root: module.Root}, nil
+	return Script{ID: action.ID, RuleID: action.RuleID, Runtime: action.Runtime, Root: action.Root}, nil
 }
 
-func (s *Store) ResolveModule(moduleID string) (Module, error) {
+func (s *Store) ResolveAction(actionID string) (Action, error) {
 	if s == nil {
-		return Module{}, errors.New("rule store is required")
+		return Action{}, errors.New("rule store is required")
 	}
-	if strings.TrimSpace(moduleID) == "" || strings.TrimSpace(moduleID) != moduleID {
-		return Module{}, errors.New("module ID is required and must be canonical")
+	if err := validateRegistryID(actionID, "action"); err != nil {
+		return Action{}, err
 	}
 	directories, err := s.ruleDirectories()
 	if err != nil {
-		return Module{}, err
+		return Action{}, err
 	}
-	var matched *Module
+	var matched *Action
 	for _, id := range directories {
 		descriptor, err := s.readDescriptor(id)
 		if err != nil {
-			return Module{}, err
+			return Action{}, err
 		}
-		declaration, ok := descriptor.Modules[moduleID]
+		declaration, ok := descriptor.Actions[actionID]
 		if !ok {
 			continue
 		}
 		if matched != nil {
-			return Module{}, fmt.Errorf("duplicate module ID %q", moduleID)
+			return Action{}, fmt.Errorf("duplicate action ID %q", actionID)
 		}
-		root, err := s.resolveModuleRoot(id, declaration.Path)
+		root, err := s.resolveActionRoot(id, declaration.Path)
 		if err != nil {
-			return Module{}, fmt.Errorf("resolve rule %s module %s: %w", id, moduleID, err)
+			return Action{}, fmt.Errorf("resolve rule %s action %s: %w", id, actionID, err)
 		}
-		matched = &Module{
-			ID:      moduleID,
-			RuleID:  id,
-			Kind:    declaration.Kind,
-			Runtime: declaration.Runtime,
-			Root:    root,
+		matched = &Action{
+			ID:            actionID,
+			RuleID:        id,
+			Runtime:       declaration.Runtime,
+			RegistrableAs: append([]string(nil), declaration.RegistrableAs...),
+			Root:          root,
 		}
 	}
 	if matched == nil {
-		return Module{}, fs.ErrNotExist
+		return Action{}, fs.ErrNotExist
 	}
 	return *matched, nil
 }
@@ -283,9 +321,9 @@ func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
 	if _, err := s.readAgents(canonicalID); err != nil {
 		return nil, Resolution{}, err
 	}
-	capabilityIDs := make([]string, 0, len(descriptor.Modules))
-	for capabilityID, declaration := range descriptor.Modules {
-		if declaration.Kind != ModuleKindQuery {
+	capabilityIDs := make([]string, 0, len(descriptor.Actions))
+	for capabilityID, declaration := range descriptor.Actions {
+		if declaration.Runtime != ObservationRuntimeV1 {
 			continue
 		}
 		capabilityIDs = append(capabilityIDs, capabilityID)
@@ -310,7 +348,7 @@ func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
 	return scripts, matchedResolution(canonicalID, descriptor.Description), nil
 }
 
-func (s *Store) ReadModules(id string) ([]Module, Resolution, error) {
+func (s *Store) ReadActions(id string) ([]Action, Resolution, error) {
 	if s == nil {
 		return nil, Resolution{}, errors.New("rule store is required")
 	}
@@ -328,23 +366,57 @@ func (s *Store) ReadModules(id string) ([]Module, Resolution, error) {
 	if _, err := s.readAgents(canonicalID); err != nil {
 		return nil, Resolution{}, err
 	}
-	moduleIDs := make([]string, 0, len(descriptor.Modules))
-	for moduleID := range descriptor.Modules {
-		moduleIDs = append(moduleIDs, moduleID)
+	actionIDs := make([]string, 0, len(descriptor.Actions))
+	for actionID := range descriptor.Actions {
+		actionIDs = append(actionIDs, actionID)
 	}
-	sort.Strings(moduleIDs)
-	modules := make([]Module, 0, len(moduleIDs))
-	for _, moduleID := range moduleIDs {
-		module, err := s.ResolveModule(moduleID)
+	sort.Strings(actionIDs)
+	actions := make([]Action, 0, len(actionIDs))
+	for _, actionID := range actionIDs {
+		action, err := s.ResolveAction(actionID)
 		if err != nil {
-			return nil, Resolution{}, fmt.Errorf("resolve module %s: %w", moduleID, err)
+			return nil, Resolution{}, fmt.Errorf("resolve action %s: %w", actionID, err)
 		}
-		if module.RuleID != canonicalID {
-			return nil, Resolution{}, fmt.Errorf("module %s resolved to Rule %s, expected %s", moduleID, module.RuleID, canonicalID)
+		if action.RuleID != canonicalID {
+			return nil, Resolution{}, fmt.Errorf("action %s resolved to Rule %s, expected %s", actionID, action.RuleID, canonicalID)
 		}
-		modules = append(modules, module)
+		actions = append(actions, action)
 	}
-	return modules, matchedResolution(canonicalID, descriptor.Description), nil
+	return actions, matchedResolution(canonicalID, descriptor.Description), nil
+}
+
+func (s *Store) ReadRegistrations(id string) ([]Registration, Resolution, error) {
+	if s == nil {
+		return nil, Resolution{}, errors.New("rule store is required")
+	}
+	canonicalID, found, err := s.findRule(id, true)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if !found {
+		return nil, Resolution{}, fs.ErrNotExist
+	}
+	descriptor, err := s.readDescriptor(canonicalID)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if _, err := s.readAgents(canonicalID); err != nil {
+		return nil, Resolution{}, err
+	}
+	ids := make([]string, 0, len(descriptor.Registrations))
+	for id := range descriptor.Registrations {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	registrations := make([]Registration, 0, len(ids))
+	for _, id := range ids {
+		declaration := descriptor.Registrations[id]
+		registrations = append(registrations, Registration{
+			ID: id, RuleID: canonicalID, Type: declaration.Type, ActionID: declaration.Action,
+			Input: append(json.RawMessage(nil), declaration.Input...), Monitor: declaration.Monitor, Reaction: declaration.Reaction,
+		})
+	}
+	return registrations, matchedResolution(canonicalID, descriptor.Description), nil
 }
 
 func (s *Store) findRule(executableName string, requireCanonical bool) (string, bool, error) {
@@ -419,7 +491,7 @@ func (s *Store) readAgents(id string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Store) resolveModuleRoot(id, name string) (string, error) {
+func (s *Store) resolveActionRoot(id, name string) (string, error) {
 	ruleRoot := filepath.Join(s.root, id)
 	fullPath := filepath.Join(ruleRoot, filepath.FromSlash(name))
 	resolved, err := filepath.EvalSymlinks(fullPath)
@@ -431,74 +503,174 @@ func (s *Store) resolveModuleRoot(id, name string) (string, error) {
 		return "", err
 	}
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", errors.New("module path resolves outside its Rule plugin")
+		return "", errors.New("action path resolves outside its Rule plugin")
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", errors.New("module path must resolve to a directory")
+		return "", errors.New("action path must resolve to a directory")
 	}
 	return resolved, nil
 }
 
 func validateDescriptor(descriptor Descriptor) error {
-	if descriptor.SchemaVersion != 2 {
-		return fmt.Errorf("schemaVersion must equal 2, got %d", descriptor.SchemaVersion)
+	if descriptor.SchemaVersion != 3 {
+		return fmt.Errorf("schemaVersion must equal 3, got %d", descriptor.SchemaVersion)
 	}
 	if strings.TrimSpace(descriptor.Description) == "" ||
 		strings.TrimSpace(descriptor.Description) != descriptor.Description {
 		return errors.New("description must be non-empty and canonical")
 	}
-	if descriptor.Modules == nil {
-		return errors.New("modules is required")
+	if descriptor.Actions == nil {
+		return errors.New("actions is required")
 	}
-	for id, declaration := range descriptor.Modules {
-		if strings.TrimSpace(id) == "" || strings.TrimSpace(id) != id {
-			return fmt.Errorf("module ID %q is not canonical", id)
+	if descriptor.Registrations == nil {
+		return errors.New("registrations is required")
+	}
+	for id, declaration := range descriptor.Actions {
+		if err := validateRegistryID(id, "action"); err != nil {
+			return err
 		}
-		if err := validateModuleKind(declaration.Kind); err != nil {
-			return fmt.Errorf("module %s kind: %w", id, err)
-		}
-		if err := validateModulePath(declaration.Kind, declaration.Path); err != nil {
-			return fmt.Errorf("module %s path: %w", id, err)
+		if err := validateActionPath(declaration.Path); err != nil {
+			return fmt.Errorf("action %s path: %w", id, err)
 		}
 		if strings.TrimSpace(declaration.Runtime) == "" ||
 			strings.TrimSpace(declaration.Runtime) != declaration.Runtime {
-			return fmt.Errorf("module %s runtime is required and must be canonical", id)
+			return fmt.Errorf("action %s runtime is required and must be canonical", id)
+		}
+		if declaration.RegistrableAs == nil {
+			return fmt.Errorf("action %s registrableAs is required", id)
+		}
+		seen := map[string]struct{}{}
+		for _, registrationType := range declaration.RegistrableAs {
+			if err := validateRegistrationType(registrationType); err != nil {
+				return fmt.Errorf("action %s registrableAs: %w", id, err)
+			}
+			if _, duplicate := seen[registrationType]; duplicate {
+				return fmt.Errorf("action %s registrableAs contains duplicate %q", id, registrationType)
+			}
+			seen[registrationType] = struct{}{}
+		}
+	}
+	for id, registration := range descriptor.Registrations {
+		if err := validateRegistryID(id, "registration"); err != nil {
+			return err
+		}
+		action, exists := descriptor.Actions[registration.Action]
+		if !exists {
+			return fmt.Errorf("registration %s references unknown action %q", id, registration.Action)
+		}
+		if err := validateRegistrationType(registration.Type); err != nil {
+			return fmt.Errorf("registration %s: %w", id, err)
+		}
+		if !slicesContains(action.RegistrableAs, registration.Type) {
+			return fmt.Errorf("registration %s type %q is not declared by action %q", id, registration.Type, registration.Action)
+		}
+		if err := validateRegistration(id, registration); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func validateModuleKind(kind string) error {
-	switch kind {
-	case ModuleKindQuery, ModuleKindPreprocessor, ModuleKindLoop, ModuleKindReactor, ModuleKindAction:
+func validateRegistrationType(value string) error {
+	switch value {
+	case RegistrationMonitor, RegistrationReaction:
 		return nil
 	default:
-		return fmt.Errorf("unsupported module kind %q", kind)
+		return fmt.Errorf("unsupported registration type %q", value)
 	}
 }
 
-func validateModulePath(kind, name string) error {
+func validateActionPath(name string) error {
 	if name == "" || filepath.IsAbs(name) || path.Clean(name) != name ||
 		strings.Contains(name, `\`) || strings.Contains(name, ":") {
-		return fmt.Errorf("module path %q is not canonical and relative", name)
+		return fmt.Errorf("action path %q is not canonical and relative", name)
 	}
-	prefix := "Modules/"
-	if kind == ModuleKindReactor {
-		prefix = "Reactors/"
-	} else if kind == ModuleKindAction {
-		prefix = "Actions/"
-	}
+	prefix := "Actions/"
 	if !strings.HasPrefix(name, prefix) || name == prefix {
-		return fmt.Errorf("module path %q must be below %s", name, prefix)
+		return fmt.Errorf("action path %q must be below %s", name, prefix)
 	}
 	if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
-		return fmt.Errorf("module path %q escapes the Rule plugin", name)
+		return fmt.Errorf("action path %q escapes the Rule plugin", name)
 	}
 	return nil
+}
+
+func validateRegistryID(id, kind string) error {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(id) != id || strings.ContainsAny(id, `\`) {
+		return fmt.Errorf("%s ID %q is not canonical", kind, id)
+	}
+	return nil
+}
+
+func validateRegistration(id string, registration RegistrationDeclaration) error {
+	if len(registration.Input) == 0 {
+		return fmt.Errorf("registration %s input object is required", id)
+	}
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal(registration.Input, &input); err != nil || input == nil {
+		return fmt.Errorf("registration %s input must be an object", id)
+	}
+	switch registration.Type {
+	case RegistrationMonitor:
+		if registration.Monitor == nil || registration.Reaction != nil {
+			return fmt.Errorf("monitor registration %s requires monitor and forbids reaction", id)
+		}
+		if registration.Monitor.IntervalMs == 0 {
+			return fmt.Errorf("monitor registration %s intervalMs must be positive", id)
+		}
+		if err := validateEventTarget(registration.Monitor.Emit); err != nil {
+			return fmt.Errorf("monitor registration %s emit: %w", id, err)
+		}
+	case RegistrationReaction:
+		if registration.Reaction == nil || registration.Monitor != nil {
+			return fmt.Errorf("reaction registration %s requires reaction and forbids monitor", id)
+		}
+		if err := validateCanonicalString(registration.Reaction.Stream, "stream"); err != nil {
+			return fmt.Errorf("reaction registration %s: %w", id, err)
+		}
+		if err := validateCanonicalString(registration.Reaction.EventType, "eventType"); err != nil {
+			return fmt.Errorf("reaction registration %s: %w", id, err)
+		}
+		if registration.Reaction.Match == nil {
+			return fmt.Errorf("reaction registration %s match object is required", id)
+		}
+		for field, expression := range registration.Reaction.Match {
+			if err := validateCanonicalString(field, "match field"); err != nil {
+				return fmt.Errorf("reaction registration %s: %w", id, err)
+			}
+			if _, err := regexp.Compile(expression); err != nil {
+				return fmt.Errorf("reaction registration %s match %s regex is invalid: %w", id, field, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateEventTarget(target EventTarget) error {
+	if err := validateCanonicalString(target.Stream, "stream"); err != nil {
+		return err
+	}
+	return validateCanonicalString(target.EventType, "eventType")
+}
+
+func validateCanonicalString(value, name string) error {
+	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value {
+		return fmt.Errorf("%s must be non-empty and canonical", name)
+	}
+	return nil
+}
+
+func slicesContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRuleID(id string) error {
@@ -571,9 +743,13 @@ func matchedResolution(id, description string) Resolution {
 			URL:         scriptsURL(id),
 			ContentType: ScriptsMediaType,
 		},
-		Modules: &Document{
-			URL:         modulesURL(id),
-			ContentType: ModulesMediaType,
+		Actions: &Document{
+			URL:         actionsURL(id),
+			ContentType: ActionsMediaType,
+		},
+		Registrations: &Document{
+			URL:         registrationsURL(id),
+			ContentType: RegistrationsMediaType,
 		},
 	}
 }
@@ -590,6 +766,10 @@ func scriptsURL(id string) string {
 	return "/v1/rules/" + url.PathEscape(id) + "/scripts"
 }
 
-func modulesURL(id string) string {
-	return "/v2/rules/" + url.PathEscape(id) + "/modules"
+func actionsURL(id string) string {
+	return "/v3/rules/" + url.PathEscape(id) + "/actions"
+}
+
+func registrationsURL(id string) string {
+	return "/v3/rules/" + url.PathEscape(id) + "/registrations"
 }

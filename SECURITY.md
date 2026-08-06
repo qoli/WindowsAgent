@@ -53,7 +53,7 @@ sensitive host data: events may contain foreground executable identity, parsed
 screen state, action intent, and artifact references. The token and journal
 must not be committed or distributed with a Rule plugin.
 
-The ScreenParser preprocessor is a finite self-contained interactive-user
+The ScreenParser Action is a finite self-contained interactive-user
 process. Its official `best.pt` checkpoint is a PyTorch pickle artifact rather
 than safe-tensors, so only the build-time exporter loads it after revision and
 SHA-256 verification. The Windows runtime loads only the separately verified

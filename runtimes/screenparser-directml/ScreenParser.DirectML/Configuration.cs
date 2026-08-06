@@ -64,7 +64,7 @@ public sealed record RuntimeConfig(
             var root = RequireObject(document.RootElement, "config");
             RequireProperties(root, "config", "schemaVersion", "moduleId", "kind", "runtime", "targetExecutable", "model", "inference");
             RequireEqual(RequireInt(root, "schemaVersion"), 1, "config.schemaVersion");
-            RequireEqual(RequireString(root, "kind"), "preprocessor", "config.kind");
+            RequireEqual(RequireString(root, "kind"), "action", "config.kind");
             RequireEqual(RequireString(root, "runtime"), RuntimeId, "config.runtime");
 
             var moduleId = RequireIdentifier(RequireString(root, "moduleId"), "config.moduleId");

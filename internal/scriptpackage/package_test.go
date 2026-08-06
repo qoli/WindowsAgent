@@ -10,7 +10,7 @@ import (
 
 func inventoryPackageRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Modules", "inventory"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "CrimsonDesert.exe", "Actions", "inventory"))
 	if err != nil {
 		t.Fatal(err)
 	}

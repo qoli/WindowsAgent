@@ -11,7 +11,7 @@ segment rotation are not yet implemented.
 
 ## Responsibility
 
-The event stream is the shared durable timeline for independent Game modules,
+The event stream is the shared durable timeline for independent Game runtimes,
 mini-model reactions, actions, and high-level model readers. It assigns event
 identity, commit time, and a contiguous global sequence. It does not interpret,
 merge, summarize, or replace producer-owned event semantics.

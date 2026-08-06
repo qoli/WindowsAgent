@@ -127,7 +127,7 @@ func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
 	server, _, ruleRoot := newTestServerAndRuleRoot(t, &fakeCapturer{status: testStatus(), result: testResult()}, time.Second)
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":2,"description":"Updated live.","modules":{}}`),
+		[]byte(`{"schemaVersion":3,"description":"Updated live.","actions":{},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -181,7 +181,8 @@ func TestCaptureReportsUnmatchedRuleExplicitly(t *testing.T) {
 		metadata.Rule.ID != "" ||
 		metadata.Rule.Agents != nil ||
 		metadata.Rule.Scripts != nil ||
-		metadata.Rule.Modules != nil {
+		metadata.Rule.Actions != nil ||
+		metadata.Rule.Registrations != nil {
 		t.Fatalf("rule navigation = %+v", metadata.Rule)
 	}
 }
@@ -192,18 +193,19 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 		&fakeCapturer{status: testStatus(), result: testResult()},
 		time.Second,
 	)
-	scriptRoot := filepath.Join(ruleRoot, "Modules", "status")
+	scriptRoot := filepath.Join(ruleRoot, "Actions", "status")
 	writeTestScriptPackage(t, scriptRoot)
 	descriptor := `{
-	  "schemaVersion": 2,
+	  "schemaVersion": 3,
 	  "description": "Read the live Rule before acting.",
-	  "modules": {
+	  "actions": {
 	    "game/status": {
-	      "kind": "query",
-	      "path": "Modules/status",
-	      "runtime": "windows-observation-v1"
+	      "path": "Actions/status",
+	      "runtime": "windows-observation-v1",
+	      "registrableAs": ["monitor", "reaction"]
 	    }
-	  }
+	  },
+	  "registrations": {}
 	}`
 	if err := os.WriteFile(filepath.Join(ruleRoot, rules.RuleFilename), []byte(descriptor), 0o600); err != nil {
 		t.Fatal(err)
@@ -243,25 +245,37 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	}
 }
 
-func TestRuleModulesCatalogReturnsClassifiedModules(t *testing.T) {
+func TestRuleActionAndRegistrationCatalogsReturnExplicitContracts(t *testing.T) {
 	server, _, ruleRoot := newTestServerAndRuleRoot(
 		t,
 		&fakeCapturer{status: testStatus(), result: testResult()},
 		time.Second,
 	)
-	for _, relative := range []string{"Modules/screen-ui", "Modules/layout", "Reactors/fast", "Actions/dock"} {
+	for _, relative := range []string{"Actions/read", "Actions/open"} {
 		if err := os.MkdirAll(filepath.Join(ruleRoot, filepath.FromSlash(relative)), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	descriptor := `{
-	  "schemaVersion": 2,
+	  "schemaVersion": 3,
 	  "description": "Read the live Rule before acting.",
-	  "modules": {
-	    "screen/ui": {"kind":"loop","path":"Modules/screen-ui","runtime":"screenparser-v2"},
-	    "screen/layout": {"kind":"preprocessor","path":"Modules/layout","runtime":"screenparser-v2"},
-	    "reaction/fast": {"kind":"reactor","path":"Reactors/fast","runtime":"local-mini-model-v1"},
-	    "action/dock": {"kind":"action","path":"Actions/dock","runtime":"windows-action-v1"}
+	  "actions": {
+	    "game/read": {"path":"Actions/read","runtime":"windows-observation-v1","registrableAs":["monitor","reaction"]},
+	    "game/open": {"path":"Actions/open","runtime":"windows-action-v1","registrableAs":["reaction"]}
+	  },
+	  "registrations": {
+	    "game/read-fast": {
+	      "type":"monitor",
+	      "action":"game/read",
+	      "input":{},
+	      "monitor":{"intervalMs":2000,"emit":{"stream":"game.test","eventType":"game.status"}}
+	    },
+	    "game/open-ready": {
+	      "type":"reaction",
+	      "action":"game/open",
+	      "input":{},
+	      "reaction":{"stream":"game.test","eventType":"game.ready","match":{"payload.state":"^ready$"}}
+	    }
 	  }
 	}`
 	if err := os.WriteFile(filepath.Join(ruleRoot, rules.RuleFilename), []byte(descriptor), 0o600); err != nil {
@@ -271,25 +285,47 @@ func TestRuleModulesCatalogReturnsClassifiedModules(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(
 		response,
-		httptest.NewRequest(http.MethodGet, "/v2/rules/game.exe/modules", nil),
+		httptest.NewRequest(http.MethodGet, "/v3/rules/game.exe/actions", nil),
 	)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	var catalog moduleCatalogResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil {
+	var actions actionCatalogResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &actions); err != nil {
 		t.Fatal(err)
 	}
-	if catalog.RuleID != "game.exe" || len(catalog.Modules) != 4 ||
-		catalog.Modules[0].ID != "action/dock" ||
-		catalog.Modules[1].ID != "reaction/fast" ||
-		catalog.Modules[2].ID != "screen/layout" ||
-		catalog.Modules[2].Kind != rules.ModuleKindPreprocessor ||
-		catalog.Modules[3].ID != "screen/ui" {
-		t.Fatalf("catalog = %+v", catalog)
+	if actions.RuleID != "game.exe" || len(actions.Actions) != 2 ||
+		actions.Actions[0].ID != "game/open" ||
+		actions.Actions[0].Runtime != "windows-action-v1" ||
+		actions.Actions[1].ID != "game/read" ||
+		len(actions.Actions[1].RegistrableAs) != 2 {
+		t.Fatalf("actions = %+v", actions)
 	}
 	if response.Header().Get("Cache-Control") != "no-store" {
-		t.Fatal("module catalog must not be cached")
+		t.Fatal("action catalog must not be cached")
+	}
+
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/v3/rules/game.exe/registrations", nil),
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var registrations registrationCatalogResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &registrations); err != nil {
+		t.Fatal(err)
+	}
+	if registrations.RuleID != "game.exe" || len(registrations.Registrations) != 2 ||
+		registrations.Registrations[0].ID != "game/open-ready" ||
+		registrations.Registrations[0].Type != rules.RegistrationReaction ||
+		registrations.Registrations[1].ID != "game/read-fast" ||
+		registrations.Registrations[1].ActionID != "game/read" {
+		t.Fatalf("registrations = %+v", registrations)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("registration catalog must not be cached")
 	}
 }
 
@@ -518,7 +554,7 @@ func newTestServerAndRuleRootWithExecutor(
 	}
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":2,"description":"Read the live Rule before acting.","modules":{}}`),
+		[]byte(`{"schemaVersion":3,"description":"Read the live Rule before acting.","actions":{},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

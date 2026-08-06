@@ -5,7 +5,7 @@
 **Implemented and live-verified.**
 
 The package lives at
-`Rules/CrimsonDesert.exe/Modules/inventory`. It owns the
+`Rules/CrimsonDesert.exe/Actions/inventory`. It owns the
 game-specific process layout, save-decoder DLL, ABI declarations, record
 layout, return codes, backpack filter, output conversion, and source order.
 The generic Go launcher knows none of those details. It derives

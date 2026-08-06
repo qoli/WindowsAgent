@@ -1,4 +1,4 @@
-# Installs the finite ScreenParser DirectML preprocessor without a background task.
+# Installs the finite ScreenParser DirectML Action without a background task.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -87,14 +87,14 @@ $targetExecutable = Split-Path -Leaf $sourceRule
 if (-not $targetExecutable.EndsWith(".exe", [StringComparison]::OrdinalIgnoreCase)) {
     throw "RulePath leaf must be a canonical executable name ending in .exe"
 }
-$sourceManifest = Join-Path $sourceRule "Modules\screenparser\manifest.json"
+$sourceManifest = Join-Path $sourceRule "Actions\screenparser\manifest.json"
 if (-not (Test-Path -LiteralPath $sourceManifest -PathType Leaf)) {
     throw "ScreenParser manifest does not exist: $sourceManifest"
 }
 $manifest = Get-Content -LiteralPath $sourceManifest -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
 Assert-ExactProperties $manifest "manifest" @("schemaVersion", "moduleId", "kind", "runtime", "targetExecutable", "model", "inference")
-if ($manifest.schemaVersion -ne 1 -or $manifest.kind -cne "preprocessor" -or $manifest.runtime -cne "screenparser-onnx-dml-v1") {
-    throw "ScreenParser manifest must declare schemaVersion=1, kind=preprocessor, runtime=screenparser-onnx-dml-v1"
+if ($manifest.schemaVersion -ne 1 -or $manifest.kind -cne "action" -or $manifest.runtime -cne "screenparser-onnx-dml-v1") {
+    throw "ScreenParser manifest must declare schemaVersion=1, kind=action, runtime=screenparser-onnx-dml-v1"
 }
 if ($manifest.targetExecutable -cne $targetExecutable) {
     throw "ScreenParser manifest targetExecutable does not match RulePath: $($manifest.targetExecutable)"
@@ -156,7 +156,7 @@ if ($runtimeHash -cne $runtimeArtifact.sha256) {
 
 & $sourceRuntime --config $sourceManifest --model $sourceModel --validate-only | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    throw "ScreenParser DirectML preprocessor validation failed with exit code $LASTEXITCODE"
+    throw "ScreenParser DirectML Action validation failed with exit code $LASTEXITCODE"
 }
 
 if (-not $LegacyLoopTaskName) {
@@ -182,7 +182,7 @@ $installedRuntime = Join-Path $runtimeDir $runtimeArtifact.filename
 $installedRuntimeManifest = Join-Path $runtimeDir "runtime-artifact.json"
 $installedModel = Join-Path $modelDir $manifest.model.filename
 $installedRulesDir = Join-Path $resolvedAgentDataDir "Rules"
-$installedManifest = Join-Path $installedRulesDir ($targetExecutable + "\Modules\screenparser\manifest.json")
+$installedManifest = Join-Path $installedRulesDir ($targetExecutable + "\Actions\screenparser\manifest.json")
 New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 New-Item -ItemType Directory -Path $modelDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installedRulesDir -Force | Out-Null
