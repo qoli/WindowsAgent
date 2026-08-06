@@ -27,6 +27,134 @@ type fixtureObserverCall struct {
 	arguments map[string]any
 }
 
+type compassBroker struct {
+	pixels []any
+	calls  []fixtureObserverCall
+}
+
+func (b *compassBroker) BlobPath(context.Context, map[string]any) (string, error) {
+	return "", errors.New("unexpected compass blob path request")
+}
+
+func (b *compassBroker) RecordNative(context.Context, NativeRecord) error {
+	return errors.New("unexpected compass native record")
+}
+
+func (b *compassBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	return map[string]any{
+		"frame": map[string]any{
+			"width": int64(3840), "height": int64(2160),
+			"capturedAt": "2026-08-07T01:02:03Z",
+			"foreground": map[string]any{"processId": int64(7), "executableName": "EliteDangerous64.exe"},
+		},
+		"region": map[string]any{
+			"left": int64(1340), "top": int64(1560), "width": int64(192), "height": int64(192),
+		},
+		"encoding": "rgb24-packed",
+		"pixels":   b.pixels,
+	}, nil
+}
+
+func compassPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "compass"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
+	pixels := make([]any, 192*192)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	for index := 0; index < 500; index++ {
+		pixels[index] = uint32(0xFF7700)
+	}
+	for y := 82; y < 85; y++ {
+		for x := 114; x < 118; x++ {
+			pixels[y*192+x] = uint32(0x40DDEB)
+		}
+	}
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatalf("load package: %v", err)
+	}
+	broker := &compassBroker{pixels: pixels}
+	runner, err := New(broker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	if len(broker.calls) != 1 || broker.calls[0].namespace != "screen" || broker.calls[0].operation != "readRegion" {
+		t.Fatalf("calls = %#v", broker.calls)
+	}
+	wantArguments := map[string]any{
+		"expectedWidth": int64(3840), "expectedHeight": int64(2160),
+		"left": int64(1340), "top": int64(1560), "width": int64(192), "height": int64(192),
+	}
+	if got := broker.calls[0].arguments; !reflect.DeepEqual(got, wantArguments) {
+		t.Fatalf("screen arguments = %#v, want %#v", got, wantArguments)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	target := result["target"].(map[string]any)
+	if target["detected"] != true || target["offsetX"] != float64(11) || target["offsetY"] != float64(-4) || target["centered"] != false {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestEliteCompassPackageFailsWhenCompassEvidenceIsAbsent(t *testing.T) {
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pixels := make([]any, 192*192)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	runner, _ := New(&compassBroker{pixels: pixels})
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
+	var runError *Error
+	if !errors.As(err, &runError) || runError.Code != "COMPASS_NOT_VISIBLE" {
+		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestEliteCompassPackageReturnsNoTargetWithoutSubstitution(t *testing.T) {
+	pixels := make([]any, 192*192)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	for index := 0; index < 500; index++ {
+		pixels[index] = uint32(0xFF7700)
+	}
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := New(&compassBroker{pixels: pixels})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	target := result["target"].(map[string]any)
+	if target["detected"] != false || target["screenX"] != nil || target["offsetX"] != nil || target["centered"] != nil {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
 func (b *fixtureBroker) BlobPath(context.Context, map[string]any) (string, error) {
 	return "", errors.New("unexpected fixture blob path request")
 }

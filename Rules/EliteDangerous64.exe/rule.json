@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 3,
+  "description": "Elite Dangerous exposes finite game-specific Actions; registrations remain opt-in.",
+  "actions": {
+    "elite-dangerous/compass": {
+      "path": "Actions/compass",
+      "runtime": "windows-observation-v1",
+      "registrableAs": ["monitor", "reaction"]
+    }
+  },
+  "registrations": {}
+}

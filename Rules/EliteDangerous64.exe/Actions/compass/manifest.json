@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "title": "Read Elite Dangerous compass",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "files": [
+    "main.star",
+    "TASK.md",
+    "input.schema.json",
+    "output.schema.json"
+  ],
+  "permissions": {
+    "memory": null,
+    "file": null,
+    "screen": {
+      "operations": ["readRegion"],
+      "maxCalls": 1,
+      "maxPixels": 36864
+    }
+  },
+  "limits": {
+    "wallTimeMs": 10000,
+    "maxSteps": 4000000,
+    "maxResultBytes": 8192,
+    "maxLogBytes": 4096
+  }
+}

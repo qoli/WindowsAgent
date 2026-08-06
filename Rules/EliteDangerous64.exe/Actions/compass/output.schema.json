@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "region", "compass", "target"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "capturedAt"],
+      "properties": {
+        "width": {"const": 3840},
+        "height": {"const": 2160},
+        "capturedAt": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "top", "width", "height", "centerX", "centerY"],
+      "properties": {
+        "left": {"const": 1340},
+        "top": {"const": 1560},
+        "width": {"const": 192},
+        "height": {"const": 192},
+        "centerX": {"const": 1444},
+        "centerY": {"const": 1647}
+      }
+    },
+    "compass": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visible", "orangePixelCount"],
+      "properties": {
+        "visible": {"const": true},
+        "orangePixelCount": {"type": "integer", "minimum": 400, "maximum": 36864}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["detected", "cyanPixelCount", "screenX", "screenY", "offsetX", "offsetY", "centered"],
+      "properties": {
+        "detected": {"type": "boolean"},
+        "cyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 36864},
+        "screenX": {"type": ["integer", "null"], "minimum": 1340, "maximum": 1531},
+        "screenY": {"type": ["integer", "null"], "minimum": 1560, "maximum": 1751},
+        "offsetX": {"type": ["integer", "null"], "minimum": -104, "maximum": 87},
+        "offsetY": {"type": ["integer", "null"], "minimum": -87, "maximum": 104},
+        "centered": {"type": ["boolean", "null"]}
+      }
+    }
+  }
+}
