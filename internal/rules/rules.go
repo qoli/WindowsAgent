@@ -20,16 +20,22 @@ import (
 )
 
 const (
-	StatusMatched        = "matched"
-	StatusUnmatched      = "unmatched"
-	UnmatchedDescription = "No rule guidance is available for this foreground process."
-	RuleFilename         = "rule.json"
-	AgentsFilename       = "AGENTS.md"
-	AgentsMediaType      = "text/markdown; charset=utf-8"
-	ScriptsMediaType     = "application/json; charset=utf-8"
-	ObservationRuntimeV1 = "windows-observation-v1"
-	maxRuleJSONBytes     = 64 << 10
-	maxAgentsBytes       = 1 << 20
+	StatusMatched          = "matched"
+	StatusUnmatched        = "unmatched"
+	UnmatchedDescription   = "No rule guidance is available for this foreground process."
+	RuleFilename           = "rule.json"
+	AgentsFilename         = "AGENTS.md"
+	AgentsMediaType        = "text/markdown; charset=utf-8"
+	ScriptsMediaType       = "application/json; charset=utf-8"
+	ModulesMediaType       = "application/json; charset=utf-8"
+	ObservationRuntimeV1   = "windows-observation-v1"
+	ModuleKindQuery        = "query"
+	ModuleKindPreprocessor = "preprocessor"
+	ModuleKindLoop         = "loop"
+	ModuleKindReactor      = "reactor"
+	ModuleKindAction       = "action"
+	maxRuleJSONBytes       = 64 << 10
+	maxAgentsBytes         = 1 << 20
 )
 
 type Document struct {
@@ -43,6 +49,7 @@ type Resolution struct {
 	ID          string    `json:"id,omitempty"`
 	Agents      *Document `json:"agents,omitempty"`
 	Scripts     *Document `json:"scripts,omitempty"`
+	Modules     *Document `json:"modules,omitempty"`
 }
 
 func (r Resolution) Validate() error {
@@ -51,8 +58,8 @@ func (r Resolution) Validate() error {
 		if r.Description != UnmatchedDescription {
 			return errors.New("unmatched rule description is invalid")
 		}
-		if r.ID != "" || r.Agents != nil || r.Scripts != nil {
-			return errors.New("unmatched rule must not contain an ID, AGENTS document, or Scripts catalog")
+		if r.ID != "" || r.Agents != nil || r.Scripts != nil || r.Modules != nil {
+			return errors.New("unmatched rule must not contain an ID, AGENTS document, Scripts catalog, or Modules catalog")
 		}
 		return nil
 	case StatusMatched:
@@ -80,13 +87,23 @@ func (r Resolution) Validate() error {
 		if r.Scripts.ContentType != ScriptsMediaType {
 			return errors.New("matched rule Scripts content type is invalid")
 		}
+		if r.Modules == nil {
+			return errors.New("matched rule requires a Modules catalog")
+		}
+		if r.Modules.URL != modulesURL(r.ID) {
+			return errors.New("matched rule Modules URL does not match rule ID")
+		}
+		if r.Modules.ContentType != ModulesMediaType {
+			return errors.New("matched rule Modules content type is invalid")
+		}
 		return nil
 	default:
 		return fmt.Errorf("invalid rule status %q", r.Status)
 	}
 }
 
-type ScriptDeclaration struct {
+type ModuleDeclaration struct {
+	Kind    string `json:"kind"`
 	Path    string `json:"path"`
 	Runtime string `json:"runtime"`
 }
@@ -94,7 +111,15 @@ type ScriptDeclaration struct {
 type Descriptor struct {
 	SchemaVersion uint32                       `json:"schemaVersion"`
 	Description   string                       `json:"description"`
-	Scripts       map[string]ScriptDeclaration `json:"scripts"`
+	Modules       map[string]ModuleDeclaration `json:"modules"`
+}
+
+type Module struct {
+	ID      string `json:"id"`
+	RuleID  string `json:"ruleId"`
+	Kind    string `json:"kind"`
+	Runtime string `json:"runtime"`
+	Root    string `json:"-"`
 }
 
 type Script struct {
@@ -188,42 +213,54 @@ func (s *Store) ReadAGENTS(id string) ([]byte, Resolution, error) {
 }
 
 func (s *Store) ResolveScript(capabilityID string) (Script, error) {
-	if s == nil {
-		return Script{}, errors.New("rule store is required")
-	}
-	if strings.TrimSpace(capabilityID) == "" || strings.TrimSpace(capabilityID) != capabilityID {
-		return Script{}, errors.New("capability ID is required and must be canonical")
-	}
-	directories, err := s.ruleDirectories()
+	module, err := s.ResolveModule(capabilityID)
 	if err != nil {
 		return Script{}, err
 	}
-	var matched *Script
+	if module.Kind != ModuleKindQuery {
+		return Script{}, fmt.Errorf("module %q has kind %q, expected %q", capabilityID, module.Kind, ModuleKindQuery)
+	}
+	return Script{ID: module.ID, RuleID: module.RuleID, Runtime: module.Runtime, Root: module.Root}, nil
+}
+
+func (s *Store) ResolveModule(moduleID string) (Module, error) {
+	if s == nil {
+		return Module{}, errors.New("rule store is required")
+	}
+	if strings.TrimSpace(moduleID) == "" || strings.TrimSpace(moduleID) != moduleID {
+		return Module{}, errors.New("module ID is required and must be canonical")
+	}
+	directories, err := s.ruleDirectories()
+	if err != nil {
+		return Module{}, err
+	}
+	var matched *Module
 	for _, id := range directories {
 		descriptor, err := s.readDescriptor(id)
 		if err != nil {
-			return Script{}, err
+			return Module{}, err
 		}
-		declaration, ok := descriptor.Scripts[capabilityID]
+		declaration, ok := descriptor.Modules[moduleID]
 		if !ok {
 			continue
 		}
 		if matched != nil {
-			return Script{}, fmt.Errorf("duplicate script capability ID %q", capabilityID)
+			return Module{}, fmt.Errorf("duplicate module ID %q", moduleID)
 		}
-		root, err := s.resolveScriptRoot(id, declaration.Path)
+		root, err := s.resolveModuleRoot(id, declaration.Path)
 		if err != nil {
-			return Script{}, fmt.Errorf("resolve rule %s script %s: %w", id, capabilityID, err)
+			return Module{}, fmt.Errorf("resolve rule %s module %s: %w", id, moduleID, err)
 		}
-		matched = &Script{
-			ID:      capabilityID,
+		matched = &Module{
+			ID:      moduleID,
 			RuleID:  id,
+			Kind:    declaration.Kind,
 			Runtime: declaration.Runtime,
 			Root:    root,
 		}
 	}
 	if matched == nil {
-		return Script{}, fs.ErrNotExist
+		return Module{}, fs.ErrNotExist
 	}
 	return *matched, nil
 }
@@ -246,8 +283,11 @@ func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
 	if _, err := s.readAgents(canonicalID); err != nil {
 		return nil, Resolution{}, err
 	}
-	capabilityIDs := make([]string, 0, len(descriptor.Scripts))
-	for capabilityID := range descriptor.Scripts {
+	capabilityIDs := make([]string, 0, len(descriptor.Modules))
+	for capabilityID, declaration := range descriptor.Modules {
+		if declaration.Kind != ModuleKindQuery {
+			continue
+		}
 		capabilityIDs = append(capabilityIDs, capabilityID)
 	}
 	sort.Strings(capabilityIDs)
@@ -268,6 +308,43 @@ func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
 		scripts = append(scripts, script)
 	}
 	return scripts, matchedResolution(canonicalID, descriptor.Description), nil
+}
+
+func (s *Store) ReadModules(id string) ([]Module, Resolution, error) {
+	if s == nil {
+		return nil, Resolution{}, errors.New("rule store is required")
+	}
+	canonicalID, found, err := s.findRule(id, true)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if !found {
+		return nil, Resolution{}, fs.ErrNotExist
+	}
+	descriptor, err := s.readDescriptor(canonicalID)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if _, err := s.readAgents(canonicalID); err != nil {
+		return nil, Resolution{}, err
+	}
+	moduleIDs := make([]string, 0, len(descriptor.Modules))
+	for moduleID := range descriptor.Modules {
+		moduleIDs = append(moduleIDs, moduleID)
+	}
+	sort.Strings(moduleIDs)
+	modules := make([]Module, 0, len(moduleIDs))
+	for _, moduleID := range moduleIDs {
+		module, err := s.ResolveModule(moduleID)
+		if err != nil {
+			return nil, Resolution{}, fmt.Errorf("resolve module %s: %w", moduleID, err)
+		}
+		if module.RuleID != canonicalID {
+			return nil, Resolution{}, fmt.Errorf("module %s resolved to Rule %s, expected %s", moduleID, module.RuleID, canonicalID)
+		}
+		modules = append(modules, module)
+	}
+	return modules, matchedResolution(canonicalID, descriptor.Description), nil
 }
 
 func (s *Store) findRule(executableName string, requireCanonical bool) (string, bool, error) {
@@ -342,7 +419,7 @@ func (s *Store) readAgents(id string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Store) resolveScriptRoot(id, name string) (string, error) {
+func (s *Store) resolveModuleRoot(id, name string) (string, error) {
 	ruleRoot := filepath.Join(s.root, id)
 	fullPath := filepath.Join(ruleRoot, filepath.FromSlash(name))
 	resolved, err := filepath.EvalSymlinks(fullPath)
@@ -354,54 +431,72 @@ func (s *Store) resolveScriptRoot(id, name string) (string, error) {
 		return "", err
 	}
 	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", errors.New("script path resolves outside its Rule plugin")
+		return "", errors.New("module path resolves outside its Rule plugin")
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", errors.New("script path must resolve to a directory")
+		return "", errors.New("module path must resolve to a directory")
 	}
 	return resolved, nil
 }
 
 func validateDescriptor(descriptor Descriptor) error {
-	if descriptor.SchemaVersion != 1 {
-		return fmt.Errorf("schemaVersion must equal 1, got %d", descriptor.SchemaVersion)
+	if descriptor.SchemaVersion != 2 {
+		return fmt.Errorf("schemaVersion must equal 2, got %d", descriptor.SchemaVersion)
 	}
 	if strings.TrimSpace(descriptor.Description) == "" ||
 		strings.TrimSpace(descriptor.Description) != descriptor.Description {
 		return errors.New("description must be non-empty and canonical")
 	}
-	if descriptor.Scripts == nil {
-		return errors.New("scripts is required")
+	if descriptor.Modules == nil {
+		return errors.New("modules is required")
 	}
-	for id, declaration := range descriptor.Scripts {
+	for id, declaration := range descriptor.Modules {
 		if strings.TrimSpace(id) == "" || strings.TrimSpace(id) != id {
-			return fmt.Errorf("script capability ID %q is not canonical", id)
+			return fmt.Errorf("module ID %q is not canonical", id)
 		}
-		if err := validateScriptPath(declaration.Path); err != nil {
-			return fmt.Errorf("script %s path: %w", id, err)
+		if err := validateModuleKind(declaration.Kind); err != nil {
+			return fmt.Errorf("module %s kind: %w", id, err)
+		}
+		if err := validateModulePath(declaration.Kind, declaration.Path); err != nil {
+			return fmt.Errorf("module %s path: %w", id, err)
 		}
 		if strings.TrimSpace(declaration.Runtime) == "" ||
 			strings.TrimSpace(declaration.Runtime) != declaration.Runtime {
-			return fmt.Errorf("script %s runtime is required and must be canonical", id)
+			return fmt.Errorf("module %s runtime is required and must be canonical", id)
 		}
 	}
 	return nil
 }
 
-func validateScriptPath(name string) error {
+func validateModuleKind(kind string) error {
+	switch kind {
+	case ModuleKindQuery, ModuleKindPreprocessor, ModuleKindLoop, ModuleKindReactor, ModuleKindAction:
+		return nil
+	default:
+		return fmt.Errorf("unsupported module kind %q", kind)
+	}
+}
+
+func validateModulePath(kind, name string) error {
 	if name == "" || filepath.IsAbs(name) || path.Clean(name) != name ||
 		strings.Contains(name, `\`) || strings.Contains(name, ":") {
-		return fmt.Errorf("script path %q is not canonical and relative", name)
+		return fmt.Errorf("module path %q is not canonical and relative", name)
 	}
-	if !strings.HasPrefix(name, "Scripts/") || name == "Scripts/" {
-		return fmt.Errorf("script path %q must be below Scripts/", name)
+	prefix := "Modules/"
+	if kind == ModuleKindReactor {
+		prefix = "Reactors/"
+	} else if kind == ModuleKindAction {
+		prefix = "Actions/"
+	}
+	if !strings.HasPrefix(name, prefix) || name == prefix {
+		return fmt.Errorf("module path %q must be below %s", name, prefix)
 	}
 	if name == "." || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "/../") {
-		return fmt.Errorf("script path %q escapes the Rule plugin", name)
+		return fmt.Errorf("module path %q escapes the Rule plugin", name)
 	}
 	return nil
 }
@@ -476,6 +571,10 @@ func matchedResolution(id, description string) Resolution {
 			URL:         scriptsURL(id),
 			ContentType: ScriptsMediaType,
 		},
+		Modules: &Document{
+			URL:         modulesURL(id),
+			ContentType: ModulesMediaType,
+		},
 	}
 }
 
@@ -489,4 +588,8 @@ func agentsURL(id string) string {
 
 func scriptsURL(id string) string {
 	return "/v1/rules/" + url.PathEscape(id) + "/scripts"
+}
+
+func modulesURL(id string) string {
+	return "/v2/rules/" + url.PathEscape(id) + "/modules"
 }

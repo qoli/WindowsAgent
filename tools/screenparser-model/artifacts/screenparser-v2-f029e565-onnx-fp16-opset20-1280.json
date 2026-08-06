@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "screenparser-v2-f029e565-onnx-fp16-opset20-1280",
+  "format": "onnx",
+  "filename": "screenparser-v2-f029e565-opset20-fp16-1280.onnx",
+  "sha256": "8f22b0a224571076a2c9631649fbe2f54e0d07ae2682a9be03c665cf9396d055",
+  "bytes": 51156459,
+  "precision": "fp16",
+  "opset": 20,
+  "inputName": "images",
+  "outputName": "output0",
+  "inputWidth": 1280,
+  "inputHeight": 1280,
+  "outputShape": [
+    1,
+    59,
+    33600
+  ],
+  "source": {
+    "repository": "docling-project/ScreenParser",
+    "revision": "f029e565f1206577402e43206454522075be3f72",
+    "filename": "best.pt",
+    "sha256": "dbcb4f583ccfdb8100a68e606525c247890a2de4c1a54b14741e0ee29ce0ab88",
+    "license": "Apache-2.0"
+  },
+  "build": {
+    "sourceArtifactId": "screenparser-v2-f029e565-onnx-fp32-opset20-1280",
+    "sourceArtifactSha256": "cce50b5720daa4d3cd3ab552a87f245feeb9711dc8aa26da01368d265f488d08",
+    "onnx": "1.22.0",
+    "onnxconverterCommon": "1.16.0",
+    "onnxruntime": "1.28.0",
+    "keepGraphIoFloat": true
+  },
+  "acceptance": {
+    "privateFrames": 10,
+    "holdoutFrames": 4,
+    "holdoutRecallAtClassIou50": 0.9836065573770492,
+    "holdoutPrecisionAtClassIou50": 0.994475138121547,
+    "windowsDirectMLFixedFrameDetections": 57,
+    "windowsDirectMLFixedFrameMatched": 57,
+    "windowsDirectMLMedianEndToEndMs": 122.08
+  }
+}

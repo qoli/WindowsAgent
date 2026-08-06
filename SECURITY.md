@@ -44,3 +44,21 @@ data, not as instruction sources.
 
 The installer does not alter Windows Firewall and does not create a traditional
 Windows service. The agent must run with the signed-in user's interactive token.
+
+`windows-event-stream.exe` is a separate, partially landed local service run by
+an interactive-user Scheduled Task. It refuses non-loopback listen addresses
+and requires a bearer token for event
+append, replay, and live streaming. Treat its token file and event journal as
+sensitive host data: events may contain foreground executable identity, parsed
+screen state, action intent, and artifact references. The token and journal
+must not be committed or distributed with a Rule plugin.
+
+The ScreenParser preprocessor is a finite self-contained interactive-user
+process. Its official `best.pt` checkpoint is a PyTorch pickle artifact rather
+than safe-tensors, so only the build-time exporter loads it after revision and
+SHA-256 verification. The Windows runtime loads only the separately verified
+ONNX artifact through pinned ONNX Runtime DirectML. It refuses a changed model
+or runtime artifact, CPU substitution, a frame outside the declared artifact
+root, a frame digest mismatch, or an unknown manifest/request field. Its result
+may expose the layout and semantic classes of visible browser or game UI; treat
+the request, frame, and response as sensitive host data.

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "artifactId": "screenparser-v2-f029e565-onnx-fp32-opset20-1280",
+  "format": "onnx",
+  "filename": "screenparser-v2-f029e565-opset20-fp32-1280.onnx",
+  "sha256": "cce50b5720daa4d3cd3ab552a87f245feeb9711dc8aa26da01368d265f488d08",
+  "bytes": 102091307,
+  "precision": "fp32",
+  "opset": 20,
+  "inputName": "images",
+  "outputName": "output0",
+  "inputWidth": 1280,
+  "inputHeight": 1280,
+  "outputShape": [1, 59, 33600],
+  "source": {
+    "repository": "docling-project/ScreenParser",
+    "revision": "f029e565f1206577402e43206454522075be3f72",
+    "filename": "best.pt",
+    "sha256": "dbcb4f583ccfdb8100a68e606525c247890a2de4c1a54b14741e0ee29ce0ab88",
+    "license": "Apache-2.0"
+  },
+  "build": {
+    "torch": "2.13.0",
+    "torchvision": "0.28.0",
+    "ultralytics": "8.4.115",
+    "onnx": "1.22.0",
+    "validation": [
+      {
+        "image": "screenparser-horizontal-canonical.png",
+        "imageSha256": "5d5de504b7ffbb5bb930f9a5b676a11d69472bbd1be1672f2d5171f265d5ab93",
+        "outputShape": [1, 59, 33600],
+        "bboxMaximumAbsoluteDelta": 0.099578857,
+        "bboxP99AbsoluteDelta": 0.001403809,
+        "scoreMaximumAbsoluteDelta": 0.00000459,
+        "scoreP99AbsoluteDelta": 0.000000064
+      }
+    ]
+  }
+}

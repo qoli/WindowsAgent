@@ -70,6 +70,11 @@ type scriptCatalogResponse struct {
 	Scripts []scriptCapabilityResponse `json:"scripts"`
 }
 
+type moduleCatalogResponse struct {
+	RuleID  string         `json:"ruleId"`
+	Modules []rules.Module `json:"modules"`
+}
+
 type scriptCapabilityResponse struct {
 	ID           string          `json:"id"`
 	Runtime      string          `json:"runtime"`
@@ -163,11 +168,38 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleCaptureResource(recorder, r, requestID)
 	case strings.HasPrefix(r.URL.Path, "/v1/rules/"):
 		s.handleRuleResource(recorder, r, requestID)
+	case strings.HasPrefix(r.URL.Path, "/v2/rules/"):
+		s.handleModuleResource(recorder, r, requestID)
 	case r.URL.Path == "/v1/scripts/run":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleScriptRun)
 	default:
 		writeError(recorder, requestID, http.StatusNotFound, "route_not_found", "route not found")
 	}
+}
+
+func (s *Server) handleModuleResource(w http.ResponseWriter, r *http.Request, requestID string) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	remainder := strings.TrimPrefix(r.URL.Path, "/v2/rules/")
+	parts := strings.Split(remainder, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "modules" {
+		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
+		return
+	}
+	modules, resolution, err := s.rules.ReadModules(parts[0])
+	if errors.Is(err, fs.ErrNotExist) {
+		writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
+		return
+	}
+	if err != nil {
+		s.writeMappedError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, moduleCatalogResponse{RuleID: resolution.ID, Modules: modules})
 }
 
 func (s *Server) handleScriptRun(w http.ResponseWriter, r *http.Request, requestID string) {

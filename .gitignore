@@ -5,4 +5,7 @@
 !Rules/*.exe/**
 *.log
 *.jsonl
+**/bin/
+**/obj/
+**/__pycache__/
 .DS_Store

@@ -4,8 +4,8 @@
 
 **Landed.**
 
-An Observation Script Package is one package below a Rule plugin's generic
-`Scripts/` directory. It has one finite Starlark entrypoint, human task
+An Observation Script Package is one `query` package below a Rule plugin's
+`Modules/` directory. It has one finite Starlark entrypoint, human task
 description, input and output schemas, Observer permissions, optional native
 DLL artifacts, and explicit limits.
 
@@ -102,9 +102,10 @@ path, and runtime:
 
 ```json
 {
-  "scripts": {
+  "modules": {
     "example/read": {
-      "path": "Scripts/read",
+      "kind": "query",
+      "path": "Modules/read",
       "runtime": "windows-observation-v1"
     }
   }

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "description": "ScreenParser is an on-demand frame preprocessor for a later Palworld VLM pipeline; this Rule grants no action capability.",
+  "modules": {
+    "screenparser/ui-elements": {
+      "kind": "preprocessor",
+      "path": "Modules/screenparser",
+      "runtime": "screenparser-onnx-dml-v1"
+    }
+  }
+}

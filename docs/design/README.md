@@ -10,6 +10,13 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Observation script package](observation-script-package.md) | Landed | Validate external Starlark logic, task documentation, input/output schemas, Observer permissions, native DLL artifacts, and limits. |
 | [Windows observer protocol](observation-worker-protocol.md) | Partially landed | Unify finite read-only memory and file calls behind framed process boundaries. |
 | [Script Runner native-library FFI](native-library-ffi.md) | Landed | Load package-owned DLL aliases and execute package-owned ABIs through a provider-neutral Windows amd64 FFI. |
+| [Event stream runtime](event-stream-runtime.md) | Partially landed | Persist strict ordered events and expose authenticated local append/replay for independent modules. |
+| [Game module registry v2](game-module-registry-v2.md) | Partially landed | Classify executable-scoped query, preprocessor, loop, reactor, and action modules independently from their runtime. |
+| [ScreenParser preprocessor module](screenparser-preprocessor-module.md) | Partially landed | Run the pinned ScreenParser v2 detector once for an explicitly supplied, hash-pinned RGB24 frame. |
+| [ScreenParser loop module](screenparser-loop-module.md) | Retired | Historical autonomous capture/inference/event-loop design, replaced by the on-demand preprocessor. |
+| [Screen scene reducer](screen-scene-reducer.md) | Retired | Historical reducer for the retired raw ScreenParser event stream. |
+| [Mini reaction runtime](mini-reaction-runtime.md) | Draft | Subscribe a configured small VLM to events and allow only declared Game actions. |
+| [Windows action runtime](windows-action-runtime.md) | Draft | Execute finite foreground-bound actions with recorded lifecycle and release-all-input guarantees. |
 
 Status meanings:
 

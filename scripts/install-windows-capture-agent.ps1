@@ -16,13 +16,16 @@ param(
     [int]$Retention = 100,
     [ValidateSet("debug", "info", "warn", "error")]
     [string]$LogLevel = "info",
-    [string]$TaskName = "gameGuide Windows Capture Agent"
+    [string]$TaskName = "gameGuide Windows Capture Agent",
+    [string]$EventListen = "127.0.0.1:8788",
+    [string]$EventTaskName = "gameGuide Windows Event Stream"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $taskDescription = "gameGuide Go WGC screenshot agent; interactive-user session required"
+$eventTaskDescription = "gameGuide durable local event stream; interactive-user session required"
 $minimumVersion = [version]"10.0.18362.0"
 $osVersion = [Environment]::OSVersion.Version
 if (-not [Environment]::Is64BitOperatingSystem) {
@@ -44,6 +47,7 @@ $runtimeSources = [ordered]@{
     "windows-observation-job.exe" = Join-Path $sourceBinDir "windows-observation-job.exe"
     "windows-observation-script-runner.exe" = Join-Path $sourceBinDir "windows-observation-script-runner.exe"
     "windows-observer.exe" = Join-Path $sourceBinDir "windows-observer.exe"
+    "windows-event-stream.exe" = Join-Path $sourceBinDir "windows-event-stream.exe"
 }
 foreach ($runtime in $runtimeSources.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $runtime.Value -PathType Leaf)) {
@@ -89,7 +93,13 @@ if (Test-Path -LiteralPath $capturesDir -PathType Container) {
             $metadata.rule.status -eq "matched" -and
             -not ($ruleProperties -contains "scripts")
         )
-        if ($usesRemovedAgentSHA -or $missingScriptNavigation) {
+        $missingModuleNavigation = (
+            $hasRule -and
+            $ruleProperties -contains "status" -and
+            $metadata.rule.status -eq "matched" -and
+            -not ($ruleProperties -contains "modules")
+        )
+        if ($usesRemovedAgentSHA -or $missingScriptNavigation -or $missingModuleNavigation) {
             $incompatibleCaptureMetadata += $metadataFile.FullName
         }
     }
@@ -108,6 +118,17 @@ $listenPort = [int]$listenMatch.Groups[2].Value
 if ($listenPort -lt 1 -or $listenPort -gt 65535) {
     throw "Listen port must be between 1 and 65535"
 }
+$eventListenMatch = [regex]::Match($EventListen, "^127\.0\.0\.1:([0-9]{1,5})$")
+if (-not $eventListenMatch.Success) {
+    throw "EventListen must use explicit loopback form 127.0.0.1:<port>"
+}
+$eventListenPort = [int]$eventListenMatch.Groups[1].Value
+if ($eventListenPort -lt 1 -or $eventListenPort -gt 65535) {
+    throw "EventListen port must be between 1 and 65535"
+}
+if ($eventListenPort -eq $listenPort) {
+    throw "Listen and EventListen must use different ports"
+}
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 if (-not $identity) {
@@ -119,6 +140,10 @@ $logDir = Join-Path $resolvedDataDir "logs"
 $installedExecutable = Join-Path $binDir "windows-capture-agent.exe"
 $installedRules = Join-Path $resolvedDataDir "Rules"
 $logFile = Join-Path $logDir "agent.jsonl"
+$eventLogFile = Join-Path $logDir "event-stream.jsonl"
+$eventDataDir = Join-Path $resolvedDataDir "events"
+$eventTokenFile = Join-Path $resolvedDataDir "event-api.token"
+$installedEventExecutable = Join-Path $binDir "windows-event-stream.exe"
 $legacyScriptAPITokenFile = Join-Path $resolvedDataDir "script-api.token"
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -129,6 +154,13 @@ if ($existingTask) {
         throw "scheduled task '$TaskName' exists but is not owned by windows-capture-agent"
     }
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+}
+$existingEventTask = Get-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
+if ($existingEventTask) {
+    if ($existingEventTask.Description -ne $eventTaskDescription) {
+        throw "scheduled task '$EventTaskName' exists but is not owned by windows-event-stream"
+    }
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
 }
 $legacyScriptAPITokenRemoved = $false
 if (Test-Path -LiteralPath $legacyScriptAPITokenFile -PathType Leaf) {
@@ -148,6 +180,18 @@ if ($listeners.Count -ne 0) {
     $owners = ($listeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ","
     throw "Listen port $listenPort is already occupied by PID(s) $owners"
 }
+$eventPortDeadline = [DateTime]::UtcNow.AddSeconds(10)
+do {
+    $eventListeners = @(Get-NetTCPConnection -State Listen -LocalPort $eventListenPort -ErrorAction SilentlyContinue)
+    if ($eventListeners.Count -eq 0) {
+        break
+    }
+    Start-Sleep -Milliseconds 250
+} while ([DateTime]::UtcNow -lt $eventPortDeadline)
+if ($eventListeners.Count -ne 0) {
+    $owners = ($eventListeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ","
+    throw "EventListen port $eventListenPort is already occupied by PID(s) $owners"
+}
 
 $captureArchive = $null
 if ($incompatibleCaptureMetadata.Count -ne 0) {
@@ -166,6 +210,27 @@ if ($sourceExecutable -ne $installedExecutable) {
 foreach ($runtime in $runtimeSources.GetEnumerator()) {
     Copy-Item -LiteralPath $runtime.Value -Destination (Join-Path $binDir $runtime.Key) -Force
 }
+if (Test-Path -LiteralPath $eventTokenFile) {
+    $eventTokenInfo = Get-Item -LiteralPath $eventTokenFile -Force
+    if ($eventTokenInfo.PSIsContainer -or $eventTokenInfo.Length -lt 32 -or $eventTokenInfo.Length -gt 4096) {
+        throw "existing event API token must be a regular file between 32 and 4096 bytes: $eventTokenFile"
+    }
+    $eventToken = [IO.File]::ReadAllText($eventTokenFile)
+    if ($eventToken.Trim() -ne $eventToken) {
+        throw "existing event API token must not contain leading or trailing whitespace: $eventTokenFile"
+    }
+} else {
+    $tokenBytes = New-Object byte[] 32
+    $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $random.GetBytes($tokenBytes)
+    } finally {
+        $random.Dispose()
+    }
+    $eventToken = [Convert]::ToBase64String($tokenBytes)
+    [IO.File]::WriteAllText($eventTokenFile, $eventToken, [Text.UTF8Encoding]::new($false))
+}
+New-Item -ItemType Directory -Path $eventDataDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installedRules -Force | Out-Null
 $sourceRuleDirectories = @(Get-ChildItem -LiteralPath $sourceRules -Directory)
 if ($sourceRuleDirectories.Count -eq 0) {
@@ -194,6 +259,12 @@ $agentArguments = @(
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
     "--log-file", (ConvertTo-NativeQuotedArgument $logFile)
 ) -join " "
+$eventArguments = @(
+    "--listen", (ConvertTo-NativeQuotedArgument $EventListen),
+    "--data-dir", (ConvertTo-NativeQuotedArgument $eventDataDir),
+    "--token-file", (ConvertTo-NativeQuotedArgument $eventTokenFile),
+    "--log-file", (ConvertTo-NativeQuotedArgument $eventLogFile)
+) -join " "
 
 $action = New-ScheduledTaskAction -Execute $installedExecutable -Argument $agentArguments
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
@@ -214,6 +285,46 @@ $task = New-ScheduledTask `
     -Settings $settings `
     -Description $taskDescription
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
+$eventAction = New-ScheduledTaskAction -Execute $installedEventExecutable -Argument $eventArguments
+$eventTask = New-ScheduledTask `
+    -Action $eventAction `
+    -Trigger $trigger `
+    -Principal $principal `
+    -Settings $settings `
+    -Description $eventTaskDescription
+Register-ScheduledTask -TaskName $EventTaskName -InputObject $eventTask -Force | Out-Null
+Start-ScheduledTask -TaskName $EventTaskName
+
+$eventHealthURI = "http://127.0.0.1:$eventListenPort/healthz"
+$eventHealthDeadline = [DateTime]::UtcNow.AddSeconds(20)
+$eventHealth = $null
+do {
+    try {
+        $eventHealth = Invoke-RestMethod -Method Get -Uri $eventHealthURI -TimeoutSec 2
+    } catch {
+        $eventHealth = $null
+    }
+    if ($eventHealth -and $eventHealth.status -eq "ok") {
+        break
+    }
+    Start-Sleep -Milliseconds 500
+} while ([DateTime]::UtcNow -lt $eventHealthDeadline)
+if (-not $eventHealth -or $eventHealth.status -ne "ok") {
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
+    throw "scheduled event stream did not become healthy at $eventHealthURI; inspect $eventLogFile"
+}
+$eventListener = Get-NetTCPConnection -State Listen -LocalPort $eventListenPort -ErrorAction Stop |
+    Select-Object -First 1
+$eventProcess = Get-Process -Id $eventListener.OwningProcess -ErrorAction Stop
+if ($eventProcess.Path -ne $installedEventExecutable) {
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
+    throw "port $eventListenPort is served by unexpected executable: $($eventProcess.Path)"
+}
+if ($eventProcess.SessionId -eq 0) {
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
+    throw "event stream started in Session 0; an interactive user session is required"
+}
+
 Start-ScheduledTask -TaskName $TaskName
 
 $healthURI = "http://127.0.0.1:$listenPort/healthz"
@@ -232,6 +343,7 @@ do {
 } while ([DateTime]::UtcNow -lt $healthDeadline)
 if (-not $health -or $health.status -ne "ok") {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
     throw "scheduled agent did not become healthy at $healthURI; inspect $logFile"
 }
 
@@ -240,10 +352,12 @@ $listener = Get-NetTCPConnection -State Listen -LocalPort $listenPort -ErrorActi
 $process = Get-Process -Id $listener.OwningProcess -ErrorAction Stop
 if ($process.Path -ne $installedExecutable) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
     throw "port $listenPort is served by unexpected executable: $($process.Path)"
 }
 if ($process.SessionId -eq 0) {
     Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    Stop-ScheduledTask -TaskName $EventTaskName -ErrorAction SilentlyContinue
     throw "agent started in Session 0; WGC requires the interactive user session"
 }
 
@@ -254,6 +368,16 @@ if ($process.SessionId -eq 0) {
     script_launcher = (Join-Path $binDir "windows-observation-job.exe")
     script_runner = (Join-Path $binDir "windows-observation-script-runner.exe")
     observer = (Join-Path $binDir "windows-observer.exe")
+    event_task_name = $EventTaskName
+    event_task_state = (Get-ScheduledTask -TaskName $EventTaskName).State.ToString()
+    event_executable = $installedEventExecutable
+    event_data_dir = $eventDataDir
+    event_token_file = $eventTokenFile
+    event_log_file = $eventLogFile
+    event_listen = $EventListen
+    event_process_id = $eventProcess.Id
+    event_session_id = $eventProcess.SessionId
+    event_health = $eventHealth.status
     data_dir = $resolvedDataDir
     rules_dir = $installedRules
     legacy_script_api_token_removed = $legacyScriptAPITokenRemoved

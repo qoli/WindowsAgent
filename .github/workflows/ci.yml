@@ -16,7 +16,22 @@ jobs:
         with:
           go-version: "1.23.x"
           cache: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
       - run: go test ./...
+      - name: Test ScreenParser DirectML contract
+        run: >-
+          dotnet run
+          --project runtimes/screenparser-directml/ScreenParser.DirectML.ContractTests/ScreenParser.DirectML.ContractTests.csproj
+          --configuration Release
+      - name: Test ScreenParser DirectML one-shot contract
+        run: >-
+          dotnet run
+          --project tools/screenparser-directml-one-shot/ScreenParser.DirectML.OneShot.ContractTests/ScreenParser.DirectML.OneShot.ContractTests.csproj
+          --configuration Release
+      - name: Check ScreenParser build tools
+        run: python3 -m py_compile tools/screenparser-model/export_onnx.py tools/screenparser-model/convert_fp16.py tools/screenparser-runtime/publish.py
 
   windows-cross-build:
     runs-on: ubuntu-latest
@@ -26,6 +41,9 @@ jobs:
         with:
           go-version: "1.23.x"
           cache: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
       - name: Vet Windows packages
         run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
       - name: Prepare output directory
@@ -43,3 +61,15 @@ jobs:
           -ldflags "-H=windowsgui"
           -o .build/windows-capture-agent-background.exe
           ./cmd/windows-capture-agent
+      - name: Build event stream executable
+        run: >-
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          go build -trimpath
+          -ldflags "-H=windowsgui"
+          -o .build/windows-event-stream.exe
+          ./cmd/windows-event-stream
+      - name: Publish ScreenParser DirectML runtime
+        run: >-
+          python3 tools/screenparser-runtime/publish.py
+          --dotnet "$(command -v dotnet)"
+          --output-dir "$PWD/.build/screenparser-directml"

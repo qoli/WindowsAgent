@@ -178,6 +178,10 @@ func testResult(content string) capture.Result {
 				URL:         "/v1/rules/game.exe/scripts",
 				ContentType: "application/json; charset=utf-8",
 			},
+			Modules: &rules.Document{
+				URL:         "/v2/rules/game.exe/modules",
+				ContentType: "application/json; charset=utf-8",
+			},
 		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",
 	}

@@ -127,7 +127,7 @@ func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
 	server, _, ruleRoot := newTestServerAndRuleRoot(t, &fakeCapturer{status: testStatus(), result: testResult()}, time.Second)
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":1,"description":"Updated live.","scripts":{}}`),
+		[]byte(`{"schemaVersion":2,"description":"Updated live.","modules":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -180,7 +180,8 @@ func TestCaptureReportsUnmatchedRuleExplicitly(t *testing.T) {
 		metadata.Rule.Description != rules.UnmatchedDescription ||
 		metadata.Rule.ID != "" ||
 		metadata.Rule.Agents != nil ||
-		metadata.Rule.Scripts != nil {
+		metadata.Rule.Scripts != nil ||
+		metadata.Rule.Modules != nil {
 		t.Fatalf("rule navigation = %+v", metadata.Rule)
 	}
 }
@@ -191,14 +192,15 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 		&fakeCapturer{status: testStatus(), result: testResult()},
 		time.Second,
 	)
-	scriptRoot := filepath.Join(ruleRoot, "Scripts", "status")
+	scriptRoot := filepath.Join(ruleRoot, "Modules", "status")
 	writeTestScriptPackage(t, scriptRoot)
 	descriptor := `{
-	  "schemaVersion": 1,
+	  "schemaVersion": 2,
 	  "description": "Read the live Rule before acting.",
-	  "scripts": {
+	  "modules": {
 	    "game/status": {
-	      "path": "Scripts/status",
+	      "kind": "query",
+	      "path": "Modules/status",
 	      "runtime": "windows-observation-v1"
 	    }
 	  }
@@ -238,6 +240,56 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	}
 	if inputSchema["type"] != "object" {
 		t.Fatalf("input schema = %#v", inputSchema)
+	}
+}
+
+func TestRuleModulesCatalogReturnsClassifiedModules(t *testing.T) {
+	server, _, ruleRoot := newTestServerAndRuleRoot(
+		t,
+		&fakeCapturer{status: testStatus(), result: testResult()},
+		time.Second,
+	)
+	for _, relative := range []string{"Modules/screen-ui", "Modules/layout", "Reactors/fast", "Actions/dock"} {
+		if err := os.MkdirAll(filepath.Join(ruleRoot, filepath.FromSlash(relative)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	descriptor := `{
+	  "schemaVersion": 2,
+	  "description": "Read the live Rule before acting.",
+	  "modules": {
+	    "screen/ui": {"kind":"loop","path":"Modules/screen-ui","runtime":"screenparser-v2"},
+	    "screen/layout": {"kind":"preprocessor","path":"Modules/layout","runtime":"screenparser-v2"},
+	    "reaction/fast": {"kind":"reactor","path":"Reactors/fast","runtime":"local-mini-model-v1"},
+	    "action/dock": {"kind":"action","path":"Actions/dock","runtime":"windows-action-v1"}
+	  }
+	}`
+	if err := os.WriteFile(filepath.Join(ruleRoot, rules.RuleFilename), []byte(descriptor), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/v2/rules/game.exe/modules", nil),
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var catalog moduleCatalogResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if catalog.RuleID != "game.exe" || len(catalog.Modules) != 4 ||
+		catalog.Modules[0].ID != "action/dock" ||
+		catalog.Modules[1].ID != "reaction/fast" ||
+		catalog.Modules[2].ID != "screen/layout" ||
+		catalog.Modules[2].Kind != rules.ModuleKindPreprocessor ||
+		catalog.Modules[3].ID != "screen/ui" {
+		t.Fatalf("catalog = %+v", catalog)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("module catalog must not be cached")
 	}
 }
 
@@ -466,7 +518,7 @@ func newTestServerAndRuleRootWithExecutor(
 	}
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":1,"description":"Read the live Rule before acting.","scripts":{}}`),
+		[]byte(`{"schemaVersion":2,"description":"Read the live Rule before acting.","modules":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

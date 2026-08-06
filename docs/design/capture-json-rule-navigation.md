@@ -13,8 +13,9 @@ Implemented:
   the rule's `AGENTS.md`;
 - a matched response exposes a live Script catalog URL without loading a
   Script package during capture;
+- a matched response exposes the Rule v2 classified Modules catalog URL;
 - an unmatched executable is represented explicitly;
-- Crimson Desert is the first Rule plugin and registers one Script capability.
+- Crimson Desert is the first Rule plugin and registers one `query` module.
 
 Explicitly out of scope:
 
@@ -61,7 +62,7 @@ Rules/
   CrimsonDesert.exe/
     rule.json
     AGENTS.md
-    Scripts/
+    Modules/
       inventory/
         manifest.json
 ```
@@ -71,8 +72,9 @@ executable selector. Matching is Windows-style case-insensitive. The response
 preserves the canonical folder spelling.
 
 Each executable folder is one externally distributed plugin. `rule.json` owns
-the description plus the capability-to-path/runtime registry. `Scripts/` is a
-generic capability container. The capture binary stores no Rule content and
+the description plus the module kind/path/runtime registry. `Modules/` is the
+query/loop container; `Reactors/` and `Actions/` own their respective module
+kinds. The capture binary stores no Rule content and
 reads the current files for every request.
 
 ### Capture response
@@ -86,7 +88,7 @@ A matched capture includes:
   },
   "rule": {
     "status": "matched",
-    "description": "The executing agent must read rule.agents.url and rule.scripts.url before taking any rule-specific action.",
+    "description": "The executing agent must read rule.agents.url and rule.modules.url before taking any rule-specific action.",
     "id": "CrimsonDesert.exe",
     "agents": {
       "url": "/v1/rules/CrimsonDesert.exe/AGENTS.md",
@@ -94,6 +96,10 @@ A matched capture includes:
     },
     "scripts": {
       "url": "/v1/rules/CrimsonDesert.exe/scripts",
+      "content_type": "application/json; charset=utf-8"
+    },
+    "modules": {
+      "url": "/v2/rules/CrimsonDesert.exe/modules",
       "content_type": "application/json; charset=utf-8"
     }
   }
@@ -119,9 +125,10 @@ not prevent the screenshot from being committed.
 ```text
 GET /v1/rules/{canonical-rule-id}/AGENTS.md
 GET /v1/rules/{canonical-rule-id}/scripts
+GET /v2/rules/{canonical-rule-id}/modules
 ```
 
-Both endpoints return current external content with `Cache-Control: no-store`.
+All endpoints return current external content with `Cache-Control: no-store`.
 The Script catalog loads and validates the packages registered by the current
 `rule.json`, then exposes capability ID, runtime, title, version, input schema,
 output schema, and the launcher contract. Unknown IDs and
@@ -136,8 +143,9 @@ is the deployment trust boundary.
 - Rule resolution uses the foreground executable from the same captured frame.
 - Window titles and executable path substrings never select a rule.
 - A normalized executable matches at most one rule.
-- A matched result always includes the canonical ID, both navigation URLs and
-  media types, and the current plugin-owned description.
+- A matched result always includes the canonical ID, AGENTS, query Script, and
+  classified Modules navigation URLs/media types, plus the current plugin-owned
+  description.
 - An unmatched result includes a description but no ID or document/catalog
   link.
 - Empty, duplicate, malformed, or missing matched Rule documents fail the

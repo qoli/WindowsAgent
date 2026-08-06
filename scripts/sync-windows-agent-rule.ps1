@@ -41,47 +41,57 @@ try {
 } catch {
     throw "Rule plugin rule.json is invalid JSON: $($_.Exception.Message)"
 }
-$allowedDescriptorFields = @("schemaVersion", "description", "scripts")
+$allowedDescriptorFields = @("schemaVersion", "description", "modules")
 foreach ($property in $descriptor.PSObject.Properties) {
     if ($allowedDescriptorFields -notcontains $property.Name) {
         throw "Rule plugin rule.json contains unknown field: $($property.Name)"
     }
 }
-if ($descriptor.schemaVersion -ne 1) {
-    throw "Rule plugin schemaVersion must equal 1"
+if ($descriptor.schemaVersion -ne 2) {
+    throw "Rule plugin schemaVersion must equal 2"
 }
 if ([String]::IsNullOrWhiteSpace([string]$descriptor.description) -or `
     ([string]$descriptor.description).Trim() -ne [string]$descriptor.description) {
     throw "Rule plugin description must be non-empty and canonical"
 }
-if ($null -eq $descriptor.scripts) {
-    throw "Rule plugin scripts registry is required"
+if ($null -eq $descriptor.modules) {
+    throw "Rule plugin modules registry is required"
 }
-foreach ($scriptProperty in $descriptor.scripts.PSObject.Properties) {
-    $script = $scriptProperty.Value
-    foreach ($property in $script.PSObject.Properties) {
-        if (@("path", "runtime") -notcontains $property.Name) {
-            throw "Rule plugin script '$($scriptProperty.Name)' contains unknown field: $($property.Name)"
+foreach ($moduleProperty in $descriptor.modules.PSObject.Properties) {
+    $module = $moduleProperty.Value
+    foreach ($property in $module.PSObject.Properties) {
+        if (@("kind", "path", "runtime") -notcontains $property.Name) {
+            throw "Rule plugin module '$($moduleProperty.Name)' contains unknown field: $($property.Name)"
         }
     }
-    $relativePath = [string]$script.path
-    $runtime = [string]$script.runtime
-    if ([String]::IsNullOrWhiteSpace($scriptProperty.Name) -or `
+    $kind = [string]$module.kind
+    $relativePath = [string]$module.path
+    $runtime = [string]$module.runtime
+    if ([String]::IsNullOrWhiteSpace($moduleProperty.Name) -or `
         [String]::IsNullOrWhiteSpace($runtime)) {
-        throw "Rule plugin script ID and runtime must be non-empty"
+        throw "Rule plugin module ID and runtime must be non-empty"
     }
-    if (-not $relativePath.StartsWith("Scripts/", [StringComparison]::Ordinal) -or `
+    if (@("query", "preprocessor", "loop", "reactor", "action") -notcontains $kind) {
+        throw "Rule plugin module kind is unsupported: $kind"
+    }
+    $requiredPrefix = "Modules/"
+    if ($kind -eq "reactor") {
+        $requiredPrefix = "Reactors/"
+    } elseif ($kind -eq "action") {
+        $requiredPrefix = "Actions/"
+    }
+    if (-not $relativePath.StartsWith($requiredPrefix, [StringComparison]::Ordinal) -or `
         $relativePath.Contains([string][IO.Path]::DirectorySeparatorChar) -or `
         $relativePath.Contains(":") -or `
         $relativePath.Split("/") -contains "..") {
-        throw "Rule plugin script path is not canonical: $relativePath"
+        throw "Rule plugin module path is not canonical for kind '$kind': $relativePath"
     }
-    $scriptPath = Join-Path $sourceRule ($relativePath.Replace("/", [string][IO.Path]::DirectorySeparatorChar))
-    if (-not (Test-Path -LiteralPath $scriptPath -PathType Container)) {
-        throw "Rule plugin script directory does not exist: $relativePath"
+    $modulePath = Join-Path $sourceRule ($relativePath.Replace("/", [string][IO.Path]::DirectorySeparatorChar))
+    if (-not (Test-Path -LiteralPath $modulePath -PathType Container)) {
+        throw "Rule plugin module directory does not exist: $relativePath"
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $scriptPath "manifest.json") -PathType Leaf)) {
-        throw "Rule plugin script is missing manifest.json: $relativePath"
+    if (-not (Test-Path -LiteralPath (Join-Path $modulePath "manifest.json") -PathType Leaf)) {
+        throw "Rule plugin module is missing manifest.json: $relativePath"
     }
 }
 

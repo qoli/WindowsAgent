@@ -3,7 +3,7 @@
 ## Status and authority
 
 This document is the authoring and review contract for every package below
-`Rules/<Executable.exe>/Scripts/`.
+`Rules/<Executable.exe>/Modules/` as a Rule v2 `query` module.
 
 An Observation Script Package is trusted local task code, not an untrusted
 plugin sandbox. Trust does not remove its boundaries: every input, Observer
@@ -21,7 +21,7 @@ Each leaf directory owns one finite observation task:
 ```text
 Rules/
 `-- <Executable.exe>/
-    `-- Scripts/
+    `-- Modules/
         `-- <task>/
             |-- manifest.json
             |-- TASK.md
@@ -443,10 +443,10 @@ A package is ready only when all answers are yes:
 The maintained Crimson Desert inventory package is the current end-to-end
 example:
 
-- [`inventory/TASK.md`](../Rules/CrimsonDesert.exe/Scripts/inventory/TASK.md)
-- [`inventory/main.star`](../Rules/CrimsonDesert.exe/Scripts/inventory/main.star)
-- [`inventory/input.schema.json`](../Rules/CrimsonDesert.exe/Scripts/inventory/input.schema.json)
-- [`inventory/output.schema.json`](../Rules/CrimsonDesert.exe/Scripts/inventory/output.schema.json)
+- [`inventory/TASK.md`](../Rules/CrimsonDesert.exe/Modules/inventory/TASK.md)
+- [`inventory/main.star`](../Rules/CrimsonDesert.exe/Modules/inventory/main.star)
+- [`inventory/input.schema.json`](../Rules/CrimsonDesert.exe/Modules/inventory/input.schema.json)
+- [`inventory/output.schema.json`](../Rules/CrimsonDesert.exe/Modules/inventory/output.schema.json)
 - [`Crimson Desert inventory walkthrough`](examples/crimson-desert-inventory-job.md)
 
 Architecture details remain in:

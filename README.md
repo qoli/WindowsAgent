@@ -54,9 +54,24 @@ This is not a general remote memory API. HTTP exposes a live read-only Script
 catalog; the unauthenticated run endpoint delegates one strictly validated
 request to the local launcher inside the signed-in Windows session.
 
+The event-driven module refactor is partially landed:
+
+- Rule schema version 2 classifies `query`, `preprocessor`, `loop`, `reactor`, and `action`
+  modules independently from their runtime;
+- `windows-event-stream.exe` owns a strict append-only JSONL journal and an
+  authenticated loopback append/replay API;
+- Crimson Desert inventory remains a finite registered `query` using the
+  landed v1 observation runtime;
+- `screenparser/ui-elements` is a Palworld-configured on-demand `preprocessor`
+  that transforms one caller-supplied, hash-pinned RGB24 frame through the
+  verified FP16 ScreenParser v2 ONNX model and then exits;
+- no mini reaction model or Windows action runtime is shipped yet.
+
 ## Build
 
-Go 1.23 or newer is required.
+Go 1.23 or newer is required. .NET 8 SDK is required only to build the
+self-contained ScreenParser DirectML runtime; it is not required on the target
+Windows machine.
 
 ```bash
 mkdir -p .build
@@ -81,6 +96,10 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
   -o .build/windows-observation-job.exe \
   ./cmd/windows-observation-job
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath -ldflags "-H=windowsgui" \
+  -o .build/windows-event-stream.exe \
+  ./cmd/windows-event-stream
 cp -R Rules .build/
 ```
 
@@ -109,6 +128,43 @@ Available options:
 
 The process must not run as a traditional Session 0 Windows service because WGC
 requires access to the interactive desktop.
+
+Run the partially landed event-stream service independently on loopback:
+
+```powershell
+$tokenBytes = New-Object byte[] 32
+$tokenRng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$tokenRng.GetBytes($tokenBytes)
+[IO.File]::WriteAllText(
+  (Join-Path $PWD "event-stream.token"),
+  [Convert]::ToBase64String($tokenBytes)
+)
+.\.build\windows-event-stream.exe `
+  --listen 127.0.0.1:8788 `
+  --data-dir (Join-Path $PWD "event-data") `
+  --token-file (Join-Path $PWD "event-stream.token") `
+  --log-file (Join-Path $PWD "event-stream.jsonl")
+```
+
+The persistent installer launches the event service as an independent,
+interactive-user Scheduled Task. It creates the token only when absent and
+rejects an existing malformed token instead of replacing it. Append, replay,
+and NDJSON live-stream requests require the exact token; `/healthz` is the only
+unauthenticated route.
+
+Follow the installed stream from macOS through an SSH tunnel without exposing
+the loopback-only event API on the Windows network interface:
+
+```bash
+./scripts/watch-windows-event-stream.sh \
+  --ssh-host user@Windows-PC
+```
+
+The watcher retrieves the installed token through the same SSH connection,
+replays the latest 10 events, and then follows new NDJSON records until
+`Control-C`. Use `--tail 0` to follow only newly committed events or `--after`
+to provide an exact durable cursor. Connection messages go to stderr; stdout
+contains only event records and can be piped to another reader.
 
 Create one strict launcher request outside the Rule plugin:
 
@@ -155,16 +211,17 @@ From the repository root in PowerShell:
 ```
 
 The installer copies the capture executable, generic Starlark launcher,
-Script Runner, Observer, and external Rule plugins under the current user's
-`%LOCALAPPDATA%`, registers an interactive-token at-logon Scheduled Task,
-starts it, and verifies `/healthz`. All four executables must be present
-beside the selected build artifact before installation. The installer does
-not create an SCM service or modify Windows Firewall.
+Script Runner, Observer, event-stream executable, and external Rule plugins
+under the current user's `%LOCALAPPDATA%`. It registers separate
+interactive-token at-logon Scheduled Tasks for capture and event streaming,
+starts them, and verifies both `/healthz` endpoints. All five executables must
+be present beside the selected capture build artifact before installation.
+The installer does not create an SCM service or modify Windows Firewall.
 
 Builds that stored `rule.agents.sha256`, or matched Rule metadata without
-`rule.scripts`, use an incompatible capture metadata contract. The installer
-detects those captures before stopping the current task and refuses the
-migration unless explicitly asked to preserve them:
+`rule.scripts` or `rule.modules`, use an incompatible capture metadata
+contract. The installer detects those captures before stopping the current
+task and refuses the migration unless explicitly asked to preserve them:
 
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
@@ -176,6 +233,71 @@ migration unless explicitly asked to preserve them:
 The switch renames the existing `captures` directory to a timestamped
 `captures.pre-external-rules-*` archive. It does not reinterpret or delete the
 old artifacts.
+
+Build the self-contained Windows runtime bundle:
+
+```bash
+python3 tools/screenparser-runtime/publish.py \
+  --dotnet "$(command -v dotnet)" \
+  --output-dir "$PWD/.build/screenparser-directml"
+```
+
+For bounded precision or provider diagnostics, publish the separate one-shot
+console tool. It reads one hash-pinned RGB24 frame, performs a bounded number
+of DirectML inferences, prints one JSON result, and never captures the desktop,
+starts a loop, or appends to the event stream:
+
+```bash
+dotnet publish \
+  tools/screenparser-directml-one-shot/ScreenParser.DirectML.OneShot/ScreenParser.DirectML.OneShot.csproj \
+  --configuration Release \
+  --runtime win-x64 \
+  --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true \
+  --output "$PWD/.build/screenparser-directml-one-shot"
+```
+
+Run it only with an absolute strict-JSON diagnostic spec. The spec pins the
+model and RGB24 frame by SHA-256, declares the frame dimensions, model I/O,
+labels, precision, thresholds, and a maximum of three warmups and ten measured
+runs:
+
+```powershell
+.\ScreenParser.DirectML.OneShot.exe --spec C:\absolute\path\to\one-shot.json
+```
+
+This tool accepts `fp32`, `fp16`, and `int8` only for isolated measurement. It
+does not widen the production preprocessor manifest, installer, or runtime contract.
+
+The pinned `.pt` checkpoint is a build-time input only. The ONNX exporter
+requires at least one real validation image and emits both the model and its
+verified `artifact.json`:
+
+```bash
+python3 tools/screenparser-model/export_onnx.py \
+  --source-model /absolute/path/to/best.pt \
+  --validation-image /absolute/path/to/real-screen.png \
+  --output-dir /absolute/empty/output
+```
+
+Install the finite ScreenParser preprocessor with the ONNX artifact declared by
+`Rules/Palworld-Win64-Shipping.exe/Modules/screenparser/manifest.json` and the published runtime
+bundle:
+
+```powershell
+.\scripts\install-windows-screenparser.ps1 `
+  -RulePath .\Rules\Palworld-Win64-Shipping.exe `
+  -ModelPath C:\absolute\path\to\screenparser-v2-f029e565-opset20-fp16-1280.onnx `
+  -RuntimeBundlePath C:\absolute\path\to\screenparser-directml
+```
+
+The installer verifies both artifact manifests and SHA-256 values, installs one
+shared runtime/model copy, and creates no task or background process. It removes
+only the exact owned legacy ScreenParser loop and scene-reducer tasks. It
+installs no Python, PyTorch, CUDA Toolkit, or .NET SDK. A trusted VLM host invokes
+the installed runtime with `--request`, `--frame-root`, and `--response`; each
+invocation processes one exact frame, writes no streaming event, and exits.
 
 Publish one updated Rule plugin without rebuilding the executable or restarting
 the task:
@@ -202,6 +324,7 @@ GET  /v1/captures/{id}
 GET  /v1/captures/{id}/content
 GET  /v1/rules/{rule-id}/AGENTS.md
 GET  /v1/rules/{rule-id}/scripts
+GET  /v2/rules/{rule-id}/modules
 POST /v1/scripts/run
 ```
 
@@ -262,7 +385,7 @@ object:
   },
   "rule": {
     "status": "matched",
-    "description": "The executing agent must read rule.agents.url and rule.scripts.url before taking any rule-specific action.",
+    "description": "The executing agent must read rule.agents.url and rule.modules.url before taking any rule-specific action.",
     "id": "Game.exe",
     "agents": {
       "url": "/v1/rules/Game.exe/AGENTS.md",
@@ -270,6 +393,10 @@ object:
     },
     "scripts": {
       "url": "/v1/rules/Game.exe/scripts",
+      "content_type": "application/json; charset=utf-8"
+    },
+    "modules": {
+      "url": "/v2/rules/Game.exe/modules",
       "content_type": "application/json; charset=utf-8"
     }
   }
@@ -281,9 +408,9 @@ frame. The same response resolves its executable name against the current
 external folders under `Rules/`; this keeps the capture JSON as Codex's single
 Windows perception entry point. Each request reloads `rule.json` and
 `AGENTS.md`, so a completed Rule plugin replacement requires no agent reload or
-task restart. Codex follows `rule.agents.url` for policy and
-`rule.scripts.url` for the current machine-readable capability, input, output,
-and launcher contract. Script package validation occurs only when that catalog
+task restart. Codex follows `rule.agents.url` for policy,
+`rule.modules.url` for the classified module registry, and `rule.scripts.url`
+for the current query input, output, and launcher contract. Script package validation occurs only when that catalog
 or capability is requested; capture remains independent from Script package
 health. An executable without a rule reports
 `rule.status=unmatched` with a description that no rule guidance is available,
@@ -306,6 +433,8 @@ cmd/windows-capture-agent/       screenshot capability executable
 cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
+cmd/windows-event-stream/        authenticated local event journal service
+cmd/windows-screen-scene-reducer/ retired raw-screen reducer reference
 docs/design/                     maintained design registry
 docs/protocol/                   runtime protocol usage
 docs/testing/                    external black-box acceptance contracts
@@ -316,13 +445,19 @@ internal/scriptrunner/           Starlark runtime and generic Windows native FFI
 internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
+internal/eventhttp/              authenticated event append/replay HTTP API
+internal/eventstream/            strict durable event journal
+internal/scenereducer/            cursor, scene delta, and append recovery
 internal/foreground/             foreground process observation
 internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
 internal/wgc/                    WGC and Direct3D 11 implementation
-Rules/<Executable.exe>/          distributable rule.json, AGENTS.md, and Scripts
+Rules/<Executable.exe>/          distributable Rule v2 modules and guidance
+runtimes/screenparser-directml/   finite self-contained DirectML preprocessor
+tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter
+tools/screenparser-runtime/       reproducible Windows runtime publisher
 scripts/                         Windows installation helpers
 ```
 

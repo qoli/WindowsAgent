@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "screen/scene-reducer",
+  "kind": "reactor",
+  "runtime": "screen-scene-reducer-v1",
+  "targetExecutable": "Palworld-Win64-Shipping.exe",
+  "input": {
+    "moduleId": "screenparser/ui-elements",
+    "stream": "screenparser.palworld",
+    "parsedType": "screenparser.parsed",
+    "lifecycleType": "screenparser.lifecycle",
+    "failureType": "screenparser.failure"
+  },
+  "output": {
+    "stream": "screen.semantic.palworld",
+    "sceneChangedType": "screen.scene.changed",
+    "sceneStableType": "screen.scene.stable",
+    "foregroundChangedType": "screen.foreground.changed",
+    "sourceFailureType": "screen.source.failure"
+  },
+  "reducer": {
+    "positionQuantum": 0.02,
+    "changeThreshold": 0.30,
+    "stableIntervalMs": 30000,
+    "maxRegions": 12
+  }
+}
