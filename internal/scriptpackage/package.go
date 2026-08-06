@@ -304,8 +304,8 @@ func validateManifest(manifest Manifest) error {
 		}
 	}
 	if screen := manifest.Permissions.Screen; screen != nil {
-		if screen.MaxCalls == 0 || screen.MaxPixels == 0 || screen.MaxPixels > 65_536 {
-			return errors.New("screen maxCalls and maxPixels are required, and maxPixels must not exceed 65536")
+		if screen.MaxCalls != 1 || screen.MaxPixels == 0 || screen.MaxPixels > 65_536 {
+			return errors.New("screen maxCalls must equal 1, and maxPixels must be from 1 through 65536")
 		}
 		if err := validateOperations("screen", screen.Operations, []string{"readRegion"}); err != nil {
 			return err

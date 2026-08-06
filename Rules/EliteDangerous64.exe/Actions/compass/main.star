@@ -1,14 +1,14 @@
-FRAME_WIDTH = 3840
-FRAME_HEIGHT = 2160
-ROI_LEFT = 1340
-ROI_TOP = 1560
-ROI_WIDTH = 192
-ROI_HEIGHT = 192
-CENTER_X = 104
-CENTER_Y = 87
-MIN_ORANGE_PIXELS = 400
-MIN_CYAN_PIXELS = 12
-CENTER_TOLERANCE = 8
+REFERENCE_WIDTH = 1920
+REFERENCE_HEIGHT = 1080
+ROI_X = 670
+ROI_Y = 780
+ROI_WIDTH = 96
+ROI_HEIGHT = 96
+CENTER_X = 52
+CENTER_Y = 44
+MIN_ORANGE_PIXELS = 150
+MIN_CYAN_PIXELS = 4
+CENTER_TOLERANCE = 4
 
 def is_orange(red, green, blue):
     return red >= 170 and green >= 55 and green <= 210 and blue <= 110 and red >= green + 35
@@ -18,30 +18,49 @@ def is_cyan(red, green, blue):
 
 def main(ctx):
     sample = observer.screen.read_region(
-        expectedWidth = FRAME_WIDTH,
-        expectedHeight = FRAME_HEIGHT,
-        left = ROI_LEFT,
-        top = ROI_TOP,
-        width = ROI_WIDTH,
-        height = ROI_HEIGHT,
+        x = ROI_X,
+        y = ROI_Y,
+        w = ROI_WIDTH,
+        h = ROI_HEIGHT,
+        sampling = "reference",
     )
-    if sample["encoding"] != "rgb24-packed":
+    if sample["sampling"] != "reference":
         return job.fail(
             code = "COMPASS_EVIDENCE_INVALID",
-            message = "screen region encoding is not rgb24-packed",
+            message = "screen region sampling is not reference",
+        )
+    coordinate_space = sample["coordinateSpace"]
+    if (
+        coordinate_space["width"] != REFERENCE_WIDTH or
+        coordinate_space["height"] != REFERENCE_HEIGHT or
+        coordinate_space["fit"] != "centered-16:9"
+    ):
+        return job.fail(
+            code = "COMPASS_EVIDENCE_INVALID",
+            message = "screen coordinate space is not the reviewed centered 1920x1080 reference",
         )
     region = sample["region"]
     if (
-        region["left"] != ROI_LEFT or
-        region["top"] != ROI_TOP or
-        region["width"] != ROI_WIDTH or
-        region["height"] != ROI_HEIGHT
+        region["x"] != ROI_X or
+        region["y"] != ROI_Y or
+        region["w"] != ROI_WIDTH or
+        region["h"] != ROI_HEIGHT
     ):
         return job.fail(
             code = "COMPASS_EVIDENCE_INVALID",
             message = "screen region does not match the reviewed absolute coordinates",
         )
-    pixels = sample["pixels"]
+    image = sample["image"]
+    if (
+        image["width"] != ROI_WIDTH or
+        image["height"] != ROI_HEIGHT or
+        image["encoding"] != "rgb24-packed"
+    ):
+        return job.fail(
+            code = "COMPASS_EVIDENCE_INVALID",
+            message = "reference-sampled compass image shape or encoding is invalid",
+        )
+    pixels = image["pixels"]
     if len(pixels) != ROI_WIDTH * ROI_HEIGHT:
         return job.fail(
             code = "COMPASS_EVIDENCE_INVALID",
@@ -73,8 +92,8 @@ def main(ctx):
     target = {
         "detected": False,
         "cyanPixelCount": cyan_count,
-        "screenX": None,
-        "screenY": None,
+            "referenceX": None,
+            "referenceY": None,
         "offsetX": None,
         "offsetY": None,
         "centered": None,
@@ -87,8 +106,8 @@ def main(ctx):
         target = {
             "detected": True,
             "cyanPixelCount": cyan_count,
-            "screenX": ROI_LEFT + local_x,
-            "screenY": ROI_TOP + local_y,
+            "referenceX": ROI_X + local_x,
+            "referenceY": ROI_Y + local_y,
             "offsetX": offset_x,
             "offsetY": offset_y,
             "centered": abs(offset_x) <= CENTER_TOLERANCE and abs(offset_y) <= CENTER_TOLERANCE,
@@ -97,18 +116,20 @@ def main(ctx):
     return {
         "schemaVersion": 1,
         "profile": {
-            "width": FRAME_WIDTH,
-            "height": FRAME_HEIGHT,
+            "width": sample["frame"]["width"],
+            "height": sample["frame"]["height"],
             "capturedAt": sample["frame"]["capturedAt"],
         },
+        "coordinateSpace": coordinate_space,
         "region": {
-            "left": ROI_LEFT,
-            "top": ROI_TOP,
-            "width": ROI_WIDTH,
-            "height": ROI_HEIGHT,
-            "centerX": ROI_LEFT + CENTER_X,
-            "centerY": ROI_TOP + CENTER_Y,
+            "x": ROI_X,
+            "y": ROI_Y,
+            "w": ROI_WIDTH,
+            "h": ROI_HEIGHT,
+            "centerX": ROI_X + CENTER_X,
+            "centerY": ROI_Y + CENTER_Y,
         },
+        "physicalRegion": sample["physicalRegion"],
         "compass": {
             "visible": True,
             "orangePixelCount": orange_count,

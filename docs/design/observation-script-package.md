@@ -69,7 +69,7 @@ plugin content is authoritative; no member digest is required.
     "screen": {
       "operations": ["readRegion"],
       "maxCalls": 1,
-      "maxPixels": 36864
+      "maxPixels": 9216
     }
   },
   "nativeLibraries": {
@@ -98,11 +98,15 @@ Manifest file-root entries combine a logical alias with a supported portable
 resolver. The Host resolves them locally; launcher callers cannot bind or
 override an absolute path.
 
-Screen permission authorizes only a bounded primary-display rectangle. Each
-call supplies exact expected frame dimensions and fixed region coordinates;
-the Observer refuses profile mismatch, region overflow, excess pixels, or
+Screen permission authorizes exactly one bounded primary-display observation.
+The call supplies `x`, `y`, `w`, and `h` in the fixed 1920x1080 reference
+coordinate space plus required `sampling` equal to `reference` or `native`.
+Core maps the rectangle through a centered 16:9 viewport. `reference` returns
+exactly `w` by `h` pixels; `native` returns the mapped physical dimensions.
+`maxPixels` bounds returned pixels in either mode. The Observer refuses an
+out-of-bounds reference rectangle, unknown sampling, excess mapped pixels, or
 foreground process identity drift. The package owns all application-specific
-coordinates, pixel thresholds, and interpretation.
+coordinates, sampling choice, pixel thresholds, and interpretation.
 
 `nativeLibraries` is an executable boundary declaration, not a provider
 registry. It contains no provider, version, operation, export, or ABI
@@ -130,8 +134,10 @@ path, and runtime:
 
 - `observer.memory.*`, `observer.file.*`, and `observer.screen.*` exist only
   for manifest-declared operations.
-- `observer.screen.read_region(...)` returns one fixed region as packed RGB24
-  pixels; it does not resize or locate application UI.
+- `observer.screen.read_region(x=..., y=..., w=..., h=...,
+  sampling="reference|native")` returns one centered-16:9-mapped region as
+  packed RGB24 pixels. Reference resizing is generic; the operation never
+  locates application UI.
 - `native.load_library(alias)` loads only a declared package artifact.
 - `native.blob_path(blob=...)` resolves only a blob issued in the current job.
 - `library.bind(...)` and `function.call(...)` implement generic Windows FFI.

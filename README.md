@@ -40,9 +40,9 @@ today:
 - `crimson-desert/inventory` performs a finite memory attempt and, only when
   that attempt cannot produce a valid inventory, discovers and decodes the
   newest unambiguous save file inside its package-declared LocalAppData root
-- `elite-dangerous/compass` reads one fixed 192x192 region in the reviewed
-  3840x2160 cockpit profile and returns the cyan target marker's offset from
-  the game-specific absolute compass center
+- `elite-dangerous/compass` reads one fixed 96x96 reference-density region in
+  the centered 1920x1080 coordinate space and returns the cyan target marker's
+  reference-coordinate offset from the game-specific compass center
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,
@@ -51,9 +51,13 @@ today:
 - the Go host launches only the runner and observer directly under one bounded
   Windows Job Object; it does not use PowerShell or a polling loop
 - `windows-observer.exe` remains game-neutral and never loads DLLs
-- the generic screen observer captures once without a cursor, enforces the
-  expected frame profile and pixel budget, and leaves UI interpretation to the
-  owning package
+- the generic screen observer captures once without a cursor, maps a 1920x1080
+  reference rectangle through the centered 16:9 viewport, performs bounded
+  `reference` or `native` GPU region sampling, and leaves UI interpretation to
+  the owning package
+- screen-region sampling requires D3D11 compute shader model 5.0 and the
+  Windows `d3dcompiler_47.dll`; missing shader support fails the Action and
+  never falls back to a full-frame CPU path
 - the save file becomes a job-scoped opaque blob; the Script Runner resolves
   that blob and loads only the package-declared DLL alias
 

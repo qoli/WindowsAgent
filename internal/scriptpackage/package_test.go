@@ -89,6 +89,11 @@ func TestValidateManifestAcceptsScreenOnlyPermission(t *testing.T) {
 	if err := validateManifest(manifest); err == nil {
 		t.Fatal("manifest accepted a game-specific screen operation")
 	}
+	manifest.Permissions.Screen.Operations = []string{"readRegion"}
+	manifest.Permissions.Screen.MaxCalls = 2
+	if err := validateManifest(manifest); err == nil {
+		t.Fatal("manifest accepted multiple non-atomic screen captures")
+	}
 }
 
 func TestNestedPackageArtifactUsesPlatformIndependentSlashPath(t *testing.T) {

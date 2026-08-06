@@ -37,11 +37,22 @@ The generic file backend also retains its explicitly declared read/hash
 implementation where permitted. The inventory package uses bounded `list`
 followed by `openBlob`.
 
-`screen.readRegion` captures once without a cursor, requires the package to
-state the expected primary-frame dimensions and an in-bounds rectangle, and
-returns only that rectangle as packed RGB24 pixels. It revalidates the exact
-foreground process identity after capture. It does not resize, search for a UI
-element, interpret pixels, or substitute a different screen profile.
+`screen.readRegion` captures once without a cursor. The package supplies one
+rectangle in the fixed 1920x1080 reference coordinate space and explicitly
+chooses `reference` or `native` sampling. Core maps the rectangle through the
+centered 16:9 viewport. Reference sampling returns exactly the requested
+reference dimensions; native sampling preserves the mapped physical pixel
+density.
+
+The WGC backend copies only the mapped physical region into a small GPU
+texture. A compute shader performs bilinear reference resizing when requested,
+HDR tone mapping, and RGB24 packing before the bounded output texture is read
+back. The path does not allocate, encode, decode, or tone-map a complete
+primary-monitor image. It revalidates the exact foreground process identity
+after capture and does not search for or interpret a UI element.
+The region path requires D3D11 compute shader model 5.0 and the Windows
+`d3dcompiler_47.dll`. Shader compilation or device support failure is terminal;
+there is no full-frame CPU fallback.
 
 The Observer does not load DLLs, bind native exports, decode saves, know game
 schemas or UI coordinates, poll, watch files, choose a file, or expose an HTTP
@@ -51,10 +62,12 @@ selection and interpretation. There is no legacy `file.decode`.
 ## Accounting and errors
 
 The manifest supplies operation, call, byte, and screen-pixel budgets. Each
-response records cumulative process bytes read, file bytes read, and screen
-pixels read. Permission denial, malformed arguments, resolution mismatch,
-budget exhaustion, deadline expiry, process identity drift, and file-root
-escape fail explicitly. Application-level source read failures may be marked
+response records cumulative process bytes read, file bytes read, and returned
+screen pixels. A screen permission authorizes exactly one capture; a future
+multi-region operation must be an atomic protocol addition. Permission denial,
+malformed reference coordinates, unknown sampling, mapped pixel-budget
+exhaustion, shader or capture failure, deadline expiry, process identity drift,
+and file-root escape fail explicitly. Application-level source read failures may be marked
 fallback-eligible only when the package's documented task contract allows a
 second source; protocol, permission, identity, and limit failures are terminal.
 

@@ -1,12 +1,9 @@
 package observer
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"image/color"
-	"image/png"
 	"path/filepath"
 	"strings"
 
@@ -17,18 +14,18 @@ import (
 type processIdentityResolver func(uint32, string) (ProcessIdentity, error)
 
 type ScreenBackend struct {
-	capturer  capture.Capturer
+	capturer  capture.RegionCapturer
 	process   ProcessIdentity
 	maxPixels uint64
 	resolve   processIdentityResolver
 }
 
-func NewScreenBackend(capturer capture.Capturer, process ProcessIdentity, maxPixels uint64) (*ScreenBackend, error) {
+func NewScreenBackend(capturer capture.RegionCapturer, process ProcessIdentity, maxPixels uint64) (*ScreenBackend, error) {
 	return newScreenBackend(capturer, process, maxPixels, ResolveProcessIdentity)
 }
 
 func newScreenBackend(
-	capturer capture.Capturer,
+	capturer capture.RegionCapturer,
 	process ProcessIdentity,
 	maxPixels uint64,
 	resolve processIdentityResolver,
@@ -52,22 +49,22 @@ func (b *ScreenBackend) Call(ctx context.Context, namespace, operation string, a
 	if namespace != observationapi.NamespaceScreen || operation != "readRegion" {
 		return BackendResult{}, fmt.Errorf("screen backend does not implement %s.%s", namespace, operation)
 	}
-	region, err := parseScreenRegion(arguments, b.maxPixels)
+	request, err := parseScreenRegion(arguments, b.maxPixels)
 	if err != nil {
 		return BackendResult{}, observationapi.NewError(
 			"OBSERVER_PROTOCOL_INVALID", "validating-arguments", namespace, operation, err,
 		)
 	}
-	result, err := b.capturer.Capture(ctx, false)
+	result, err := b.capturer.CaptureRegion(ctx, request)
 	if err != nil {
+		var captureFailure *capture.Error
+		if errors.As(err, &captureFailure) && captureFailure.Code == "screen_pixel_limit_exceeded" {
+			return BackendResult{}, observationapi.NewError(
+				"LIMIT_EXCEEDED", "mapping-screen-region", namespace, operation, err,
+			)
+		}
 		return BackendResult{}, observationapi.NewError(
 			"SCREEN_CAPTURE_FAILED", "capturing-primary-monitor", namespace, operation, err,
-		)
-	}
-	if result.Width != region.expectedWidth || result.Height != region.expectedHeight {
-		return BackendResult{}, observationapi.NewError(
-			"SCREEN_PROFILE_MISMATCH", "validating-frame-profile", namespace, operation,
-			fmt.Errorf("captured frame is %dx%d, expected %dx%d", result.Width, result.Height, region.expectedWidth, region.expectedHeight),
 		)
 	}
 	observed, err := b.resolve(result.Foreground.ProcessID, result.Foreground.ExecutablePath)
@@ -82,99 +79,123 @@ func (b *ScreenBackend) Call(ctx context.Context, namespace, operation string, a
 			fmt.Errorf("captured foreground PID %d does not match owning PID %d", observed.PID, b.process.PID),
 		)
 	}
-	decoded, err := png.Decode(bytes.NewReader(result.PNG))
-	if err != nil {
+	if err := validateScreenRegionResult(result, request); err != nil {
 		return BackendResult{}, observationapi.NewError(
-			"SCREEN_CAPTURE_INVALID", "decoding-captured-frame", namespace, operation, err,
+			"SCREEN_CAPTURE_INVALID", "validating-captured-region", namespace, operation, err,
 		)
-	}
-	if decoded.Bounds().Dx() != result.Width || decoded.Bounds().Dy() != result.Height {
-		return BackendResult{}, observationapi.NewError(
-			"SCREEN_CAPTURE_INVALID", "validating-captured-frame", namespace, operation,
-			errors.New("captured PNG dimensions do not match capture metadata"),
-		)
-	}
-	pixels := make([]uint32, 0, region.width*region.height)
-	for y := region.top; y < region.top+region.height; y++ {
-		for x := region.left; x < region.left+region.width; x++ {
-			pixel := color.NRGBAModel.Convert(decoded.At(decoded.Bounds().Min.X+x, decoded.Bounds().Min.Y+y)).(color.NRGBA)
-			pixels = append(pixels, uint32(pixel.R)<<16|uint32(pixel.G)<<8|uint32(pixel.B))
-		}
 	}
 	return BackendResult{
 		Value: map[string]any{
+			"sampling": string(request.Sampling),
+			"coordinateSpace": map[string]any{
+				"width": capture.ReferenceWidth, "height": capture.ReferenceHeight,
+				"fit": "centered-16:9",
+			},
 			"frame": map[string]any{
-				"width": result.Width, "height": result.Height,
+				"width": result.FrameWidth, "height": result.FrameHeight,
 				"capturedAt": result.Foreground.ObservedAt,
 				"foreground": map[string]any{
 					"processId":      result.Foreground.ProcessID,
 					"executableName": result.Foreground.ExecutableName,
 				},
 			},
-			"region": map[string]any{
-				"left": region.left, "top": region.top, "width": region.width, "height": region.height,
+			"viewport": map[string]any{
+				"left": result.Viewport.Left, "top": result.Viewport.Top,
+				"width": result.Viewport.Width, "height": result.Viewport.Height,
 			},
-			"encoding": "rgb24-packed",
-			"pixels":   pixels,
+			"region": map[string]any{
+				"x": request.Region.X, "y": request.Region.Y,
+				"w": request.Region.Width, "h": request.Region.Height,
+			},
+			"physicalRegion": map[string]any{
+				"left": result.PhysicalRegion.Left, "top": result.PhysicalRegion.Top,
+				"width": result.PhysicalRegion.Width, "height": result.PhysicalRegion.Height,
+			},
+			"image": map[string]any{
+				"width": result.ImageWidth, "height": result.ImageHeight,
+				"encoding": "rgb24-packed", "pixels": result.Pixels,
+			},
 		},
-		ScreenPixelsRead: uint64(len(pixels)),
+		ScreenPixelsRead: uint64(len(result.Pixels)),
 	}, nil
 }
 
-type screenRegion struct {
-	expectedWidth  int
-	expectedHeight int
-	left           int
-	top            int
-	width          int
-	height         int
-}
-
-func parseScreenRegion(arguments map[string]any, maxPixels uint64) (screenRegion, error) {
-	required := []string{"expectedWidth", "expectedHeight", "left", "top", "width", "height"}
+func parseScreenRegion(arguments map[string]any, maxPixels uint64) (capture.RegionRequest, error) {
+	required := []string{"x", "y", "w", "h", "sampling"}
 	if len(arguments) != len(required) {
-		return screenRegion{}, errors.New("readRegion requires exactly expectedWidth, expectedHeight, left, top, width, and height")
+		return capture.RegionRequest{}, errors.New("readRegion requires exactly x, y, w, h, and sampling")
 	}
 	for _, name := range required {
 		if _, exists := arguments[name]; !exists {
-			return screenRegion{}, fmt.Errorf("readRegion is missing %s", name)
+			return capture.RegionRequest{}, fmt.Errorf("readRegion is missing %s", name)
 		}
 	}
-	expectedWidth, err := positiveInt64(arguments["expectedWidth"], "expectedWidth")
+	x, err := nonNegativeInt64(arguments["x"], "x")
 	if err != nil {
-		return screenRegion{}, err
+		return capture.RegionRequest{}, err
 	}
-	expectedHeight, err := positiveInt64(arguments["expectedHeight"], "expectedHeight")
+	y, err := nonNegativeInt64(arguments["y"], "y")
 	if err != nil {
-		return screenRegion{}, err
+		return capture.RegionRequest{}, err
 	}
-	left, err := nonNegativeInt64(arguments["left"], "left")
+	width, err := positiveInt64(arguments["w"], "w")
 	if err != nil {
-		return screenRegion{}, err
+		return capture.RegionRequest{}, err
 	}
-	top, err := nonNegativeInt64(arguments["top"], "top")
+	height, err := positiveInt64(arguments["h"], "h")
 	if err != nil {
-		return screenRegion{}, err
+		return capture.RegionRequest{}, err
 	}
-	width, err := positiveInt64(arguments["width"], "width")
+	sampling, ok := arguments["sampling"].(string)
+	if !ok || (sampling != string(capture.SamplingReference) && sampling != string(capture.SamplingNative)) {
+		return capture.RegionRequest{}, errors.New("sampling must equal reference or native")
+	}
+	request := capture.RegionRequest{
+		Region:   capture.ReferenceRegion{X: int(x), Y: int(y), Width: int(width), Height: int(height)},
+		Sampling: capture.Sampling(sampling), MaxPixels: maxPixels,
+	}
+	if err := request.Region.Validate(); err != nil {
+		return capture.RegionRequest{}, err
+	}
+	if request.Sampling == capture.SamplingReference && uint64(width)*uint64(height) > maxPixels {
+		return capture.RegionRequest{}, fmt.Errorf("readRegion requests %d reference pixels, limit is %d", uint64(width)*uint64(height), maxPixels)
+	}
+	return request, nil
+}
+
+func validateScreenRegionResult(result capture.RegionResult, request capture.RegionRequest) error {
+	if result.FrameWidth <= 0 || result.FrameHeight <= 0 ||
+		result.ImageWidth <= 0 || result.ImageHeight <= 0 {
+		return errors.New("captured frame and image dimensions must be positive")
+	}
+	if len(result.Pixels) != result.ImageWidth*result.ImageHeight {
+		return errors.New("captured pixel count does not match image dimensions")
+	}
+	if uint64(len(result.Pixels)) > request.MaxPixels {
+		return errors.New("captured pixel count exceeds the authorized limit")
+	}
+	if request.Sampling == capture.SamplingReference &&
+		(result.ImageWidth != request.Region.Width || result.ImageHeight != request.Region.Height) {
+		return errors.New("reference sampling output does not match the requested reference dimensions")
+	}
+	if request.Sampling == capture.SamplingNative &&
+		(result.ImageWidth != result.PhysicalRegion.Width || result.ImageHeight != result.PhysicalRegion.Height) {
+		return errors.New("native sampling output does not match the physical region dimensions")
+	}
+	if result.PhysicalRegion.Left < 0 || result.PhysicalRegion.Top < 0 ||
+		result.PhysicalRegion.Width <= 0 || result.PhysicalRegion.Height <= 0 ||
+		result.PhysicalRegion.Left+result.PhysicalRegion.Width > result.FrameWidth ||
+		result.PhysicalRegion.Top+result.PhysicalRegion.Height > result.FrameHeight {
+		return errors.New("captured physical region is outside the frame")
+	}
+	wantViewport, wantPhysical, err := capture.MapReferenceRegion(result.FrameWidth, result.FrameHeight, request.Region)
 	if err != nil {
-		return screenRegion{}, err
+		return fmt.Errorf("remap captured reference region: %w", err)
 	}
-	height, err := positiveInt64(arguments["height"], "height")
-	if err != nil {
-		return screenRegion{}, err
+	if result.Viewport != wantViewport || result.PhysicalRegion != wantPhysical {
+		return errors.New("captured viewport or physical region does not match the reference mapping")
 	}
-	if expectedWidth > 16_384 || expectedHeight > 16_384 || left+width > expectedWidth || top+height > expectedHeight {
-		return screenRegion{}, errors.New("readRegion rectangle must be within the expected frame profile")
-	}
-	pixelCount := uint64(width) * uint64(height)
-	if pixelCount > maxPixels {
-		return screenRegion{}, fmt.Errorf("readRegion requests %d pixels, limit is %d", pixelCount, maxPixels)
-	}
-	return screenRegion{
-		expectedWidth: int(expectedWidth), expectedHeight: int(expectedHeight),
-		left: int(left), top: int(top), width: int(width), height: int(height),
-	}, nil
+	return nil
 }
 
 func sameProcessIdentity(left, right ProcessIdentity) bool {

@@ -35,19 +35,25 @@ const (
 	d3d11CreateDeviceBGRASupport = 0x20
 	d3d11SDKVersion              = 7
 	d3d11UsageStaging            = 3
+	d3d11UsageDefault            = 0
 	d3d11CPUAccessRead           = 0x20000
+	d3d11BindConstantBuffer      = 0x4
+	d3d11BindShaderResource      = 0x8
+	d3d11BindUnorderedAccess     = 0x80
 
 	dxgiFormatR16G16B16A16Float = 10
+	dxgiFormatR32Uint           = 42
 	dxgiFormatB8G8R8A8UNorm     = 87
 
 	monitorDefaultToPrimary = 2
 )
 
 var (
-	modUser32  = windows.NewLazySystemDLL("user32.dll")
-	modCombase = windows.NewLazySystemDLL("combase.dll")
-	modDXGI    = windows.NewLazySystemDLL("dxgi.dll")
-	modD3D11   = windows.NewLazySystemDLL("d3d11.dll")
+	modUser32   = windows.NewLazySystemDLL("user32.dll")
+	modCombase  = windows.NewLazySystemDLL("combase.dll")
+	modDXGI     = windows.NewLazySystemDLL("dxgi.dll")
+	modD3D11    = windows.NewLazySystemDLL("d3d11.dll")
+	modCompiler = windows.NewLazySystemDLL("d3dcompiler_47.dll")
 
 	procSetProcessDPIAwarenessContext        = modUser32.NewProc("SetProcessDpiAwarenessContext")
 	procMonitorFromPoint                     = modUser32.NewProc("MonitorFromPoint")
@@ -55,6 +61,7 @@ var (
 	procRoUninitialize                       = modCombase.NewProc("RoUninitialize")
 	procCreateDXGIFactory1                   = modDXGI.NewProc("CreateDXGIFactory1")
 	procD3D11CreateDevice                    = modD3D11.NewProc("D3D11CreateDevice")
+	procD3DCompile                           = modCompiler.NewProc("D3DCompile")
 	procCreateDirect3D11DeviceFromDXGIDevice = modD3D11.NewProc("CreateDirect3D11DeviceFromDXGIDevice")
 
 	iidIDXGIFactory1 = ole.NewGUID("{770aae78-f26f-4dba-a829-253c83d1b387}")
@@ -122,6 +129,87 @@ type mappedSubresource struct {
 	DepthPitch uint32
 }
 
+type d3d11Box struct {
+	Left, Top, Front, Right, Bottom, Back uint32
+}
+
+type bufferDesc struct {
+	ByteWidth           uint32
+	Usage               uint32
+	BindFlags           uint32
+	CPUAccessFlags      uint32
+	MiscFlags           uint32
+	StructureByteStride uint32
+}
+
+type subresourceData struct {
+	SystemMemory           unsafe.Pointer
+	SystemMemoryPitch      uint32
+	SystemMemorySlicePitch uint32
+}
+
+type regionShaderConstants struct {
+	SourceWidth  uint32
+	SourceHeight uint32
+	OutputWidth  uint32
+	OutputHeight uint32
+	WhiteSquared float32
+	HDR          uint32
+	Padding      [2]uint32
+}
+
+const regionShaderSource = `
+cbuffer RegionConstants : register(b0) {
+    uint2 sourceSize;
+    uint2 outputSize;
+    float whiteSquared;
+    uint sourceIsHDR;
+    uint2 padding;
+};
+
+Texture2D<float4> sourceTexture : register(t0);
+RWTexture2D<uint> outputTexture : register(u0);
+
+float encodeSRGB(float value) {
+    value = saturate(value);
+    if (value <= 0.0031308) {
+        return 12.92 * value;
+    }
+    return 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+}
+
+[numthreads(8, 8, 1)]
+void main(uint3 dispatchID : SV_DispatchThreadID) {
+    if (dispatchID.x >= outputSize.x || dispatchID.y >= outputSize.y) {
+        return;
+    }
+
+    float2 sourcePosition =
+        (float2(dispatchID.xy) + 0.5) * float2(sourceSize) / float2(outputSize) - 0.5;
+    int2 lower = clamp(int2(floor(sourcePosition)), int2(0, 0), int2(sourceSize) - 1);
+    int2 upper = min(lower + 1, int2(sourceSize) - 1);
+    float2 fraction = saturate(sourcePosition - float2(lower));
+
+    float4 top = lerp(sourceTexture.Load(int3(lower.x, lower.y, 0)),
+                      sourceTexture.Load(int3(upper.x, lower.y, 0)), fraction.x);
+    float4 bottom = lerp(sourceTexture.Load(int3(lower.x, upper.y, 0)),
+                         sourceTexture.Load(int3(upper.x, upper.y, 0)), fraction.x);
+    float3 rgb = max(lerp(top, bottom, fraction.y).rgb, 0.0);
+
+    if (sourceIsHDR != 0) {
+        float luminance = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+        if (luminance > 0.0) {
+            float mapped = luminance * (1.0 + luminance / whiteSquared) / (1.0 + luminance);
+            rgb *= mapped / luminance;
+        }
+        rgb = float3(encodeSRGB(rgb.r), encodeSRGB(rgb.g), encodeSRGB(rgb.b));
+    }
+
+    uint3 encoded = uint3(round(saturate(rgb) * 255.0));
+    outputTexture[dispatchID.xy] = (encoded.r << 16) | (encoded.g << 8) | encoded.b;
+}
+`
+
 func New(logger *slog.Logger) (*Capturer, error) {
 	if logger == nil {
 		return nil, errors.New("logger is required")
@@ -156,18 +244,111 @@ func (c *Capturer) Status(ctx context.Context) (capture.Status, error) {
 }
 
 func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Result, error) {
-	return onWinRTThread(ctx, func() (capture.Result, error) {
+	var result capture.Result
+	err := c.withCapturedFrame(ctx, includeCursor, func(frame capturedFrame) error {
+		image, width, height, err := readFrame(frame.frame, frame.device, frame.context3D, frame.pixelFormat, frame.display)
+		if err != nil {
+			return err
+		}
+		if width != frame.width || height != frame.height {
+			return capture.Failure(
+				"capture_size_mismatch",
+				fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", width, height, frame.width, frame.height),
+				nil,
+			)
+		}
+
+		var encoded bytes.Buffer
+		if err := png.Encode(&encoded, image); err != nil {
+			return capture.Failure("capture_encode_failed", "failed to encode captured frame as PNG", err)
+		}
+		monitor := frame.monitor
+		monitor.Width = width
+		monitor.Height = height
+		result = capture.Result{
+			PNG: encoded.Bytes(), Width: width, Height: height,
+			IncludeCursor: includeCursor, Monitor: monitor, Foreground: frame.foreground,
+			CapturePixelFormat: frame.pixelFormatName, ToneMapped: monitor.HDR,
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequest) (capture.RegionResult, error) {
+	if err := request.Region.Validate(); err != nil {
+		return capture.RegionResult{}, err
+	}
+	if request.Sampling != capture.SamplingReference && request.Sampling != capture.SamplingNative {
+		return capture.RegionResult{}, errors.New("region sampling must equal reference or native")
+	}
+	if request.MaxPixels == 0 || request.MaxPixels > 65_536 {
+		return capture.RegionResult{}, errors.New("region maxPixels must be from 1 through 65536")
+	}
+
+	var result capture.RegionResult
+	err := c.withCapturedFrame(ctx, false, func(frame capturedFrame) error {
+		viewport, physical, err := capture.MapReferenceRegion(frame.width, frame.height, request.Region)
+		if err != nil {
+			return capture.Failure("screen_region_invalid", "failed to map the reference screen region", err)
+		}
+		outputWidth, outputHeight := physical.Width, physical.Height
+		if request.Sampling == capture.SamplingReference {
+			outputWidth, outputHeight = request.Region.Width, request.Region.Height
+		}
+		pixelCount := uint64(outputWidth) * uint64(outputHeight)
+		if pixelCount > request.MaxPixels {
+			return capture.Failure(
+				"screen_pixel_limit_exceeded",
+				fmt.Sprintf("mapped screen region returns %d pixels, limit is %d", pixelCount, request.MaxPixels),
+				nil,
+			)
+		}
+		pixels, err := readRegionPixels(frame, physical, outputWidth, outputHeight)
+		if err != nil {
+			return err
+		}
+		result = capture.RegionResult{
+			Pixels: pixels, ImageWidth: outputWidth, ImageHeight: outputHeight,
+			FrameWidth: frame.width, FrameHeight: frame.height,
+			Viewport: viewport, PhysicalRegion: physical,
+			Monitor: frame.monitor, Foreground: frame.foreground,
+			CapturePixelFormat: frame.pixelFormatName, ToneMapped: frame.monitor.HDR,
+		}
+		return nil
+	})
+	return result, err
+}
+
+type capturedFrame struct {
+	frame           unsafe.Pointer
+	device          unsafe.Pointer
+	context3D       unsafe.Pointer
+	pixelFormat     uint32
+	pixelFormatName string
+	display         outputDesc1
+	monitor         capture.Monitor
+	foreground      foreground.Info
+	width           int
+	height          int
+}
+
+func (c *Capturer) withCapturedFrame(ctx context.Context, includeCursor bool, process func(capturedFrame) error) error {
+	if process == nil {
+		return errors.New("captured frame processor is required")
+	}
+	_, err := onWinRTThread(ctx, func() (struct{}, error) {
 		supported, err := graphicsCaptureSupported()
 		if err != nil {
-			return capture.Result{}, capture.Failure("capture_support_check_failed", "failed to query Windows Graphics Capture support", err)
+			return struct{}{}, capture.Failure("capture_support_check_failed", "failed to query Windows Graphics Capture support", err)
 		}
 		if !supported {
-			return capture.Result{}, capture.Failure("capture_unsupported", "Windows Graphics Capture is not supported", nil)
+			return struct{}{}, capture.Failure("capture_unsupported", "Windows Graphics Capture is not supported", nil)
 		}
 
 		target, err := findPrimaryDisplay()
 		if err != nil {
-			return capture.Result{}, err
+			return struct{}{}, err
 		}
 		defer release(target.adapter)
 		monitor := monitorFromDesc(target.desc)
@@ -178,7 +359,7 @@ func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Res
 		case dxgiColorSpaceRGBFullG22NoneP709:
 		case dxgiColorSpaceRGBFullG2084NoneP2020:
 			if !finitePositiveAbove80(float64(target.desc.MaxLuminance)) {
-				return capture.Result{}, capture.Failure(
+				return struct{}{}, capture.Failure(
 					"invalid_hdr_metadata",
 					"HDR display metadata must provide finite maximum luminance above 80 nits",
 					nil,
@@ -187,7 +368,7 @@ func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Res
 			pixelFormat = dxgiFormatR16G16B16A16Float
 			pixelFormatName = "R16G16B16A16_FLOAT"
 		default:
-			return capture.Result{}, capture.Failure(
+			return struct{}{}, capture.Failure(
 				"unsupported_color_space",
 				fmt.Sprintf("unsupported primary-monitor color space: %s", colorSpaceName(target.desc.ColorSpace)),
 				nil,
@@ -196,7 +377,7 @@ func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Res
 
 		device, context3D, winRTDevice, err := createD3DDevice(target.adapter)
 		if err != nil {
-			return capture.Result{}, capture.Failure("capture_device_failed", "failed to create the Direct3D 11 capture device", err)
+			return struct{}{}, capture.Failure("capture_device_failed", "failed to create the Direct3D 11 capture device", err)
 		}
 		defer release(device)
 		defer release(context3D)
@@ -204,75 +385,55 @@ func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Res
 
 		item, size, err := createMonitorItem(target.desc.Monitor)
 		if err != nil {
-			return capture.Result{}, capture.Failure("desktop_unavailable", "failed to create a capture item for the primary monitor", err)
+			return struct{}{}, capture.Failure("desktop_unavailable", "failed to create a capture item for the primary monitor", err)
 		}
 		defer release(item)
 		if size.Width <= 0 || size.Height <= 0 {
-			return capture.Result{}, capture.Failure("desktop_unavailable", "primary monitor capture size is invalid", nil)
+			return struct{}{}, capture.Failure("desktop_unavailable", "primary monitor capture size is invalid", nil)
 		}
 
 		framePool, err := createFreeThreadedFramePool(winRTDevice, int32(pixelFormat), size)
 		if err != nil {
-			return capture.Result{}, capture.Failure("capture_session_failed", "failed to create the WGC frame pool", err)
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to create the WGC frame pool", err)
 		}
 		defer closeAndRelease(framePool)
 
 		session, err := createCaptureSession(framePool, item)
 		if err != nil {
-			return capture.Result{}, capture.Failure("capture_session_failed", "failed to create the WGC capture session", err)
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to create the WGC capture session", err)
 		}
 		defer closeAndRelease(session)
 		if err := setCursorCapture(session, includeCursor); err != nil {
-			return capture.Result{}, capture.Failure("capture_session_failed", "failed to configure cursor capture", err)
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to configure cursor capture", err)
 		}
 		if err := callHRESULT(session, 6); err != nil {
-			return capture.Result{}, capture.Failure("capture_session_failed", "failed to start WGC capture", err)
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to start WGC capture", err)
 		}
 
 		frame, err := waitForFrame(ctx, framePool)
 		if err != nil {
-			return capture.Result{}, err
+			return struct{}{}, err
 		}
 		defer closeAndRelease(frame)
 
 		foregroundInfo, err := foreground.Snapshot()
 		if err != nil {
-			return capture.Result{}, capture.Failure(
+			return struct{}{}, capture.Failure(
 				"foreground_process_unavailable",
 				"failed to identify the foreground process at capture time",
 				err,
 			)
 		}
 
-		image, width, height, err := readFrame(frame, device, context3D, pixelFormat, target.desc)
-		if err != nil {
-			return capture.Result{}, err
-		}
-		if width != int(size.Width) || height != int(size.Height) {
-			return capture.Result{}, capture.Failure(
-				"capture_size_mismatch",
-				fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", width, height, size.Width, size.Height),
-				nil,
-			)
-		}
-
-		var encoded bytes.Buffer
-		if err := png.Encode(&encoded, image); err != nil {
-			return capture.Result{}, capture.Failure("capture_encode_failed", "failed to encode captured frame as PNG", err)
-		}
-		monitor.Width = width
-		monitor.Height = height
-		return capture.Result{
-			PNG:                encoded.Bytes(),
-			Width:              width,
-			Height:             height,
-			IncludeCursor:      includeCursor,
-			Monitor:            monitor,
-			Foreground:         foregroundInfo,
-			CapturePixelFormat: pixelFormatName,
-			ToneMapped:         monitor.HDR,
-		}, nil
+		err = process(capturedFrame{
+			frame: frame, device: device, context3D: context3D,
+			pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
+			display: target.desc, monitor: monitor, foreground: foregroundInfo,
+			width: int(size.Width), height: int(size.Height),
+		})
+		return struct{}{}, err
 	})
+	return err
 }
 
 func onWinRTThread[T any](ctx context.Context, operation func() (T, error)) (T, error) {
@@ -527,6 +688,237 @@ func waitForFrame(ctx context.Context, framePool unsafe.Pointer) (unsafe.Pointer
 		case <-ticker.C:
 		}
 	}
+}
+
+func readRegionPixels(frame capturedFrame, physical capture.PixelRegion, outputWidth, outputHeight int) ([]uint32, error) {
+	sourceTexture, sourceDesc, err := openFrameTexture(frame.frame, frame.pixelFormat)
+	if err != nil {
+		return nil, err
+	}
+	defer release(sourceTexture)
+	if int(sourceDesc.Width) != frame.width || int(sourceDesc.Height) != frame.height {
+		return nil, capture.Failure(
+			"capture_size_mismatch",
+			fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", sourceDesc.Width, sourceDesc.Height, frame.width, frame.height),
+			nil,
+		)
+	}
+
+	inputDesc := texture2DDesc{
+		Width: uint32(physical.Width), Height: uint32(physical.Height),
+		MipLevels: 1, ArraySize: 1, Format: frame.pixelFormat,
+		SampleDesc: sampleDesc{Count: 1}, Usage: d3d11UsageDefault,
+		BindFlags: d3d11BindShaderResource,
+	}
+	var inputTexture unsafe.Pointer
+	if err := callHRESULTWith(
+		frame.device, 5,
+		uintptr(unsafe.Pointer(&inputDesc)), 0, uintptr(unsafe.Pointer(&inputTexture)),
+	); err != nil {
+		return nil, capture.Failure("capture_readback_failed", "failed to create the region source texture", err)
+	}
+	defer release(inputTexture)
+	sourceBox := d3d11Box{
+		Left: uint32(physical.Left), Top: uint32(physical.Top), Front: 0,
+		Right: uint32(physical.Left + physical.Width), Bottom: uint32(physical.Top + physical.Height), Back: 1,
+	}
+	syscall.SyscallN(
+		comMethod(frame.context3D, 46), uintptr(frame.context3D),
+		uintptr(inputTexture), 0, 0, 0, 0,
+		uintptr(sourceTexture), 0, uintptr(unsafe.Pointer(&sourceBox)),
+	)
+
+	outputDesc := texture2DDesc{
+		Width: uint32(outputWidth), Height: uint32(outputHeight),
+		MipLevels: 1, ArraySize: 1, Format: dxgiFormatR32Uint,
+		SampleDesc: sampleDesc{Count: 1}, Usage: d3d11UsageDefault,
+		BindFlags: d3d11BindUnorderedAccess,
+	}
+	var outputTexture unsafe.Pointer
+	if err := callHRESULTWith(
+		frame.device, 5,
+		uintptr(unsafe.Pointer(&outputDesc)), 0, uintptr(unsafe.Pointer(&outputTexture)),
+	); err != nil {
+		return nil, capture.Failure("capture_readback_failed", "failed to create the region output texture", err)
+	}
+	defer release(outputTexture)
+
+	var sourceView unsafe.Pointer
+	if err := callHRESULTWith(
+		frame.device, 7,
+		uintptr(inputTexture), 0, uintptr(unsafe.Pointer(&sourceView)),
+	); err != nil {
+		return nil, capture.Failure("capture_readback_failed", "failed to create the region shader resource view", err)
+	}
+	defer release(sourceView)
+	var outputView unsafe.Pointer
+	if err := callHRESULTWith(
+		frame.device, 8,
+		uintptr(outputTexture), 0, uintptr(unsafe.Pointer(&outputView)),
+	); err != nil {
+		return nil, capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", err)
+	}
+	defer release(outputView)
+
+	shader, err := createRegionComputeShader(frame.device)
+	if err != nil {
+		return nil, capture.Failure("capture_region_shader_failed", "failed to create the region sampling shader", err)
+	}
+	defer release(shader)
+	white := float32(1)
+	hdr := uint32(0)
+	if frame.monitor.HDR {
+		ratio := float32(frame.display.MaxLuminance / 80)
+		white = ratio * ratio
+		hdr = 1
+	}
+	constants := regionShaderConstants{
+		SourceWidth: uint32(physical.Width), SourceHeight: uint32(physical.Height),
+		OutputWidth: uint32(outputWidth), OutputHeight: uint32(outputHeight),
+		WhiteSquared: white, HDR: hdr,
+	}
+	constantDesc := bufferDesc{
+		ByteWidth: uint32(unsafe.Sizeof(constants)), Usage: d3d11UsageDefault,
+		BindFlags: d3d11BindConstantBuffer,
+	}
+	constantData := subresourceData{SystemMemory: unsafe.Pointer(&constants)}
+	var constantBuffer unsafe.Pointer
+	if err := callHRESULTWith(
+		frame.device, 3,
+		uintptr(unsafe.Pointer(&constantDesc)), uintptr(unsafe.Pointer(&constantData)),
+		uintptr(unsafe.Pointer(&constantBuffer)),
+	); err != nil {
+		return nil, capture.Failure("capture_region_shader_failed", "failed to create the region shader constants", err)
+	}
+	defer release(constantBuffer)
+
+	syscall.SyscallN(comMethod(frame.context3D, 67), uintptr(frame.context3D), 0, 1, uintptr(unsafe.Pointer(&sourceView)))
+	syscall.SyscallN(comMethod(frame.context3D, 68), uintptr(frame.context3D), 0, 1, uintptr(unsafe.Pointer(&outputView)), 0)
+	syscall.SyscallN(comMethod(frame.context3D, 69), uintptr(frame.context3D), uintptr(shader), 0, 0)
+	syscall.SyscallN(comMethod(frame.context3D, 71), uintptr(frame.context3D), 0, 1, uintptr(unsafe.Pointer(&constantBuffer)))
+	syscall.SyscallN(
+		comMethod(frame.context3D, 41), uintptr(frame.context3D),
+		uintptr((outputWidth+7)/8), uintptr((outputHeight+7)/8), 1,
+	)
+	var nullView unsafe.Pointer
+	syscall.SyscallN(comMethod(frame.context3D, 67), uintptr(frame.context3D), 0, 1, uintptr(unsafe.Pointer(&nullView)))
+	syscall.SyscallN(comMethod(frame.context3D, 68), uintptr(frame.context3D), 0, 1, uintptr(unsafe.Pointer(&nullView)), 0)
+	syscall.SyscallN(comMethod(frame.context3D, 69), uintptr(frame.context3D), 0, 0, 0)
+
+	stagingDesc := outputDesc
+	stagingDesc.Usage = d3d11UsageStaging
+	stagingDesc.BindFlags = 0
+	stagingDesc.CPUAccessFlags = d3d11CPUAccessRead
+	var staging unsafe.Pointer
+	if err := callHRESULTWith(
+		frame.device, 5,
+		uintptr(unsafe.Pointer(&stagingDesc)), 0, uintptr(unsafe.Pointer(&staging)),
+	); err != nil {
+		return nil, capture.Failure("capture_readback_failed", "failed to create the region staging texture", err)
+	}
+	defer release(staging)
+	syscall.SyscallN(comMethod(frame.context3D, 47), uintptr(frame.context3D), uintptr(staging), uintptr(outputTexture))
+
+	var mapped mappedSubresource
+	if err := callHRESULTWith(
+		frame.context3D, 14,
+		uintptr(staging), 0, 1, 0, uintptr(unsafe.Pointer(&mapped)),
+	); err != nil {
+		return nil, capture.Failure("capture_readback_failed", "failed to map the region staging texture", err)
+	}
+	defer syscall.SyscallN(comMethod(frame.context3D, 15), uintptr(frame.context3D), uintptr(staging), 0)
+	rowBytes := outputWidth * 4
+	if mapped.Data == nil || int(mapped.RowPitch) < rowBytes {
+		return nil, capture.Failure("capture_readback_failed", "mapped region texture has an invalid row pitch", nil)
+	}
+	bufferSize := uint64(mapped.RowPitch) * uint64(outputHeight)
+	if bufferSize > uint64(math.MaxInt) {
+		return nil, capture.Failure("capture_readback_failed", "mapped region texture is too large", nil)
+	}
+	raw := unsafe.Slice((*byte)(mapped.Data), int(bufferSize))
+	pixels := make([]uint32, outputWidth*outputHeight)
+	for y := 0; y < outputHeight; y++ {
+		row := raw[y*int(mapped.RowPitch):]
+		for x := 0; x < outputWidth; x++ {
+			pixels[y*outputWidth+x] = uint32(row[x*4]) |
+				uint32(row[x*4+1])<<8 |
+				uint32(row[x*4+2])<<16 |
+				uint32(row[x*4+3])<<24
+		}
+	}
+	return pixels, nil
+}
+
+func createRegionComputeShader(device unsafe.Pointer) (unsafe.Pointer, error) {
+	source := []byte(regionShaderSource)
+	entrypoint := append([]byte("main"), 0)
+	target := append([]byte("cs_5_0"), 0)
+	sourceName := append([]byte("windows-agent-region.hlsl"), 0)
+	var codeBlob unsafe.Pointer
+	var errorBlob unsafe.Pointer
+	hr, _, _ := procD3DCompile.Call(
+		uintptr(unsafe.Pointer(&source[0])), uintptr(len(source)), uintptr(unsafe.Pointer(&sourceName[0])),
+		0, 0, uintptr(unsafe.Pointer(&entrypoint[0])), uintptr(unsafe.Pointer(&target[0])),
+		0, 0, uintptr(unsafe.Pointer(&codeBlob)), uintptr(unsafe.Pointer(&errorBlob)),
+	)
+	if errorBlob != nil {
+		defer release(errorBlob)
+	}
+	if err := checkHRESULT(hr, "D3DCompile(region shader)"); err != nil {
+		return nil, err
+	}
+	if codeBlob == nil {
+		return nil, errors.New("D3DCompile returned no region shader bytecode")
+	}
+	defer release(codeBlob)
+	codePointer, _, _ := syscall.SyscallN(comMethod(codeBlob, 3), uintptr(codeBlob))
+	codeSize, _, _ := syscall.SyscallN(comMethod(codeBlob, 4), uintptr(codeBlob))
+	if codePointer == 0 || codeSize == 0 {
+		return nil, errors.New("compiled region shader bytecode is empty")
+	}
+	var shader unsafe.Pointer
+	if err := callHRESULTWith(
+		device, 18,
+		codePointer, codeSize, 0, uintptr(unsafe.Pointer(&shader)),
+	); err != nil {
+		return nil, err
+	}
+	return shader, nil
+}
+
+func openFrameTexture(frame unsafe.Pointer, pixelFormat uint32) (unsafe.Pointer, texture2DDesc, error) {
+	var surface unsafe.Pointer
+	if err := callHRESULTWith(frame, 6, uintptr(unsafe.Pointer(&surface))); err != nil {
+		return nil, texture2DDesc{}, capture.Failure("capture_frame_failed", "failed to access the WGC frame surface", err)
+	}
+	defer release(surface)
+	var access unsafe.Pointer
+	if err := queryInterface(surface, iidDXGIInterface, &access); err != nil {
+		return nil, texture2DDesc{}, capture.Failure("capture_frame_failed", "frame surface does not expose IDirect3DDxgiInterfaceAccess", err)
+	}
+	defer release(access)
+	var sourceTexture unsafe.Pointer
+	if err := callHRESULTWith(
+		access, 3,
+		uintptr(unsafe.Pointer(iidTexture2D)), uintptr(unsafe.Pointer(&sourceTexture)),
+	); err != nil {
+		return nil, texture2DDesc{}, capture.Failure("capture_frame_failed", "failed to obtain the D3D11 frame texture", err)
+	}
+	var sourceDesc texture2DDesc
+	syscall.SyscallN(comMethod(sourceTexture, 10), uintptr(sourceTexture), uintptr(unsafe.Pointer(&sourceDesc)))
+	if sourceDesc.Width == 0 || sourceDesc.Height == 0 {
+		release(sourceTexture)
+		return nil, texture2DDesc{}, capture.Failure("capture_frame_failed", "captured D3D11 texture has invalid dimensions", nil)
+	}
+	if sourceDesc.Format != pixelFormat {
+		release(sourceTexture)
+		return nil, texture2DDesc{}, capture.Failure(
+			"capture_format_mismatch",
+			fmt.Sprintf("captured D3D11 texture format is %d, expected %d", sourceDesc.Format, pixelFormat),
+			nil,
+		)
+	}
+	return sourceTexture, sourceDesc, nil
 }
 
 func readFrame(frame, device, context3D unsafe.Pointer, pixelFormat uint32, desc outputDesc1) (image.Image, int, int, error) {

@@ -148,12 +148,16 @@ declarations use a supported portable resolver such as
 `windows-known-folder/LocalAppData` plus a canonical relative path. They must
 not encode a private machine identity or absolute path.
 
-Screen permissions require positive `maxCalls` and `maxPixels`; `maxPixels`
-may not exceed 65,536. Every `readRegion` call must provide the exact expected
-primary-frame width and height plus an in-bounds rectangle. Resolution
-mismatch, foreground identity drift, malformed pixel evidence, and budget
-exhaustion are terminal. UI location, color rules, and evidence thresholds
-belong to the package, not Core.
+Screen permissions require `maxCalls: 1` and positive `maxPixels` no greater
+than 65,536. Every `readRegion` call must provide `x`, `y`, `w`, and `h` inside
+the fixed 1920x1080 reference coordinate space and an explicit `sampling`
+value of `reference` or `native`. Core maps through a centered 16:9 viewport.
+Reference sampling returns exactly `w` by `h` pixels; native sampling preserves
+the mapped physical density. `maxPixels` bounds the returned image in either
+mode. Invalid mapping, unknown sampling, foreground identity drift, malformed
+pixel evidence, shader failure, and budget exhaustion are terminal. UI
+location, sampling choice, color rules, and evidence thresholds belong to the
+package, not Core.
 
 The implemented memory target is exactly `rule/current-process`. The launcher
 derives its executable from the owning `Rules/<Executable.exe>/` folder.

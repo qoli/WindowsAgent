@@ -23,7 +23,7 @@ func ValidateBlobHandle(value string) error {
 	return nil
 }
 
-const ProtocolVersion = "2026-08-07"
+const ProtocolVersion = "2026-08-07-reference-region"
 
 const (
 	NamespaceMemory = "memory"

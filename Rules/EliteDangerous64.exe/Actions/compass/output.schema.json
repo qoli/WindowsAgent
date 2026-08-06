@@ -2,7 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "profile", "region", "compass", "target"],
+  "required": [
+    "schemaVersion",
+    "profile",
+    "coordinateSpace",
+    "region",
+    "physicalRegion",
+    "compass",
+    "target"
+  ],
   "properties": {
     "schemaVersion": {"const": 1},
     "profile": {
@@ -10,22 +18,43 @@
       "additionalProperties": false,
       "required": ["width", "height", "capturedAt"],
       "properties": {
-        "width": {"const": 3840},
-        "height": {"const": 2160},
+        "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "height": {"type": "integer", "minimum": 1, "maximum": 16384},
         "capturedAt": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
+    },
+    "coordinateSpace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fit"],
+      "properties": {
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "fit": {"const": "centered-16:9"}
       }
     },
     "region": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["left", "top", "width", "height", "centerX", "centerY"],
+      "required": ["x", "y", "w", "h", "centerX", "centerY"],
       "properties": {
-        "left": {"const": 1340},
-        "top": {"const": 1560},
-        "width": {"const": 192},
-        "height": {"const": 192},
-        "centerX": {"const": 1444},
-        "centerY": {"const": 1647}
+        "x": {"const": 670},
+        "y": {"const": 780},
+        "w": {"const": 96},
+        "h": {"const": 96},
+        "centerX": {"const": 722},
+        "centerY": {"const": 824}
+      }
+    },
+    "physicalRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "integer", "minimum": 0, "maximum": 16383},
+        "top": {"type": "integer", "minimum": 0, "maximum": 16383},
+        "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "height": {"type": "integer", "minimum": 1, "maximum": 16384}
       }
     },
     "compass": {
@@ -34,20 +63,28 @@
       "required": ["visible", "orangePixelCount"],
       "properties": {
         "visible": {"const": true},
-        "orangePixelCount": {"type": "integer", "minimum": 400, "maximum": 36864}
+        "orangePixelCount": {"type": "integer", "minimum": 150, "maximum": 9216}
       }
     },
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["detected", "cyanPixelCount", "screenX", "screenY", "offsetX", "offsetY", "centered"],
+      "required": [
+        "detected",
+        "cyanPixelCount",
+        "referenceX",
+        "referenceY",
+        "offsetX",
+        "offsetY",
+        "centered"
+      ],
       "properties": {
         "detected": {"type": "boolean"},
-        "cyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 36864},
-        "screenX": {"type": ["integer", "null"], "minimum": 1340, "maximum": 1531},
-        "screenY": {"type": ["integer", "null"], "minimum": 1560, "maximum": 1751},
-        "offsetX": {"type": ["integer", "null"], "minimum": -104, "maximum": 87},
-        "offsetY": {"type": ["integer", "null"], "minimum": -87, "maximum": 104},
+        "cyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 9216},
+        "referenceX": {"type": ["integer", "null"], "minimum": 670, "maximum": 765},
+        "referenceY": {"type": ["integer", "null"], "minimum": 780, "maximum": 875},
+        "offsetX": {"type": ["integer", "null"], "minimum": -52, "maximum": 43},
+        "offsetY": {"type": ["integer", "null"], "minimum": -44, "maximum": 51},
         "centered": {"type": ["boolean", "null"]}
       }
     }

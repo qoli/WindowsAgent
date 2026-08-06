@@ -43,16 +43,28 @@ func (b *compassBroker) RecordNative(context.Context, NativeRecord) error {
 func (b *compassBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
 	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
 	return map[string]any{
+		"sampling": "reference",
+		"coordinateSpace": map[string]any{
+			"width": int64(1920), "height": int64(1080), "fit": "centered-16:9",
+		},
 		"frame": map[string]any{
 			"width": int64(3840), "height": int64(2160),
 			"capturedAt": "2026-08-07T01:02:03Z",
 			"foreground": map[string]any{"processId": int64(7), "executableName": "EliteDangerous64.exe"},
 		},
+		"viewport": map[string]any{
+			"left": int64(0), "top": int64(0), "width": int64(3840), "height": int64(2160),
+		},
 		"region": map[string]any{
+			"x": int64(670), "y": int64(780), "w": int64(96), "h": int64(96),
+		},
+		"physicalRegion": map[string]any{
 			"left": int64(1340), "top": int64(1560), "width": int64(192), "height": int64(192),
 		},
-		"encoding": "rgb24-packed",
-		"pixels":   b.pixels,
+		"image": map[string]any{
+			"width": int64(96), "height": int64(96),
+			"encoding": "rgb24-packed", "pixels": b.pixels,
+		},
 	}, nil
 }
 
@@ -66,16 +78,16 @@ func compassPackageRoot(t *testing.T) string {
 }
 
 func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
-	pixels := make([]any, 192*192)
+	pixels := make([]any, 96*96)
 	for index := range pixels {
 		pixels[index] = uint32(0)
 	}
-	for index := 0; index < 500; index++ {
+	for index := 0; index < 200; index++ {
 		pixels[index] = uint32(0xFF7700)
 	}
-	for y := 82; y < 85; y++ {
-		for x := 114; x < 118; x++ {
-			pixels[y*192+x] = uint32(0x40DDEB)
+	for y := 40; y < 43; y++ {
+		for x := 58; x < 62; x++ {
+			pixels[y*96+x] = uint32(0x40DDEB)
 		}
 	}
 	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
@@ -95,8 +107,8 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		t.Fatalf("calls = %#v", broker.calls)
 	}
 	wantArguments := map[string]any{
-		"expectedWidth": int64(3840), "expectedHeight": int64(2160),
-		"left": int64(1340), "top": int64(1560), "width": int64(192), "height": int64(192),
+		"x": int64(670), "y": int64(780), "w": int64(96), "h": int64(96),
+		"sampling": "reference",
 	}
 	if got := broker.calls[0].arguments; !reflect.DeepEqual(got, wantArguments) {
 		t.Fatalf("screen arguments = %#v, want %#v", got, wantArguments)
@@ -106,7 +118,7 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result["target"].(map[string]any)
-	if target["detected"] != true || target["offsetX"] != float64(11) || target["offsetY"] != float64(-4) || target["centered"] != false {
+	if target["detected"] != true || target["offsetX"] != float64(7) || target["offsetY"] != float64(-3) || target["centered"] != false {
 		t.Fatalf("target = %#v", target)
 	}
 }
@@ -116,7 +128,7 @@ func TestEliteCompassPackageFailsWhenCompassEvidenceIsAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pixels := make([]any, 192*192)
+	pixels := make([]any, 96*96)
 	for index := range pixels {
 		pixels[index] = uint32(0)
 	}
@@ -129,11 +141,11 @@ func TestEliteCompassPackageFailsWhenCompassEvidenceIsAbsent(t *testing.T) {
 }
 
 func TestEliteCompassPackageReturnsNoTargetWithoutSubstitution(t *testing.T) {
-	pixels := make([]any, 192*192)
+	pixels := make([]any, 96*96)
 	for index := range pixels {
 		pixels[index] = uint32(0)
 	}
-	for index := 0; index < 500; index++ {
+	for index := 0; index < 200; index++ {
 		pixels[index] = uint32(0xFF7700)
 	}
 	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
@@ -150,7 +162,7 @@ func TestEliteCompassPackageReturnsNoTargetWithoutSubstitution(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result["target"].(map[string]any)
-	if target["detected"] != false || target["screenX"] != nil || target["offsetX"] != nil || target["centered"] != nil {
+	if target["detected"] != false || target["referenceX"] != nil || target["offsetX"] != nil || target["centered"] != nil {
 		t.Fatalf("target = %#v", target)
 	}
 }

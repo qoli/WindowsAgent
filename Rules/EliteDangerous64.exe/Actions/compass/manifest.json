@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 1,
+  "version": 2,
   "title": "Read Elite Dangerous compass",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
@@ -18,7 +18,7 @@
     "screen": {
       "operations": ["readRegion"],
       "maxCalls": 1,
-      "maxPixels": 36864
+      "maxPixels": 9216
     }
   },
   "limits": {
