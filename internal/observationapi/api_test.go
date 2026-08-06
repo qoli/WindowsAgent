@@ -13,3 +13,14 @@ func TestFileDecodeIsNotAnObserverOperation(t *testing.T) {
 		t.Fatal("generic bounded file.list is unavailable")
 	}
 }
+
+func TestScreenSurfaceIsOnlyBoundedRegionRead(t *testing.T) {
+	if !OperationAllowed(NamespaceScreen, "readRegion") {
+		t.Fatal("generic screen.readRegion is unavailable")
+	}
+	for _, operation := range []string{"capture", "findCompass", "readScreen"} {
+		if OperationAllowed(NamespaceScreen, operation) {
+			t.Fatalf("game-specific or unbounded screen operation %q is available", operation)
+		}
+	}
+}

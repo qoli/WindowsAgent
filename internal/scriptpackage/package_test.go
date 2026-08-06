@@ -66,6 +66,31 @@ func TestLoadCrimsonInventoryPackage(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAcceptsScreenOnlyPermission(t *testing.T) {
+	manifest := Manifest{
+		SchemaVersion: 2, Version: 1, Title: "Screen fixture",
+		Entrypoint: "main.star", TaskDocument: "TASK.md",
+		InputSchema: "input.schema.json", OutputSchema: "output.schema.json",
+		Files: []string{"main.star", "TASK.md", "input.schema.json", "output.schema.json"},
+		Permissions: Permissions{Screen: &ScreenPermissions{
+			Operations: []string{"readRegion"}, MaxCalls: 1, MaxPixels: 36864,
+		}},
+		Limits: Limits{WallTimeMS: 1000, MaxSteps: 1000, MaxResultBytes: 1024, MaxLogBytes: 1024},
+	}
+	if err := validateManifest(manifest); err != nil {
+		t.Fatalf("screen-only manifest: %v", err)
+	}
+	manifest.Permissions.Screen.MaxPixels = 65537
+	if err := validateManifest(manifest); err == nil {
+		t.Fatal("manifest accepted more than 65536 screen pixels")
+	}
+	manifest.Permissions.Screen.MaxPixels = 1
+	manifest.Permissions.Screen.Operations = []string{"findCompass"}
+	if err := validateManifest(manifest); err == nil {
+		t.Fatal("manifest accepted a game-specific screen operation")
+	}
+}
+
 func TestNestedPackageArtifactUsesPlatformIndependentSlashPath(t *testing.T) {
 	if err := validateRelativeName("native/windows-amd64/fixture.dll"); err != nil {
 		t.Fatalf("canonical nested package path was rejected: %v", err)

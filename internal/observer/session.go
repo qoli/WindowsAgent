@@ -16,9 +16,10 @@ import (
 )
 
 type BackendResult struct {
-	Value           any
-	MemoryBytesRead uint64
-	FileBytesRead   uint64
+	Value            any
+	MemoryBytesRead  uint64
+	FileBytesRead    uint64
+	ScreenPixelsRead uint64
 }
 
 type Backend interface {
@@ -38,6 +39,7 @@ type Session struct {
 	accounting  observationapi.Accounting
 	memoryCalls uint32
 	fileCalls   uint32
+	screenCalls uint32
 }
 
 func NewSession(jobID string, permissions scriptpackage.Permissions, backend Backend) (*Session, error) {
@@ -47,7 +49,7 @@ func NewSession(jobID string, permissions scriptpackage.Permissions, backend Bac
 	if backend == nil {
 		return nil, errors.New("backend is required")
 	}
-	if permissions.Memory == nil && permissions.File == nil {
+	if permissions.Memory == nil && permissions.File == nil && permissions.Screen == nil {
 		return nil, errors.New("at least one permission namespace is required")
 	}
 	return &Session{jobID: jobID, permissions: permissions, backend: backend}, nil
@@ -142,6 +144,12 @@ func (s *Session) Call(ctx context.Context, call observationapi.Call) (observati
 	}
 	next.MemoryBytesRead += result.MemoryBytesRead
 	next.FileBytesRead += result.FileBytesRead
+	if result.ScreenPixelsRead > ^uint64(0)-next.ScreenPixelsRead {
+		return observationapi.Result{}, observationapi.NewError(
+			"LIMIT_EXCEEDED", "accounting-call", call.Namespace, call.Operation, errors.New("screen pixel accounting overflow"),
+		)
+	}
+	next.ScreenPixelsRead += result.ScreenPixelsRead
 	if err := s.checkLimits(next); err != nil {
 		return observationapi.Result{}, observationapi.NewError(
 			"LIMIT_EXCEEDED", "accounting-call", call.Namespace, call.Operation, err,
@@ -170,6 +178,10 @@ func (s *Session) authorize(namespace, operation string) error {
 		if s.permissions.File != nil {
 			allowed = s.permissions.File.Operations
 		}
+	case observationapi.NamespaceScreen:
+		if s.permissions.Screen != nil {
+			allowed = s.permissions.Screen.Operations
+		}
 	}
 	if !slices.Contains(allowed, operation) {
 		return observationapi.NewError(
@@ -190,6 +202,11 @@ func (s *Session) checkLimits(accounting observationapi.Accounting) error {
 			return fmt.Errorf("file bytes %d exceed limit %d", accounting.FileBytesRead, permission.MaxBytesRead)
 		}
 	}
+	if permission := s.permissions.Screen; permission != nil {
+		if accounting.ScreenPixelsRead > permission.MaxPixels {
+			return fmt.Errorf("screen pixels %d exceed limit %d", accounting.ScreenPixelsRead, permission.MaxPixels)
+		}
+	}
 	return nil
 }
 
@@ -205,6 +222,11 @@ func (s *Session) reserveCall(namespace string) error {
 			return errors.New("file call limit exceeded")
 		}
 		s.fileCalls++
+	case observationapi.NamespaceScreen:
+		if s.permissions.Screen == nil || s.screenCalls >= s.permissions.Screen.MaxCalls {
+			return errors.New("screen call limit exceeded")
+		}
+		s.screenCalls++
 	default:
 		return fmt.Errorf("unsupported namespace %q", namespace)
 	}

@@ -40,6 +40,13 @@ type Manifest struct {
 type Permissions struct {
 	Memory *MemoryPermissions `json:"memory"`
 	File   *FilePermissions   `json:"file"`
+	Screen *ScreenPermissions `json:"screen"`
+}
+
+type ScreenPermissions struct {
+	Operations []string `json:"operations"`
+	MaxCalls   uint32   `json:"maxCalls"`
+	MaxPixels  uint64   `json:"maxPixels"`
 }
 
 type MemoryPermissions struct {
@@ -255,7 +262,7 @@ func validateManifest(manifest Manifest) error {
 	if filepath.Ext(manifest.OutputSchema) != ".json" {
 		return errors.New("outputSchema must be a JSON file")
 	}
-	if manifest.Permissions.Memory == nil && manifest.Permissions.File == nil && len(manifest.NativeLibraries) == 0 {
+	if manifest.Permissions.Memory == nil && manifest.Permissions.File == nil && manifest.Permissions.Screen == nil && len(manifest.NativeLibraries) == 0 {
 		return errors.New("at least one observer permission or native library is required")
 	}
 	if memory := manifest.Permissions.Memory; memory != nil {
@@ -293,6 +300,14 @@ func validateManifest(manifest Manifest) error {
 			}
 		}
 		if err := validateOperations("file", file.Operations, []string{"list", "stat", "read", "hash", "openBlob"}); err != nil {
+			return err
+		}
+	}
+	if screen := manifest.Permissions.Screen; screen != nil {
+		if screen.MaxCalls == 0 || screen.MaxPixels == 0 || screen.MaxPixels > 65_536 {
+			return errors.New("screen maxCalls and maxPixels are required, and maxPixels must not exceed 65536")
+		}
+		if err := validateOperations("screen", screen.Operations, []string{"readRegion"}); err != nil {
 			return err
 		}
 	}

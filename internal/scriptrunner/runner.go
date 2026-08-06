@@ -243,12 +243,22 @@ func (h *host) predeclared() (starlark.StringDict, error) {
 			file[name] = starlark.NewBuiltin("observer.file."+name, h.callBuiltin(observationapi.NamespaceFile, operation))
 		}
 	}
+	screen := starlark.StringDict{}
+	if permission := h.pkg.Manifest.Permissions.Screen; permission != nil {
+		for _, operation := range permission.Operations {
+			name := starlarkOperationName(operation)
+			screen[name] = starlark.NewBuiltin("observer.screen."+name, h.callBuiltin(observationapi.NamespaceScreen, operation))
+		}
+	}
 	observerFields := starlark.StringDict{}
 	if len(memory) != 0 {
 		observerFields["memory"] = starlarkstruct.FromStringDict(starlark.String("memory"), memory)
 	}
 	if len(file) != 0 {
 		observerFields["file"] = starlarkstruct.FromStringDict(starlark.String("file"), file)
+	}
+	if len(screen) != 0 {
+		observerFields["screen"] = starlarkstruct.FromStringDict(starlark.String("screen"), screen)
 	}
 	job := starlarkstruct.FromStringDict(starlark.String("job"), starlark.StringDict{
 		"input":   starlark.NewBuiltin("job.input", h.inputBuiltin),

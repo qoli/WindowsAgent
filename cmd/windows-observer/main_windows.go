@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/observationprotocol"
 	"github.com/qoli/WindowsAgent/internal/observer"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
+	"github.com/qoli/WindowsAgent/internal/wgc"
 )
 
 type initializeParams struct {
@@ -82,6 +85,23 @@ func run() error {
 		if err != nil {
 			router.Close()
 			writeError(conn, first.ID, -32011, "initialize file observer", err)
+			return err
+		}
+	}
+	if params.Permissions.Screen != nil {
+		if params.Process == nil {
+			return errors.New("screen permission requires an exact process identity")
+		}
+		capturer, captureErr := wgc.New(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+		if captureErr != nil {
+			router.Close()
+			writeError(conn, first.ID, -32013, "initialize screen observer", captureErr)
+			return captureErr
+		}
+		router.Screen, err = observer.NewScreenBackend(capturer, *params.Process, params.Permissions.Screen.MaxPixels)
+		if err != nil {
+			router.Close()
+			writeError(conn, first.ID, -32013, "initialize screen observer", err)
 			return err
 		}
 	}

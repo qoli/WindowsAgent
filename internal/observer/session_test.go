@@ -16,6 +16,12 @@ func (countingBackend) Call(context.Context, string, string, map[string]any) (Ba
 	return BackendResult{Value: map[string]any{"ok": true}, MemoryBytesRead: 4}, nil
 }
 
+type screenCountingBackend struct{}
+
+func (screenCountingBackend) Call(context.Context, string, string, map[string]any) (BackendResult, error) {
+	return BackendResult{Value: map[string]any{"ok": true}, ScreenPixelsRead: 4}, nil
+}
+
 func TestSessionEnforcesNamespaceCallLimit(t *testing.T) {
 	session, err := NewSession("job-1", scriptpackage.Permissions{
 		Memory: &scriptpackage.MemoryPermissions{
@@ -43,5 +49,33 @@ func TestSessionEnforcesNamespaceCallLimit(t *testing.T) {
 	var typed *observationapi.Error
 	if !errors.As(err, &typed) || typed.Kind != "LIMIT_EXCEEDED" {
 		t.Fatalf("second call error = %#v", err)
+	}
+}
+
+func TestSessionEnforcesScreenCallAndPixelLimits(t *testing.T) {
+	session, err := NewSession("job-screen", scriptpackage.Permissions{
+		Screen: &scriptpackage.ScreenPermissions{
+			Operations: []string{"readRegion"}, MaxCalls: 1, MaxPixels: 4,
+		},
+	}, screenCountingBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := observationapi.Call{
+		JobID: "job-screen", ObserverCallID: "screen-1",
+		Namespace: "screen", Operation: "readRegion", Arguments: json.RawMessage(`{}`),
+	}
+	result, err := session.Call(context.Background(), call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Accounting.ScreenPixelsRead != 4 {
+		t.Fatalf("screen pixel accounting = %d", result.Accounting.ScreenPixelsRead)
+	}
+	call.ObserverCallID = "screen-2"
+	_, err = session.Call(context.Background(), call)
+	var typed *observationapi.Error
+	if !errors.As(err, &typed) || typed.Kind != "LIMIT_EXCEEDED" {
+		t.Fatalf("second screen call error = %#v", err)
 	}
 }

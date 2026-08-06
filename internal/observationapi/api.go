@@ -23,16 +23,18 @@ func ValidateBlobHandle(value string) error {
 	return nil
 }
 
-const ProtocolVersion = "2026-07-28"
+const ProtocolVersion = "2026-08-07"
 
 const (
 	NamespaceMemory = "memory"
 	NamespaceFile   = "file"
+	NamespaceScreen = "screen"
 )
 
 var operations = map[string][]string{
 	NamespaceMemory: {"modules", "regions", "scan", "resolveRip", "readBatch", "readStrided"},
 	NamespaceFile:   {"list", "stat", "read", "hash", "openBlob"},
+	NamespaceScreen: {"readRegion"},
 }
 
 func OperationAllowed(namespace, operation string) bool {
@@ -70,9 +72,10 @@ func (c Call) Validate() error {
 }
 
 type Accounting struct {
-	CallsUsed       uint32 `json:"callsUsed"`
-	MemoryBytesRead uint64 `json:"memoryBytesRead"`
-	FileBytesRead   uint64 `json:"fileBytesRead"`
+	CallsUsed        uint32 `json:"callsUsed"`
+	MemoryBytesRead  uint64 `json:"memoryBytesRead"`
+	FileBytesRead    uint64 `json:"fileBytesRead"`
+	ScreenPixelsRead uint64 `json:"screenPixelsRead"`
 }
 
 type Result struct {
