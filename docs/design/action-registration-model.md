@@ -29,6 +29,9 @@ registration forms:
 
 `registrableAs` is permission to register, not a registration. An empty
 `registrations` object means the Action remains directly callable only.
+For example, the Elite Dangerous compass Action is eligible for both
+registration types while its empty registration catalog leaves it strictly
+on-demand.
 
 A Monitor registration adds a timer and an emitted event contract:
 

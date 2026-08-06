@@ -6,7 +6,7 @@ signed-in Windows user's interactive session.
 Its first capability is primary-monitor still capture through Windows Graphics
 Capture (WGC). It also includes a finite, read-only observation-job runtime
 that brokers locally distributed Starlark Script Packages to a
-unified memory/file observer process. Script Packages may carry
+unified memory/file/screen-region observer process. Script Packages may carry
 manifest-declared native DLLs and call them through the Script Runner's generic
 Windows amd64 FFI. Every capability remains behind an explicit package, API,
 permission, and validation boundary.
@@ -34,11 +34,15 @@ The screenshot capability is available today:
 - strict JSON errors with no GDI or hidden capture fallback
 - optional hidden startup through an interactive-user Scheduled Task
 
-The generic Starlark launcher and one Script capability are available today:
+The generic Starlark launcher and finite Script capabilities are available
+today:
 
 - `crimson-desert/inventory` performs a finite memory attempt and, only when
   that attempt cannot produce a valid inventory, discovers and decodes the
   newest unambiguous save file inside its package-declared LocalAppData root
+- `elite-dangerous/compass` reads one fixed 192x192 region in the reviewed
+  3840x2160 cockpit profile and returns the cyan target marker's offset from
+  the game-specific absolute compass center
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,
@@ -47,6 +51,9 @@ The generic Starlark launcher and one Script capability are available today:
 - the Go host launches only the runner and observer directly under one bounded
   Windows Job Object; it does not use PowerShell or a polling loop
 - `windows-observer.exe` remains game-neutral and never loads DLLs
+- the generic screen observer captures once without a cursor, enforces the
+  expected frame profile and pixel budget, and leaves UI interpretation to the
+  owning package
 - the save file becomes a job-scoped opaque blob; the Script Runner resolves
   that blob and loads only the package-declared DLL alias
 
@@ -65,7 +72,7 @@ The Action registration refactor is partially landed:
 - `screenparser/ui-elements` is a Palworld-configured on-demand Action
   that transforms one caller-supplied, hash-pinned RGB24 frame through the
   verified FP16 ScreenParser v2 ONNX model and then exits;
-- both shipped Rules have no active Monitor or Reaction registrations by
+- all shipped Rules have no active Monitor or Reaction registrations by
   default; no scheduler or reaction dispatcher is shipped yet.
 
 ## Build

@@ -65,6 +65,11 @@ plugin content is authoritative; no member digest is required.
       "operations": ["list", "openBlob"],
       "maxCalls": 2,
       "maxBytesRead": 67108864
+    },
+    "screen": {
+      "operations": ["readRegion"],
+      "maxCalls": 1,
+      "maxPixels": 36864
     }
   },
   "nativeLibraries": {
@@ -93,6 +98,12 @@ Manifest file-root entries combine a logical alias with a supported portable
 resolver. The Host resolves them locally; launcher callers cannot bind or
 override an absolute path.
 
+Screen permission authorizes only a bounded primary-display rectangle. Each
+call supplies exact expected frame dimensions and fixed region coordinates;
+the Observer refuses profile mismatch, region overflow, excess pixels, or
+foreground process identity drift. The package owns all application-specific
+coordinates, pixel thresholds, and interpretation.
+
 `nativeLibraries` is an executable boundary declaration, not a provider
 registry. It contains no provider, version, operation, export, or ABI
 knowledge. Those details belong to the package's Starlark.
@@ -117,8 +128,10 @@ path, and runtime:
 
 ## Starlark surface
 
-- `observer.memory.*` and `observer.file.*` exist only for manifest-declared
-  operations.
+- `observer.memory.*`, `observer.file.*`, and `observer.screen.*` exist only
+  for manifest-declared operations.
+- `observer.screen.read_region(...)` returns one fixed region as packed RGB24
+  pixels; it does not resize or locate application UI.
 - `native.load_library(alias)` loads only a declared package artifact.
 - `native.blob_path(blob=...)` resolves only a blob issued in the current job.
 - `library.bind(...)` and `function.call(...)` implement generic Windows FFI.

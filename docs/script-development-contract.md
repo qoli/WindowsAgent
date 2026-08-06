@@ -40,8 +40,8 @@ The package owns:
   by the owning Rule plugin's `rule.json`;
 - required host inputs and their meaning;
 - source ordering and any explicitly approved fallback;
-- game/application-specific process validation, signatures, offsets, and data
-  conversion;
+- game/application-specific process validation, signatures, offsets, data
+  conversion, fixed screen profiles, UI coordinates, and pixel interpretation;
 - native DLL artifacts, export names, ABI declarations, return codes, handle
   lifecycle, and decoded record layouts;
 - the terminal JSON contract and application-level error codes;
@@ -136,6 +136,7 @@ The current allowed permission operations are:
 ```text
 memory: modules, regions, scan, resolveRip, readBatch, readStrided
 file:   list, stat, read, hash, openBlob
+screen: readRegion
 ```
 
 Manifest operations use the camel-case names above. Starlark receives only
@@ -146,6 +147,13 @@ Permission targets and file-root names are logical bindings. File-root
 declarations use a supported portable resolver such as
 `windows-known-folder/LocalAppData` plus a canonical relative path. They must
 not encode a private machine identity or absolute path.
+
+Screen permissions require positive `maxCalls` and `maxPixels`; `maxPixels`
+may not exceed 65,536. Every `readRegion` call must provide the exact expected
+primary-frame width and height plus an in-bounds rectangle. Resolution
+mismatch, foreground identity drift, malformed pixel evidence, and budget
+exhaustion are terminal. UI location, color rules, and evidence thresholds
+belong to the package, not Core.
 
 The implemented memory target is exactly `rule/current-process`. The launcher
 derives its executable from the owning `Rules/<Executable.exe>/` folder.
@@ -163,7 +171,8 @@ number:
   `print`; the Host separately truncates child-process stderr, and neither
   channel authorizes sensitive logging.
 
-At least one memory permission, file permission, or native library is required.
+At least one memory permission, file permission, screen permission, or native
+library is required.
 V2 permits at most four native libraries. Each library must have a canonical
 alias, `windows-amd64`-style platform, package-relative `.dll` artifact,
 positive call limit no greater than 1024, and positive native memory limit no
@@ -413,6 +422,8 @@ session with the exact built executables and package being reviewed. Validate:
 - ordered attempts and terminal failure behavior;
 - capability ID, package version, and schema-valid output;
 - Observer call/byte accounting;
+- screen profile, fixed region, pixel accounting, and explicit no-evidence
+  behavior when screen permission is used;
 - native alias, completed call count, memory accounting, and terminal native
   failures when applicable;
 - blob and temporary runtime cleanup.
