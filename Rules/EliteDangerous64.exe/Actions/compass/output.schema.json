@@ -38,12 +38,12 @@
       "additionalProperties": false,
       "required": ["x", "y", "w", "h", "centerX", "centerY"],
       "properties": {
-        "x": {"const": 670},
-        "y": {"const": 780},
+        "x": {"const": 682},
+        "y": {"const": 771},
         "w": {"const": 96},
         "h": {"const": 96},
-        "centerX": {"const": 722},
-        "centerY": {"const": 824}
+        "centerX": {"const": 730},
+        "centerY": {"const": 819}
       }
     },
     "physicalRegion": {
@@ -81,10 +81,10 @@
       "properties": {
         "detected": {"type": "boolean"},
         "cyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 9216},
-        "referenceX": {"type": ["integer", "null"], "minimum": 670, "maximum": 765},
-        "referenceY": {"type": ["integer", "null"], "minimum": 780, "maximum": 875},
-        "offsetX": {"type": ["integer", "null"], "minimum": -52, "maximum": 43},
-        "offsetY": {"type": ["integer", "null"], "minimum": -44, "maximum": 51},
+        "referenceX": {"type": ["integer", "null"], "minimum": 682, "maximum": 777},
+        "referenceY": {"type": ["integer", "null"], "minimum": 771, "maximum": 866},
+        "offsetX": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
+        "offsetY": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
         "centered": {"type": ["boolean", "null"]}
       }
     }

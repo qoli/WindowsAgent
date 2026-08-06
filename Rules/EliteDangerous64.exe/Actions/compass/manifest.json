@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 2,
+  "version": 5,
   "title": "Read Elite Dangerous compass",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

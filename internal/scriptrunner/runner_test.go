@@ -56,10 +56,10 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 			"left": int64(0), "top": int64(0), "width": int64(3840), "height": int64(2160),
 		},
 		"region": map[string]any{
-			"x": int64(670), "y": int64(780), "w": int64(96), "h": int64(96),
+			"x": int64(682), "y": int64(771), "w": int64(96), "h": int64(96),
 		},
 		"physicalRegion": map[string]any{
-			"left": int64(1340), "top": int64(1560), "width": int64(192), "height": int64(192),
+			"left": int64(1364), "top": int64(1542), "width": int64(192), "height": int64(192),
 		},
 		"image": map[string]any{
 			"width": int64(96), "height": int64(96),
@@ -107,7 +107,7 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		t.Fatalf("calls = %#v", broker.calls)
 	}
 	wantArguments := map[string]any{
-		"x": int64(670), "y": int64(780), "w": int64(96), "h": int64(96),
+		"x": int64(682), "y": int64(771), "w": int64(96), "h": int64(96),
 		"sampling": "reference",
 	}
 	if got := broker.calls[0].arguments; !reflect.DeepEqual(got, wantArguments) {
@@ -118,7 +118,7 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result["target"].(map[string]any)
-	if target["detected"] != true || target["offsetX"] != float64(7) || target["offsetY"] != float64(-3) || target["centered"] != false {
+	if target["detected"] != true || target["offsetX"] != float64(11) || target["offsetY"] != float64(-7) || target["centered"] != false {
 		t.Fatalf("target = %#v", target)
 	}
 }
