@@ -13,7 +13,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
-const MaxRequestBytes = 64 << 10
+const MaxRequestBytes = 256 << 10
 
 type Request struct {
 	Inputs map[string]any `json:"inputs"`

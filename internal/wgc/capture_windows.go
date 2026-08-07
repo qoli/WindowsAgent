@@ -282,8 +282,8 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 	if request.Sampling != capture.SamplingReference && request.Sampling != capture.SamplingNative {
 		return capture.RegionResult{}, errors.New("region sampling must equal reference or native")
 	}
-	if request.MaxPixels == 0 || request.MaxPixels > 65_536 {
-		return capture.RegionResult{}, errors.New("region maxPixels must be from 1 through 65536")
+	if request.MaxPixels == 0 || request.MaxPixels > 262_144 {
+		return capture.RegionResult{}, errors.New("region maxPixels must be from 1 through 262144")
 	}
 
 	var result capture.RegionResult

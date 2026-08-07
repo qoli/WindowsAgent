@@ -12,16 +12,18 @@ import (
 
 type Recognizer interface {
 	Recognize(context.Context, string, string, Request) (Result, error)
+	DetectTextRegions(context.Context, string, string, Request) (TextRegionsResult, error)
 }
 
 type Manager struct {
-	mu          sync.Mutex
-	rules       *rules.Store
-	runtimeRoot string
-	logger      *slog.Logger
-	activeRule  string
-	clients     map[string]*Client
-	failed      map[string]error
+	mu                 sync.Mutex
+	rules              *rules.Store
+	runtimeRoot        string
+	logger             *slog.Logger
+	activeRule         string
+	recognitionClients map[string]*Client
+	textRegionClients  map[string]*TextRegionsClient
+	failed             map[string]error
 }
 
 func NewManager(ruleStore *rules.Store, runtimeRoot string, logger *slog.Logger) (*Manager, error) {
@@ -36,7 +38,8 @@ func NewManager(ruleStore *rules.Store, runtimeRoot string, logger *slog.Logger)
 	}
 	return &Manager{
 		rules: ruleStore, runtimeRoot: runtimeRoot, logger: logger,
-		clients: map[string]*Client{}, failed: map[string]error{},
+		recognitionClients: map[string]*Client{}, textRegionClients: map[string]*TextRegionsClient{},
+		failed: map[string]error{},
 	}, nil
 }
 
@@ -66,10 +69,13 @@ func (m *Manager) Reconcile(ctx context.Context, executableName string) error {
 		if _, failed := m.failed[profile.ID]; failed {
 			continue
 		}
-		if _, exists := m.clients[profile.ID]; exists {
+		if _, exists := m.recognitionClients[profile.ID]; exists {
 			continue
 		}
-		if _, err := m.startLocked(ctx, profile); err != nil {
+		if _, exists := m.textRegionClients[profile.ID]; exists {
+			continue
+		}
+		if err := m.startLocked(ctx, profile); err != nil {
 			m.failed[profile.ID] = err
 			m.logger.Error("ocr_worker_start_failed", "rule_id", resolution.ID, "profile_id", profile.ID, "error", err)
 		}
@@ -91,68 +97,135 @@ func (m *Manager) Recognize(ctx context.Context, ruleID, profileID string, reque
 	if failure := m.failed[profileID]; failure != nil {
 		return Result{}, fmt.Errorf("OCR runtime profile %s failed during this Rule activation: %w", profileID, failure)
 	}
-	client := m.clients[profileID]
+	client := m.recognitionClients[profileID]
 	if client == nil {
-		profiles, _, err := m.rules.ReadRuntimeProfiles(ruleID)
+		profile, err := m.findProfileLocked(ruleID, profileID)
 		if err != nil {
 			return Result{}, err
 		}
-		var profile *rules.RuntimeProfile
-		for index := range profiles {
-			if profiles[index].ID == profileID {
-				profile = &profiles[index]
-				break
-			}
+		if profile.Runtime != rules.PpOcrWorkerRuntimeV1 {
+			return Result{}, fmt.Errorf("OCR runtime profile %s does not provide recognition-only calls", profileID)
 		}
-		if profile == nil {
-			return Result{}, fmt.Errorf("Rule %s does not declare runtime profile %s", ruleID, profileID)
-		}
-		client, err = m.startLocked(ctx, *profile)
-		if err != nil {
+		if err := m.startLocked(ctx, profile); err != nil {
 			m.failed[profileID] = err
 			return Result{}, err
 		}
+		client = m.recognitionClients[profileID]
 	}
 	result, err := client.Recognize(ctx, request)
 	if err != nil {
 		m.failed[profileID] = err
-		delete(m.clients, profileID)
+		delete(m.recognitionClients, profileID)
 		_ = client.Close()
 		return Result{}, err
 	}
 	return result, nil
 }
 
-func (m *Manager) startLocked(ctx context.Context, profile rules.RuntimeProfile) (*Client, error) {
-	if profile.Runtime != rules.PpOcrWorkerRuntimeV1 || profile.Residency != rules.ResidencyRuleActive {
-		return nil, fmt.Errorf("unsupported OCR runtime profile contract: %+v", profile)
+func (m *Manager) DetectTextRegions(ctx context.Context, ruleID, profileID string, request Request) (TextRegionsResult, error) {
+	if m == nil {
+		return TextRegionsResult{}, errors.New("OCR runtime manager is required")
 	}
-	client, err := Start(context.Background(), m.runtimeRoot)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeRule != ruleID {
+		if err := m.switchRuleLocked(ruleID); err != nil {
+			return TextRegionsResult{}, err
+		}
+	}
+	if failure := m.failed[profileID]; failure != nil {
+		return TextRegionsResult{}, fmt.Errorf("OCR runtime profile %s failed during this Rule activation: %w", profileID, failure)
+	}
+	client := m.textRegionClients[profileID]
+	if client == nil {
+		profile, err := m.findProfileLocked(ruleID, profileID)
+		if err != nil {
+			return TextRegionsResult{}, err
+		}
+		if profile.Runtime != rules.PpOcrTextRegionsWorkerRuntimeV1 {
+			return TextRegionsResult{}, fmt.Errorf("OCR runtime profile %s does not provide text region calls", profileID)
+		}
+		if err := m.startLocked(ctx, profile); err != nil {
+			m.failed[profileID] = err
+			return TextRegionsResult{}, err
+		}
+		client = m.textRegionClients[profileID]
+	}
+	result, err := client.DetectRecognize(ctx, request)
 	if err != nil {
-		return nil, err
-	}
-	initialized := client.Initialized()
-	if initialized.Model.ArtifactID != profile.ArtifactID {
+		m.failed[profileID] = err
+		delete(m.textRegionClients, profileID)
 		_ = client.Close()
-		return nil, fmt.Errorf(
-			"OCR runtime artifact mismatch: Rule=%s worker=%s",
-			profile.ArtifactID, initialized.Model.ArtifactID,
-		)
+		return TextRegionsResult{}, err
 	}
-	m.clients[profile.ID] = client
-	m.logger.Info("ocr_worker_started", "rule_id", profile.RuleID, "profile_id", profile.ID,
-		"process_id", initialized.ProcessID, "model_load_ms", initialized.ModelLoadMS)
-	return client, nil
+	return result, nil
+}
+
+func (m *Manager) findProfileLocked(ruleID, profileID string) (rules.RuntimeProfile, error) {
+	profiles, _, err := m.rules.ReadRuntimeProfiles(ruleID)
+	if err != nil {
+		return rules.RuntimeProfile{}, err
+	}
+	for _, profile := range profiles {
+		if profile.ID == profileID {
+			return profile, nil
+		}
+	}
+	return rules.RuntimeProfile{}, fmt.Errorf("Rule %s does not declare runtime profile %s", ruleID, profileID)
+}
+
+func (m *Manager) startLocked(ctx context.Context, profile rules.RuntimeProfile) error {
+	if profile.Residency != rules.ResidencyRuleActive {
+		return fmt.Errorf("unsupported OCR runtime profile contract: %+v", profile)
+	}
+	switch profile.Runtime {
+	case rules.PpOcrWorkerRuntimeV1:
+		client, err := Start(context.Background(), m.runtimeRoot)
+		if err != nil {
+			return err
+		}
+		initialized := client.Initialized()
+		if initialized.Model.ArtifactID != profile.ArtifactID {
+			_ = client.Close()
+			return fmt.Errorf("OCR runtime artifact mismatch: Rule=%s worker=%s", profile.ArtifactID, initialized.Model.ArtifactID)
+		}
+		m.recognitionClients[profile.ID] = client
+		m.logger.Info("ocr_worker_started", "rule_id", profile.RuleID, "profile_id", profile.ID,
+			"process_id", initialized.ProcessID, "model_load_ms", initialized.ModelLoadMS)
+		return nil
+	case rules.PpOcrTextRegionsWorkerRuntimeV1:
+		client, err := StartTextRegions(context.Background(), m.runtimeRoot)
+		if err != nil {
+			return err
+		}
+		initialized := client.Initialized()
+		if initialized.Detection.ArtifactID != profile.ArtifactID {
+			_ = client.Close()
+			return fmt.Errorf("OCR text regions runtime artifact mismatch: Rule=%s worker=%s", profile.ArtifactID, initialized.Detection.ArtifactID)
+		}
+		m.textRegionClients[profile.ID] = client
+		m.logger.Info("ocr_text_regions_worker_started", "rule_id", profile.RuleID, "profile_id", profile.ID,
+			"process_id", initialized.ProcessID, "model_load_ms", initialized.ModelLoadMS)
+		return nil
+	default:
+		return fmt.Errorf("unsupported OCR runtime profile contract: %+v", profile)
+	}
 }
 
 func (m *Manager) switchRuleLocked(ruleID string) error {
 	var result error
-	for profileID, client := range m.clients {
+	for profileID, client := range m.recognitionClients {
 		if err := client.Close(); err != nil {
 			result = errors.Join(result, fmt.Errorf("stop OCR profile %s: %w", profileID, err))
 		}
 	}
-	m.clients = map[string]*Client{}
+	for profileID, client := range m.textRegionClients {
+		if err := client.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("stop OCR text regions profile %s: %w", profileID, err))
+		}
+	}
+	m.recognitionClients = map[string]*Client{}
+	m.textRegionClients = map[string]*TextRegionsClient{}
 	m.failed = map[string]error{}
 	m.activeRule = ruleID
 	return result

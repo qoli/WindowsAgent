@@ -122,4 +122,63 @@ catch (ContractException exception) when (exception.Message.Contains("must not i
 {
 }
 
-Console.WriteLine("10 PP-OCR DirectML contract tests passed");
+try
+{
+    TextRegionsRuntimeArguments.Parse(new[] { "--unknown", "value" });
+    throw new Exception("unknown text regions runtime argument was accepted");
+}
+catch (ContractException exception) when (exception.Message.Contains("unknown text regions worker argument", StringComparison.Ordinal))
+{
+}
+
+var textRegionsRgb = new byte[640 * 300 * 3];
+var textRegionsSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(textRegionsRgb)).ToLowerInvariant();
+using var textRegionsDocument = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(new
+{
+    requestId = "regions-full-size",
+    artifactId = "regions-artifact",
+    capturedAt = "2026-08-08T01:02:03.123456Z",
+    width = 640,
+    height = 300,
+    rgbBase64 = Convert.ToBase64String(textRegionsRgb),
+    sha256 = textRegionsSha,
+}));
+var textRegionsRequest = TextRegionsWorkerProtocol.ParseRequest(textRegionsDocument.RootElement);
+Equal(textRegionsRequest.Region.Rgb.Length, textRegionsRgb.Length, "text regions RGB length");
+
+var detectionOutput = new DenseTensor<float>(new[] { 1, 1, 32, 64 });
+for (var y = 10; y < 18; y++)
+{
+    for (var x = 15; x < 45; x++)
+    {
+        detectionOutput[0, 0, y, x] = 0.9f;
+    }
+}
+var detectedRegions = TextRegionDetector.Postprocess(
+    detectionOutput,
+    64,
+    32,
+    1,
+    new DetectionSettings(64, 0.2, 0.45, 8, 1.4));
+Equal(detectedRegions.Count, 1, "synthetic detection region count");
+Equal(detectedRegions[0].Points.Count, 4, "synthetic detection point count");
+
+detectionOutput[0, 0, 0, 0] = float.NaN;
+try
+{
+    TextRegionDetector.Postprocess(detectionOutput, 64, 32, 1, new DetectionSettings(64, 0.2, 0.45, 8, 1.4));
+    throw new Exception("non-finite detection output was accepted");
+}
+catch (ContractException exception) when (exception.Message.Contains("non-finite", StringComparison.Ordinal))
+{
+}
+
+var rectified = TextRegionDetector.Rectify(
+    new CapturedRegion(2, 2, new byte[] { 255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255 }, new string('0', 64)),
+    new[] { new PointD(0, 0), new PointD(1, 0), new PointD(1, 1), new PointD(0, 1) },
+    480,
+    48);
+Equal(rectified.Rgb.Length, 480 * 48 * 3, "rectified RGB length");
+Equal(rectified.RgbSha256.Length, 64, "rectified RGB SHA length");
+
+Console.WriteLine("15 PP-OCR DirectML contract tests passed");

@@ -12,6 +12,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/inputaction"
+	"github.com/qoli/WindowsAgent/internal/ocrregionsaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -138,6 +139,10 @@ func (f *fakeOCRRecognizer) Recognize(_ context.Context, ruleID, profileID strin
 	}, nil
 }
 
+func (f *fakeOCRRecognizer) DetectTextRegions(_ context.Context, ruleID, profileID string, request ocrworker.Request) (ocrworker.TextRegionsResult, error) {
+	return ocrworker.TextRegionsResult{RequestID: request.RequestID}, nil
+}
+
 func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 	rulesRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
 	if err != nil {
@@ -198,5 +203,22 @@ func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 	}
 	if recognizer.request.RGB[0] != 1 || recognizer.request.RGB[1] != 2 || recognizer.request.RGB[2] != 3 {
 		t.Fatal("packed pixels were not converted to RGB24")
+	}
+}
+
+func TestTextRegionAtLeftEdgeReturnsExplicitEmptyContext(t *testing.T) {
+	context, err := buildLeftContext(
+		capture.RegionResult{Pixels: make([]uint32, 320*150), ImageWidth: 320, ImageHeight: 150},
+		ocrregionsaction.Config{
+			ReferenceRegion:  capture.ReferenceRegion{X: 1600, Y: 880, Width: 320, Height: 150},
+			LeftContextWidth: 48, VerticalPadding: 4,
+		},
+		[]ocrworker.TextRegionPoint{{X: 0, Y: 70}, {X: 25, Y: 70}, {X: 25, Y: 90}, {X: 0, Y: 90}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if context["w"] != 0 || context["h"] != 0 || len(context["pixels"].([]uint32)) != 0 {
+		t.Fatalf("left-edge context = %#v", context)
 	}
 }

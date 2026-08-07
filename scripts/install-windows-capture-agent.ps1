@@ -112,6 +112,8 @@ if ($requiresOCRRuntime) {
     foreach ($name in @(
         "PpOcr.DirectML.exe",
         "runtime-config.json",
+        "text-regions-runtime-config.json",
+        "ppocrv6-small-det.onnx",
         "ppocrv6-small-rec-w480.onnx",
         "ppocrv6-small-characters.json"
     )) {
@@ -291,6 +293,8 @@ if ($requiresOCRRuntime) {
     foreach ($name in @(
         "PpOcr.DirectML.exe",
         "runtime-config.json",
+        "text-regions-runtime-config.json",
+        "ppocrv6-small-det.onnx",
         "ppocrv6-small-rec-w480.onnx",
         "ppocrv6-small-characters.json"
     )) {

@@ -25,6 +25,28 @@ func TestReadRequest(t *testing.T) {
 	}
 }
 
+func TestReadRequestAcceptsBoundedTextRegionPayload(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "request.json")
+	payload := `{"inputs":{"pixels":"` + strings.Repeat("a", 128<<10) + `"}}`
+	if err := os.WriteFile(name, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadRequest(name); err != nil {
+		t.Fatalf("bounded text-region payload was rejected: %v", err)
+	}
+}
+
+func TestReadRequestRejectsPayloadOverBound(t *testing.T) {
+	name := filepath.Join(t.TempDir(), "request.json")
+	payload := `{"inputs":{"pixels":"` + strings.Repeat("a", MaxRequestBytes) + `"}}`
+	if err := os.WriteFile(name, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadRequest(name); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized request error = %v", err)
+	}
+}
+
 func TestReadRequestRejectsInvalidContract(t *testing.T) {
 	tests := []struct {
 		name string

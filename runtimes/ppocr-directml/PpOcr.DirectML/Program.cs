@@ -8,6 +8,46 @@ public static class Program
     {
         try
         {
+            if (arguments.Length > 0 && arguments[0] is "--text-regions-worker" or "--text-regions-validate-only")
+            {
+                var worker = arguments[0] == "--text-regions-worker";
+                var parsedTextRegions = TextRegionsRuntimeArguments.Parse(arguments[1..]);
+                var textRegionsConfig = TextRegionsRuntimeConfig.Load(parsedTextRegions.ConfigPath);
+                var textRegionCharacters = textRegionsConfig.ValidateArtifacts(
+                    parsedTextRegions.DetectionModelPath,
+                    parsedTextRegions.RecognitionModelPath,
+                    parsedTextRegions.CharactersPath);
+                if (!worker)
+                {
+                    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        status = "ok",
+                        runtime = TextRegionsRuntimeConfig.RuntimeId,
+                        pipeline = TextRegionsRuntimeConfig.Pipeline,
+                        detectionArtifactId = textRegionsConfig.DetectionModel.ArtifactId,
+                        recognitionArtifactId = textRegionsConfig.RecognitionModel.ArtifactId,
+                        characterCount = textRegionCharacters.Count,
+                        provider = "DirectML",
+                        adapterIndex = 0,
+                    }));
+                    return 0;
+                }
+                var textRegionsLoadTimer = Stopwatch.StartNew();
+                using var detector = new TextRegionDetector(parsedTextRegions.DetectionModelPath, textRegionsConfig);
+                using var textRegionsRecognizer = new TextLineRecognizer(
+                    parsedTextRegions.RecognitionModelPath,
+                    new RuntimeConfig(textRegionsConfig.RecognitionModel, textRegionsConfig.Characters, textRegionsConfig.Device),
+                    textRegionCharacters);
+                textRegionsLoadTimer.Stop();
+                return TextRegionsWorkerProtocol.Run(
+                    Console.OpenStandardInput(),
+                    Console.OpenStandardOutput(),
+                    textRegionsConfig,
+                    detector,
+                    textRegionsRecognizer,
+                    Environment.ProcessId,
+                    Math.Round(textRegionsLoadTimer.Elapsed.TotalMilliseconds, 2));
+            }
             var parsed = RuntimeArguments.Parse(arguments);
             var config = RuntimeConfig.Load(parsed.ConfigPath);
             var characters = config.ValidateArtifacts(parsed.ModelPath, parsed.CharactersPath);

@@ -299,8 +299,12 @@ func (c *Client) Close() error {
 }
 
 func writeFrame(writer io.Writer, body []byte) error {
-	if len(body) == 0 || len(body) > MaxFrameBytes {
-		return fmt.Errorf("OCR worker frame length must be from 1 through %d", MaxFrameBytes)
+	return writeFrameLimit(writer, body, MaxFrameBytes)
+}
+
+func writeFrameLimit(writer io.Writer, body []byte, limit int) error {
+	if len(body) == 0 || len(body) > limit {
+		return fmt.Errorf("OCR worker frame length must be from 1 through %d", limit)
 	}
 	header := make([]byte, 4)
 	binary.LittleEndian.PutUint32(header, uint32(len(body)))
@@ -314,13 +318,17 @@ func writeFrame(writer io.Writer, body []byte) error {
 }
 
 func readFrame(reader io.Reader) ([]byte, error) {
+	return readFrameLimit(reader, MaxFrameBytes)
+}
+
+func readFrameLimit(reader io.Reader, limit int) ([]byte, error) {
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(reader, header); err != nil {
 		return nil, fmt.Errorf("read OCR worker frame header: %w", err)
 	}
 	length := int(binary.LittleEndian.Uint32(header))
-	if length <= 0 || length > MaxFrameBytes {
-		return nil, fmt.Errorf("OCR worker frame length must be from 1 through %d", MaxFrameBytes)
+	if length <= 0 || length > limit {
+		return nil, fmt.Errorf("OCR worker frame length must be from 1 through %d", limit)
 	}
 	body := make([]byte, length)
 	if _, err := io.ReadFull(reader, body); err != nil {

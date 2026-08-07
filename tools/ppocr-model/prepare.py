@@ -255,12 +255,41 @@ def run(argv: list[str]) -> int:
     }
     config_path = output / "runtime-config.json"
     config_path.write_text(json.dumps(runtime_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    text_regions_config = {
+        "schemaVersion": 1,
+        "runtime": "ppocr-onnx-dml-text-regions-v1",
+        "pipeline": "text-region-detection-recognition",
+        "detectionModel": {
+            "artifactId": "ppocrv6-small-det-onnx-official",
+            "format": "onnx",
+            "filename": files["detectionModel"],
+            "sha256": sha256_file(output / files["detectionModel"]),
+            "opset": artifact["models"]["detection"]["opset"],
+            "inputName": artifact["models"]["detection"]["inputName"],
+            "outputName": artifact["models"]["detection"]["outputName"],
+        },
+        "recognitionModel": runtime_config["model"],
+        "characters": artifact["characters"],
+        "detection": {
+            "inputWidth": 1280,
+            "pixelThreshold": 0.2,
+            "boxThreshold": 0.45,
+            "maxCandidates": 64,
+            "unclipRatio": 1.4,
+        },
+        "inference": {"device": "directml:0"},
+    }
+    text_regions_config_path = output / "text-regions-runtime-config.json"
+    text_regions_config_path.write_text(
+        json.dumps(text_regions_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     print(
         json.dumps(
             {
                 "output": str(output),
                 "manifest": str(artifact_path),
                 "runtimeConfig": str(config_path),
+                "textRegionsRuntimeConfig": str(text_regions_config_path),
                 "characterCount": len(characters),
             }
         )

@@ -64,7 +64,7 @@ foreach ($profileProperty in $descriptor.runtimeProfiles.PSObject.Properties) {
         $profileFields -notcontains "residency" -or $profileFields -notcontains "artifactId") {
         throw "Rule plugin runtime profile '$($profileProperty.Name)' has an invalid shape"
     }
-    if ([string]$profile.runtime -ne "ppocr-onnx-dml-worker-v1" -or `
+    if (@("ppocr-onnx-dml-worker-v1", "ppocr-onnx-dml-text-regions-worker-v1") -notcontains [string]$profile.runtime -or `
         [string]$profile.residency -ne "while-rule-active" -or `
         [String]::IsNullOrWhiteSpace([string]$profile.artifactId)) {
         throw "Rule plugin runtime profile '$($profileProperty.Name)' has an unsupported contract"
@@ -108,13 +108,13 @@ foreach ($actionProperty in $descriptor.actions.PSObject.Properties) {
     } else {
         throw "Rule plugin action '$($actionProperty.Name)' has unsupported completion: $completion"
     }
-    if ($runtime -eq "ppocr-w480-text-v1") {
+    if (@("ppocr-w480-text-v1", "ppocr-text-regions-v1") -contains $runtime) {
         if ($actionFields -notcontains "runtimeProfile" -or `
             $null -eq $descriptor.runtimeProfiles.PSObject.Properties[[string]$action.runtimeProfile]) {
             throw "Rule plugin OCR action '$($actionProperty.Name)' requires a declared runtimeProfile"
         }
     } elseif ($actionFields -contains "runtimeProfile") {
-        throw "Rule plugin action '$($actionProperty.Name)' runtimeProfile is only valid for ppocr-w480-text-v1"
+        throw "Rule plugin action '$($actionProperty.Name)' runtimeProfile is only valid for PP-OCR Actions"
     }
     $seenRegistrationTypes = @{}
     foreach ($registrationType in @($action.registrableAs)) {

@@ -21,30 +21,33 @@ import (
 )
 
 const (
-	StatusMatched             = "matched"
-	StatusUnmatched           = "unmatched"
-	UnmatchedDescription      = "No rule guidance is available for this foreground process."
-	RuleFilename              = "rule.json"
-	AgentsFilename            = "AGENTS.md"
-	AgentsMediaType           = "text/markdown; charset=utf-8"
-	ScriptsMediaType          = "application/json; charset=utf-8"
-	ActionsMediaType          = "application/json; charset=utf-8"
-	RegistrationsMediaType    = "application/json; charset=utf-8"
-	RuntimesMediaType         = "application/json; charset=utf-8"
-	ObservationRuntimeV1      = "windows-observation-v1"
-	PpOcrActionRuntimeV1      = "ppocr-w480-text-v1"
-	StreamingActionRuntimeV1  = "windows-streaming-action-v1"
-	WindowsKeyActionRuntimeV1 = "windows-key-action-v1"
-	PpOcrWorkerRuntimeV1      = "ppocr-onnx-dml-worker-v1"
-	ResidencyRuleActive       = "while-rule-active"
-	RegistrationMonitor       = "monitor"
-	RegistrationReaction      = "reaction"
-	CompletionReturn          = "return"
-	CompletionStream          = "stream"
-	LifecycleLinear           = "linear"
-	LifecycleLoop             = "loop"
-	maxRuleJSONBytes          = 64 << 10
-	maxAgentsBytes            = 1 << 20
+	StatusMatched                   = "matched"
+	StatusUnmatched                 = "unmatched"
+	UnmatchedDescription            = "No rule guidance is available for this foreground process."
+	RuleFilename                    = "rule.json"
+	AgentsFilename                  = "AGENTS.md"
+	AgentsMediaType                 = "text/markdown; charset=utf-8"
+	ScriptsMediaType                = "application/json; charset=utf-8"
+	ActionsMediaType                = "application/json; charset=utf-8"
+	RegistrationsMediaType          = "application/json; charset=utf-8"
+	RuntimesMediaType               = "application/json; charset=utf-8"
+	ObservationRuntimeV1            = "windows-observation-v1"
+	PpOcrActionRuntimeV1            = "ppocr-w480-text-v1"
+	PpOcrTextRegionsActionRuntimeV1 = "ppocr-text-regions-v1"
+	CompositeActionRuntimeV1        = "windows-composite-action-v1"
+	StreamingActionRuntimeV1        = "windows-streaming-action-v1"
+	WindowsKeyActionRuntimeV1       = "windows-key-action-v1"
+	PpOcrWorkerRuntimeV1            = "ppocr-onnx-dml-worker-v1"
+	PpOcrTextRegionsWorkerRuntimeV1 = "ppocr-onnx-dml-text-regions-worker-v1"
+	ResidencyRuleActive             = "while-rule-active"
+	RegistrationMonitor             = "monitor"
+	RegistrationReaction            = "reaction"
+	CompletionReturn                = "return"
+	CompletionStream                = "stream"
+	LifecycleLinear                 = "linear"
+	LifecycleLoop                   = "loop"
+	maxRuleJSONBytes                = 64 << 10
+	maxAgentsBytes                  = 1 << 20
 )
 
 type Document struct {
@@ -614,8 +617,8 @@ func validateDescriptor(descriptor Descriptor) error {
 		if err := validateRegistryID(id, "runtime profile"); err != nil {
 			return err
 		}
-		if profile.Runtime != PpOcrWorkerRuntimeV1 {
-			return fmt.Errorf("runtime profile %s runtime must equal %s", id, PpOcrWorkerRuntimeV1)
+		if profile.Runtime != PpOcrWorkerRuntimeV1 && profile.Runtime != PpOcrTextRegionsWorkerRuntimeV1 {
+			return fmt.Errorf("runtime profile %s runtime must equal %s or %s", id, PpOcrWorkerRuntimeV1, PpOcrTextRegionsWorkerRuntimeV1)
 		}
 		if profile.Residency != ResidencyRuleActive {
 			return fmt.Errorf("runtime profile %s residency must equal %s", id, ResidencyRuleActive)
@@ -641,16 +644,20 @@ func validateDescriptor(descriptor Descriptor) error {
 		if err := validateActionExecution(declaration.Execution); err != nil {
 			return fmt.Errorf("action %s execution: %w", id, err)
 		}
-		if declaration.Runtime == PpOcrActionRuntimeV1 {
+		if declaration.Runtime == PpOcrActionRuntimeV1 || declaration.Runtime == PpOcrTextRegionsActionRuntimeV1 {
 			profile, exists := descriptor.RuntimeProfiles[declaration.RuntimeProfile]
 			if declaration.RuntimeProfile == "" || !exists {
 				return fmt.Errorf("action %s requires a declared runtimeProfile", id)
 			}
-			if profile.Runtime != PpOcrWorkerRuntimeV1 {
-				return fmt.Errorf("action %s runtimeProfile must use %s", id, PpOcrWorkerRuntimeV1)
+			expectedRuntime := PpOcrWorkerRuntimeV1
+			if declaration.Runtime == PpOcrTextRegionsActionRuntimeV1 {
+				expectedRuntime = PpOcrTextRegionsWorkerRuntimeV1
+			}
+			if profile.Runtime != expectedRuntime {
+				return fmt.Errorf("action %s runtimeProfile must use %s", id, expectedRuntime)
 			}
 		} else if declaration.RuntimeProfile != "" {
-			return fmt.Errorf("action %s runtimeProfile is only supported by %s", id, PpOcrActionRuntimeV1)
+			return fmt.Errorf("action %s runtimeProfile is only supported by OCR Action runtimes", id)
 		}
 		seen := map[string]struct{}{}
 		for _, registrationType := range declaration.RegistrableAs {

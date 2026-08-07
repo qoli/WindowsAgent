@@ -86,7 +86,7 @@ def run(argv: list[str]) -> int:
         "selfContained": True,
         "targetFramework": "net8.0-windows",
         "onnxRuntimeDirectML": ONNX_RUNTIME_DIRECTML_VERSION,
-        "implementedPipeline": "text-line-recognition",
+        "implementedPipelines": ["text-line-recognition", "text-region-detection-recognition"],
     }
     manifest = output / "runtime-artifact.json"
     manifest.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
