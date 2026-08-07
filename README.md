@@ -123,8 +123,10 @@ The Action runtime and registration refactor is partially landed:
   scan-code key-down/key-up pair with backend and timing evidence;
 - `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
   It immediately returns a durable watch URL, asks the supervising model to
-  arrange Auto Launch, observes flight and Mass Lock state, then commands 100%
-  and 0% throttle at its declared gates;
+  arrange Auto Launch, and requires empty prompt text plus positive `KNOWN`
+  visual speed while Mass Lock remains ON before commanding 100% throttle. Its
+  events keep observed speed separate from commanded throttle, and it commands
+  0% only after the Mass Lock OFF gate;
 - all shipped Rules have no active Monitor or Reaction registrations by
   default; no scheduler or reaction dispatcher is shipped yet.
 
@@ -506,7 +508,11 @@ The initial stream event is `AWAITING_AUTO_LAUNCH`. During that phase the
 supervising model captures the screen and invokes `elite-dangerous/ui-control`
 one logical key at a time. The Streaming Action does not guess a fixed Auto
 Launch key sequence. Once the prompt pipeline observes Auto Launch, the
-workflow continues autonomously through the Mass Lock and throttle gates.
+workflow waits for three consecutive visual-handover samples: empty raw prompt,
+Mass Lock ON, and a positive `KNOWN` ship-speed value. Only then does it
+continue autonomously through the 100% command, Mass Lock OFF, and 0% command
+gates. Stream fields named `observedSpeed*` are visual evidence;
+`commandedThrottle` is input-command state.
 
 Only one capture can run at a time. A concurrent request receives
 `409 capture_busy`. Each completed artifact contains `capture.png` and

@@ -120,5 +120,8 @@ Invoke it with `{"stationConfirmed":true}` only after high-level visual
 confirmation that the ship is inside a station, then follow the returned NDJSON
 watch URL. While its phase is `AWAITING_AUTO_LAUNCH`, arrange Auto Launch slowly
 with the visual focus evidence loop above. Once Auto Launch is observed, the
-workflow owns the 100% throttle, Mass Lock OFF, and 0% throttle sequence and
-reports `COMPLETED`, `FAILED`, or `CANCELLED` through the stream.
+workflow waits for three consecutive visual-handover samples: empty raw flight
+prompt, Mass Lock `ON`, and a `KNOWN` positive `ship-speed` display value. Only
+then does it own the 100% throttle, Mass Lock OFF, and 0% throttle sequence.
+Stream events distinguish `commandedThrottle` from the independently observed
+speed fields and report `COMPLETED`, `FAILED`, or `CANCELLED`.

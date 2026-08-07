@@ -78,10 +78,14 @@ fallback is attempted.
 `elite-dangerous/leave-station` returns its watch URL immediately and emits
 `AWAITING_AUTO_LAUNCH`. The higher model remains responsible for slow menu
 arrangement through one-key `elite-dangerous/ui-control` calls. The workflow
-then consumes finite `flight-status` and `ship-status` evidence, invokes the
-binding-resolved `set-throttle` Action at 100% and 0%, and naturally completes.
-Unknown evidence, contradictory transitions, and sample limits are terminal;
-there is no inferred state or alternate execution path.
+then consumes finite `flight-status`, `ship-status`, and `ship-speed` evidence.
+After Auto Launch is seen, three consecutive samples must show empty raw prompt
+text, Mass Lock ON, and positive `KNOWN` visual speed before the workflow may
+invoke binding-resolved 100% throttle. Mass Lock OFF then gates the 0% command
+and natural completion. Events distinguish `commandedThrottle` from
+`observedSpeed*`; unknown or contradictory speed never inherits command state.
+Bounded unknown evidence, contradictory transitions, and sample limits fail
+explicitly; there is no inferred state or alternate execution path.
 
 ## Deferred
 

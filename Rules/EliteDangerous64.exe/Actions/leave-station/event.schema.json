@@ -8,13 +8,16 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "flightStatus", "massLock", "throttle", "instruction", "throttleCommand"],
+      "required": ["phase", "sample", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "commandedThrottle", "instruction", "throttleCommand"],
       "properties": {
         "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "DEPARTING", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
         "flightStatus": {"enum": ["SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "AUTO_DOCK", "UNKNOWN"]},
+        "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"enum": ["ON", "OFF", "UNKNOWN"]},
-        "throttle": {"type": ["integer", "null"], "enum": [0, 100, null]},
+        "observedSpeedState": {"enum": ["KNOWN", "UNKNOWN"]},
+        "observedSpeedDisplayValue": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
+        "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 100, null]},
         "instruction": {"type": ["string", "null"], "maxLength": 256},
         "throttleCommand": {
           "oneOf": [
@@ -41,5 +44,12 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"payload": {"properties": {"observedSpeedState": {"const": "KNOWN"}}}}},
+      "then": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "integer"}}}}},
+      "else": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "null"}}}}}
+    }
+  ]
 }
