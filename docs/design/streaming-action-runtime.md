@@ -80,8 +80,12 @@ fallback is attempted.
 arrangement through one-key `elite-dangerous/ui-control` calls. The workflow
 then consumes finite `flight-status`, `ship-status`, and `ship-speed` evidence.
 After Auto Launch is seen, the workflow requires an observed movement peak,
-five samples without a classified Auto Launch prompt, Mass Lock ON, and two
-reliable low-speed samples before it may invoke binding-resolved 100% throttle.
+five samples without a classified Auto Launch prompt, Mass Lock ON, and either
+two strict low-speed samples or four consecutive matching workflow-qualified
+low-confidence `0` through `10` OCR samples before it may invoke
+binding-resolved 100% throttle. The temporal path requires matching raw and
+constrained text, confidence at least `0.40`, and margin at most `0.02`; it is
+reported explicitly rather than changing the finite speed classifier.
 Mass Lock OFF then gates the 0% command. The workflow enters `VERIFYING_STOP`
 instead of completing from input success: three consecutive frames must have
 matching raw and digit-constrained `0` candidates, constrained confidence at

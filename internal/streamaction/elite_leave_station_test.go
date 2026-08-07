@@ -14,20 +14,25 @@ import (
 )
 
 type leaveStationCaller struct {
-	cycle                    int
-	forceMassOff             bool
-	massOffAt                int
-	speedAlwaysUnknown       bool
-	promptGarbageAfterLaunch bool
-	invalidUnknownSpeedValue bool
-	stopEvidenceNever        bool
-	throttleZeroCommanded    bool
-	flightPromptCalls        int
-	shipStatusCalls          int
-	shipSpeedCalls           int
-	autoLaunchCycles         map[int]bool
-	speedByCycle             map[int]int
-	throttles                []int
+	cycle                       int
+	forceMassOff                bool
+	massOffAt                   int
+	speedAlwaysUnknown          bool
+	promptGarbageAfterLaunch    bool
+	invalidUnknownSpeedValue    bool
+	temporalLowSpeedFrom        int
+	temporalLowSpeedConfidence  float64
+	temporalLowSpeedMargin      float64
+	temporalLowSpeedAlternates  bool
+	temporalLowSpeedRawMismatch bool
+	stopEvidenceNever           bool
+	throttleZeroCommanded       bool
+	flightPromptCalls           int
+	shipStatusCalls             int
+	shipSpeedCalls              int
+	autoLaunchCycles            map[int]bool
+	speedByCycle                map[int]int
+	throttles                   []int
 }
 
 func (c *leaveStationCaller) isAutoLaunchCycle() bool {
@@ -98,6 +103,25 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "0",
 					"rawConfidence": 0.49, "constrainedText": "0",
 					"constrainedConfidence": 0.49, "rawConstraintMargin": 0.0,
+				},
+			}})
+		}
+		if c.temporalLowSpeedFrom > 0 && c.cycle >= c.temporalLowSpeedFrom {
+			text := "7"
+			if c.temporalLowSpeedAlternates && c.cycle%2 == 0 {
+				text = "8"
+			}
+			rawText := text
+			if c.temporalLowSpeedRawMismatch {
+				rawText = "1"
+			}
+			return json.Marshal(map[string]any{"speed": map[string]any{
+				"state": "UNKNOWN", "displayValue": nil,
+				"evidence": map[string]any{
+					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": rawText,
+					"rawConfidence": c.temporalLowSpeedConfidence, "constrainedText": text,
+					"constrainedConfidence": c.temporalLowSpeedConfidence,
+					"rawConstraintMargin":   c.temporalLowSpeedMargin,
 				},
 			}})
 		}
@@ -262,6 +286,75 @@ func TestEliteLeaveStationWorkflowRejectsMassLockOffBeforeAutoLaunch(t *testing.
 func TestEliteLeaveStationWorkflowDoesNotTreatUnknownSpeedAsAutoLaunchHandover(t *testing.T) {
 	pkg := loadEliteLeaveStationPackage(t)
 	caller := &leaveStationCaller{massOffAt: 2000, speedAlwaysUnknown: true}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "Auto Launch visual handover was not confirmed") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.throttles) != 0 {
+		t.Fatalf("unexpected throttle controls=%v", caller.throttles)
+	}
+}
+
+func TestEliteLeaveStationWorkflowAcceptsRepeatedQualifiedTemporalLowSpeedEvidence(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{
+		temporalLowSpeedFrom:       9,
+		temporalLowSpeedConfidence: 0.45,
+	}
+	reporter := &leaveStationReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("throttle controls=%v", caller.throttles)
+	}
+	var handover map[string]any
+	for _, payload := range reporter.payloads {
+		if payload["commandedThrottle"] == float64(100) && payload["throttleCommand"] != nil {
+			handover = payload
+			break
+		}
+	}
+	if handover == nil || handover["observedSpeedState"] != "UNKNOWN" ||
+		handover["observedSpeedConstrainedText"] != "7" ||
+		handover["temporalLowSpeedConfirmations"] != float64(4) ||
+		handover["handoverEvidence"] != "TEMPORAL_LOW_CONFIDENCE" ||
+		handover["gateDecision"] != "HANDOVER_CONFIRMED" {
+		t.Fatalf("temporal handover payload=%#v", handover)
+	}
+}
+
+func TestEliteLeaveStationWorkflowRejectsTemporalLowSpeedBelowWorkflowThreshold(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{
+		massOffAt:                  2000,
+		temporalLowSpeedFrom:       9,
+		temporalLowSpeedConfidence: 0.39,
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "Auto Launch visual handover was not confirmed") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.throttles) != 0 {
+		t.Fatalf("unexpected throttle controls=%v", caller.throttles)
+	}
+}
+
+func TestEliteLeaveStationWorkflowRejectsChangingTemporalLowSpeedText(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{
+		massOffAt:                  2000,
+		temporalLowSpeedFrom:       9,
+		temporalLowSpeedConfidence: 0.45,
+		temporalLowSpeedAlternates: true,
+	}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
 	)

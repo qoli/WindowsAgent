@@ -124,7 +124,13 @@ with the visual focus evidence loop above. Once Auto Launch is observed, the
 workflow first requires a `KNOWN` speed of at least 15 to prove that Auto
 Launch actually moved the ship. It then requires the Auto Launch prompt to be
 absent for five samples, Mass Lock to remain `ON`, and two `KNOWN` speed samples
-at or below 10 within the bounded confirmation window. Only then does it own
+at or below 10 within the bounded confirmation window. When the finite
+classifier returns `UNKNOWN` only because constrained confidence is below
+`0.55`, the workflow may instead accept four consecutive observations of the
+same raw and constrained `0` through `10` text, each at confidence `0.40` or
+higher and margin `0.02` or lower. A changed or non-qualifying candidate clears
+that workflow-local temporal count, and events identify which evidence mode
+confirmed the handover. Only then does it own
 the 100% throttle, Mass Lock OFF, and 0% throttle sequence. Sending 0% is not
 completion: the Action enters `VERIFYING_STOP` and requires three consecutive
 current frames where both OCR candidates are exactly `0`, constrained

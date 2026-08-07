@@ -8,6 +8,9 @@ AUTO_LAUNCH_MOVEMENT_SPEED_MIN = 15
 AUTO_LAUNCH_HANDOVER_SPEED_MAX = 10
 AUTO_LAUNCH_LOW_SPEED_CONFIRMATIONS = 2
 AUTO_LAUNCH_LOW_SPEED_WINDOW = 8
+AUTO_LAUNCH_TEMPORAL_LOW_SPEED_CONFIRMATIONS = 4
+AUTO_LAUNCH_TEMPORAL_LOW_SPEED_MIN_CONFIDENCE = 0.40
+AUTO_LAUNCH_TEMPORAL_LOW_SPEED_MAX_MARGIN = 0.02
 MASS_LOCK_OFF_STABLE = 2
 STOP_VERIFICATION_LIMIT = 60
 ZERO_SPEED_CONFIRMATIONS = 3
@@ -71,13 +74,19 @@ def observe_stop_speed():
         "observedSpeedRawConstraintMargin": speed["observedSpeedRawConstraintMargin"],
     }
 
-def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, movement_seen=False, maximum_observed_speed=None, low_speed_confirmations=0, handover_candidate=False, decision="WAITING_FOR_AUTO_LAUNCH", samples_since_throttle_zero=None, zero_speed_confirmations=0, stop_decision="NOT_STARTED"):
+def is_handover_low_speed_text(text):
+    return text in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
+
+def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, movement_seen=False, maximum_observed_speed=None, low_speed_confirmations=0, temporal_low_speed_text=None, temporal_low_speed_confirmations=0, handover_evidence="NONE", handover_candidate=False, decision="WAITING_FOR_AUTO_LAUNCH", samples_since_throttle_zero=None, zero_speed_confirmations=0, stop_decision="NOT_STARTED"):
     return {
         "autoLaunchSeen": auto_launch_seen,
         "samplesSinceAutoLaunchSeen": samples_since_auto_launch_seen,
         "movementSeen": movement_seen,
         "maximumObservedSpeed": maximum_observed_speed,
         "lowSpeedConfirmations": low_speed_confirmations,
+        "temporalLowSpeedText": temporal_low_speed_text,
+        "temporalLowSpeedConfirmations": temporal_low_speed_confirmations,
+        "handoverEvidence": handover_evidence,
         "handoverCandidate": handover_candidate,
         "gateDecision": decision,
         "samplesSinceThrottleZero": samples_since_throttle_zero,
@@ -108,6 +117,9 @@ def emit_update(phase, sample, observation, gate, commanded_throttle=None, instr
             "movementSeen": gate["movementSeen"],
             "maximumObservedSpeed": gate["maximumObservedSpeed"],
             "lowSpeedConfirmations": gate["lowSpeedConfirmations"],
+            "temporalLowSpeedText": gate["temporalLowSpeedText"],
+            "temporalLowSpeedConfirmations": gate["temporalLowSpeedConfirmations"],
+            "handoverEvidence": gate["handoverEvidence"],
             "handoverCandidate": gate["handoverCandidate"],
             "gateDecision": gate["gateDecision"],
             "samplesSinceThrottleZero": gate["samplesSinceThrottleZero"],
@@ -176,6 +188,9 @@ def main(ctx):
     movement_seen = observation["observedSpeedState"] == "KNOWN" and observation["observedSpeedDisplayValue"] >= AUTO_LAUNCH_MOVEMENT_SPEED_MIN
     maximum_observed_speed = observation["observedSpeedDisplayValue"] if observation["observedSpeedState"] == "KNOWN" else None
     low_speed_samples = []
+    temporal_low_speed_text = None
+    temporal_low_speed_confirmations = 0
+    handover_evidence = "NONE"
     handover_confirmed = False
     unknown_mass_lock_count = 0
     for _ in range(AUTO_LAUNCH_HANDOVER_LIMIT):
@@ -194,6 +209,8 @@ def main(ctx):
         if flight_status == "AUTO_LAUNCH" or flight_status == "WAITING_IN_QUEUE":
             samples_since_auto_launch_seen = 0
             low_speed_samples = []
+            temporal_low_speed_text = None
+            temporal_low_speed_confirmations = 0
         elif flight_status == "UNKNOWN":
             samples_since_auto_launch_seen += 1
         else:
@@ -213,6 +230,26 @@ def main(ctx):
             else:
                 low_speed_samples = []
 
+        temporal_low_speed_qualified = (
+            handover_candidate and
+            observation["observedSpeedState"] == "UNKNOWN" and
+            observation["observedSpeedReason"] == "CONSTRAINED_CONFIDENCE_LOW" and
+            observation["observedSpeedRawText"] == observation["observedSpeedConstrainedText"] and
+            is_handover_low_speed_text(observation["observedSpeedConstrainedText"]) and
+            observation["observedSpeedConstrainedConfidence"] >= AUTO_LAUNCH_TEMPORAL_LOW_SPEED_MIN_CONFIDENCE and
+            observation["observedSpeedRawConstraintMargin"] <= AUTO_LAUNCH_TEMPORAL_LOW_SPEED_MAX_MARGIN
+        )
+        if temporal_low_speed_qualified:
+            candidate_text = observation["observedSpeedConstrainedText"]
+            if candidate_text == temporal_low_speed_text:
+                temporal_low_speed_confirmations += 1
+            else:
+                temporal_low_speed_text = candidate_text
+                temporal_low_speed_confirmations = 1
+        else:
+            temporal_low_speed_text = None
+            temporal_low_speed_confirmations = 0
+
         recent_low_speed_samples = []
         for low_speed_sample in low_speed_samples:
             if sample - low_speed_sample < AUTO_LAUNCH_LOW_SPEED_WINDOW:
@@ -228,11 +265,16 @@ def main(ctx):
             decision = "WAITING_FOR_AUTO_LAUNCH_ABSENCE"
         elif mass_lock != "ON":
             decision = "WAITING_FOR_MASS_LOCK"
-        elif len(low_speed_samples) < AUTO_LAUNCH_LOW_SPEED_CONFIRMATIONS:
-            decision = "WAITING_FOR_LOW_SPEED_CONFIRMATION"
-        else:
+        elif len(low_speed_samples) >= AUTO_LAUNCH_LOW_SPEED_CONFIRMATIONS:
             decision = "HANDOVER_CONFIRMED"
+            handover_evidence = "STRICT_SINGLE_FRAME"
             handover_confirmed = True
+        elif temporal_low_speed_confirmations >= AUTO_LAUNCH_TEMPORAL_LOW_SPEED_CONFIRMATIONS:
+            decision = "HANDOVER_CONFIRMED"
+            handover_evidence = "TEMPORAL_LOW_CONFIDENCE"
+            handover_confirmed = True
+        else:
+            decision = "WAITING_FOR_LOW_SPEED_CONFIRMATION"
 
         gate = gate_state(
             auto_launch_seen=True,
@@ -240,6 +282,9 @@ def main(ctx):
             movement_seen=movement_seen,
             maximum_observed_speed=maximum_observed_speed,
             low_speed_confirmations=len(low_speed_samples),
+            temporal_low_speed_text=temporal_low_speed_text,
+            temporal_low_speed_confirmations=temporal_low_speed_confirmations,
+            handover_evidence=handover_evidence,
             handover_candidate=handover_candidate,
             decision=decision,
         )
@@ -278,6 +323,9 @@ def main(ctx):
             movement_seen=movement_seen,
             maximum_observed_speed=maximum_observed_speed,
             low_speed_confirmations=len(low_speed_samples),
+            temporal_low_speed_text=temporal_low_speed_text,
+            temporal_low_speed_confirmations=temporal_low_speed_confirmations,
+            handover_evidence=handover_evidence,
             handover_candidate=True,
             decision=departure_decision,
         )
@@ -290,6 +338,9 @@ def main(ctx):
                 movement_seen=movement_seen,
                 maximum_observed_speed=maximum_observed_speed,
                 low_speed_confirmations=len(low_speed_samples),
+                temporal_low_speed_text=temporal_low_speed_text,
+                temporal_low_speed_confirmations=temporal_low_speed_confirmations,
+                handover_evidence=handover_evidence,
                 handover_candidate=True,
                 decision="MASS_LOCK_RELEASE_CONFIRMED",
                 samples_since_throttle_zero=0,
@@ -322,6 +373,9 @@ def main(ctx):
                     movement_seen=movement_seen,
                     maximum_observed_speed=maximum_observed_speed,
                     low_speed_confirmations=len(low_speed_samples),
+                    temporal_low_speed_text=temporal_low_speed_text,
+                    temporal_low_speed_confirmations=temporal_low_speed_confirmations,
+                    handover_evidence=handover_evidence,
                     handover_candidate=True,
                     decision="MASS_LOCK_RELEASE_CONFIRMED",
                     samples_since_throttle_zero=samples_since_throttle_zero,

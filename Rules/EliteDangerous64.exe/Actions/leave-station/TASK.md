@@ -1,6 +1,6 @@
 # Elite Dangerous supervised leave station
 
-This version 5 interruptible linear Streaming Action begins only after a supervising
+This version 6 interruptible linear Streaming Action begins only after a supervising
 model supplies `stationConfirmed: true`. It immediately starts observing raw
 flight prompt text, classified flight status, ship status, and visual ship
 speed, then emits `AWAITING_AUTO_LAUNCH` with instructions for the model.
@@ -14,9 +14,14 @@ positive evidence and follows the visible motion lifecycle. A reliable speed of
 at least 15 proves that Auto Launch moved the ship. Five later samples without
 another classified Auto Launch prompt establish a handover candidate; raw OCR
 garbage is neutral rather than a false clear signal. While Mass Lock remains
-`ON`, two reliable values from 0 through 10 within an eight-sample window prove
-the low-speed handover. Intervening `UNKNOWN` speed samples do not erase valid
-evidence, while a higher reliable value does. It then calls
+`ON`, the low-speed handover accepts either two strict `KNOWN` values from 0
+through 10 within an eight-sample window, or four consecutive workflow-local
+OCR observations of the same value from 0 through 10. The temporal path accepts
+only `CONSTRAINED_CONFIDENCE_LOW` evidence where raw and constrained text match,
+constrained confidence is at least `0.40`, and raw constraint margin is at most
+`0.02`. A changed or non-qualifying candidate clears the temporal count.
+Intervening `UNKNOWN` samples do not erase valid strict evidence, while a higher
+reliable value does. It then calls
 `elite-dangerous/set-throttle` with `100` and emits the resolved preset,
 binding file, logical control, and physical key. After Mass Lock is `OFF` for
 two consecutive samples, it calls the same Action with `0` and enters
@@ -35,8 +40,9 @@ command alone.
 Every update separates `commandedThrottle` from `observedSpeedState` and
 `observedSpeedDisplayValue`. A successful input command is not reported as
 observed speed. Events retain the speed classifier reason, raw text and
-confidence, plus the Auto Launch age, movement latch, peak speed, low-speed
-confirmation count, handover-candidate flag and explicit gate decision. Stop
+confidence, plus the Auto Launch age, movement latch, peak speed, strict and
+temporal low-speed confirmation counts, temporal candidate text, selected
+handover evidence mode, handover-candidate flag and explicit gate decision. Stop
 verification also reports its age, zero confirmation count, and decision. The
 terminal result records the final command and the evidence from the final
 independent visual speed observation.

@@ -124,7 +124,10 @@ The Action runtime and registration refactor is partially landed:
 - `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
   It immediately returns a durable watch URL, asks the supervising model to
   arrange Auto Launch, and requires empty prompt text plus positive `KNOWN`
-  visual speed while Mass Lock remains ON before commanding 100% throttle. Its
+  visual speed while Mass Lock remains ON before commanding 100% throttle. The
+  handover accepts either two strict low-speed frames or four consecutive
+  matching low-confidence `0` through `10` OCR frames under the narrower
+  workflow-local confidence and margin contract. Its
   events keep observed speed separate from commanded throttle, and it commands
   0% only after the Mass Lock OFF gate, then requires three consecutive
   workflow-local zero-speed OCR confirmations before reporting completion;
