@@ -131,6 +131,7 @@ func Start(ctx context.Context, root string) (*Client, error) {
 		ctx, paths["executable"], "--worker",
 		"--config", paths["config"], "--model", paths["model"], "--characters", paths["characters"],
 	)
+	configureWorkerCommand(command)
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open OCR worker stdin: %w", err)
