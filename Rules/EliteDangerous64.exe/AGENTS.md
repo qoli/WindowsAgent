@@ -40,12 +40,13 @@ only `MASS`, `LANDING`, and `CARGO`, then independently returns `massLock`,
 
 `elite-dangerous/ship-speed` is a finite composite Action over the fixed visual
 speed-number region. It returns the displayed number only as `KNOWN` when the
-same-frame OCR box geometry, digit count, and recognition confidence satisfy
-the reviewed conservative contract; otherwise it returns `UNKNOWN`. Its value
-is observed HUD evidence, not the requested throttle setting. The unit remains
-unknown, and the Action never consults Player Journal, `Status.json`, prior
-commands, or another fallback source. It may be registered as a Monitor, but no
-speed loop is active by default.
+digit-constrained CTC candidate contains one through four digits, reaches the
+reviewed confidence threshold, and remains sufficiently close to the retained
+unrestricted candidate; otherwise it returns `UNKNOWN`. It does not run the
+text-region detector. Its value is observed HUD evidence, not the requested
+throttle setting. The unit remains unknown, and the Action never consults
+Player Journal, `Status.json`, prior commands, or another fallback source. It
+may be registered as a Monitor, but no speed loop is active by default.
 
 Target geometry uses 1080p reference pixels. `screenAngleDegrees` is clockwise
 from straight up. `centerZone.inside` is a current-frame circular membership
@@ -120,8 +121,10 @@ Invoke it with `{"stationConfirmed":true}` only after high-level visual
 confirmation that the ship is inside a station, then follow the returned NDJSON
 watch URL. While its phase is `AWAITING_AUTO_LAUNCH`, arrange Auto Launch slowly
 with the visual focus evidence loop above. Once Auto Launch is observed, the
-workflow waits for three consecutive visual-handover samples: empty raw flight
-prompt, Mass Lock `ON`, and a `KNOWN` positive `ship-speed` display value. Only
-then does it own the 100% throttle, Mass Lock OFF, and 0% throttle sequence.
+workflow first requires a `KNOWN` speed of at least 15 to prove that Auto
+Launch actually moved the ship. It then requires the Auto Launch prompt to be
+absent for five samples, Mass Lock to remain `ON`, and two `KNOWN` speed samples
+at or below 10 within the bounded confirmation window. Only then does it own
+the 100% throttle, Mass Lock OFF, and 0% throttle sequence.
 Stream events distinguish `commandedThrottle` from the independently observed
 speed fields and report `COMPLETED`, `FAILED`, or `CANCELLED`.
