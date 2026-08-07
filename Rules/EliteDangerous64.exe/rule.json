@@ -6,6 +6,11 @@
       "runtime": "ppocr-onnx-dml-worker-v1",
       "residency": "while-rule-active",
       "artifactId": "ppocrv6-small-rec-onnx-official-w480"
+    },
+    "ocr/text-regions": {
+      "runtime": "ppocr-onnx-dml-text-regions-worker-v1",
+      "residency": "while-rule-active",
+      "artifactId": "ppocrv6-small-det-onnx-official"
     }
   },
   "actions": {
@@ -17,9 +22,22 @@
     },
     "elite-dangerous/ship-status": {
       "path": "Actions/ship-status",
-      "runtime": "windows-observation-v1",
+      "runtime": "windows-composite-action-v1",
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/ship-status-text-regions": {
+      "path": "Actions/ship-status-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/ship-status-classifier": {
+      "path": "Actions/ship-status-classifier",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
     },
     "elite-dangerous/flight-prompt-text": {
       "path": "Actions/flight-prompt-text",

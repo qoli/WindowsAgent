@@ -161,9 +161,11 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) != 1 || profiles[0].ID != "ocr/w480" ||
-		profiles[0].Runtime != PpOcrWorkerRuntimeV1 || profiles[0].Residency != ResidencyRuleActive ||
-		profiles[0].ArtifactID != "ppocrv6-small-rec-onnx-official-w480" {
+	if len(profiles) != 2 || profiles[0].ID != "ocr/text-regions" ||
+		profiles[0].Runtime != PpOcrTextRegionsWorkerRuntimeV1 || profiles[0].Residency != ResidencyRuleActive ||
+		profiles[0].ArtifactID != "ppocrv6-small-det-onnx-official" ||
+		profiles[1].ID != "ocr/w480" || profiles[1].Runtime != PpOcrWorkerRuntimeV1 ||
+		profiles[1].Residency != ResidencyRuleActive || profiles[1].ArtifactID != "ppocrv6-small-rec-onnx-official-w480" {
 		t.Fatalf("profiles = %+v", profiles)
 	}
 	action, err := store.ResolveAction("elite-dangerous/flight-prompt-text")
@@ -184,7 +186,7 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if shipStatus.Runtime != ObservationRuntimeV1 || !reflect.DeepEqual(shipStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
+	if shipStatus.Runtime != CompositeActionRuntimeV1 || !reflect.DeepEqual(shipStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
 		t.Fatalf("ship-status action = %+v", shipStatus)
 	}
 }

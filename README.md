@@ -44,9 +44,10 @@ today:
   the centered 1920x1080 coordinate space and returns the cyan target marker's
   reference-coordinate offset, clockwise screen angle, Euclidean center
   distance, and circular center-zone membership
-- `elite-dangerous/ship-status` reads the reviewed lower-right HUD region at
-  reference density without OCR and independently reports Mass Lock, Landing
-  Gear, and Cargo Scoop as `ON`, `OFF`, or evidence-preserving `UNKNOWN`
+- `elite-dangerous/ship-status` composes a reference-density PP-OCR boxes
+  Action with a pure game classifier; it confirms only `MASS`, `LANDING`, and
+  `CARGO`, then independently reports the three same-frame indicators as
+  `ON`, `OFF`, or evidence-preserving `UNKNOWN`
 - `elite-dangerous/flight-status` accepts the complete raw output of
   `elite-dangerous/flight-prompt-text`, combines OCR confidence with finite
   phrase similarity, and returns one reviewed flight state or `UNKNOWN`
@@ -96,8 +97,11 @@ The Action runtime and registration refactor is partially landed:
 - its separate pure `elite-dangerous/flight-status` Action classifies that raw
   output into a finite status only when both combined-confidence and
   best-candidate-margin thresholds pass; unresolved content remains `UNKNOWN`;
-- Elite Dangerous also declares the finite non-OCR
-  `elite-dangerous/ship-status` Action for its three lower-right indicators;
+- Elite Dangerous also declares `ocr/text-regions`, a resident PP-OCRv6 small
+  detection-plus-recognition profile. The generic raw Action returns text
+  quadrilaterals, recognition evidence, and bounded same-frame left context;
+  the composite `elite-dangerous/ship-status` Action alone owns its three
+  lower-right indicator semantics;
 - `windows-key-action-v1` is a game-neutral finite runtime for one serialized,
   foreground-bound scan-code key press. A Rule package may declare literal
   canonical keys directly or select a game-specific binding source; callers
@@ -318,11 +322,11 @@ python3 tools/ppocr-runtime/publish.py \
   --output-dir "$PWD/.build/ppocr-directml"
 ```
 
-The PP-OCR runtime implements fixed-aspect text-line recognition only. It
-disables ONNX Runtime CPU-provider fallback; dynamic-shape models and regions
-whose natural 48-pixel-height width differs from the pinned model fail. Its
-framed worker mode loads the model once and serves finite recognition calls.
-WindowsAgent starts that worker only while the owning Rule is active, as
+The PP-OCR executable implements two separately declared framed pipelines:
+fixed-aspect text-line recognition and region detection plus w480 recognition.
+The latter returns quadrilateral boxes rather than game state. Both disable
+ONNX Runtime CPU-provider fallback and validate pinned artifacts exactly.
+WindowsAgent starts either worker only while the owning Rule is active, as
 declared by `runtimeProfiles`; residency is not a Monitor and emits no event.
 The developer benchmark tool remains a separate bounded diagnostic.
 
@@ -587,7 +591,7 @@ internal/streamaction/            bounded streaming Starlark orchestration runti
 internal/wgc/                    WGC and Direct3D 11 implementation
 Rules/<Executable.exe>/          distributable Rule v5 runtimes, Actions, registrations, and guidance
 runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
-runtimes/ppocr-directml/          strict fixed-shape resident PP-OCR worker
+runtimes/ppocr-directml/          resident PP-OCR text-line and text-regions workers
 tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter
 tools/screenparser-runtime/       reproducible Windows runtime publisher
 tools/ppocr-model/                official PP-OCR artifacts and shape specialization

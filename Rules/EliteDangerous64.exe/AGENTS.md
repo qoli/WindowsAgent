@@ -30,12 +30,13 @@ evidence-preserving `UNKNOWN`. It performs no capture or OCR and malformed raw
 input fails schema validation. Multi-frame confirmation, event emission, and
 follow-up execution remain registration concerns.
 
-`elite-dangerous/ship-status` is a finite, non-OCR Action over the reviewed
-lower-right HUD region. It locates the three-row status group and independently
-returns `massLock`, `landingGear`, and `cargoScoop`. Each indicator reports
-`ON` for cyan filled, `OFF` for orange hollow, or `UNKNOWN` when the complete
-group cannot be established; its `on` field is strictly paired as `true`,
-`false`, or `null`.
+`elite-dangerous/ship-status` is a finite composite Action over the reviewed
+lower-right HUD region. Its internal raw Action captures at reference density
+and uses the Rule-declared `ocr/text-regions` resident DirectML worker to return
+PP-OCR quadrilateral boxes and recognition evidence. A pure classifier confirms
+only `MASS`, `LANDING`, and `CARGO`, then independently returns `massLock`,
+`landingGear`, and `cargoScoop` as cyan `ON`, orange `OFF`, or evidence-preserving
+`UNKNOWN`. It never falls back to the retired fixed-position triplet detector.
 
 Target geometry uses 1080p reference pixels. `screenAngleDegrees` is clockwise
 from straight up. `centerZone.inside` is a current-frame circular membership
@@ -44,9 +45,9 @@ state; do not infer an entered/exited transition without Monitor history.
 These four observation Actions declare that they may be registered as either a
 Monitor or Reaction, but the registration catalog is intentionally empty. Do not infer a
 timer or event subscription from `registrableAs`; declaring eligibility does
-not activate a registration. Likewise, `ocr/w480` residency only keeps model
-initialization alive while this Rule owns the foreground; it does not invoke
-the OCR Action or produce an event.
+not activate a registration. Likewise, `ocr/w480` and `ocr/text-regions`
+residency only keep model initialization alive while this Rule owns the
+foreground; neither invokes an OCR Action nor produces an event.
 
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
 supervising model chooses exactly one logical `UP`, `DOWN`, `LEFT`, `RIGHT`,

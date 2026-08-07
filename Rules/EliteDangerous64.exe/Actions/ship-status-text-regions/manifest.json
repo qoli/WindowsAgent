@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous ship status text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 1600, "y": 880, "w": 320, "h": 150},
+  "sampling": "reference",
+  "maxPixels": 262144,
+  "leftContextWidth": 32,
+  "verticalPadding": 0
+}

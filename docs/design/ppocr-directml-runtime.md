@@ -2,13 +2,14 @@
 
 ## Status
 
-**Landed for fixed-region text-line recognition.**
+**Landed for fixed-region text-line recognition and text-region boxes.**
 
 The reproducible official-model preparer, fixed-shape recognition artifact,
 strict request/config contracts, DirectML runtime, CTC decoder, framed resident
 worker, Rule-scoped lifecycle manager, reference-density Rule Action, installer,
 publisher, developer benchmark tool, and Windows contract tests are
-implemented. Arbitrary text detection remains outside this pipeline.
+implemented. The same executable also implements a separately declared
+`text-region-detection-recognition` pipeline.
 
 ## Boundary
 
@@ -20,9 +21,12 @@ recognition ONNX model and generated character dictionary once, then handles
 strictly framed finite recognition requests through that same initialized
 DirectML session.
 
-The runtime does not capture the screen, choose a region, detect arbitrary text
-boxes, classify game state, write the event stream, invoke another Action, or
-switch models. The executable-specific `ppocr-w480-text-v1` Action owns its
+The runtime does not capture the screen, choose a region, classify game state,
+write the event stream, invoke another Action, or switch models. The
+game-neutral text-regions worker accepts one caller-owned RGB24 region and
+returns PP-OCR quadrilaterals, detection confidence, recognized text,
+recognition confidence, provenance, and timings. The executable-specific
+`ppocr-w480-text-v1` Action owns its
 reviewed 1920x1080 reference rectangle and reference sampling choice. A Rule
 runtime profile may keep the initialized worker alive only while that Rule is
 active; reuse does not make the OCR runtime a Monitor.
@@ -45,6 +49,21 @@ separation thresholds. It returns `UNKNOWN` when the evidence does not support
 a finite state. Connecting repeated OCR results to events remains an explicit
 registration concern.
 
+The Elite Dangerous ship-status path uses a second profile and three finite
+layers:
+
+```text
+reference-density 320x150 lower-right ROI
+  -> resident PP-OCRv6 small detection + w480 recognition
+  -> raw boxes plus same-line, same-frame left-context pixels
+  -> pure MASS / LANDING / CARGO prefix classifier
+  -> independent ON / OFF / UNKNOWN indicators
+```
+
+Boxes touching the ROI's left edge return an explicitly empty left context.
+Only the game classifier interprets left context; a required label with missing
+or ambiguous context becomes `UNKNOWN`.
+
 ## Rule lifecycle
 
 Rule schema version 5 declares worker residency independently from Action and
@@ -57,6 +76,11 @@ registration declarations:
       "runtime": "ppocr-onnx-dml-worker-v1",
       "residency": "while-rule-active",
       "artifactId": "ppocrv6-small-rec-onnx-official-w480"
+    },
+    "ocr/text-regions": {
+      "runtime": "ppocr-onnx-dml-text-regions-worker-v1",
+      "residency": "while-rule-active",
+      "artifactId": "ppocrv6-small-det-onnx-official"
     }
   }
 }
@@ -128,9 +152,16 @@ median was `30.76 ms` and p95 was `48.07 ms`. The separate semantic Action uses
 of at least `0.10`. In the reviewed set, the weakest accepted example scored
 `0.3149`, while the strongest unknown interference scored `0.2382`.
 
+On 2026-08-08, the text-regions worker processed the reviewed Elite Dangerous
+ship-status crop at the configured 320x150 reference density. It returned
+`MASS LOCKED`, `LANDING GEAR.`, and `CARGO SCOOP` as separate boxes with
+recognition confidence `0.954942`, `0.989826`, and `0.998809`. Model load was
+`862.16 ms`; the measured complete request was `698.28 ms`, including six line
+recognitions. This is one device-specific validation sample, not a throughput
+guarantee.
+
 ## Deferred
 
-- port the official DB text-detection and quadrilateral crop stages;
 - add explicit registration execution for multi-frame confirmation and event
   emission;
 - benchmark a separately declared PP-OCRv6 tiny artifact only if small remains

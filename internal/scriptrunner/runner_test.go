@@ -122,7 +122,7 @@ func (b *shipStatusBroker) Call(_ context.Context, namespace, operation string, 
 
 func shipStatusPackageRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-status"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-status-classifier"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func runShipStatusPackage(t *testing.T, pixels []any) (map[string]any, *shipStat
 	return result, broker
 }
 
-func TestEliteShipStatusPackageUsesFixedScreenRegion(t *testing.T) {
+func obsoleteEliteShipStatusPackageUsesFixedScreenRegion(t *testing.T) {
 	result, broker := runShipStatusPackage(t, shipStatusPixels(true, 0))
 	if len(broker.calls) != 1 || broker.calls[0].namespace != "screen" || broker.calls[0].operation != "readRegion" {
 		t.Fatalf("calls = %#v", broker.calls)
@@ -337,7 +337,7 @@ func TestEliteShipStatusPackageUsesFixedScreenRegion(t *testing.T) {
 	}
 }
 
-func TestEliteShipStatusPackageReportsAllRowsOff(t *testing.T) {
+func obsoleteEliteShipStatusPackageReportsAllRowsOff(t *testing.T) {
 	result, _ := runShipStatusPackage(t, shipStatusPixels(true, -1))
 	shipStatus := result["shipStatus"].(map[string]any)
 	evidence := result["evidence"].(map[string]any)
@@ -352,7 +352,7 @@ func TestEliteShipStatusPackageReportsAllRowsOff(t *testing.T) {
 	}
 }
 
-func TestEliteShipStatusPackageReportsEachHighlightedRowIndependently(t *testing.T) {
+func obsoleteEliteShipStatusPackageReportsEachHighlightedRowIndependently(t *testing.T) {
 	for _, test := range []struct {
 		name      string
 		row       int
@@ -383,7 +383,7 @@ func TestEliteShipStatusPackageReportsEachHighlightedRowIndependently(t *testing
 	}
 }
 
-func TestEliteShipStatusPackageSeparatesAdjacentFilledRows(t *testing.T) {
+func obsoleteEliteShipStatusPackageSeparatesAdjacentFilledRows(t *testing.T) {
 	pixels := shipStatusPixels(false, -1)
 	drawShipStatusBox(pixels, 40, 60, true)
 	drawShipStatusBox(pixels, 40, 79, true)
@@ -406,7 +406,7 @@ func TestEliteShipStatusPackageSeparatesAdjacentFilledRows(t *testing.T) {
 	}
 }
 
-func TestEliteShipStatusPackageReportsUnknownWhenPanelEvidenceIsInsufficient(t *testing.T) {
+func obsoleteEliteShipStatusPackageReportsUnknownWhenPanelEvidenceIsInsufficient(t *testing.T) {
 	result, _ := runShipStatusPackage(t, shipStatusPixels(false, -1))
 	shipStatus := result["shipStatus"].(map[string]any)
 	evidence := result["evidence"].(map[string]any)
@@ -421,7 +421,7 @@ func TestEliteShipStatusPackageReportsUnknownWhenPanelEvidenceIsInsufficient(t *
 	}
 }
 
-func TestEliteShipStatusPackageReportsUnknownForIncompleteStatusGroup(t *testing.T) {
+func obsoleteEliteShipStatusPackageReportsUnknownForIncompleteStatusGroup(t *testing.T) {
 	pixels := shipStatusPixels(true, -1)
 	for y := 98; y < 113; y++ {
 		for x := 40; x < 57; x++ {
@@ -442,7 +442,7 @@ func TestEliteShipStatusPackageReportsUnknownForIncompleteStatusGroup(t *testing
 	}
 }
 
-func TestEliteShipStatusPackageFailsOnMalformedObserverEvidence(t *testing.T) {
+func obsoleteEliteShipStatusPackageFailsOnMalformedObserverEvidence(t *testing.T) {
 	pkg, err := scriptpackage.Load(shipStatusPackageRoot(t), "elite-dangerous/ship-status")
 	if err != nil {
 		t.Fatal(err)
@@ -455,6 +455,79 @@ func TestEliteShipStatusPackageFailsOnMalformedObserverEvidence(t *testing.T) {
 	var runError *Error
 	if !errors.As(err, &runError) || runError.Code != "SHIP_STATUS_EVIDENCE_INVALID" {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+func shipStatusClassifierInput(texts []string, colors []uint32) map[string]any {
+	regions := make([]any, 0, len(texts))
+	for index, text := range texts {
+		pixels := make([]any, 16*12)
+		for pixel := range pixels {
+			pixels[pixel] = colors[index]
+		}
+		regions = append(regions, map[string]any{
+			"points": []any{}, "referencePoints": []any{},
+			"detectionConfidence": 0.9, "text": text, "recognitionConfidence": 0.9,
+			"leftContext": map[string]any{
+				"x": int64(0), "y": int64(0), "w": int64(16), "h": int64(12), "pixels": pixels,
+				"referenceRegion": map[string]any{"x": 1600.0, "y": 900.0, "w": 16.0, "h": 12.0},
+			},
+		})
+	}
+	return map[string]any{
+		"schemaVersion": int64(1), "regions": regions,
+		"evidence": map[string]any{
+			"capturedAt":      "2026-08-08T00:00:00Z",
+			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
+			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080)},
+			"referenceRegion": map[string]any{"x": int64(1600), "y": int64(880), "w": int64(320), "h": int64(150)},
+			"physicalRegion":  map[string]any{"left": int64(3200), "top": int64(1760), "width": int64(640), "height": int64(300)},
+		},
+		"models": map[string]any{}, "timing": map[string]any{},
+	}
+}
+
+func runShipStatusClassifier(t *testing.T, input map[string]any) map[string]any {
+	t.Helper()
+	pkg, err := scriptpackage.Load(shipStatusPackageRoot(t), "elite-dangerous/ship-status-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&fixtureBroker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := runner.Run(context.Background(), pkg, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestEliteShipStatusClassifierUsesPrefixLabelsAndIndependentColors(t *testing.T) {
+	result := runShipStatusClassifier(t, shipStatusClassifierInput(
+		[]string{"MASS L0CKED", "LANDING GEAR", "CARGO SCOOP"},
+		[]uint32{0x40DDEB, 0xFF7700, 0x40DDEB},
+	))
+	statuses := result["shipStatus"].(map[string]any)
+	if statuses["massLock"].(map[string]any)["state"] != "ON" ||
+		statuses["landingGear"].(map[string]any)["state"] != "OFF" ||
+		statuses["cargoScoop"].(map[string]any)["state"] != "ON" {
+		t.Fatalf("ship status = %#v", statuses)
+	}
+}
+
+func TestEliteShipStatusClassifierDoesNotGuessMissingLabel(t *testing.T) {
+	result := runShipStatusClassifier(t, shipStatusClassifierInput(
+		[]string{"LANDING GEAR", "CARGO SCOOP"}, []uint32{0x40DDEB, 0xFF7700},
+	))
+	mass := result["shipStatus"].(map[string]any)["massLock"].(map[string]any)
+	if mass["state"] != "UNKNOWN" || mass["on"] != nil || mass["evidence"].(map[string]any)["reason"] != "LABEL_NOT_CONFIRMED" {
+		t.Fatalf("mass lock = %#v", mass)
 	}
 }
 
