@@ -14,6 +14,11 @@
       "runtime": "windows-observation-v1",
       "registrableAs": ["monitor", "reaction"]
     },
+    "elite-dangerous/ship-status": {
+      "path": "Actions/ship-status",
+      "runtime": "windows-observation-v1",
+      "registrableAs": ["monitor", "reaction"]
+    },
     "elite-dangerous/flight-prompt-text": {
       "path": "Actions/flight-prompt-text",
       "runtime": "ppocr-w480-text-v1",

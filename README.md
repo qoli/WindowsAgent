@@ -44,6 +44,9 @@ today:
   the centered 1920x1080 coordinate space and returns the cyan target marker's
   reference-coordinate offset, clockwise screen angle, Euclidean center
   distance, and circular center-zone membership
+- `elite-dangerous/ship-status` reads the reviewed lower-right HUD region at
+  reference density without OCR and independently reports Mass Lock, Landing
+  Gear, and Cargo Scoop as `ON`, `OFF`, or evidence-preserving `UNKNOWN`
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,
@@ -82,6 +85,8 @@ The Action registration refactor is partially landed:
   finite `elite-dangerous/flight-prompt-text` Action. The Action captures one
   reviewed 400x40 reference-density region and returns raw OCR text, confidence,
   provenance, model identity, and timing; it performs no state classification;
+- Elite Dangerous also declares the finite non-OCR
+  `elite-dangerous/ship-status` Action for its three lower-right indicators;
 - all shipped Rules have no active Monitor or Reaction registrations by
   default; no scheduler or reaction dispatcher is shipped yet.
 

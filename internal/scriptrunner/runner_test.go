@@ -33,6 +33,11 @@ type compassBroker struct {
 	calls  []fixtureObserverCall
 }
 
+type shipStatusBroker struct {
+	pixels []any
+	calls  []fixtureObserverCall
+}
+
 func (b *compassBroker) BlobPath(context.Context, map[string]any) (string, error) {
 	return "", errors.New("unexpected compass blob path request")
 }
@@ -76,6 +81,222 @@ func compassPackageRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func (b *shipStatusBroker) BlobPath(context.Context, map[string]any) (string, error) {
+	return "", errors.New("unexpected ship-status blob path request")
+}
+
+func (b *shipStatusBroker) RecordNative(context.Context, NativeRecord) error {
+	return errors.New("unexpected ship-status native record")
+}
+
+func (b *shipStatusBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	return map[string]any{
+		"sampling": "reference",
+		"coordinateSpace": map[string]any{
+			"width": int64(1920), "height": int64(1080), "fit": "centered-16:9",
+		},
+		"frame": map[string]any{
+			"width": int64(3840), "height": int64(2160),
+			"capturedAt": "2026-08-07T01:02:03Z",
+			"foreground": map[string]any{"processId": int64(7), "executableName": "EliteDangerous64.exe"},
+		},
+		"viewport": map[string]any{
+			"left": int64(0), "top": int64(0), "width": int64(3840), "height": int64(2160),
+		},
+		"region": map[string]any{
+			"x": int64(1650), "y": int64(900), "w": int64(270), "h": int64(180),
+		},
+		"physicalRegion": map[string]any{
+			"left": int64(3300), "top": int64(1800), "width": int64(540), "height": int64(360),
+		},
+		"image": map[string]any{
+			"width": int64(270), "height": int64(180),
+			"encoding": "rgb24-packed", "pixels": b.pixels,
+		},
+	}, nil
+}
+
+func shipStatusPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-status"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func drawShipStatusBox(pixels []any, left, top int, highlighted bool) {
+	color := uint32(0xFF7700)
+	if highlighted {
+		color = uint32(0x40DDEB)
+	}
+	for y := top; y < top+15; y++ {
+		for x := left; x < left+17; x++ {
+			if highlighted || y < top+3 || y >= top+12 || x < left+3 || x >= left+14 {
+				pixels[y*270+x] = color
+			}
+		}
+	}
+}
+
+func shipStatusPixels(panelVisible bool, highlightedRow int) []any {
+	pixels := make([]any, 270*180)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	if panelVisible {
+		for row := 0; row < 3; row++ {
+			drawShipStatusBox(pixels, 40, 60+row*19, highlightedRow == row)
+		}
+	}
+	return pixels
+}
+
+func runShipStatusPackage(t *testing.T, pixels []any) (map[string]any, *shipStatusBroker) {
+	t.Helper()
+	pkg, err := scriptpackage.Load(shipStatusPackageRoot(t), "elite-dangerous/ship-status")
+	if err != nil {
+		t.Fatalf("load package: %v", err)
+	}
+	broker := &shipStatusBroker{pixels: pixels}
+	runner, err := New(broker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result, broker
+}
+
+func TestEliteShipStatusPackageUsesFixedScreenRegion(t *testing.T) {
+	result, broker := runShipStatusPackage(t, shipStatusPixels(true, 0))
+	if len(broker.calls) != 1 || broker.calls[0].namespace != "screen" || broker.calls[0].operation != "readRegion" {
+		t.Fatalf("calls = %#v", broker.calls)
+	}
+	wantArguments := map[string]any{
+		"x": int64(1650), "y": int64(900), "w": int64(270), "h": int64(180),
+		"sampling": "reference",
+	}
+	if got := broker.calls[0].arguments; !reflect.DeepEqual(got, wantArguments) {
+		t.Fatalf("screen arguments = %#v, want %#v", got, wantArguments)
+	}
+	shipStatus := result["shipStatus"].(map[string]any)
+	massLock := shipStatus["massLock"].(map[string]any)
+	landingGear := shipStatus["landingGear"].(map[string]any)
+	cargoScoop := shipStatus["cargoScoop"].(map[string]any)
+	evidence := result["evidence"].(map[string]any)
+	if massLock["state"] != "ON" || massLock["on"] != true || massLock["color"] != "cyan" ||
+		landingGear["state"] != "OFF" || cargoScoop["state"] != "OFF" ||
+		evidence["panelVisible"] != true || evidence["statusTripletDetected"] != true {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEliteShipStatusPackageReportsAllRowsOff(t *testing.T) {
+	result, _ := runShipStatusPackage(t, shipStatusPixels(true, -1))
+	shipStatus := result["shipStatus"].(map[string]any)
+	evidence := result["evidence"].(map[string]any)
+	for _, name := range []string{"massLock", "landingGear", "cargoScoop"} {
+		status := shipStatus[name].(map[string]any)
+		if status["state"] != "OFF" || status["on"] != false || status["color"] != "orange" {
+			t.Fatalf("%s = %#v", name, status)
+		}
+	}
+	if evidence["panelVisible"] != true {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
+func TestEliteShipStatusPackageReportsEachHighlightedRowIndependently(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		row       int
+		indicator string
+	}{
+		{name: "mass lock", row: 0, indicator: "massLock"},
+		{name: "landing gear", row: 1, indicator: "landingGear"},
+		{name: "cargo scoop", row: 2, indicator: "cargoScoop"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, _ := runShipStatusPackage(t, shipStatusPixels(true, test.row))
+			shipStatus := result["shipStatus"].(map[string]any)
+			for _, name := range []string{"massLock", "landingGear", "cargoScoop"} {
+				status := shipStatus[name].(map[string]any)
+				wantState := "OFF"
+				wantOn := false
+				wantColor := "orange"
+				if name == test.indicator {
+					wantState = "ON"
+					wantOn = true
+					wantColor = "cyan"
+				}
+				if status["state"] != wantState || status["on"] != wantOn || status["color"] != wantColor {
+					t.Fatalf("%s = %#v, want state=%s on=%v color=%s", name, status, wantState, wantOn, wantColor)
+				}
+			}
+		})
+	}
+}
+
+func TestEliteShipStatusPackageReportsUnknownWhenPanelEvidenceIsInsufficient(t *testing.T) {
+	result, _ := runShipStatusPackage(t, shipStatusPixels(false, -1))
+	shipStatus := result["shipStatus"].(map[string]any)
+	evidence := result["evidence"].(map[string]any)
+	for _, name := range []string{"massLock", "landingGear", "cargoScoop"} {
+		status := shipStatus[name].(map[string]any)
+		if status["state"] != "UNKNOWN" || status["on"] != nil || status["color"] != nil {
+			t.Fatalf("%s = %#v", name, status)
+		}
+	}
+	if evidence["panelVisible"] != false {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
+func TestEliteShipStatusPackageReportsUnknownForIncompleteStatusGroup(t *testing.T) {
+	pixels := shipStatusPixels(true, -1)
+	for y := 98; y < 113; y++ {
+		for x := 40; x < 57; x++ {
+			pixels[y*270+x] = uint32(0)
+		}
+	}
+	result, _ := runShipStatusPackage(t, pixels)
+	shipStatus := result["shipStatus"].(map[string]any)
+	evidence := result["evidence"].(map[string]any)
+	for _, name := range []string{"massLock", "landingGear", "cargoScoop"} {
+		status := shipStatus[name].(map[string]any)
+		if status["state"] != "UNKNOWN" || status["on"] != nil {
+			t.Fatalf("%s = %#v", name, status)
+		}
+	}
+	if evidence["statusTripletDetected"] != false {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
+func TestEliteShipStatusPackageFailsOnMalformedObserverEvidence(t *testing.T) {
+	pkg, err := scriptpackage.Load(shipStatusPackageRoot(t), "elite-dangerous/ship-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&shipStatusBroker{pixels: []any{uint32(0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
+	var runError *Error
+	if !errors.As(err, &runError) || runError.Code != "SHIP_STATUS_EVIDENCE_INVALID" {
+		t.Fatalf("error = %#v", err)
+	}
 }
 
 func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {

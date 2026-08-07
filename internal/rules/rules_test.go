@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -146,7 +147,7 @@ func TestRepositoryRulesUseActionModelWithoutDefaultRegistrations(t *testing.T) 
 	}
 }
 
-func TestEliteRuleDeclaresResidentW480RuntimeAndRawTextAction(t *testing.T) {
+func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
 	if err != nil {
 		t.Fatal(err)
@@ -170,6 +171,13 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndRawTextAction(t *testing.T) {
 	}
 	if action.Runtime != PpOcrActionRuntimeV1 || action.RuntimeProfile != "ocr/w480" {
 		t.Fatalf("action = %+v", action)
+	}
+	shipStatus, err := store.ResolveAction("elite-dangerous/ship-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shipStatus.Runtime != ObservationRuntimeV1 || !reflect.DeepEqual(shipStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
+		t.Fatalf("ship-status action = %+v", shipStatus)
 	}
 }
 

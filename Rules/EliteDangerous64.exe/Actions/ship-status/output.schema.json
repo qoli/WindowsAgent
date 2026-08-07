@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "statusIndicator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "on", "color", "referenceX", "referenceY"],
+      "properties": {
+        "state": {"enum": ["ON", "OFF", "UNKNOWN"]},
+        "on": {"type": ["boolean", "null"]},
+        "color": {"type": ["string", "null"], "enum": ["orange", "cyan", null]},
+        "referenceX": {"type": ["integer", "null"], "minimum": 1650, "maximum": 1919},
+        "referenceY": {"type": ["integer", "null"], "minimum": 900, "maximum": 1079}
+      },
+      "oneOf": [
+        {"properties": {"state": {"const": "ON"}, "on": {"const": true}, "color": {"const": "cyan"}, "referenceX": {"type": "integer"}, "referenceY": {"type": "integer"}}},
+        {"properties": {"state": {"const": "OFF"}, "on": {"const": false}, "color": {"const": "orange"}, "referenceX": {"type": "integer"}, "referenceY": {"type": "integer"}}},
+        {"properties": {"state": {"const": "UNKNOWN"}, "on": {"const": null}, "color": {"const": null}, "referenceX": {"const": null}, "referenceY": {"const": null}}}
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "shipStatus", "evidence"],
+  "properties": {
+    "schemaVersion": {"const": 3},
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "capturedAt"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "capturedAt": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
+    },
+    "coordinateSpace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fit"],
+      "properties": {
+        "width": {"const": 1920},
+        "height": {"const": 1080},
+        "fit": {"const": "centered-16:9"}
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "w", "h"],
+      "properties": {
+        "x": {"const": 1650},
+        "y": {"const": 900},
+        "w": {"const": 270},
+        "h": {"const": 180}
+      }
+    },
+    "physicalRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["left", "top", "width", "height"],
+      "properties": {
+        "left": {"type": "integer", "minimum": 0, "maximum": 16383},
+        "top": {"type": "integer", "minimum": 0, "maximum": 16383},
+        "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "height": {"type": "integer", "minimum": 1, "maximum": 16384}
+      }
+    },
+    "shipStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["massLock", "landingGear", "cargoScoop"],
+      "properties": {
+        "massLock": {"$ref": "#/$defs/statusIndicator"},
+        "landingGear": {"$ref": "#/$defs/statusIndicator"},
+        "cargoScoop": {"$ref": "#/$defs/statusIndicator"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["panelVisible", "orangePixelCount", "cyanPixelCount", "colorRunCount", "boxCandidateCount", "statusTripletDetected", "statusTripletScore"],
+      "properties": {
+        "panelVisible": {"type": "boolean"},
+        "orangePixelCount": {"type": "integer", "minimum": 0, "maximum": 48600},
+        "cyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 48600},
+        "colorRunCount": {"type": "integer", "minimum": 0, "maximum": 48600},
+        "boxCandidateCount": {"type": "integer", "minimum": 0, "maximum": 48600},
+        "statusTripletDetected": {"type": "boolean"},
+        "statusTripletScore": {"type": "integer", "minimum": 0, "maximum": 540}
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "shipStatus": {
+          "properties": {
+            "massLock": {"properties": {"state": {"enum": ["ON", "OFF"]}}},
+            "landingGear": {"properties": {"state": {"enum": ["ON", "OFF"]}}},
+            "cargoScoop": {"properties": {"state": {"enum": ["ON", "OFF"]}}}
+          }
+        },
+        "evidence": {"properties": {"panelVisible": {"const": true}, "statusTripletDetected": {"const": true}}}
+      }
+    },
+    {
+      "properties": {
+        "shipStatus": {
+          "properties": {
+            "massLock": {"properties": {"state": {"const": "UNKNOWN"}}},
+            "landingGear": {"properties": {"state": {"const": "UNKNOWN"}}},
+            "cargoScoop": {"properties": {"state": {"const": "UNKNOWN"}}}
+          }
+        },
+        "evidence": {"properties": {"panelVisible": {"const": false}, "statusTripletDetected": {"const": false}, "statusTripletScore": {"const": 0}}}
+      }
+    }
+  ]
+}

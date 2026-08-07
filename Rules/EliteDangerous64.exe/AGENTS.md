@@ -24,11 +24,18 @@ raw OCR text evidence only. Spelling correction, Elite Dangerous state mapping,
 multi-frame confirmation, event emission, and follow-up execution belong to a
 separate Action or registration.
 
+`elite-dangerous/ship-status` is a finite, non-OCR Action over the reviewed
+lower-right HUD region. It locates the three-row status group and independently
+returns `massLock`, `landingGear`, and `cargoScoop`. Each indicator reports
+`ON` for cyan filled, `OFF` for orange hollow, or `UNKNOWN` when the complete
+group cannot be established; its `on` field is strictly paired as `true`,
+`false`, or `null`.
+
 Target geometry uses 1080p reference pixels. `screenAngleDegrees` is clockwise
 from straight up. `centerZone.inside` is a current-frame circular membership
 state; do not infer an entered/exited transition without Monitor history.
 
-Both Actions declare that they may be registered as either a Monitor or
+All three Actions declare that they may be registered as either a Monitor or
 Reaction, but the registration catalog is intentionally empty. Do not infer a
 timer or event subscription from `registrableAs`; declaring eligibility does
 not activate a registration. Likewise, `ocr/w480` residency only keeps model
