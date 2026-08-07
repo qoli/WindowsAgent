@@ -52,15 +52,19 @@ jobs:
         run: >-
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0
           go build -trimpath
-          -o .build/windows-capture-agent.exe
+          -o .build/windows-capture-agent-console.exe
           ./cmd/windows-capture-agent
-      - name: Build GUI executable
+      - name: Build installable GUI executable
         run: >-
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0
           go build -trimpath
           -ldflags "-H=windowsgui"
-          -o .build/windows-capture-agent-background.exe
+          -o .build/windows-capture-agent.exe
           ./cmd/windows-capture-agent
+      - name: Verify capture-agent PE subsystems
+        run: |
+          python3 scripts/verify-windows-pe-subsystem.py .build/windows-capture-agent.exe --expect gui
+          python3 scripts/verify-windows-pe-subsystem.py .build/windows-capture-agent-console.exe --expect console
       - name: Build event stream executable
         run: >-
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0
@@ -68,6 +72,8 @@ jobs:
           -ldflags "-H=windowsgui"
           -o .build/windows-event-stream.exe
           ./cmd/windows-event-stream
+      - name: Verify event-stream PE subsystem
+        run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-event-stream.exe --expect gui
       - name: Publish ScreenParser DirectML runtime
         run: >-
           python3 tools/screenparser-runtime/publish.py

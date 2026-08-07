@@ -2,13 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "selection", "control", "key", "activePreset", "bindingFile"],
+  "required": ["schemaVersion", "selection", "control", "key", "activePreset", "bindingFile", "bindingSource", "backend", "scanCode", "extended", "holdMs"],
   "properties": {
     "schemaVersion": {"const": 1},
     "selection": {"enum": ["UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK"]},
     "control": {"enum": ["UI_Up", "UI_Down", "UI_Left", "UI_Right", "UI_Select", "UI_Back"]},
     "key": {"type": "string", "pattern": "^Key_[A-Za-z0-9]+$", "maxLength": 32},
     "activePreset": {"type": "string", "minLength": 1, "maxLength": 128},
-    "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260}
+    "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260},
+    "bindingSource": {"const": "frontier-active-preset-v1"},
+    "backend": {"const": "sendinput-scancode"},
+    "scanCode": {"type": "integer", "minimum": 1, "maximum": 255},
+    "extended": {"type": "boolean"},
+    "holdMs": {"const": 40}
   }
 }

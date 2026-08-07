@@ -98,13 +98,17 @@ The Action runtime and registration refactor is partially landed:
   best-candidate-margin thresholds pass; unresolved content remains `UNKNOWN`;
 - Elite Dangerous also declares the finite non-OCR
   `elite-dangerous/ship-status` Action for its three lower-right indicators;
+- `windows-key-action-v1` is a game-neutral finite runtime for one serialized,
+  foreground-bound scan-code key press. A Rule package may declare literal
+  canonical keys directly or select a game-specific binding source; callers
+  still choose only schema-valid logical selections;
 - `elite-dangerous/ui-control` performs exactly one model-selected logical UI
   movement or selection. It is intentionally a slow screenshot/one-key
   interaction surface for tasks such as arranging `AUTO LAUNCH`;
 - `elite-dangerous/set-throttle` resolves `SetSpeedZero` or `SetSpeed100` from
   the game's currently active `.binds` preset on every invocation, reports the
   resolved preset/file/key, rechecks the foreground game, and sends one
-  key-down/key-up pair;
+  scan-code key-down/key-up pair with backend and timing evidence;
 - `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
   It immediately returns a durable watch URL, asks the supervising model to
   arrange Auto Launch, observes flight and Mass Lock state, then commands 100%
@@ -121,14 +125,7 @@ the target Windows machine.
 ```bash
 mkdir -p .build
 go test ./...
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath \
-  -o .build/windows-capture-agent.exe \
-  ./cmd/windows-capture-agent
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath -ldflags "-H=windowsgui" \
-  -o .build/windows-capture-agent-background.exe \
-  ./cmd/windows-capture-agent
+./scripts/build-windows-capture-agent.sh
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
   -o .build/windows-observer.exe \
@@ -148,14 +145,16 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
 cp -R Rules .build/
 ```
 
-The GUI-subsystem build runs without a console window.
+`windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
+The build script also emits `windows-capture-agent-console.exe` for interactive
+terminal diagnostics and verifies both PE subsystem values before returning.
 
 ## Run
 
-Run the console build inside the signed-in Windows user's session:
+Run the diagnostic console build inside the signed-in Windows user's session:
 
 ```powershell
-.\.build\windows-capture-agent.exe `
+.\.build\windows-capture-agent-console.exe `
   --rules-dir (Resolve-Path .\.build\Rules)
 ```
 
@@ -252,7 +251,7 @@ From the repository root in PowerShell:
 
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent-background.exe `
+  -ExecutablePath .\.build\windows-capture-agent.exe `
   -RulesPath .\.build\Rules `
   -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle
 ```
@@ -265,6 +264,19 @@ interactive-token at-logon Scheduled Tasks for capture and event streaming,
 starts them, and verifies both `/healthz` endpoints. All five executables must
 be present beside the selected capture build artifact before installation.
 The installer does not create an SCM service or modify Windows Firewall.
+It validates that both persistent executables use PE subsystem `Windows GUI`
+before stopping any existing task. A console build is rejected because Task
+Scheduler's `Hidden` setting cannot suppress its console window.
+
+For a code-only update of an existing installation, use the transactional
+updater. It checks the GUI subsystem and SHA-256 before stopping the task,
+keeps the prior executable as a timestamped backup, verifies the interactive
+listener and `/healthz`, and restores the backup if the new process fails:
+
+```powershell
+.\scripts\update-windows-capture-agent.ps1 `
+  -ExecutablePath .\.build\windows-capture-agent.exe
+```
 
 Builds that stored `rule.agents.sha256`, or matched Rule metadata without
 `rule.scripts`, `rule.actions`, `rule.registrations`, or `rule.runtimes`, use an
@@ -274,7 +286,7 @@ asked to preserve them:
 
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent-background.exe `
+  -ExecutablePath .\.build\windows-capture-agent.exe `
   -RulesPath .\.build\Rules `
   -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
   -ArchiveIncompatibleCaptures

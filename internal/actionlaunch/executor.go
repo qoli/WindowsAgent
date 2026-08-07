@@ -92,10 +92,10 @@ func (e *Executor) RunAction(ctx context.Context, invocation scriptlaunch.Invoca
 		if err != nil {
 			return Result{}, err
 		}
-	case rules.FrontierKeyActionRuntimeV1:
+	case rules.WindowsKeyActionRuntimeV1:
 		pkg, err := inputaction.Load(action.Root)
 		if err != nil {
-			return Result{}, fmt.Errorf("load Frontier key Action %q: %w", action.ID, err)
+			return Result{}, fmt.Errorf("load Windows key Action %q: %w", action.ID, err)
 		}
 		output, err = e.input.Run(ctx, pkg, invocation.Inputs, action.RuleID)
 		if err != nil {

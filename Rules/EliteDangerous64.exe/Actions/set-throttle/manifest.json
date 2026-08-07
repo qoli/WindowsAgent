@@ -5,6 +5,8 @@
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "taskDocument": "TASK.md",
+  "bindingSource": {"type": "frontier-active-preset-v1"},
+  "gesture": {"type": "press", "holdMs": 40},
   "selector": {"inputField": "percent"},
   "bindings": {
     "0": {"control": "SetSpeedZero"},

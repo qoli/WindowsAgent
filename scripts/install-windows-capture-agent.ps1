@@ -28,6 +28,32 @@ $ErrorActionPreference = "Stop"
 
 $taskDescription = "gameGuide Go WGC screenshot agent; interactive-user session required"
 $eventTaskDescription = "gameGuide durable local event stream; interactive-user session required"
+
+function Get-WindowsPESubsystem {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+        throw "executable does not have a valid DOS header: $Path"
+    }
+    $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+    $optionalOffset = $peOffset + 24
+    if ($peOffset -lt 0 -or $optionalOffset + 0x46 -gt $bytes.Length -or `
+        $bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset + 1] -ne 0x45 -or `
+        $bytes[$peOffset + 2] -ne 0 -or $bytes[$peOffset + 3] -ne 0) {
+        throw "executable does not have a valid PE header: $Path"
+    }
+    return [BitConverter]::ToUInt16($bytes, $optionalOffset + 0x44)
+}
+
+function Assert-GUIExecutable {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Label)
+    $subsystem = Get-WindowsPESubsystem -Path $Path
+    if ($subsystem -ne 2) {
+        throw ("$Label must use PE Windows GUI subsystem 2; found subsystem $subsystem. " +
+            "Persistent Scheduled Tasks cannot hide a console-subsystem executable.")
+    }
+}
+
 $minimumVersion = [version]"10.0.18362.0"
 $osVersion = [Environment]::OSVersion.Version
 if (-not [Environment]::Is64BitOperatingSystem) {
@@ -44,6 +70,7 @@ $sourceExecutable = [IO.Path]::GetFullPath($ExecutablePath)
 if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
     throw "agent executable does not exist: $sourceExecutable"
 }
+Assert-GUIExecutable -Path $sourceExecutable -Label "capture agent executable"
 $sourceBinDir = Split-Path -Parent $sourceExecutable
 $runtimeSources = [ordered]@{
     "windows-observation-job.exe" = Join-Path $sourceBinDir "windows-observation-job.exe"
@@ -56,6 +83,7 @@ foreach ($runtime in $runtimeSources.GetEnumerator()) {
         throw "required Starlark launcher runtime does not exist: $($runtime.Value)"
     }
 }
+Assert-GUIExecutable -Path $runtimeSources["windows-event-stream.exe"] -Label "event stream executable"
 $sourceRules = [IO.Path]::GetFullPath($RulesPath)
 if (-not (Test-Path -LiteralPath $sourceRules -PathType Container)) {
     throw "Rules directory does not exist: $sourceRules"

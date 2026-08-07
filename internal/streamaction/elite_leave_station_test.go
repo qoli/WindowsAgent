@@ -52,6 +52,8 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		return json.Marshal(map[string]any{
 			"schemaVersion": 1, "selection": selection, "control": control,
 			"key": key, "activePreset": "ControlPadKeyboard", "bindingFile": "ControlPadKeyboard.4.2.binds",
+			"bindingSource": "frontier-active-preset-v1", "backend": "sendinput-scancode",
+			"scanCode": 31, "extended": false, "holdMs": 40,
 		})
 	default:
 		return nil, errors.New("unexpected Action: " + id)

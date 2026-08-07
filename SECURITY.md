@@ -30,11 +30,12 @@ execution alike.
 `POST /v1/actions/invoke` is also unauthenticated. Reachable clients can start
 declared finite or streaming Actions. For the Elite Dangerous Rule this now
 includes foreground-bound keyboard input through `ui-control`, `set-throttle`,
-and the supervised `leave-station` workflow. The input runtime accepts only
-Rule-declared logical controls, resolves the player's active binding preset,
-requires the exact owning foreground process, and sends one key press per
-finite invocation, but these constraints do not replace network access
-control. Do not expose port 8787 outside the trusted network boundary.
+and the supervised `leave-station` workflow. The game-neutral input runtime
+accepts only Rule-declared bindings, either literal canonical keys or logical
+controls resolved by a declared game binding source. It requires the exact
+owning foreground process and sends one scan-code press per finite invocation,
+but these constraints do not replace network access control. Do not expose
+port 8787 outside the trusted network boundary.
 
 The Script endpoint accepts only a capability ID and schema-valid logical
 inputs, not Host file roots, package paths, runtime overrides, DLL paths, or

@@ -9,4 +9,5 @@ logical control and revalidates `EliteDangerous64.exe` immediately before
 input injection. A missing or ambiguous active preset file, missing binding,
 unsupported key name, ambiguous Keyboard bindings, or foreground drift fails
 without sending a substitute key. The output names the resolved preset,
-binding file, logical control, and actual key.
+binding file, logical control, actual key, scan-code backend, scan code,
+extended-key flag, and the manifest-declared 40 millisecond hold time.

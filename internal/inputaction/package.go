@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/qoli/WindowsAgent/internal/strictjson"
+	"github.com/qoli/WindowsAgent/internal/windowsinput"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -28,9 +29,25 @@ type Manifest struct {
 	InputSchema   string             `json:"inputSchema"`
 	OutputSchema  string             `json:"outputSchema"`
 	TaskDocument  string             `json:"taskDocument"`
+	BindingSource BindingSource      `json:"bindingSource"`
+	Gesture       Gesture            `json:"gesture"`
 	Selector      Selector           `json:"selector"`
 	Bindings      map[string]Binding `json:"bindings"`
 	Files         []string           `json:"files"`
+}
+
+const (
+	BindingSourceFrontier = "frontier-active-preset-v1"
+	BindingSourceLiteral  = "literal-key-v1"
+)
+
+type BindingSource struct {
+	Type string `json:"type"`
+}
+
+type Gesture struct {
+	Type   string `json:"type"`
+	HoldMS uint32 `json:"holdMs"`
 }
 
 type Selector struct {
@@ -40,6 +57,7 @@ type Selector struct {
 
 type Binding struct {
 	Control string `json:"control"`
+	Key     string `json:"key"`
 }
 
 type Package struct {
@@ -134,14 +152,36 @@ func validateManifest(manifest Manifest) error {
 	if len(manifest.Bindings) == 0 {
 		return errors.New("input Action bindings must not be empty")
 	}
+	if manifest.BindingSource.Type != BindingSourceFrontier && manifest.BindingSource.Type != BindingSourceLiteral {
+		return fmt.Errorf("input Action bindingSource type %q is unsupported", manifest.BindingSource.Type)
+	}
+	if manifest.Gesture.Type != "press" || manifest.Gesture.HoldMS == 0 || manifest.Gesture.HoldMS > 1000 {
+		return errors.New("input Action gesture must declare press with holdMs between 1 and 1000")
+	}
 	if constant {
 		if _, ok := manifest.Bindings[manifest.Selector.Constant]; !ok {
 			return errors.New("input Action selector constant does not name a binding")
 		}
 	}
 	for name, binding := range manifest.Bindings {
-		if name == "" || strings.TrimSpace(name) != name || binding.Control == "" || strings.TrimSpace(binding.Control) != binding.Control {
+		if name == "" || strings.TrimSpace(name) != name {
 			return fmt.Errorf("input Action binding %q is not canonical", name)
+		}
+		control := binding.Control != ""
+		key := binding.Key != ""
+		if control == key {
+			return fmt.Errorf("input Action binding %q must declare exactly one of control or key", name)
+		}
+		if control && (manifest.BindingSource.Type != BindingSourceFrontier || strings.TrimSpace(binding.Control) != binding.Control) {
+			return fmt.Errorf("input Action binding %q has an invalid Frontier control", name)
+		}
+		if key {
+			if manifest.BindingSource.Type != BindingSourceLiteral || strings.TrimSpace(binding.Key) != binding.Key {
+				return fmt.Errorf("input Action binding %q has an invalid literal key", name)
+			}
+			if _, err := windowsinput.VirtualKey(binding.Key); err != nil {
+				return fmt.Errorf("input Action binding %q: %w", name, err)
+			}
 		}
 	}
 	if manifest.Files == nil || len(manifest.Files) != 3 {

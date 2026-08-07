@@ -19,7 +19,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [ScreenParser loop module](screenparser-loop-module.md) | Retired | Historical autonomous capture/inference/event-loop design, replaced by the on-demand Action. |
 | [Screen scene reducer](screen-scene-reducer.md) | Retired | Historical reducer for the retired raw ScreenParser event stream. |
 | [Mini reaction runtime](mini-reaction-runtime.md) | Draft | Subscribe a configured small VLM to events and allow only declared Game actions. |
-| [Windows action runtime](windows-action-runtime.md) | Partially landed | Resolve Elite logical controls from the active preset and execute one serialized foreground-bound key press. |
+| [Windows action runtime](windows-action-runtime.md) | Partially landed | Execute one manifest-declared, foreground-bound scan-code key press from either a literal key or a game binding provider. |
 
 Status meanings:
 

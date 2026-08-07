@@ -51,12 +51,14 @@ the OCR Action or produce an event.
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
 supervising model chooses exactly one logical `UP`, `DOWN`, `LEFT`, `RIGHT`,
 `SELECT`, or `BACK` after inspecting a fresh screenshot. The runtime resolves
-that logical control from the game's active binding preset; never assume Space
-or any other fixed physical key.
+that logical control from the game's active binding preset, then uses the
+game-neutral Windows scan-code input driver; never assume Space or any other
+fixed physical key. Successful output includes the binding source, backend,
+scan code, extended-key flag, and configured hold time.
 
 `elite-dangerous/set-throttle` is deterministic. It accepts only `0` or `100`,
 resolves the corresponding logical throttle control from the active preset on
-each invocation, and reports the exact resolved key evidence.
+each invocation, and reports the exact resolved key and injection evidence.
 
 `elite-dangerous/leave-station` is an interruptible linear Streaming Action.
 Invoke it with `{"stationConfirmed":true}` only after high-level visual

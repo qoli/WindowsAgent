@@ -10,4 +10,7 @@ The runtime reads the game's active preset, finds the unique `.binds` file
 whose XML `PresetName` matches it, resolves the selected logical control,
 requires exactly one supported Keyboard binding, revalidates the owning
 foreground process, and sends one key-down/key-up pair. Missing, unsupported,
-or ambiguous presets and bindings fail explicitly.
+or ambiguous presets and bindings fail explicitly. The game-neutral Windows
+driver converts the resolved key to a scan code and holds it for the
+manifest-declared 40 milliseconds; it does not fall back to virtual-key or
+window-message injection.

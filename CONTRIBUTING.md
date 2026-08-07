@@ -16,9 +16,7 @@ gofmt -w $(find cmd internal -name '*.go')
 go test ./...
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
 mkdir -p .build
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath -o .build/windows-capture-agent.exe \
-  ./cmd/windows-capture-agent
+./scripts/build-windows-capture-agent.sh
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -o .build/windows-observer.exe \
   ./cmd/windows-observer
@@ -29,6 +27,10 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -o .build/windows-observation-job.exe \
   ./cmd/windows-observation-job
 ```
+
+The canonical `windows-capture-agent.exe` is the persistent GUI-subsystem
+artifact. Do not deploy `windows-capture-agent-console.exe`; the installer and
+transactional updater reject it before stopping a running task.
 
 Capture and observation-runtime changes should also be verified in a signed-in
 interactive Windows session. Include only privacy-minimized metadata and

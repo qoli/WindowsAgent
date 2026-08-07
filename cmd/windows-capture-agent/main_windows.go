@@ -29,6 +29,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/wgc"
+	"github.com/qoli/WindowsAgent/internal/windowsinput"
 )
 
 var version = "dev"
@@ -98,7 +99,7 @@ func run() (runErr error) {
 			logger.Error("ocr_runtime_shutdown_failed", "error", err)
 		}
 	}()
-	inputController, err := inputaction.NewController(cfg.FrontierBindingsRoot, inputaction.WindowsSender{}, foreground.Snapshot)
+	inputController, err := inputaction.NewController(cfg.FrontierBindingsRoot, windowsinput.WindowsDriver{}, foreground.Snapshot)
 	if err != nil {
 		return fmt.Errorf("initialize Frontier key Action controller: %w", err)
 	}

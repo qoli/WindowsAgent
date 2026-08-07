@@ -36,13 +36,13 @@
     },
     "elite-dangerous/ui-control": {
       "path": "Actions/ui-control",
-      "runtime": "frontier-key-action-v1",
+      "runtime": "windows-key-action-v1",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
     "elite-dangerous/set-throttle": {
       "path": "Actions/set-throttle",
-      "runtime": "frontier-key-action-v1",
+      "runtime": "windows-key-action-v1",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
