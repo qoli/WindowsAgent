@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,26 @@ type leaveStationCaller struct {
 	speedAlwaysUnknown       bool
 	promptGarbageAfterLaunch bool
 	invalidUnknownSpeedValue bool
+	autoLaunchCycles         map[int]bool
+	speedByCycle             map[int]int
 	throttles                []int
+}
+
+func (c *leaveStationCaller) isAutoLaunchCycle() bool {
+	if c.autoLaunchCycles != nil {
+		return c.autoLaunchCycles[c.cycle]
+	}
+	return c.cycle >= 2 && c.cycle <= 4
+}
+
+func (c *leaveStationCaller) visibleSpeed() (int, bool) {
+	if c.speedByCycle != nil {
+		value, ok := c.speedByCycle[c.cycle]
+		return value, ok
+	}
+	values := map[int]int{3: 20, 4: 55, 9: 7, 11: 7, 12: 40, 13: 80, 14: 100, 15: 100}
+	value, ok := values[c.cycle]
+	return value, ok
 }
 
 func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -28,7 +48,7 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		c.cycle++
 		text := ""
 		confidence := 0.0
-		if c.cycle == 2 || c.cycle == 3 {
+		if c.isAutoLaunchCycle() {
 			text = "AUTO LAUNCH IN PROGRESS"
 			confidence = 0.99
 		} else if c.promptGarbageAfterLaunch && c.cycle >= 4 {
@@ -38,7 +58,7 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		return json.Marshal(map[string]any{"text": text, "confidence": confidence})
 	case "elite-dangerous/flight-status":
 		state := "UNKNOWN"
-		if c.cycle == 2 || c.cycle == 3 {
+		if c.isAutoLaunchCycle() {
 			state = "AUTO_LAUNCH"
 		}
 		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
@@ -46,7 +66,7 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		state := "ON"
 		massOffAt := c.massOffAt
 		if massOffAt == 0 {
-			massOffAt = 8
+			massOffAt = 14
 		}
 		if c.forceMassOff || c.cycle >= massOffAt {
 			state = "OFF"
@@ -55,13 +75,30 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 	case "elite-dangerous/ship-speed":
 		state := "UNKNOWN"
 		var value any
-		if !c.speedAlwaysUnknown && c.cycle >= 4 {
+		if speed, ok := c.visibleSpeed(); !c.speedAlwaysUnknown && ok {
 			state = "KNOWN"
-			value = 60 + c.cycle*10
+			value = speed
 		} else if c.invalidUnknownSpeedValue {
 			value = 99
 		}
-		return json.Marshal(map[string]any{"speed": map[string]any{"state": state, "displayValue": value}})
+		rawText := any(nil)
+		detectionConfidence := 0.0
+		recognitionConfidence := 0.0
+		reason := "SPEED_BOX_NOT_FOUND"
+		if state == "KNOWN" {
+			rawText = strconv.Itoa(value.(int))
+			detectionConfidence = 0.91
+			recognitionConfidence = 0.88
+			reason = "VISUAL_SPEED_CONFIRMED"
+		}
+		return json.Marshal(map[string]any{"speed": map[string]any{
+			"state": state, "displayValue": value,
+			"evidence": map[string]any{
+				"reason": reason, "rawText": rawText,
+				"detectionConfidence":   detectionConfidence,
+				"recognitionConfidence": recognitionConfidence,
+			},
+		}})
 	case "elite-dangerous/set-throttle":
 		percent, ok := inputs["percent"].(int64)
 		if !ok {
@@ -114,7 +151,7 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","lastObservedSpeedDisplayValue":150,"lastObservedSpeedState":"KNOWN","sampleCount":9,"schemaVersion":2,"task":"LEAVE_STATION"}` {
+	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","lastObservedSpeedDisplayValue":100,"lastObservedSpeedState":"KNOWN","sampleCount":15,"schemaVersion":2,"task":"LEAVE_STATION"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
@@ -140,11 +177,12 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 		t.Fatal("leave-station emitted no throttle-100 command payload")
 	}
 	if departing["commandedThrottle"] != float64(100) || departing["observedSpeedState"] != "KNOWN" ||
-		departing["observedSpeedDisplayValue"] != float64(120) {
+		departing["observedSpeedDisplayValue"] != float64(7) || departing["gateDecision"] != "HANDOVER_CONFIRMED" {
 		t.Fatalf("first departing payload=%#v", departing)
 	}
 	completed := reporter.payloads[len(reporter.payloads)-1]
-	if completed["commandedThrottle"] != float64(0) || completed["observedSpeedDisplayValue"] != float64(150) {
+	if completed["commandedThrottle"] != float64(0) || completed["observedSpeedDisplayValue"] != float64(100) ||
+		completed["gateDecision"] != "MASS_LOCK_RELEASE_CONFIRMED" {
 		t.Fatalf("completed payload=%#v", completed)
 	}
 }
@@ -177,9 +215,27 @@ func TestEliteLeaveStationWorkflowDoesNotTreatUnknownSpeedAsAutoLaunchHandover(t
 	}
 }
 
-func TestEliteLeaveStationWorkflowDoesNotTreatUnclassifiedPromptAsClear(t *testing.T) {
+func TestEliteLeaveStationWorkflowAllowsUnclassifiedPromptAfterObservedLifecycle(t *testing.T) {
 	pkg := loadEliteLeaveStationPackage(t)
-	caller := &leaveStationCaller{massOffAt: 2000, promptGarbageAfterLaunch: true}
+	caller := &leaveStationCaller{promptGarbageAfterLaunch: true}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("throttle controls=%v", caller.throttles)
+	}
+}
+
+func TestEliteLeaveStationWorkflowIgnoresIsolatedLowSpeedWhileAutoLaunchVisible(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{
+		massOffAt:        2000,
+		autoLaunchCycles: map[int]bool{2: true, 3: true, 4: true},
+		speedByCycle:     map[int]int{3: 20, 4: 0},
+	}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
 	)

@@ -7,6 +7,11 @@ the reviewed confidence rule. OCR strings containing the known ambiguous
 digit `8` are intentionally unresolved by this first contract because the
 review corpus contains high-confidence `0/8` and `6/8` substitutions.
 
+When PP-OCR returns multiple boxes in the calibrated speed zone, accepted
+numeric candidates outrank rejected boxes. Ties use recognition confidence,
+detection confidence, then distance from the calibrated speed-zone center; a
+high detection score alone cannot hide a valid one-digit value such as `7`.
+
 `displayValue` is the number visibly printed by the HUD. `unit` remains null:
 this Action does not infer normal-flight or supercruise units from an unseen
 source. Missing, covered, malformed, or ambiguous evidence returns

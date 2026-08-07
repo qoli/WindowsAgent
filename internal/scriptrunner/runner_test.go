@@ -552,6 +552,10 @@ func shipSpeedClassifierInput(text string, recognitionConfidence float64, points
 			},
 		})
 	}
+	return shipSpeedClassifierInputWithRegions(regions)
+}
+
+func shipSpeedClassifierInputWithRegions(regions []any) map[string]any {
 	return map[string]any{
 		"schemaVersion": int64(1), "regions": regions,
 		"evidence": map[string]any{
@@ -616,6 +620,32 @@ func TestEliteShipSpeedClassifierDoesNotFallbackWhenVisualBoxIsMissing(t *testin
 	speed := result["speed"].(map[string]any)
 	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
 		speed["evidence"].(map[string]any)["reason"] != "SPEED_BOX_NOT_FOUND" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierPrefersAcceptedSevenOverHigherDetectionRejectedBox(t *testing.T) {
+	rejectedPoints := speedBox()
+	sevenPoints := []any{
+		map[string]any{"x": 145.0, "y": 68.0}, map[string]any{"x": 163.0, "y": 68.0},
+		map[string]any{"x": 163.0, "y": 98.0}, map[string]any{"x": 145.0, "y": 98.0},
+	}
+	regions := []any{
+		map[string]any{
+			"points": rejectedPoints, "referencePoints": rejectedPoints,
+			"detectionConfidence": 0.99, "text": "288", "recognitionConfidence": 0.95,
+			"leftContext": map[string]any{"x": int64(0), "y": int64(0), "w": int64(0), "h": int64(0), "pixels": []any{}, "referenceRegion": map[string]any{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}},
+		},
+		map[string]any{
+			"points": sevenPoints, "referencePoints": sevenPoints,
+			"detectionConfidence": 0.71, "text": "7", "recognitionConfidence": 0.90,
+			"leftContext": map[string]any{"x": int64(0), "y": int64(0), "w": int64(0), "h": int64(0), "pixels": []any{}, "referenceRegion": map[string]any{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}},
+		},
+	}
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInputWithRegions(regions))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(7) ||
+		speed["evidence"].(map[string]any)["rawText"] != "7" {
 		t.Fatalf("speed = %#v", speed)
 	}
 }

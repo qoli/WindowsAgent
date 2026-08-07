@@ -8,15 +8,28 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "commandedThrottle", "instruction", "throttleCommand"],
+      "required": ["phase", "sample", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedReason", "observedSpeedRawText", "observedSpeedDetectionConfidence", "observedSpeedRecognitionConfidence", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "handoverCandidate", "gateDecision", "commandedThrottle", "instruction", "throttleCommand"],
       "properties": {
-        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "DEPARTING", "COMPLETED"]},
+        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "HANDOVER_CANDIDATE", "DEPARTING", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
         "flightStatus": {"enum": ["SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "AUTO_DOCK", "UNKNOWN"]},
         "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"enum": ["ON", "OFF", "UNKNOWN"]},
         "observedSpeedState": {"enum": ["KNOWN", "UNKNOWN"]},
         "observedSpeedDisplayValue": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
+        "observedSpeedReason": {"type": ["string", "null"], "maxLength": 64},
+        "observedSpeedRawText": {"type": ["string", "null"], "maxLength": 32},
+        "observedSpeedDetectionConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "observedSpeedRecognitionConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "autoLaunchSeen": {"type": "boolean"},
+        "samplesSinceAutoLaunchSeen": {"type": ["integer", "null"], "minimum": 0, "maximum": 2000},
+        "movementSeen": {"type": "boolean"},
+        "maximumObservedSpeed": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
+        "lowSpeedConfirmations": {"type": "integer", "minimum": 0, "maximum": 8},
+        "handoverCandidate": {"type": "boolean"},
+        "gateDecision": {
+          "enum": ["WAITING_FOR_AUTO_LAUNCH", "AUTO_LAUNCH_VISIBLE", "WAITING_FOR_MOVEMENT", "WAITING_FOR_AUTO_LAUNCH_ABSENCE", "WAITING_FOR_MASS_LOCK", "WAITING_FOR_LOW_SPEED_CONFIRMATION", "HANDOVER_CONFIRMED", "WAITING_FOR_MASS_LOCK_RELEASE", "MASS_LOCK_RELEASE_CONFIRMED"]
+        },
         "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 100, null]},
         "instruction": {"type": ["string", "null"], "maxLength": 256},
         "throttleCommand": {

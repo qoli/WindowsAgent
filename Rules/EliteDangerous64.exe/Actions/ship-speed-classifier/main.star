@@ -86,6 +86,31 @@ def candidate(region):
         "reason": "VISUAL_SPEED_CONFIRMED" if accepted else reason,
     }
 
+def candidate_priority(value):
+    shape = value["geometry"]
+    center_distance = 1000000.0
+    if shape != None:
+        center_distance = math.hypot(shape["centerX"] - 162.5, shape["centerY"] - 100.0)
+    return {
+        "accepted": 1 if value["accepted"] else 0,
+        "recognitionConfidence": value["region"]["recognitionConfidence"],
+        "detectionConfidence": value["region"]["detectionConfidence"],
+        "centerDistance": center_distance,
+    }
+
+def is_better_candidate(current, selected):
+    if selected == None:
+        return True
+    current_priority = candidate_priority(current)
+    selected_priority = candidate_priority(selected)
+    if current_priority["accepted"] != selected_priority["accepted"]:
+        return current_priority["accepted"] > selected_priority["accepted"]
+    if current_priority["recognitionConfidence"] != selected_priority["recognitionConfidence"]:
+        return current_priority["recognitionConfidence"] > selected_priority["recognitionConfidence"]
+    if current_priority["detectionConfidence"] != selected_priority["detectionConfidence"]:
+        return current_priority["detectionConfidence"] > selected_priority["detectionConfidence"]
+    return current_priority["centerDistance"] < selected_priority["centerDistance"]
+
 def main(ctx):
     raw = ctx.inputs
     selected = None
@@ -93,7 +118,7 @@ def main(ctx):
         current = candidate(region)
         if current["geometry"] == None or not current["geometry"]["inSpeedZone"]:
             continue
-        if selected == None or region["detectionConfidence"] > selected["region"]["detectionConfidence"]:
+        if is_better_candidate(current, selected):
             selected = current
 
     state = "UNKNOWN"
