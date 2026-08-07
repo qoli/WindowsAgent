@@ -126,7 +126,8 @@ The Action runtime and registration refactor is partially landed:
   arrange Auto Launch, and requires empty prompt text plus positive `KNOWN`
   visual speed while Mass Lock remains ON before commanding 100% throttle. Its
   events keep observed speed separate from commanded throttle, and it commands
-  0% only after the Mass Lock OFF gate;
+  0% only after the Mass Lock OFF gate, then requires three consecutive
+  workflow-local zero-speed OCR confirmations before reporting completion;
 - all shipped Rules have no active Monitor or Reaction registrations by
   default; no scheduler or reaction dispatcher is shipped yet.
 
@@ -511,11 +512,17 @@ The initial stream event is `AWAITING_AUTO_LAUNCH`. During that phase the
 supervising model captures the screen and invokes `elite-dangerous/ui-control`
 one logical key at a time. The Streaming Action does not guess a fixed Auto
 Launch key sequence. Once the prompt pipeline observes Auto Launch, the
-workflow waits for three consecutive visual-handover samples: empty raw prompt,
-Mass Lock ON, and a positive `KNOWN` ship-speed value. Only then does it
-continue autonomously through the 100% command, Mass Lock OFF, and 0% command
-gates. Stream fields named `observedSpeed*` are visual evidence;
-`commandedThrottle` is input-command state.
+workflow requires observed movement, five samples without a classified Auto
+Launch prompt, Mass Lock ON, and two reliable speeds at or below 10. It then
+continues autonomously through the 100% command and Mass Lock OFF gates. After
+the 0% command it enters `VERIFYING_STOP`; three consecutive current frames
+must provide matching raw and constrained `0` candidates with the declared
+workflow confidence and margin bounds before `COMPLETED`. This final phase
+calls only the resident speed OCR path and marks flight prompt and Mass Lock as
+unobserved instead of repeating their slower pipelines or retaining stale
+values. Stream fields named `observedSpeed*` are visual evidence;
+`commandedThrottle` is input-command state, and inability to confirm the stop
+fails explicitly.
 
 Only one capture can run at a time. A concurrent request receives
 `409 capture_busy`. Each completed artifact contains `capture.png` and

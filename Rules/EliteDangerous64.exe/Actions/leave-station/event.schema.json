@@ -8,10 +8,11 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedReason", "observedSpeedRawText", "observedSpeedRawConfidence", "observedSpeedConstrainedText", "observedSpeedConstrainedConfidence", "observedSpeedRawConstraintMargin", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "handoverCandidate", "gateDecision", "commandedThrottle", "instruction", "throttleCommand"],
+      "required": ["phase", "sample", "observationScope", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedReason", "observedSpeedRawText", "observedSpeedRawConfidence", "observedSpeedConstrainedText", "observedSpeedConstrainedConfidence", "observedSpeedRawConstraintMargin", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "handoverCandidate", "gateDecision", "samplesSinceThrottleZero", "zeroSpeedConfirmations", "stopGateDecision", "commandedThrottle", "instruction", "throttleCommand"],
       "properties": {
-        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "HANDOVER_CANDIDATE", "DEPARTING", "COMPLETED"]},
+        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "HANDOVER_CANDIDATE", "DEPARTING", "VERIFYING_STOP", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
+        "observationScope": {"enum": ["NONE", "FULL", "SPEED_ONLY"]},
         "flightStatus": {"enum": ["SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "AUTO_DOCK", "UNKNOWN"]},
         "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"enum": ["ON", "OFF", "UNKNOWN"]},
@@ -32,6 +33,9 @@
         "gateDecision": {
           "enum": ["WAITING_FOR_AUTO_LAUNCH", "AUTO_LAUNCH_VISIBLE", "WAITING_FOR_MOVEMENT", "WAITING_FOR_AUTO_LAUNCH_ABSENCE", "WAITING_FOR_MASS_LOCK", "WAITING_FOR_LOW_SPEED_CONFIRMATION", "HANDOVER_CONFIRMED", "WAITING_FOR_MASS_LOCK_RELEASE", "MASS_LOCK_RELEASE_CONFIRMED"]
         },
+        "samplesSinceThrottleZero": {"type": ["integer", "null"], "minimum": 0, "maximum": 60},
+        "zeroSpeedConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
+        "stopGateDecision": {"enum": ["NOT_STARTED", "WAITING_FOR_ZERO_SPEED", "ZERO_SPEED_CONFIRMED"]},
         "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 100, null]},
         "instruction": {"type": ["string", "null"], "maxLength": 256},
         "throttleCommand": {

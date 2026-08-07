@@ -20,6 +20,11 @@ type leaveStationCaller struct {
 	speedAlwaysUnknown       bool
 	promptGarbageAfterLaunch bool
 	invalidUnknownSpeedValue bool
+	stopEvidenceNever        bool
+	throttleZeroCommanded    bool
+	flightPromptCalls        int
+	shipStatusCalls          int
+	shipSpeedCalls           int
 	autoLaunchCycles         map[int]bool
 	speedByCycle             map[int]int
 	throttles                []int
@@ -45,6 +50,7 @@ func (c *leaveStationCaller) visibleSpeed() (int, bool) {
 func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
 	case "elite-dangerous/flight-prompt-text":
+		c.flightPromptCalls++
 		c.cycle++
 		text := ""
 		confidence := 0.0
@@ -63,6 +69,7 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		}
 		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
 	case "elite-dangerous/ship-status":
+		c.shipStatusCalls++
 		state := "ON"
 		massOffAt := c.massOffAt
 		if massOffAt == 0 {
@@ -73,6 +80,27 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		}
 		return json.Marshal(map[string]any{"shipStatus": map[string]any{"massLock": map[string]any{"state": state}}})
 	case "elite-dangerous/ship-speed":
+		c.shipSpeedCalls++
+		if c.throttleZeroCommanded {
+			if c.stopEvidenceNever {
+				return json.Marshal(map[string]any{"speed": map[string]any{
+					"state": "UNKNOWN", "displayValue": nil,
+					"evidence": map[string]any{
+						"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "0",
+						"rawConfidence": 0.44, "constrainedText": "0",
+						"constrainedConfidence": 0.44, "rawConstraintMargin": 0.0,
+					},
+				}})
+			}
+			return json.Marshal(map[string]any{"speed": map[string]any{
+				"state": "UNKNOWN", "displayValue": nil,
+				"evidence": map[string]any{
+					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "0",
+					"rawConfidence": 0.49, "constrainedText": "0",
+					"constrainedConfidence": 0.49, "rawConstraintMargin": 0.0,
+				},
+			}})
+		}
 		state := "UNKNOWN"
 		var value any
 		if speed, ok := c.visibleSpeed(); !c.speedAlwaysUnknown && ok {
@@ -108,6 +136,9 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 			return nil, errors.New("throttle percent is not an integer")
 		}
 		c.throttles = append(c.throttles, int(percent))
+		if percent == 0 {
+			c.throttleZeroCommanded = true
+		}
 		control := "SetSpeedZero"
 		key := "Key_X"
 		selection := "0"
@@ -154,16 +185,20 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","lastObservedSpeedDisplayValue":100,"lastObservedSpeedState":"KNOWN","sampleCount":15,"schemaVersion":2,"task":"LEAVE_STATION"}` {
+	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","finalStopState":"CONFIRMED","lastObservedSpeedConstrainedConfidence":0.49,"lastObservedSpeedConstrainedText":"0","lastObservedSpeedDisplayValue":null,"lastObservedSpeedRawConstraintMargin":0,"lastObservedSpeedRawText":"0","lastObservedSpeedState":"UNKNOWN","sampleCount":18,"schemaVersion":3,"task":"LEAVE_STATION","zeroSpeedConfirmations":3}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
+	if caller.flightPromptCalls != 15 || caller.shipStatusCalls != 15 || caller.shipSpeedCalls != 18 {
+		t.Fatalf("unexpected observation calls: prompt=%d status=%d speed=%d", caller.flightPromptCalls, caller.shipStatusCalls, caller.shipSpeedCalls)
+	}
 	joined := strings.Join(reporter.phases, ",")
 	if !strings.HasPrefix(joined, "AWAITING_AUTO_LAUNCH,AWAITING_AUTO_LAUNCH") ||
 		!strings.Contains(joined, "AUTO_LAUNCH_ACTIVE") ||
-		!strings.Contains(joined, "DEPARTING") || !strings.HasSuffix(joined, "COMPLETED") {
+		!strings.Contains(joined, "DEPARTING") || !strings.Contains(joined, "VERIFYING_STOP") ||
+		!strings.HasSuffix(joined, "COMPLETED") {
 		t.Fatalf("phases=%v", reporter.phases)
 	}
 	if len(reporter.payloads) == 0 {
@@ -184,9 +219,29 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 		t.Fatalf("first departing payload=%#v", departing)
 	}
 	completed := reporter.payloads[len(reporter.payloads)-1]
-	if completed["commandedThrottle"] != float64(0) || completed["observedSpeedDisplayValue"] != float64(100) ||
-		completed["gateDecision"] != "MASS_LOCK_RELEASE_CONFIRMED" {
+	if completed["commandedThrottle"] != float64(0) || completed["observedSpeedState"] != "UNKNOWN" ||
+		completed["observedSpeedDisplayValue"] != nil || completed["gateDecision"] != "MASS_LOCK_RELEASE_CONFIRMED" ||
+		completed["stopGateDecision"] != "ZERO_SPEED_CONFIRMED" || completed["zeroSpeedConfirmations"] != float64(3) ||
+		completed["observationScope"] != "SPEED_ONLY" || completed["massLock"] != "UNKNOWN" {
 		t.Fatalf("completed payload=%#v", completed)
+	}
+}
+
+func TestEliteLeaveStationWorkflowFailsWhenZeroSpeedIsNotVisuallyConfirmed(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{stopEvidenceNever: true}
+	reporter := &leaveStationReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, reporter,
+	)
+	if err == nil || !strings.Contains(err.Error(), "Zero speed was not visually confirmed after throttle 0") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("throttle controls=%v", caller.throttles)
+	}
+	if strings.Contains(strings.Join(reporter.phases, ","), "COMPLETED") {
+		t.Fatalf("unexpected completed phase=%v", reporter.phases)
 	}
 }
 

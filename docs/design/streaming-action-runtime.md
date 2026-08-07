@@ -79,13 +79,20 @@ fallback is attempted.
 `AWAITING_AUTO_LAUNCH`. The higher model remains responsible for slow menu
 arrangement through one-key `elite-dangerous/ui-control` calls. The workflow
 then consumes finite `flight-status`, `ship-status`, and `ship-speed` evidence.
-After Auto Launch is seen, three consecutive samples must show empty raw prompt
-text, Mass Lock ON, and positive `KNOWN` visual speed before the workflow may
-invoke binding-resolved 100% throttle. Mass Lock OFF then gates the 0% command
-and natural completion. Events distinguish `commandedThrottle` from
-`observedSpeed*`; unknown or contradictory speed never inherits command state.
-Bounded unknown evidence, contradictory transitions, and sample limits fail
-explicitly; there is no inferred state or alternate execution path.
+After Auto Launch is seen, the workflow requires an observed movement peak,
+five samples without a classified Auto Launch prompt, Mass Lock ON, and two
+reliable low-speed samples before it may invoke binding-resolved 100% throttle.
+Mass Lock OFF then gates the 0% command. The workflow enters `VERIFYING_STOP`
+instead of completing from input success: three consecutive frames must have
+matching raw and digit-constrained `0` candidates, constrained confidence at
+least `0.45`, and raw constraint margin at most `0.02`. The final loop invokes
+only resident `ship-speed` OCR. Flight prompt and Mass Lock fields use explicit
+unobserved values in `SPEED_ONLY` events rather than repeating those pipelines
+or retaining stale observations. This temporal gate leaves the finite
+classifier's stricter single-frame threshold unchanged. Events distinguish
+`commandedThrottle` from `observedSpeed*` and expose observation scope,
+stop-gate age, and confirmations; missing or contradictory evidence and sample
+limits fail explicitly, with no inferred state or alternate execution path.
 
 ## Deferred
 

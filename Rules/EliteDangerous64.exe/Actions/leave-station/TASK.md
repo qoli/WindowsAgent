@@ -1,6 +1,6 @@
 # Elite Dangerous supervised leave station
 
-This version 3 interruptible linear Streaming Action begins only after a supervising
+This version 5 interruptible linear Streaming Action begins only after a supervising
 model supplies `stationConfirmed: true`. It immediately starts observing raw
 flight prompt text, classified flight status, ship status, and visual ship
 speed, then emits `AWAITING_AUTO_LAUNCH` with instructions for the model.
@@ -19,22 +19,34 @@ the low-speed handover. Intervening `UNKNOWN` speed samples do not erase valid
 evidence, while a higher reliable value does. It then calls
 `elite-dangerous/set-throttle` with `100` and emits the resolved preset,
 binding file, logical control, and physical key. After Mass Lock is `OFF` for
-two consecutive samples, it calls the same Action with `0`, emits `COMPLETED`,
-and naturally terminates.
+two consecutive samples, it calls the same Action with `0` and enters
+`VERIFYING_STOP`. Completion requires three consecutive current-frame samples
+whose unrestricted and digit-constrained candidates are both exactly `0`,
+whose constrained confidence is at least `0.45`, and whose raw-versus-
+constrained margin is at most `0.02`. The stop loop invokes only `ship-speed`;
+it does not rerun flight-prompt or ship-status OCR after the already-confirmed
+Mass Lock OFF gate, and its events mark those unobserved fields explicitly.
+This temporal stop gate does not change the stricter single-frame `ship-speed`
+threshold, so each contributing frame may remain honestly `UNKNOWN`. A
+non-qualifying frame clears the count, and failure to confirm zero within 60
+samples fails the workflow instead of reporting completion from the throttle
+command alone.
 
 Every update separates `commandedThrottle` from `observedSpeedState` and
 `observedSpeedDisplayValue`. A successful input command is not reported as
 observed speed. Events retain the speed classifier reason, raw text and
 confidence, plus the Auto Launch age, movement latch, peak speed, low-speed
-confirmation count, handover-candidate flag and explicit gate decision. The
-terminal result likewise records the final command and the last independent
-visual speed observation.
+confirmation count, handover-candidate flag and explicit gate decision. Stop
+verification also reports its age, zero confirmation count, and decision. The
+terminal result records the final command and the evidence from the final
+independent visual speed observation.
 
 The fixed observation interval is 250 ms between sequential samples. The
 workflow fails explicitly if Auto Launch is not observed within 600 samples,
 if lifecycle handover is not confirmed within 720 samples, if Mass Lock becomes
 `OFF` before the 100% command, if Mass Lock remains `UNKNOWN` for 20 samples,
-if speed state and value contradict each other, or if departure does not
-release Mass Lock within 600 samples. Cancellation stops the workflow and
-prevents later controls. It never substitutes prior speed, commanded throttle,
-Player Journal, or `Status.json` for missing visual evidence.
+if speed state and value contradict each other, if departure does not release
+Mass Lock within 600 samples, or if zero speed is not visually confirmed within
+60 samples after the 0% command. Cancellation stops the workflow and prevents
+later controls. It never substitutes prior speed, commanded throttle, Player
+Journal, or `Status.json` for missing visual evidence.

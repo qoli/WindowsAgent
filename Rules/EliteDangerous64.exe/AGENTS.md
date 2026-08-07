@@ -125,6 +125,14 @@ workflow first requires a `KNOWN` speed of at least 15 to prove that Auto
 Launch actually moved the ship. It then requires the Auto Launch prompt to be
 absent for five samples, Mass Lock to remain `ON`, and two `KNOWN` speed samples
 at or below 10 within the bounded confirmation window. Only then does it own
-the 100% throttle, Mass Lock OFF, and 0% throttle sequence.
+the 100% throttle, Mass Lock OFF, and 0% throttle sequence. Sending 0% is not
+completion: the Action enters `VERIFYING_STOP` and requires three consecutive
+current frames where both OCR candidates are exactly `0`, constrained
+confidence is at least `0.45`, the raw-versus-constrained margin is at most
+`0.02`. This phase calls only the resident `ship-speed` OCR path; flight prompt
+and ship status are explicitly unobserved after the already-confirmed Mass Lock
+OFF gate. The workflow-local temporal gate does not weaken the finite
+`ship-speed` classifier's `0.55` single-frame threshold. If zero is not visually
+confirmed within 60 samples, the workflow fails explicitly.
 Stream events distinguish `commandedThrottle` from the independently observed
 speed fields and report `COMPLETED`, `FAILED`, or `CANCELLED`.

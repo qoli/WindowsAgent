@@ -9,11 +9,12 @@ AUTO_LAUNCH_HANDOVER_SPEED_MAX = 10
 AUTO_LAUNCH_LOW_SPEED_CONFIRMATIONS = 2
 AUTO_LAUNCH_LOW_SPEED_WINDOW = 8
 MASS_LOCK_OFF_STABLE = 2
+STOP_VERIFICATION_LIMIT = 60
+ZERO_SPEED_CONFIRMATIONS = 3
+ZERO_SPEED_MIN_CONSTRAINED_CONFIDENCE = 0.45
+ZERO_SPEED_MAX_RAW_CONSTRAINT_MARGIN = 0.02
 
-def observe():
-    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
-    flight = action.call(id="elite-dangerous/flight-status", inputs=raw)
-    ship = action.call(id="elite-dangerous/ship-status", inputs={})
+def read_speed():
     speed = action.call(id="elite-dangerous/ship-speed", inputs={})
     speed_state = speed["speed"]["state"]
     speed_value = speed["speed"]["displayValue"]
@@ -23,9 +24,6 @@ def observe():
     if speed_state == "UNKNOWN" and speed_value != None:
         fail("ship-speed returned UNKNOWN with displayValue")
     return {
-        "flightStatus": flight["flightStatus"]["state"],
-        "flightPromptText": raw["text"],
-        "massLock": ship["shipStatus"]["massLock"]["state"],
         "observedSpeedState": speed_state,
         "observedSpeedDisplayValue": speed_value,
         "observedSpeedReason": speed_evidence["reason"],
@@ -36,7 +34,44 @@ def observe():
         "observedSpeedRawConstraintMargin": speed_evidence["rawConstraintMargin"],
     }
 
-def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, movement_seen=False, maximum_observed_speed=None, low_speed_confirmations=0, handover_candidate=False, decision="WAITING_FOR_AUTO_LAUNCH"):
+def observe():
+    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
+    flight = action.call(id="elite-dangerous/flight-status", inputs=raw)
+    ship = action.call(id="elite-dangerous/ship-status", inputs={})
+    speed = read_speed()
+    return {
+        "observationScope": "FULL",
+        "flightStatus": flight["flightStatus"]["state"],
+        "flightPromptText": raw["text"],
+        "massLock": ship["shipStatus"]["massLock"]["state"],
+        "observedSpeedState": speed["observedSpeedState"],
+        "observedSpeedDisplayValue": speed["observedSpeedDisplayValue"],
+        "observedSpeedReason": speed["observedSpeedReason"],
+        "observedSpeedRawText": speed["observedSpeedRawText"],
+        "observedSpeedRawConfidence": speed["observedSpeedRawConfidence"],
+        "observedSpeedConstrainedText": speed["observedSpeedConstrainedText"],
+        "observedSpeedConstrainedConfidence": speed["observedSpeedConstrainedConfidence"],
+        "observedSpeedRawConstraintMargin": speed["observedSpeedRawConstraintMargin"],
+    }
+
+def observe_stop_speed():
+    speed = read_speed()
+    return {
+        "observationScope": "SPEED_ONLY",
+        "flightStatus": "UNKNOWN",
+        "flightPromptText": None,
+        "massLock": "UNKNOWN",
+        "observedSpeedState": speed["observedSpeedState"],
+        "observedSpeedDisplayValue": speed["observedSpeedDisplayValue"],
+        "observedSpeedReason": speed["observedSpeedReason"],
+        "observedSpeedRawText": speed["observedSpeedRawText"],
+        "observedSpeedRawConfidence": speed["observedSpeedRawConfidence"],
+        "observedSpeedConstrainedText": speed["observedSpeedConstrainedText"],
+        "observedSpeedConstrainedConfidence": speed["observedSpeedConstrainedConfidence"],
+        "observedSpeedRawConstraintMargin": speed["observedSpeedRawConstraintMargin"],
+    }
+
+def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, movement_seen=False, maximum_observed_speed=None, low_speed_confirmations=0, handover_candidate=False, decision="WAITING_FOR_AUTO_LAUNCH", samples_since_throttle_zero=None, zero_speed_confirmations=0, stop_decision="NOT_STARTED"):
     return {
         "autoLaunchSeen": auto_launch_seen,
         "samplesSinceAutoLaunchSeen": samples_since_auto_launch_seen,
@@ -45,6 +80,9 @@ def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, move
         "lowSpeedConfirmations": low_speed_confirmations,
         "handoverCandidate": handover_candidate,
         "gateDecision": decision,
+        "samplesSinceThrottleZero": samples_since_throttle_zero,
+        "zeroSpeedConfirmations": zero_speed_confirmations,
+        "stopGateDecision": stop_decision,
     }
 
 def emit_update(phase, sample, observation, gate, commanded_throttle=None, instruction=None, throttle_command=None):
@@ -53,6 +91,7 @@ def emit_update(phase, sample, observation, gate, commanded_throttle=None, instr
         payload={
             "phase": phase,
             "sample": sample,
+            "observationScope": observation["observationScope"],
             "flightStatus": observation["flightStatus"],
             "flightPromptText": observation["flightPromptText"],
             "massLock": observation["massLock"],
@@ -71,6 +110,9 @@ def emit_update(phase, sample, observation, gate, commanded_throttle=None, instr
             "lowSpeedConfirmations": gate["lowSpeedConfirmations"],
             "handoverCandidate": gate["handoverCandidate"],
             "gateDecision": gate["gateDecision"],
+            "samplesSinceThrottleZero": gate["samplesSinceThrottleZero"],
+            "zeroSpeedConfirmations": gate["zeroSpeedConfirmations"],
+            "stopGateDecision": gate["stopGateDecision"],
             "commandedThrottle": commanded_throttle,
             "instruction": instruction,
             "throttleCommand": throttle_command,
@@ -83,6 +125,7 @@ def main(ctx):
 
     sample = 0
     unknown = {
+        "observationScope": "NONE",
         "flightStatus": "UNKNOWN",
         "flightPromptText": None,
         "massLock": "UNKNOWN",
@@ -241,17 +284,71 @@ def main(ctx):
         emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100)
         if mass_lock_off_count >= MASS_LOCK_OFF_STABLE:
             throttle_0 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-            emit_update("COMPLETED", sample, observation, gate, commanded_throttle=0, throttle_command=throttle_0)
-            return {
-                "schemaVersion": 2,
-                "task": "LEAVE_STATION",
-                "completed": True,
-                "finalPhase": "COMPLETED",
-                "finalMassLock": "OFF",
-                "finalCommandedThrottle": 0,
-                "lastObservedSpeedState": observation["observedSpeedState"],
-                "lastObservedSpeedDisplayValue": observation["observedSpeedDisplayValue"],
-                "sampleCount": sample,
-            }
+            gate = gate_state(
+                auto_launch_seen=True,
+                samples_since_auto_launch_seen=samples_since_auto_launch_seen,
+                movement_seen=movement_seen,
+                maximum_observed_speed=maximum_observed_speed,
+                low_speed_confirmations=len(low_speed_samples),
+                handover_candidate=True,
+                decision="MASS_LOCK_RELEASE_CONFIRMED",
+                samples_since_throttle_zero=0,
+                zero_speed_confirmations=0,
+                stop_decision="WAITING_FOR_ZERO_SPEED",
+            )
+            emit_update("VERIFYING_STOP", sample, observation, gate, commanded_throttle=0, throttle_command=throttle_0)
+
+            zero_speed_confirmations = 0
+            for samples_since_throttle_zero in range(1, STOP_VERIFICATION_LIMIT + 1):
+                observation = observe_stop_speed()
+                sample += 1
+
+                weak_zero = (
+                    (observation["observedSpeedState"] != "KNOWN" or observation["observedSpeedDisplayValue"] == 0) and
+                    observation["observedSpeedRawText"] == "0" and
+                    observation["observedSpeedConstrainedText"] == "0" and
+                    observation["observedSpeedConstrainedConfidence"] >= ZERO_SPEED_MIN_CONSTRAINED_CONFIDENCE and
+                    observation["observedSpeedRawConstraintMargin"] <= ZERO_SPEED_MAX_RAW_CONSTRAINT_MARGIN
+                )
+                if weak_zero:
+                    zero_speed_confirmations += 1
+                else:
+                    zero_speed_confirmations = 0
+
+                stop_decision = "ZERO_SPEED_CONFIRMED" if zero_speed_confirmations >= ZERO_SPEED_CONFIRMATIONS else "WAITING_FOR_ZERO_SPEED"
+                gate = gate_state(
+                    auto_launch_seen=True,
+                    samples_since_auto_launch_seen=samples_since_auto_launch_seen,
+                    movement_seen=movement_seen,
+                    maximum_observed_speed=maximum_observed_speed,
+                    low_speed_confirmations=len(low_speed_samples),
+                    handover_candidate=True,
+                    decision="MASS_LOCK_RELEASE_CONFIRMED",
+                    samples_since_throttle_zero=samples_since_throttle_zero,
+                    zero_speed_confirmations=zero_speed_confirmations,
+                    stop_decision=stop_decision,
+                )
+                phase = "COMPLETED" if stop_decision == "ZERO_SPEED_CONFIRMED" else "VERIFYING_STOP"
+                emit_update(phase, sample, observation, gate, commanded_throttle=0)
+                if stop_decision == "ZERO_SPEED_CONFIRMED":
+                    return {
+                        "schemaVersion": 3,
+                        "task": "LEAVE_STATION",
+                        "completed": True,
+                        "finalPhase": "COMPLETED",
+                        "finalMassLock": "OFF",
+                        "finalCommandedThrottle": 0,
+                        "finalStopState": "CONFIRMED",
+                        "zeroSpeedConfirmations": zero_speed_confirmations,
+                        "lastObservedSpeedState": observation["observedSpeedState"],
+                        "lastObservedSpeedDisplayValue": observation["observedSpeedDisplayValue"],
+                        "lastObservedSpeedRawText": observation["observedSpeedRawText"],
+                        "lastObservedSpeedConstrainedText": observation["observedSpeedConstrainedText"],
+                        "lastObservedSpeedConstrainedConfidence": observation["observedSpeedConstrainedConfidence"],
+                        "lastObservedSpeedRawConstraintMargin": observation["observedSpeedRawConstraintMargin"],
+                        "sampleCount": sample,
+                    }
+                task.sleep(milliseconds=POLL_MS)
+            fail("Zero speed was not visually confirmed after throttle 0")
         task.sleep(milliseconds=POLL_MS)
     fail("Mass Lock did not become OFF before the departure sample limit")
