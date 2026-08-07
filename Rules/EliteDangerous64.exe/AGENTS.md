@@ -59,30 +59,39 @@ scan code, extended-key flag, and configured hold time.
 
 ### Visual focus confirmation for the higher execution Agent
 
-Do not call a menu item selected merely because its label is visible, orange,
-or placed on a brown or grey row. In the reviewed station cockpit UI, keyboard
-focus is shown by a saturated bright-yellow filled tile with a dark glyph or
-dark label. Unfocused main-menu rows retain orange labels without that
-bright-yellow fill.
+Do not infer keyboard focus from one color or one static frame. Elite
+Dangerous uses its configured HUD color throughout the interface, so orange or
+bright-yellow appearance alone is not a focus rule. Before navigating, the
+higher execution Agent must first identify and calibrate the current menu's
+highlight state from a fresh screenshot and a reversible, one-step visual
+test. Relevant evidence may include a changed fill, border, brightness, text
+contrast, glyph treatment, or contextual label, but only a change synchronized
+with a completed directional input establishes which treatment means focused
+in the current UI state.
 
-The focus is not confined to the vertical text menu. It may be on the icon row
-above it. In the reviewed sequence, the `RETURN TO SURFACE` elevator icon at
-the upper right of that row had the bright-yellow filled tile while every main
-menu row was unfocused. One `UP` produced no visible movement at that boundary.
-One subsequent `DOWN` moved the bright-yellow fill to `STARPORT SERVICES`; a
-second `DOWN` moved it to `AUTO LAUNCH`.
+Focus is not confined to the vertical text menu. It may be on the icon row
+above it, so calibration must include both areas. In one reviewed default-color
+station sequence, the `RETURN TO SURFACE` elevator icon initially had a filled
+tile. One `UP` produced no visible movement at that boundary. One subsequent
+`DOWN` moved the differing tile treatment to `STARPORT SERVICES`; a second
+`DOWN` moved it to `AUTO LAUNCH`. This sequence demonstrates how to calibrate
+focus through correlated movement; its bright-yellow color is an observation,
+not a reusable rule.
 
 Use the following evidence loop before `SELECT`:
 
-1. Capture a fresh frame and identify the one bright-yellow filled focus tile,
-   including the icon row as well as the text rows.
-2. If the target itself does not have that fill and dark label or glyph, send
-   exactly one directional `ui-control` invocation.
-3. Wait for that invocation to return, then capture a new frame. Associate the
-   frame only with that completed invocation and compare the focus tile with
-   the immediately preceding frame.
-4. Repeat one direction at a time. Invoke `SELECT` only when the target label
-   itself is inside the bright-yellow filled tile in the newest frame.
+1. Capture a fresh frame and describe the candidate highlight treatments,
+   including the icon row as well as the text rows. Do not yet declare which
+   candidate is focused from color alone.
+2. Send exactly one reversible directional `ui-control` invocation, wait for
+   it to return, then capture a new frame. Associate the new frame only with
+   that completed invocation.
+3. Compare the two frames and identify whether one coherent highlight treatment
+   moved from one control to an adjacent control. Use that synchronized visual
+   delta to calibrate the focused and unfocused appearances for the current
+   menu state.
+4. Navigate one direction and one fresh frame at a time. Invoke `SELECT` only
+   when the target has the calibrated focused appearance in the newest frame.
 
 A completed `ui-control` result proves only that WindowsAgent resolved and
 injected the configured key. It does not prove that the game accepted the key
