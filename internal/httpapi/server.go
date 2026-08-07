@@ -15,8 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/qoli/WindowsAgent/internal/actionrun"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
@@ -34,12 +36,20 @@ type Server struct {
 	store      *artifact.Store
 	rules      *rules.Store
 	scripts    scriptlaunch.Executor
+	actions    ActionService
 	timeout    time.Duration
 	version    string
 	logger     *slog.Logger
 	gate       chan struct{}
 	scriptGate chan struct{}
 	sequence   atomic.Uint64
+}
+
+type ActionService interface {
+	Invoke(context.Context, scriptlaunch.Invocation) (actionrun.Invocation, error)
+	Get(string) (actionrun.Invocation, error)
+	Stop(string) (actionrun.Invocation, error)
+	Stream(context.Context, string, uint64, func(eventstream.Event) error) error
 }
 
 type ErrorEnvelope struct {
@@ -106,6 +116,7 @@ func New(
 	store *artifact.Store,
 	ruleStore *rules.Store,
 	scriptExecutor scriptlaunch.Executor,
+	actionService ActionService,
 	timeout time.Duration,
 	version string,
 	logger *slog.Logger,
@@ -122,6 +133,9 @@ func New(
 	if scriptExecutor == nil {
 		return nil, errors.New("Script executor is required")
 	}
+	if actionService == nil {
+		return nil, errors.New("Action service is required")
+	}
 	if timeout <= 0 {
 		return nil, errors.New("capture timeout must be positive")
 	}
@@ -136,6 +150,7 @@ func New(
 		store:      store,
 		rules:      ruleStore,
 		scripts:    scriptExecutor,
+		actions:    actionService,
 		timeout:    timeout,
 		version:    version,
 		logger:     logger,
@@ -184,6 +199,10 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleRuntimeResource(recorder, r, requestID)
 	case r.URL.Path == "/v1/scripts/run":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleScriptRun)
+	case r.URL.Path == "/v1/actions/invoke":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleActionInvoke)
+	case strings.HasPrefix(r.URL.Path, "/v1/action-invocations/"):
+		s.handleActionInvocationResource(recorder, r, requestID)
 	default:
 		writeError(recorder, requestID, http.StatusNotFound, "route_not_found", "route not found")
 	}
@@ -286,6 +305,154 @@ func (s *Server) handleScriptRun(w http.ResponseWriter, r *http.Request, request
 		"capability", invocation.Capability,
 	)
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleActionInvoke(w http.ResponseWriter, r *http.Request, requestID string) {
+	invocation, err := decodeActionInvocation(w, r)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_action_request", err.Error())
+		return
+	}
+	result, err := s.actions.Invoke(r.Context(), invocation)
+	if err != nil {
+		s.writeActionError(w, requestID, err)
+		return
+	}
+	status := http.StatusOK
+	if result.Execution.Completion == rules.CompletionStream {
+		status = http.StatusAccepted
+		w.Header().Set("Location", "/v1/action-invocations/"+result.InvocationID)
+	}
+	s.logger.InfoContext(r.Context(), "action_invoked",
+		"request_id", requestID,
+		"invocation_id", result.InvocationID,
+		"action_id", result.ActionID,
+		"completion", result.Execution.Completion,
+		"state", result.State,
+	)
+	writeJSON(w, status, result)
+}
+
+func decodeActionInvocation(w http.ResponseWriter, r *http.Request) (scriptlaunch.Invocation, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxScriptRequestBody)
+	defer r.Body.Close()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return scriptlaunch.Invocation{}, fmt.Errorf("read JSON body: %w", err)
+	}
+	if err := strictjson.Validate(data); err != nil {
+		return scriptlaunch.Invocation{}, fmt.Errorf("validate JSON body: %w", err)
+	}
+	var request struct {
+		ActionID string         `json:"actionId"`
+		Inputs   map[string]any `json:"inputs"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return scriptlaunch.Invocation{}, fmt.Errorf("decode JSON body: %w", err)
+	}
+	if request.ActionID == "" || strings.TrimSpace(request.ActionID) != request.ActionID {
+		return scriptlaunch.Invocation{}, errors.New("actionId is required and must be canonical")
+	}
+	if request.Inputs == nil {
+		return scriptlaunch.Invocation{}, errors.New("inputs object is required")
+	}
+	return scriptlaunch.Invocation{Capability: request.ActionID, Inputs: request.Inputs}, nil
+}
+
+func (s *Server) handleActionInvocationResource(w http.ResponseWriter, r *http.Request, requestID string) {
+	remainder := strings.TrimPrefix(r.URL.Path, "/v1/action-invocations/")
+	parts := strings.Split(remainder, "/")
+	switch {
+	case len(parts) == 1 && parts[0] != "":
+		s.requireMethod(w, r, requestID, http.MethodGet, func(w http.ResponseWriter, _ *http.Request, requestID string) {
+			result, err := s.actions.Get(parts[0])
+			if err != nil {
+				s.writeActionError(w, requestID, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, result)
+		})
+	case len(parts) == 2 && parts[0] != "" && parts[1] == "stop":
+		s.requireMethod(w, r, requestID, http.MethodPost, func(w http.ResponseWriter, _ *http.Request, requestID string) {
+			result, err := s.actions.Stop(parts[0])
+			if err != nil {
+				s.writeActionError(w, requestID, err)
+				return
+			}
+			writeJSON(w, http.StatusAccepted, result)
+		})
+	case len(parts) == 2 && parts[0] != "" && parts[1] == "events":
+		s.requireMethod(w, r, requestID, http.MethodGet, func(w http.ResponseWriter, r *http.Request, requestID string) {
+			s.handleActionEvents(w, r, requestID, parts[0])
+		})
+	default:
+		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
+	}
+}
+
+var errActionStreamTerminal = errors.New("Action event stream reached terminal event")
+
+func (s *Server) handleActionEvents(w http.ResponseWriter, r *http.Request, requestID, identity string) {
+	values, present := r.URL.Query()["after"]
+	if !present || len(values) != 1 || values[0] == "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_after_cursor", "after query parameter is required exactly once")
+		return
+	}
+	after, err := strconv.ParseUint(values[0], 10, 64)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_after_cursor", "after query parameter must be an unsigned integer")
+		return
+	}
+	if _, err := s.actions.Get(identity); err != nil {
+		s.writeActionError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+	if flusher != nil {
+		flusher.Flush()
+	}
+	err = s.actions.Stream(r.Context(), identity, after, func(event eventstream.Event) error {
+		if err := json.NewEncoder(w).Encode(event); err != nil {
+			return err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		switch event.Type {
+		case "action.completed", "action.failed", "action.cancelled":
+			return errActionStreamTerminal
+		default:
+			return nil
+		}
+	})
+	if err != nil && !errors.Is(err, errActionStreamTerminal) && !errors.Is(err, context.Canceled) {
+		s.logger.ErrorContext(r.Context(), "action_event_stream_failed",
+			"request_id", requestID,
+			"invocation_id", identity,
+			"error", err,
+		)
+	}
+}
+
+func (s *Server) writeActionError(w http.ResponseWriter, requestID string, err error) {
+	switch {
+	case errors.Is(err, actionrun.ErrInvocationNotFound):
+		writeError(w, requestID, http.StatusNotFound, "action_invocation_not_found", "Action invocation not found")
+	case errors.Is(err, actionrun.ErrNotInterruptible):
+		writeError(w, requestID, http.StatusConflict, "action_not_interruptible", err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		writeError(w, requestID, http.StatusGatewayTimeout, "action_timeout", "Action timed out")
+	case errors.Is(err, context.Canceled):
+		writeError(w, requestID, http.StatusRequestTimeout, "request_canceled", "request was canceled")
+	default:
+		writeError(w, requestID, http.StatusUnprocessableEntity, "action_invocation_failed", err.Error())
+	}
 }
 
 func (s *Server) requireMethod(w http.ResponseWriter, r *http.Request, requestID, method string, handler func(http.ResponseWriter, *http.Request, string)) {
@@ -630,4 +797,10 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

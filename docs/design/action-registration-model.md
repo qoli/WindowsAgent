@@ -2,9 +2,10 @@
 
 ## Status
 
-**Partially landed.** Rule schema version 4, strict runtime-profile and Action
-declarations, explicit Monitor and Reaction registrations, and read-only HTTP
-catalogs are implemented. Registration execution is deferred.
+**Partially landed.** Rule schema version 5, strict runtime-profile and Action
+declarations, explicit execution semantics, Monitor and Reaction
+registrations, read-only catalogs, and direct invocation are implemented.
+Registration execution is deferred.
 
 ## Model
 
@@ -14,13 +15,14 @@ registration forms:
 
 ```json
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "description": "Read the live Rule before acting.",
   "runtimeProfiles": {},
   "actions": {
     "game/status": {
       "path": "Actions/status",
       "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     }
   },
@@ -38,6 +40,12 @@ not implicitly connect or schedule those two Actions. The ship-status Action's `
 insufficient visual evidence rather than silently converting it to `OFF`; its
 three-row relative-geometry check reports Mass Lock, Landing Gear, and Cargo
 Scoop independently.
+
+`execution` is required independently from registration. It declares whether
+direct invocation completes through the HTTP return value or a durable event
+stream. Streaming Actions additionally declare `linear` or `loop` lifecycle
+and an explicit interruption capability. See
+[Streaming Action Runtime](streaming-action-runtime.md).
 
 A Monitor registration adds a timer and an emitted event contract:
 
@@ -75,6 +83,7 @@ the Action ID remains executable capability identity.
 
 - every package lives below `Actions/`;
 - every Action explicitly declares `registrableAs`, including an empty list;
+- every Action explicitly declares one valid execution contract;
 - a registration must reference an existing Action;
 - its type must appear in that Action's `registrableAs` declaration;
 - Monitor intervals are positive and emitted stream/event names are canonical;
@@ -96,7 +105,7 @@ not a registration. For example, an OCR worker may use
 activation. An Action must still reference that profile explicitly, and no
 timer, event, or Action invocation is synthesized from residency.
 
-The v1 Script catalog remains a compatibility projection of Actions using the
+The v1 Script catalog remains the existing finite projection of Actions using the
 `windows-observation-v1` runtime. It does not change Action or registration
 semantics.
 
@@ -104,6 +113,5 @@ semantics.
 
 - Monitor scheduler and lifecycle control;
 - Reaction event subscription and dispatch;
-- generic direct Action invocation beyond the existing observation launcher;
 - registration enable/disable overrides owned by a Game session;
-- durable execution lifecycle events for mutating Actions.
+- restart recovery for running streaming invocations.

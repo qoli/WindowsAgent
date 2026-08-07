@@ -47,8 +47,8 @@ foreach ($property in $descriptor.PSObject.Properties) {
         throw "Rule plugin rule.json contains unknown field: $($property.Name)"
     }
 }
-if ($descriptor.schemaVersion -ne 4) {
-    throw "Rule plugin schemaVersion must equal 4"
+if ($descriptor.schemaVersion -ne 5) {
+    throw "Rule plugin schemaVersion must equal 5"
 }
 if ([String]::IsNullOrWhiteSpace([string]$descriptor.description) -or `
     ([string]$descriptor.description).Trim() -ne [string]$descriptor.description) {
@@ -73,7 +73,7 @@ foreach ($profileProperty in $descriptor.runtimeProfiles.PSObject.Properties) {
 foreach ($actionProperty in $descriptor.actions.PSObject.Properties) {
     $action = $actionProperty.Value
     foreach ($property in $action.PSObject.Properties) {
-        if (@("path", "runtime", "runtimeProfile", "registrableAs") -notcontains $property.Name) {
+        if (@("path", "runtime", "runtimeProfile", "execution", "registrableAs") -notcontains $property.Name) {
             throw "Rule plugin action '$($actionProperty.Name)' contains unknown field: $($property.Name)"
         }
     }
@@ -87,6 +87,27 @@ foreach ($actionProperty in $descriptor.actions.PSObject.Properties) {
         throw "Rule plugin action '$($actionProperty.Name)' registrableAs is required"
     }
     $actionFields = @($action.PSObject.Properties.Name)
+    if ($actionFields -notcontains "execution" -or $null -eq $action.execution) {
+        throw "Rule plugin action '$($actionProperty.Name)' execution is required"
+    }
+    $executionFields = @($action.execution.PSObject.Properties.Name)
+    $completion = [string]$action.execution.completion
+    if ($completion -eq "return") {
+        if ($executionFields.Count -ne 1 -or $executionFields -notcontains "completion") {
+            throw "Rule plugin return action '$($actionProperty.Name)' execution must contain only completion"
+        }
+    } elseif ($completion -eq "stream") {
+        if ($executionFields.Count -ne 3 -or $executionFields -notcontains "completion" -or `
+            $executionFields -notcontains "lifecycle" -or $executionFields -notcontains "interruptible") {
+            throw "Rule plugin streaming action '$($actionProperty.Name)' execution requires completion, lifecycle, and interruptible"
+        }
+        if (@("linear", "loop") -notcontains [string]$action.execution.lifecycle -or `
+            -not ($action.execution.interruptible -is [bool])) {
+            throw "Rule plugin streaming action '$($actionProperty.Name)' lifecycle or interruptible is invalid"
+        }
+    } else {
+        throw "Rule plugin action '$($actionProperty.Name)' has unsupported completion: $completion"
+    }
     if ($runtime -eq "ppocr-w480-text-v1") {
         if ($actionFields -notcontains "runtimeProfile" -or `
             $null -eq $descriptor.runtimeProfiles.PSObject.Properties[[string]$action.runtimeProfile]) {

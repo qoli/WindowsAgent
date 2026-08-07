@@ -18,8 +18,10 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/actionlaunch"
+	"github.com/qoli/WindowsAgent/internal/actionrun"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/config"
+	"github.com/qoli/WindowsAgent/internal/eventclient"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/httpapi"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
@@ -99,11 +101,36 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize Action executor: %w", err)
 	}
+	eventHTTPClient := &http.Client{Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     false,
+		MaxIdleConns:          8,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   3 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Second,
+	}}
+	eventJournal, err := eventclient.New(cfg.EventAPIURL, cfg.EventTokenFile, eventHTTPClient)
+	if err != nil {
+		return fmt.Errorf("initialize event journal client: %w", err)
+	}
+	healthContext, healthCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err = eventJournal.Health(healthContext)
+	healthCancel()
+	if err != nil {
+		return fmt.Errorf("require event journal service: %w", err)
+	}
+	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, eventJournal, foreground.Snapshot)
+	if err != nil {
+		return fmt.Errorf("initialize Action invocation manager: %w", err)
+	}
+	defer actionManager.Close()
 	api, err := httpapi.New(
 		capturer,
 		store,
 		ruleStore,
 		actionExecutor,
+		actionManager,
 		cfg.CaptureTimeout,
 		version,
 		logger,
@@ -122,7 +149,7 @@ func run() (runErr error) {
 		Handler:           api.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      90 * time.Second,
+		WriteTimeout:      0,
 		IdleTimeout:       60 * time.Second,
 		ErrorLog:          log.New(&slogWriter{logger: logger}, "", 0),
 	}
@@ -134,6 +161,7 @@ func run() (runErr error) {
 		"capture_timeout", cfg.CaptureTimeout.String(),
 		"rules_root", ruleStore.Root(),
 		"script_api_auth", "none",
+		"event_api_url", cfg.EventAPIURL,
 	)
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

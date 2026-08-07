@@ -314,7 +314,9 @@ $agentArguments = @(
     "--retention", (ConvertTo-NativeQuotedArgument $Retention.ToString()),
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
     "--log-file", (ConvertTo-NativeQuotedArgument $logFile),
-    "--ocr-runtime-root", (ConvertTo-NativeQuotedArgument $installedOCRRuntime)
+    "--ocr-runtime-root", (ConvertTo-NativeQuotedArgument $installedOCRRuntime),
+    "--event-api-url", (ConvertTo-NativeQuotedArgument ("http://" + $EventListen)),
+    "--event-token-file", (ConvertTo-NativeQuotedArgument $eventTokenFile)
 ) -join " "
 $eventArguments = @(
     "--listen", (ConvertTo-NativeQuotedArgument $EventListen),

@@ -21,6 +21,8 @@ type Config struct {
 	LogLevel       slog.Level
 	LogFile        string
 	OCRRuntimeRoot string
+	EventAPIURL    string
+	EventTokenFile string
 }
 
 func Parse(args []string, localAppData string) (Config, error) {
@@ -40,6 +42,8 @@ func Parse(args []string, localAppData string) (Config, error) {
 	flagSet.StringVar(&level, "log-level", "info", "debug, info, warn, or error")
 	flagSet.StringVar(&cfg.LogFile, "log-file", "", "absolute path for persistent JSON logs; empty writes to stdout")
 	flagSet.StringVar(&cfg.OCRRuntimeRoot, "ocr-runtime-root", "", "absolute resident w480 OCR runtime bundle root; empty uses <data-dir>/runtimes/ppocr-w480")
+	flagSet.StringVar(&cfg.EventAPIURL, "event-api-url", "http://127.0.0.1:8788", "loopback windows-event-stream HTTP origin")
+	flagSet.StringVar(&cfg.EventTokenFile, "event-token-file", "", "absolute windows-event-stream token file; empty uses <data-dir>/event-api.token")
 	if err := flagSet.Parse(args); err != nil {
 		return Config{}, fmt.Errorf("parse flags: %w", err)
 	}
@@ -70,6 +74,14 @@ func Parse(args []string, localAppData string) (Config, error) {
 		cfg.OCRRuntimeRoot = filepath.Join(cfg.DataDir, "runtimes", "ppocr-w480")
 	} else if !filepath.IsAbs(cfg.OCRRuntimeRoot) {
 		return Config{}, errors.New("--ocr-runtime-root must be empty or an absolute path")
+	}
+	if cfg.EventAPIURL == "" {
+		return Config{}, errors.New("--event-api-url is required")
+	}
+	if cfg.EventTokenFile == "" {
+		cfg.EventTokenFile = filepath.Join(cfg.DataDir, "event-api.token")
+	} else if !filepath.IsAbs(cfg.EventTokenFile) {
+		return Config{}, errors.New("--event-token-file must be empty or an absolute path")
 	}
 	switch strings.ToLower(level) {
 	case "debug":

@@ -21,24 +21,29 @@ import (
 )
 
 const (
-	StatusMatched          = "matched"
-	StatusUnmatched        = "unmatched"
-	UnmatchedDescription   = "No rule guidance is available for this foreground process."
-	RuleFilename           = "rule.json"
-	AgentsFilename         = "AGENTS.md"
-	AgentsMediaType        = "text/markdown; charset=utf-8"
-	ScriptsMediaType       = "application/json; charset=utf-8"
-	ActionsMediaType       = "application/json; charset=utf-8"
-	RegistrationsMediaType = "application/json; charset=utf-8"
-	RuntimesMediaType      = "application/json; charset=utf-8"
-	ObservationRuntimeV1   = "windows-observation-v1"
-	PpOcrActionRuntimeV1   = "ppocr-w480-text-v1"
-	PpOcrWorkerRuntimeV1   = "ppocr-onnx-dml-worker-v1"
-	ResidencyRuleActive    = "while-rule-active"
-	RegistrationMonitor    = "monitor"
-	RegistrationReaction   = "reaction"
-	maxRuleJSONBytes       = 64 << 10
-	maxAgentsBytes         = 1 << 20
+	StatusMatched            = "matched"
+	StatusUnmatched          = "unmatched"
+	UnmatchedDescription     = "No rule guidance is available for this foreground process."
+	RuleFilename             = "rule.json"
+	AgentsFilename           = "AGENTS.md"
+	AgentsMediaType          = "text/markdown; charset=utf-8"
+	ScriptsMediaType         = "application/json; charset=utf-8"
+	ActionsMediaType         = "application/json; charset=utf-8"
+	RegistrationsMediaType   = "application/json; charset=utf-8"
+	RuntimesMediaType        = "application/json; charset=utf-8"
+	ObservationRuntimeV1     = "windows-observation-v1"
+	PpOcrActionRuntimeV1     = "ppocr-w480-text-v1"
+	StreamingActionRuntimeV1 = "windows-streaming-action-v1"
+	PpOcrWorkerRuntimeV1     = "ppocr-onnx-dml-worker-v1"
+	ResidencyRuleActive      = "while-rule-active"
+	RegistrationMonitor      = "monitor"
+	RegistrationReaction     = "reaction"
+	CompletionReturn         = "return"
+	CompletionStream         = "stream"
+	LifecycleLinear          = "linear"
+	LifecycleLoop            = "loop"
+	maxRuleJSONBytes         = 64 << 10
+	maxAgentsBytes           = 1 << 20
 )
 
 type Document struct {
@@ -114,10 +119,23 @@ func (r Resolution) Validate() error {
 }
 
 type ActionDeclaration struct {
-	Path           string   `json:"path"`
-	Runtime        string   `json:"runtime"`
-	RuntimeProfile string   `json:"runtimeProfile,omitempty"`
-	RegistrableAs  []string `json:"registrableAs"`
+	Path           string                      `json:"path"`
+	Runtime        string                      `json:"runtime"`
+	RuntimeProfile string                      `json:"runtimeProfile,omitempty"`
+	Execution      *ActionExecutionDeclaration `json:"execution"`
+	RegistrableAs  []string                    `json:"registrableAs"`
+}
+
+type ActionExecutionDeclaration struct {
+	Completion    string `json:"completion"`
+	Lifecycle     string `json:"lifecycle,omitempty"`
+	Interruptible *bool  `json:"interruptible,omitempty"`
+}
+
+type ActionExecution struct {
+	Completion    string `json:"completion"`
+	Lifecycle     string `json:"lifecycle,omitempty"`
+	Interruptible bool   `json:"interruptible"`
 }
 
 type RuntimeProfileDeclaration struct {
@@ -135,12 +153,13 @@ type Descriptor struct {
 }
 
 type Action struct {
-	ID             string   `json:"id"`
-	RuleID         string   `json:"ruleId"`
-	Runtime        string   `json:"runtime"`
-	RuntimeProfile string   `json:"runtimeProfile,omitempty"`
-	RegistrableAs  []string `json:"registrableAs"`
-	Root           string   `json:"-"`
+	ID             string          `json:"id"`
+	RuleID         string          `json:"ruleId"`
+	Runtime        string          `json:"runtime"`
+	RuntimeProfile string          `json:"runtimeProfile,omitempty"`
+	Execution      ActionExecution `json:"execution"`
+	RegistrableAs  []string        `json:"registrableAs"`
+	Root           string          `json:"-"`
 }
 
 type RuntimeProfile struct {
@@ -319,6 +338,7 @@ func (s *Store) ResolveAction(actionID string) (Action, error) {
 			RuleID:         id,
 			Runtime:        declaration.Runtime,
 			RuntimeProfile: declaration.RuntimeProfile,
+			Execution:      resolvedActionExecution(declaration.Execution),
 			RegistrableAs:  append([]string(nil), declaration.RegistrableAs...),
 			Root:           root,
 		}
@@ -573,8 +593,8 @@ func (s *Store) resolveActionRoot(id, name string) (string, error) {
 }
 
 func validateDescriptor(descriptor Descriptor) error {
-	if descriptor.SchemaVersion != 4 {
-		return fmt.Errorf("schemaVersion must equal 4, got %d", descriptor.SchemaVersion)
+	if descriptor.SchemaVersion != 5 {
+		return fmt.Errorf("schemaVersion must equal 5, got %d", descriptor.SchemaVersion)
 	}
 	if strings.TrimSpace(descriptor.Description) == "" ||
 		strings.TrimSpace(descriptor.Description) != descriptor.Description {
@@ -617,6 +637,9 @@ func validateDescriptor(descriptor Descriptor) error {
 		if declaration.RegistrableAs == nil {
 			return fmt.Errorf("action %s registrableAs is required", id)
 		}
+		if err := validateActionExecution(declaration.Execution); err != nil {
+			return fmt.Errorf("action %s execution: %w", id, err)
+		}
 		if declaration.Runtime == PpOcrActionRuntimeV1 {
 			profile, exists := descriptor.RuntimeProfiles[declaration.RuntimeProfile]
 			if declaration.RuntimeProfile == "" || !exists {
@@ -658,6 +681,36 @@ func validateDescriptor(descriptor Descriptor) error {
 		}
 	}
 	return nil
+}
+
+func validateActionExecution(execution *ActionExecutionDeclaration) error {
+	if execution == nil {
+		return errors.New("object is required")
+	}
+	switch execution.Completion {
+	case CompletionReturn:
+		if execution.Lifecycle != "" || execution.Interruptible != nil {
+			return errors.New("return completion forbids lifecycle and interruptible")
+		}
+	case CompletionStream:
+		if execution.Lifecycle != LifecycleLinear && execution.Lifecycle != LifecycleLoop {
+			return fmt.Errorf("stream completion lifecycle must equal %q or %q", LifecycleLinear, LifecycleLoop)
+		}
+		if execution.Interruptible == nil {
+			return errors.New("stream completion requires explicit interruptible")
+		}
+	default:
+		return fmt.Errorf("completion must equal %q or %q", CompletionReturn, CompletionStream)
+	}
+	return nil
+}
+
+func resolvedActionExecution(declaration *ActionExecutionDeclaration) ActionExecution {
+	execution := ActionExecution{Completion: declaration.Completion, Lifecycle: declaration.Lifecycle}
+	if declaration.Interruptible != nil {
+		execution.Interruptible = *declaration.Interruptible
+	}
+	return execution
 }
 
 func validateRegistrationType(value string) error {

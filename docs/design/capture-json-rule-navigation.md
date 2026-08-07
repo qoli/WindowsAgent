@@ -13,7 +13,7 @@ Implemented:
   the rule's `AGENTS.md`;
 - a matched response exposes a live Script catalog URL without loading a
   Script package during capture;
-- a matched response exposes Rule v4 runtime-profile navigation plus Action
+- a matched response exposes Rule v5 runtime-profile navigation plus Action
   and registration catalog URLs;
 - an unmatched executable is represented explicitly;
 - Crimson Desert is the first Rule plugin and declares one observation Action.

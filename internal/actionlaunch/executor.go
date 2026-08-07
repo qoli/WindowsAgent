@@ -16,6 +16,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
+	"github.com/qoli/WindowsAgent/internal/streamaction"
 )
 
 type Executor struct {
@@ -24,6 +25,13 @@ type Executor struct {
 	capturer    capture.RegionCapturer
 	ocr         ocrworker.Recognizer
 	foreground  func() (foreground.Info, error)
+}
+
+type Result struct {
+	ActionID string          `json:"actionId"`
+	RuleID   string          `json:"ruleId"`
+	Runtime  string          `json:"runtime"`
+	Output   json.RawMessage `json:"output"`
 }
 
 func New(
@@ -43,21 +51,92 @@ func New(
 }
 
 func (e *Executor) Run(ctx context.Context, invocation scriptlaunch.Invocation) (json.RawMessage, error) {
+	result, err := e.RunAction(ctx, invocation)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(result)
+}
+
+func (e *Executor) RunAction(ctx context.Context, invocation scriptlaunch.Invocation) (Result, error) {
 	if e == nil {
-		return nil, errors.New("Action executor is required")
+		return Result{}, errors.New("Action executor is required")
 	}
 	action, err := e.rules.ResolveAction(invocation.Capability)
 	if err != nil {
-		return nil, fmt.Errorf("resolve Action %q: %w", invocation.Capability, err)
+		return Result{}, fmt.Errorf("resolve Action %q: %w", invocation.Capability, err)
 	}
+	if action.Execution.Completion != rules.CompletionReturn {
+		return Result{}, fmt.Errorf("Action %q does not declare return completion", action.ID)
+	}
+	var output json.RawMessage
 	switch action.Runtime {
 	case rules.ObservationRuntimeV1:
-		return e.observation.Run(ctx, invocation)
+		raw, err := e.observation.Run(ctx, invocation)
+		if err != nil {
+			return Result{}, err
+		}
+		output, err = observationOutput(raw)
+		if err != nil {
+			return Result{}, fmt.Errorf("decode observation Action output: %w", err)
+		}
 	case rules.PpOcrActionRuntimeV1:
-		return e.runOCR(ctx, action, invocation.Inputs)
+		output, err = e.runOCR(ctx, action, invocation.Inputs)
+		if err != nil {
+			return Result{}, err
+		}
 	default:
-		return nil, fmt.Errorf("Action %q declares unsupported runtime %q", action.ID, action.Runtime)
+		return Result{}, fmt.Errorf("Action %q declares unsupported runtime %q", action.ID, action.Runtime)
 	}
+	return Result{ActionID: action.ID, RuleID: action.RuleID, Runtime: action.Runtime, Output: output}, nil
+}
+
+func (e *Executor) RunStreaming(ctx context.Context, invocation scriptlaunch.Invocation, reporter streamaction.Reporter) (Result, error) {
+	if e == nil || ctx == nil || reporter == nil {
+		return Result{}, errors.New("Action executor, context, and streaming reporter are required")
+	}
+	action, err := e.rules.ResolveAction(invocation.Capability)
+	if err != nil {
+		return Result{}, fmt.Errorf("resolve Action %q: %w", invocation.Capability, err)
+	}
+	if action.Execution.Completion != rules.CompletionStream {
+		return Result{}, fmt.Errorf("Action %q does not declare stream completion", action.ID)
+	}
+	if action.Runtime != rules.StreamingActionRuntimeV1 {
+		return Result{}, fmt.Errorf("streaming Action %q declares unsupported runtime %q", action.ID, action.Runtime)
+	}
+	pkg, err := streamaction.Load(action.Root)
+	if err != nil {
+		return Result{}, fmt.Errorf("load streaming Action %q: %w", action.ID, err)
+	}
+	output, err := (streamaction.Runner{}).Run(ctx, pkg, invocation.Inputs, childCaller{executor: e, parent: action}, reporter)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{ActionID: action.ID, RuleID: action.RuleID, Runtime: action.Runtime, Output: output}, nil
+}
+
+type childCaller struct {
+	executor *Executor
+	parent   rules.Action
+}
+
+func (c childCaller) Call(ctx context.Context, actionID string, inputs map[string]any) (json.RawMessage, error) {
+	child, err := c.executor.rules.ResolveAction(actionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve child Action %q: %w", actionID, err)
+	}
+	if !strings.EqualFold(child.RuleID, c.parent.RuleID) {
+		return nil, fmt.Errorf("child Action %q belongs to Rule %q, expected %q", child.ID, child.RuleID, c.parent.RuleID)
+	}
+	if child.Execution.Completion != rules.CompletionReturn {
+		return nil, fmt.Errorf("child Action %q must declare return completion", child.ID)
+	}
+	result, err := c.executor.RunAction(ctx, scriptlaunch.Invocation{Capability: actionID, Inputs: inputs})
+	if err != nil {
+		return nil, err
+	}
+	return append(json.RawMessage(nil), result.Output...), nil
 }
 
 func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[string]any) (json.RawMessage, error) {
@@ -113,41 +192,36 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		return nil, fmt.Errorf("run resident OCR profile %s: %w", action.RuntimeProfile, err)
 	}
 	response := map[string]any{
-		"ok":         true,
-		"capability": action.ID,
-		"runtime":    action.Runtime,
-		"result": map[string]any{
-			"schemaVersion": 1,
-			"text":          result.Text,
-			"confidence":    result.Confidence,
-			"evidence": map[string]any{
-				"artifactId": result.Evidence.ArtifactID,
-				"capturedAt": result.Evidence.CapturedAt,
-				"rgbSha256":  result.Evidence.RGBSHA256,
-				"frame": map[string]any{
-					"width": region.FrameWidth, "height": region.FrameHeight,
-					"foreground": map[string]any{
-						"processId":      region.Foreground.ProcessID,
-						"executableName": region.Foreground.ExecutableName,
-					},
-				},
-				"coordinateSpace": map[string]any{
-					"width": capture.ReferenceWidth, "height": capture.ReferenceHeight, "fit": "centered-16:9",
-				},
-				"referenceRegion": config.ReferenceRegion,
-				"physicalRegion":  region.PhysicalRegion,
-				"image": map[string]any{
-					"width": region.ImageWidth, "height": region.ImageHeight, "encoding": "rgb24",
+		"schemaVersion": 1,
+		"text":          result.Text,
+		"confidence":    result.Confidence,
+		"evidence": map[string]any{
+			"artifactId": result.Evidence.ArtifactID,
+			"capturedAt": result.Evidence.CapturedAt,
+			"rgbSha256":  result.Evidence.RGBSHA256,
+			"frame": map[string]any{
+				"width": region.FrameWidth, "height": region.FrameHeight,
+				"foreground": map[string]any{
+					"processId":      region.Foreground.ProcessID,
+					"executableName": region.Foreground.ExecutableName,
 				},
 			},
-			"model": result.Model,
-			"timing": map[string]any{
-				"captureMs":     captureMS,
-				"preprocessMs":  result.Timing.PreprocessMS,
-				"inferenceMs":   result.Timing.InferenceMS,
-				"postprocessMs": result.Timing.PostprocessMS,
-				"ocrTotalMs":    result.Timing.TotalMS,
+			"coordinateSpace": map[string]any{
+				"width": capture.ReferenceWidth, "height": capture.ReferenceHeight, "fit": "centered-16:9",
 			},
+			"referenceRegion": config.ReferenceRegion,
+			"physicalRegion":  region.PhysicalRegion,
+			"image": map[string]any{
+				"width": region.ImageWidth, "height": region.ImageHeight, "encoding": "rgb24",
+			},
+		},
+		"model": result.Model,
+		"timing": map[string]any{
+			"captureMs":     captureMS,
+			"preprocessMs":  result.Timing.PreprocessMS,
+			"inferenceMs":   result.Timing.InferenceMS,
+			"postprocessMs": result.Timing.PostprocessMS,
+			"ocrTotalMs":    result.Timing.TotalMS,
 		},
 	}
 	encoded, err := json.Marshal(response)
@@ -155,6 +229,20 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		return nil, fmt.Errorf("encode OCR Action result: %w", err)
 	}
 	return encoded, nil
+}
+
+func observationOutput(raw json.RawMessage) (json.RawMessage, error) {
+	var envelope struct {
+		OK     bool            `json:"ok"`
+		Output json.RawMessage `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	if !envelope.OK || len(envelope.Output) == 0 || !json.Valid(envelope.Output) {
+		return nil, errors.New("observation Action did not return one valid output")
+	}
+	return append(json.RawMessage(nil), envelope.Output...), nil
 }
 
 func sameForeground(before, captured foreground.Info) bool {

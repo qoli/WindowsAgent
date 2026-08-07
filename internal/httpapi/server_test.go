@@ -19,8 +19,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoli/WindowsAgent/internal/actionrun"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -41,6 +43,41 @@ type fakeScriptExecutor struct {
 	err        error
 	invocation scriptlaunch.Invocation
 	calls      int
+}
+
+type fakeActionService struct {
+	invokeResult actionrun.Invocation
+	invokeErr    error
+	getResult    actionrun.Invocation
+	getErr       error
+	stopResult   actionrun.Invocation
+	stopErr      error
+	events       []eventstream.Event
+	invocation   scriptlaunch.Invocation
+	after        uint64
+}
+
+func (f *fakeActionService) Invoke(_ context.Context, invocation scriptlaunch.Invocation) (actionrun.Invocation, error) {
+	f.invocation = invocation
+	return f.invokeResult, f.invokeErr
+}
+
+func (f *fakeActionService) Get(string) (actionrun.Invocation, error) {
+	return f.getResult, f.getErr
+}
+
+func (f *fakeActionService) Stop(string) (actionrun.Invocation, error) {
+	return f.stopResult, f.stopErr
+}
+
+func (f *fakeActionService) Stream(_ context.Context, _ string, after uint64, visit func(eventstream.Event) error) error {
+	f.after = after
+	for _, event := range f.events {
+		if err := visit(event); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (f *fakeScriptExecutor) Run(_ context.Context, invocation scriptlaunch.Invocation) (json.RawMessage, error) {
@@ -127,7 +164,7 @@ func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
 	server, _, ruleRoot := newTestServerAndRuleRoot(t, &fakeCapturer{status: testStatus(), result: testResult()}, time.Second)
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":4,"description":"Updated live.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
+		[]byte(`{"schemaVersion":5,"description":"Updated live.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -196,13 +233,14 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	scriptRoot := filepath.Join(ruleRoot, "Actions", "status")
 	writeTestScriptPackage(t, scriptRoot)
 	descriptor := `{
-	  "schemaVersion": 4,
+	  "schemaVersion": 5,
 	  "description": "Read the live Rule before acting.",
 	  "runtimeProfiles": {},
 	  "actions": {
 	    "game/status": {
 	      "path": "Actions/status",
 	      "runtime": "windows-observation-v1",
+	      "execution": {"completion":"return"},
 	      "registrableAs": ["monitor", "reaction"]
 	    }
 	  },
@@ -258,12 +296,12 @@ func TestRuleActionAndRegistrationCatalogsReturnExplicitContracts(t *testing.T) 
 		}
 	}
 	descriptor := `{
-	  "schemaVersion": 4,
+	  "schemaVersion": 5,
 	  "description": "Read the live Rule before acting.",
 	  "runtimeProfiles": {},
 	  "actions": {
-	    "game/read": {"path":"Actions/read","runtime":"windows-observation-v1","registrableAs":["monitor","reaction"]},
-	    "game/open": {"path":"Actions/open","runtime":"windows-action-v1","registrableAs":["reaction"]}
+	    "game/read": {"path":"Actions/read","runtime":"windows-observation-v1","execution":{"completion":"return"},"registrableAs":["monitor","reaction"]},
+	    "game/open": {"path":"Actions/open","runtime":"windows-action-v1","execution":{"completion":"return"},"registrableAs":["reaction"]}
 	  },
 	  "registrations": {
 	    "game/read-fast": {
@@ -398,6 +436,96 @@ func TestScriptRunRejectsDuplicateJSONAndReportsLaunchFailure(t *testing.T) {
 	assertErrorCode(t, failedResponse.Body.Bytes(), "script_launch_failed")
 }
 
+func TestActionInvokeFiniteAndStreamingContracts(t *testing.T) {
+	finite := &fakeActionService{invokeResult: actionrun.Invocation{
+		InvocationID: "act_finite", ActionID: "game/read", RuleID: "game.exe", Runtime: "windows-action-v1",
+		State: actionrun.StateCompleted, Execution: rules.ActionExecution{Completion: rules.CompletionReturn},
+		Output: json.RawMessage(`{"ready":true}`),
+	}}
+	server, _ := newTestServerWithActionService(t, finite)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost, "/v1/actions/invoke", strings.NewReader(`{"actionId":"game/read","inputs":{}}`),
+	))
+	if response.Code != http.StatusOK || response.Header().Get("Location") != "" {
+		t.Fatalf("finite status = %d, location = %q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if finite.invocation.Capability != "game/read" {
+		t.Fatalf("finite invocation = %+v", finite.invocation)
+	}
+
+	streaming := &fakeActionService{invokeResult: actionrun.Invocation{
+		InvocationID: "act_stream", ActionID: "game/workflow", RuleID: "game.exe", Runtime: rules.StreamingActionRuntimeV1,
+		State:     actionrun.StateRunning,
+		Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true},
+		Watch:     &actionrun.WatchTarget{URL: "/v1/action-invocations/act_stream/events?after=7", ContentType: "application/x-ndjson", AfterCursor: 7},
+		Stop:      &actionrun.StopTarget{Method: http.MethodPost, URL: "/v1/action-invocations/act_stream/stop"},
+	}}
+	server, _ = newTestServerWithActionService(t, streaming)
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost, "/v1/actions/invoke", strings.NewReader(`{"actionId":"game/workflow","inputs":{}}`),
+	))
+	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/v1/action-invocations/act_stream" {
+		t.Fatalf("stream status = %d, location = %q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+}
+
+func TestActionInvocationWatchStatusAndStop(t *testing.T) {
+	service := &fakeActionService{
+		getResult: actionrun.Invocation{
+			InvocationID: "act_stream", State: actionrun.StateRunning,
+			Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLoop, Interruptible: true},
+		},
+		stopResult: actionrun.Invocation{
+			InvocationID: "act_stream", State: actionrun.StateCancelling,
+			Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLoop, Interruptible: true},
+		},
+		events: []eventstream.Event{
+			{SchemaVersion: 1, Sequence: 8, EventID: "evt_8", Type: "action.started", CorrelationID: "act_stream", Payload: json.RawMessage(`{"state":"RUNNING"}`)},
+			{SchemaVersion: 1, Sequence: 9, EventID: "evt_9", Type: "action.completed", CorrelationID: "act_stream", Payload: json.RawMessage(`{"state":"COMPLETED"}`)},
+		},
+	}
+	server, _ := newTestServerWithActionService(t, service)
+
+	statusResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(statusResponse, httptest.NewRequest(http.MethodGet, "/v1/action-invocations/act_stream", nil))
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", statusResponse.Code, statusResponse.Body.String())
+	}
+
+	stopResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(stopResponse, httptest.NewRequest(http.MethodPost, "/v1/action-invocations/act_stream/stop", nil))
+	if stopResponse.Code != http.StatusAccepted || !strings.Contains(stopResponse.Body.String(), actionrun.StateCancelling) {
+		t.Fatalf("stop status = %d, body = %s", stopResponse.Code, stopResponse.Body.String())
+	}
+
+	eventsResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(eventsResponse, httptest.NewRequest(http.MethodGet, "/v1/action-invocations/act_stream/events?after=7", nil))
+	if eventsResponse.Code != http.StatusOK || eventsResponse.Header().Get("Content-Type") != "application/x-ndjson" || service.after != 7 {
+		t.Fatalf("events status = %d, after = %d, headers = %+v", eventsResponse.Code, service.after, eventsResponse.Header())
+	}
+	lines := strings.Split(strings.TrimSpace(eventsResponse.Body.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[1], "action.completed") {
+		t.Fatalf("event lines = %q", lines)
+	}
+}
+
+func TestActionInvocationErrorsAreExplicit(t *testing.T) {
+	service := &fakeActionService{getErr: actionrun.ErrInvocationNotFound, stopErr: actionrun.ErrNotInterruptible}
+	server, _ := newTestServerWithActionService(t, service)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/action-invocations/missing", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("get status = %d, body = %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/action-invocations/act_fixed/stop", nil))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("stop status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func TestRuleDocumentRejectsUnknownAndNonCanonicalIDs(t *testing.T) {
 	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
 	for _, path := range []string{
@@ -527,6 +655,18 @@ func newTestServerWithExecutor(
 	return server, store
 }
 
+func newTestServerWithActionService(t *testing.T, actions ActionService) (*Server, *artifact.Store) {
+	t.Helper()
+	server, store, _ := newTestServerAndRuleRootWithServices(
+		t,
+		&fakeCapturer{status: testStatus(), result: testResult()},
+		time.Second,
+		&fakeScriptExecutor{result: json.RawMessage(`{"ok":true}`)},
+		actions,
+	)
+	return server, store
+}
+
 func newTestServerAndRuleRoot(t *testing.T, capturer capture.Capturer, timeout time.Duration) (*Server, *artifact.Store, string) {
 	t.Helper()
 	return newTestServerAndRuleRootWithExecutor(
@@ -544,6 +684,17 @@ func newTestServerAndRuleRootWithExecutor(
 	executor scriptlaunch.Executor,
 ) (*Server, *artifact.Store, string) {
 	t.Helper()
+	return newTestServerAndRuleRootWithServices(t, capturer, timeout, executor, &fakeActionService{})
+}
+
+func newTestServerAndRuleRootWithServices(
+	t *testing.T,
+	capturer capture.Capturer,
+	timeout time.Duration,
+	executor scriptlaunch.Executor,
+	actions ActionService,
+) (*Server, *artifact.Store, string) {
+	t.Helper()
 	store, err := artifact.New(t.TempDir(), 100)
 	if err != nil {
 		t.Fatal(err)
@@ -556,7 +707,7 @@ func newTestServerAndRuleRootWithExecutor(
 	}
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":4,"description":"Read the live Rule before acting.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
+		[]byte(`{"schemaVersion":5,"description":"Read the live Rule before acting.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -573,6 +724,7 @@ func newTestServerAndRuleRootWithExecutor(
 		store,
 		ruleStore,
 		executor,
+		actions,
 		timeout,
 		"test",
 		logger,

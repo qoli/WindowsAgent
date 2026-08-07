@@ -72,13 +72,18 @@ This is not a general remote memory API. HTTP exposes a live read-only Script
 catalog; the unauthenticated run endpoint delegates one strictly validated
 request to the local launcher inside the signed-in Windows session.
 
-The Action registration refactor is partially landed:
+The Action runtime and registration refactor is partially landed:
 
-- Rule schema version 4 declares executable Actions, optional resident runtime
+- Rule schema version 5 declares executable Actions, explicit return or stream
+  completion, optional resident runtime
   profiles, and separately registers selected Actions as timer-driven Monitors
   or event-driven Reactions;
 - `windows-event-stream.exe` owns a strict append-only JSONL journal and an
   authenticated loopback append/replay API;
+- `POST /v1/actions/invoke` gives every call an invocation ID. Finite Actions
+  return terminal output directly; streaming Actions first commit a durable
+  start event and immediately return a callback URL, optional stop URL, and
+  their declared linear or loop lifecycle;
 - Crimson Desert inventory remains a finite Action using the landed v1
   observation runtime;
 - `screenparser/ui-elements` is a Palworld-configured on-demand Action
@@ -381,7 +386,12 @@ GET  /v1/rules/{rule-id}/AGENTS.md
 GET  /v1/rules/{rule-id}/scripts
 GET  /v3/rules/{rule-id}/actions
 GET  /v3/rules/{rule-id}/registrations
+GET  /v4/rules/{rule-id}/runtimes
 POST /v1/scripts/run
+POST /v1/actions/invoke
+GET  /v1/action-invocations/{invocation-id}
+GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
+POST /v1/action-invocations/{invocation-id}/stop
 ```
 
 Create a capture:
@@ -424,6 +434,22 @@ The invocation body contains only `capability` and package-defined `inputs`;
 Host filesystem roots are never caller input. No bearer token or other HTTP
 credential is required. Script execution is serialized and does not upload,
 rewrite, or reload a Rule plugin.
+
+Invoke any Action through the unified surface:
+
+```powershell
+curl.exe `
+  -H "Content-Type: application/json" `
+  --data-binary '{"actionId":"elite-dangerous/ship-status","inputs":{}}' `
+  http://127.0.0.1:8787/v1/actions/invoke
+```
+
+A finite Action returns HTTP `200`, `state: COMPLETED`, and `output`. A
+streaming Action returns HTTP `202`, `state: RUNNING`, and a `watch` object.
+Follow its returned URL with `curl.exe -N`; the NDJSON connection replays the
+durable invocation events and closes when the Action completes, fails, or is
+cancelled. The `stop` object appears only when that Action explicitly declares
+itself interruptible.
 
 Only one capture can run at a time. A concurrent request receives
 `409 capture_busy`. Each completed artifact contains `capture.png` and
@@ -507,6 +533,8 @@ internal/scriptrunner/           Starlark runtime and generic Windows native FFI
 internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
+internal/actionrun/              finite and streaming invocation lifecycle
+internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
 internal/scenereducer/            cursor, scene delta, and append recovery
@@ -515,8 +543,9 @@ internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
+internal/streamaction/            bounded streaming Starlark orchestration runtime
 internal/wgc/                    WGC and Direct3D 11 implementation
-Rules/<Executable.exe>/          distributable Rule v4 runtimes, Actions, registrations, and guidance
+Rules/<Executable.exe>/          distributable Rule v5 runtimes, Actions, registrations, and guidance
 runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
 runtimes/ppocr-directml/          strict fixed-shape resident PP-OCR worker
 tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter

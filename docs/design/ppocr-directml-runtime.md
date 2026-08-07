@@ -47,7 +47,7 @@ registration concern.
 
 ## Rule lifecycle
 
-Rule schema version 4 declares worker residency independently from Action and
+Rule schema version 5 declares worker residency independently from Action and
 registration declarations:
 
 ```json

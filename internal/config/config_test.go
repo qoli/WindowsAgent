@@ -19,6 +19,8 @@ func TestParseDefaults(t *testing.T) {
 		cfg.DataDir != filepath.Join(root, "gameGuide", "windows-capture-agent") ||
 		cfg.RulesDir != filepath.Join(root, "gameGuide", "windows-capture-agent", "Rules") ||
 		cfg.OCRRuntimeRoot != filepath.Join(root, "gameGuide", "windows-capture-agent", "runtimes", "ppocr-w480") ||
+		cfg.EventAPIURL != "http://127.0.0.1:8788" ||
+		cfg.EventTokenFile != filepath.Join(root, "gameGuide", "windows-capture-agent", "event-api.token") ||
 		cfg.CaptureTimeout != 5*time.Second ||
 		cfg.Retention != 100 ||
 		cfg.LogLevel != slog.LevelInfo ||
@@ -38,6 +40,8 @@ func TestParseOverrides(t *testing.T) {
 		"--log-level", "debug",
 		"--log-file", filepath.Join(root, "agent.jsonl"),
 		"--ocr-runtime-root", filepath.Join(root, "ocr"),
+		"--event-api-url", "http://127.0.0.1:9876",
+		"--event-token-file", filepath.Join(root, "event.token"),
 	}, filepath.Dir(root))
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +53,9 @@ func TestParseOverrides(t *testing.T) {
 		cfg.Retention != 7 ||
 		cfg.LogLevel != slog.LevelDebug ||
 		cfg.LogFile != filepath.Join(root, "agent.jsonl") ||
-		cfg.OCRRuntimeRoot != filepath.Join(root, "ocr") {
+		cfg.OCRRuntimeRoot != filepath.Join(root, "ocr") ||
+		cfg.EventAPIURL != "http://127.0.0.1:9876" ||
+		cfg.EventTokenFile != filepath.Join(root, "event.token") {
 		t.Fatalf("unexpected overrides: %+v", cfg)
 	}
 }
@@ -69,6 +75,8 @@ func TestParseRejectsInvalidRequiredState(t *testing.T) {
 		{name: "unknown log level", args: []string{"--log-level", "verbose"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative log file", args: []string{"--log-file", "agent.jsonl"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative OCR runtime root", args: []string{"--ocr-runtime-root", "runtime"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
+		{name: "empty event API URL", args: []string{"--event-api-url", ""}, localAppData: filepath.Join(string(filepath.Separator), "data")},
+		{name: "relative event token", args: []string{"--event-token-file", "event.token"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "removed script token flag", args: []string{"--script-api-token-file", filepath.Join(string(filepath.Separator), "token")}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "positional argument", args: []string{"unexpected"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 	}

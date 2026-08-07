@@ -3,11 +3,13 @@ package actionlaunch
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
@@ -17,13 +19,92 @@ import (
 type fakeObservationExecutor struct{}
 
 func (fakeObservationExecutor) Run(context.Context, scriptlaunch.Invocation) (json.RawMessage, error) {
-	return json.RawMessage(`{"ok":true}`), nil
+	return json.RawMessage(`{"ok":true,"output":{"ready":true}}`), nil
 }
 
 type fakeRegionCapturer struct{ result capture.RegionResult }
 
 func (f fakeRegionCapturer) CaptureRegion(context.Context, capture.RegionRequest) (capture.RegionResult, error) {
 	return f.result, nil
+}
+
+type fakeStreamingReporter struct{ types []string }
+
+func (f *fakeStreamingReporter) Emit(_ context.Context, eventType string, _ json.RawMessage) (eventstream.Event, error) {
+	f.types = append(f.types, eventType)
+	return eventstream.Event{Sequence: uint64(len(f.types))}, nil
+}
+
+func TestStreamingActionCallsSameRuleFiniteChild(t *testing.T) {
+	rulesRoot := t.TempDir()
+	ruleRoot := filepath.Join(rulesRoot, "game.exe")
+	workflowRoot := filepath.Join(ruleRoot, "Actions", "workflow")
+	childRoot := filepath.Join(ruleRoot, "Actions", "status")
+	if err := os.MkdirAll(workflowRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(childRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(ruleRoot, rules.RuleFilename), `{
+  "schemaVersion":5,
+  "description":"Streaming fixture.",
+  "runtimeProfiles":{},
+  "actions":{
+    "game/workflow":{"path":"Actions/workflow","runtime":"windows-streaming-action-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":true},"registrableAs":[]},
+    "game/status":{"path":"Actions/status","runtime":"windows-observation-v1","execution":{"completion":"return"},"registrableAs":[]}
+  },
+  "registrations":{}
+}`)
+	writeTestFile(t, filepath.Join(ruleRoot, rules.AgentsFilename), "# Fixture\n")
+	writeStreamingPackage(t, workflowRoot)
+	ruleStore, err := rules.New(rulesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor, err := New(
+		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{},
+		func() (foreground.Info, error) { return foreground.Info{ExecutableName: "game.exe"}, nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fakeStreamingReporter{}
+	result, err := executor.RunStreaming(context.Background(), scriptlaunch.Invocation{
+		Capability: "game/workflow", Inputs: map[string]any{"enabled": true},
+	}, reporter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result.Output) != `{"done":true}` || len(reporter.types) != 1 || reporter.types[0] != "action.child.ready" {
+		t.Fatalf("result=%s events=%v", result.Output, reporter.types)
+	}
+}
+
+func writeStreamingPackage(t *testing.T, root string) {
+	t.Helper()
+	files := map[string]string{
+		"main.star": `def main(ctx):
+    child = action.call(id="game/status", inputs={})
+    stream.emit(type="action.child.ready", payload={"ready": child["ready"]})
+    return {"done": True}
+`,
+		"TASK.md":            "# Fixture\n",
+		"input.schema.json":  `{"type":"object","additionalProperties":false,"required":["enabled"],"properties":{"enabled":{"type":"boolean"}}}`,
+		"output.schema.json": `{"type":"object","additionalProperties":false,"required":["done"],"properties":{"done":{"const":true}}}`,
+		"event.schema.json":  `{"type":"object","additionalProperties":false,"required":["type","payload"],"properties":{"type":{"const":"action.child.ready"},"payload":{"type":"object","additionalProperties":false,"required":["ready"],"properties":{"ready":{"const":true}}}}}`,
+		"manifest.json":      `{"schemaVersion":1,"version":1,"title":"Fixture","entrypoint":"main.star","taskDocument":"TASK.md","inputSchema":"input.schema.json","outputSchema":"output.schema.json","eventSchema":"event.schema.json","files":["main.star","TASK.md","input.schema.json","output.schema.json","event.schema.json"],"limits":{"maxSteps":10000,"maxOutputBytes":4096,"maxEventBytes":4096,"maxSleepMs":1000}}`,
+	}
+	for name, content := range files {
+		writeTestFile(t, filepath.Join(root, name), content)
+	}
+}
+
+func writeTestFile(t *testing.T, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(name, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type fakeOCRRecognizer struct {
@@ -91,16 +172,16 @@ func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	var response struct {
-		OK     bool `json:"ok"`
-		Result struct {
+		ActionID string `json:"actionId"`
+		Output   struct {
 			Text       string  `json:"text"`
 			Confidence float64 `json:"confidence"`
-		} `json:"result"`
+		} `json:"output"`
 	}
 	if err := json.Unmarshal(encoded, &response); err != nil {
 		t.Fatal(err)
 	}
-	if !response.OK || response.Result.Text != "ALIGN WITH TARGET DESTINATION" || response.Result.Confidence != .998932 {
+	if response.ActionID != "elite-dangerous/flight-prompt-text" || response.Output.Text != "ALIGN WITH TARGET DESTINATION" || response.Output.Confidence != .998932 {
 		t.Fatalf("response = %s", encoded)
 	}
 	if recognizer.ruleID != "EliteDangerous64.exe" || recognizer.profileID != "ocr/w480" ||

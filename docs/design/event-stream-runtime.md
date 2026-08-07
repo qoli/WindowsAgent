@@ -16,6 +16,12 @@ mini-model reactions, actions, and high-level model readers. It assigns event
 identity, commit time, and a contiguous global sequence. It does not interpret,
 merge, summarize, or replace producer-owned event semantics.
 
+Streaming Action invocations now use the journal as their callback channel.
+The Agent commits `action.started` before returning the watch URL, correlates
+all records by invocation ID, owns terminal events, and exposes a filtered
+NDJSON endpoint that closes at the terminal event. Finite Actions do not write
+callback records.
+
 The process listens only on an explicit loopback IP and requires one canonical
 bearer token from an absolute token file for append and replay. `/healthz` is
 the only unauthenticated endpoint.

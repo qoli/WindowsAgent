@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "description": "Elite Dangerous exposes finite game-specific Actions; registrations remain opt-in.",
   "runtimeProfiles": {
     "ocr/w480": {
@@ -12,22 +12,26 @@
     "elite-dangerous/compass": {
       "path": "Actions/compass",
       "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
     "elite-dangerous/ship-status": {
       "path": "Actions/ship-status",
       "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
     "elite-dangerous/flight-prompt-text": {
       "path": "Actions/flight-prompt-text",
       "runtime": "ppocr-w480-text-v1",
       "runtimeProfile": "ocr/w480",
+      "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
     "elite-dangerous/flight-status": {
       "path": "Actions/flight-status",
       "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     }
   },

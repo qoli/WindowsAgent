@@ -56,8 +56,8 @@ func TestStoreReportsUnmatchedExplicitly(t *testing.T) {
 func TestStoreReadsActionsAndExplicitRegistrations(t *testing.T) {
 	root := t.TempDir()
 	actions := map[string]ActionDeclaration{
-		"game/read": {Path: "Actions/read", Runtime: ObservationRuntimeV1, RegistrableAs: []string{RegistrationMonitor, RegistrationReaction}},
-		"game/open": {Path: "Actions/open", Runtime: "windows-action-v1", RegistrableAs: []string{RegistrationReaction}},
+		"game/read": {Path: "Actions/read", Runtime: ObservationRuntimeV1, Execution: returnExecution(), RegistrableAs: []string{RegistrationMonitor, RegistrationReaction}},
+		"game/open": {Path: "Actions/open", Runtime: "windows-action-v1", Execution: returnExecution(), RegistrableAs: []string{RegistrationReaction}},
 	}
 	registrations := map[string]RegistrationDeclaration{
 		"game/read-fast": {
@@ -137,7 +137,8 @@ func TestRepositoryRulesUseActionModelWithoutDefaultRegistrations(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(actions) != 1 || actions[0].ID != test.action || actions[0].Runtime != test.runtime || len(actions[0].RegistrableAs) != 2 {
+		if len(actions) != 1 || actions[0].ID != test.action || actions[0].Runtime != test.runtime ||
+			actions[0].Execution.Completion != CompletionReturn || len(actions[0].RegistrableAs) != 2 {
 			t.Fatalf("%s actions = %+v", test.rule, actions)
 		}
 		registrations, _, err := store.ReadRegistrations(test.rule)
@@ -169,7 +170,7 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if action.Runtime != PpOcrActionRuntimeV1 || action.RuntimeProfile != "ocr/w480" {
+	if action.Runtime != PpOcrActionRuntimeV1 || action.RuntimeProfile != "ocr/w480" || action.Execution.Completion != CompletionReturn {
 		t.Fatalf("action = %+v", action)
 	}
 	flightStatus, err := store.ResolveAction("elite-dangerous/flight-status")
@@ -190,18 +191,22 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 
 func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
 	tests := []struct{ name, body, want string }{
-		{"old schema", `{"schemaVersion":3,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{}}`, "schemaVersion"},
-		{"missing actions", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"registrations":{}}`, "actions is required"},
-		{"missing registrations", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{}}`, "registrations is required"},
-		{"missing runtime profiles", `{"schemaVersion":4,"description":"Valid.","actions":{},"registrations":{}}`, "runtimeProfiles is required"},
-		{"unknown field", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{},"extra":true}`, "unknown field"},
-		{"action path", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Modules/a","runtime":"r","registrableAs":[]}},"registrations":{}}`, "below Actions/"},
-		{"missing registrable", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r"}},"registrations":{}}`, "registrableAs"},
-		{"unknown registration type", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["timer"]}},"registrations":{}}`, "unsupported registration type"},
-		{"unknown action", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
-		{"not declared", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
-		{"zero interval", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["monitor"]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
-		{"invalid regex", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["reaction"]}},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
+		{"old schema", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{}}`, "schemaVersion"},
+		{"missing actions", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"registrations":{}}`, "actions is required"},
+		{"missing registrations", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{}}`, "registrations is required"},
+		{"missing runtime profiles", `{"schemaVersion":5,"description":"Valid.","actions":{},"registrations":{}}`, "runtimeProfiles is required"},
+		{"unknown field", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{},"extra":true}`, "unknown field"},
+		{"action path", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Modules/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"registrations":{}}`, "below Actions/"},
+		{"missing registrable", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"}}},"registrations":{}}`, "registrableAs"},
+		{"missing execution", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"registrations":{}}`, "execution"},
+		{"return lifecycle", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return","lifecycle":"linear"},"registrableAs":[]}},"registrations":{}}`, "forbids lifecycle"},
+		{"stream lifecycle", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","interruptible":true},"registrableAs":[]}},"registrations":{}}`, "lifecycle"},
+		{"stream interruptible", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","lifecycle":"linear"},"registrableAs":[]}},"registrations":{}}`, "interruptible"},
+		{"unknown registration type", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["timer"]}},"registrations":{}}`, "unsupported registration type"},
+		{"unknown action", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
+		{"not declared", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
+		{"zero interval", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["monitor"]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
+		{"invalid regex", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["reaction"]}},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -230,7 +235,7 @@ func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
 func TestResolveActionRejectsDuplicateOrMissing(t *testing.T) {
 	root := testRulesRoot(t)
 	writeRule(t, root, "Other.exe", "Other.", "# Other\n", map[string]ActionDeclaration{
-		"crimson-desert/inventory": {Path: "Actions/inventory", Runtime: ObservationRuntimeV1, RegistrableAs: []string{}},
+		"crimson-desert/inventory": {Path: "Actions/inventory", Runtime: ObservationRuntimeV1, Execution: returnExecution(), RegistrableAs: []string{}},
 	}, map[string]RegistrationDeclaration{})
 	for _, rule := range []string{"CrimsonDesert.exe", "Other.exe"} {
 		if err := os.MkdirAll(filepath.Join(root, rule, "Actions", "inventory"), 0o700); err != nil {
@@ -253,7 +258,7 @@ func testRulesRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	writeRule(t, root, "CrimsonDesert.exe", "Read the live Rule before acting.", "# Guidance\n", map[string]ActionDeclaration{
-		"crimson-desert/inventory": {Path: "Actions/inventory", Runtime: ObservationRuntimeV1, RegistrableAs: []string{RegistrationMonitor, RegistrationReaction}},
+		"crimson-desert/inventory": {Path: "Actions/inventory", Runtime: ObservationRuntimeV1, Execution: returnExecution(), RegistrableAs: []string{RegistrationMonitor, RegistrationReaction}},
 	}, map[string]RegistrationDeclaration{})
 	return root
 }
@@ -271,7 +276,7 @@ func writeRule(t *testing.T, root, id, description, agents string, actions map[s
 		t.Fatal(err)
 	}
 	descriptor := Descriptor{
-		SchemaVersion: 4, Description: description,
+		SchemaVersion: 5, Description: description,
 		RuntimeProfiles: map[string]RuntimeProfileDeclaration{},
 		Actions:         actions, Registrations: registrations,
 	}
@@ -285,4 +290,8 @@ func writeRule(t *testing.T, root, id, description, agents string, actions map[s
 	if err := os.WriteFile(filepath.Join(ruleRoot, AgentsFilename), []byte(agents), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func returnExecution() *ActionExecutionDeclaration {
+	return &ActionExecutionDeclaration{Completion: CompletionReturn}
 }
