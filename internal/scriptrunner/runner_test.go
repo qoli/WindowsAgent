@@ -197,7 +197,7 @@ func TestEliteFlightStatusPackageClassifiesFivePassCalibrationCorpus(t *testing.
 		{9, "AUTO LAUNCHIN PROGRESS", 0.995785, "AUTO_LAUNCH"},
 		{10, "AUTO LAUNCHIN PROGRESS", 0.981162, "AUTO_LAUNCH"},
 		{11, "vOAVVM", 0.435403, "UNKNOWN"},
-		{12, "RESHAGINGORT", 0.75576, "FSD_CHARGING"},
+		{12, "RESHAGINGORT", 0.75576, "UNKNOWN"},
 		{13, "PRESSTO ABORT", 0.92825, "FSD_CHARGING"},
 		{14, "ALIGN WITH TARGET DESTINATION", 0.990222, "FSD_ALIGNMENT_REQUIRED"},
 		{15, "ALIGN WITH TARGET DESTINATION", 0.987779, "FSD_ALIGNMENT_REQUIRED"},
@@ -237,6 +237,21 @@ func TestEliteFlightStatusPackageRecognizesSupercruise(t *testing.T) {
 	}
 }
 
+func TestEliteFlightStatusPackageRecognizesSlowDownForAutoDock(t *testing.T) {
+	for _, text := range []string{
+		"SLOW DOWN FOR AUTO DOCK",
+		"SLOWDOWNFORAUTODOCK",
+		"SLOW DOWN FOR AUTO OOCK",
+	} {
+		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "SLOW_DOWN_FOR_AUTO_DOCK" || status["known"] != true || decision["accepted"] != true {
+			t.Fatalf("text %q result = %#v", text, result)
+		}
+	}
+}
+
 func TestEliteFlightStatusPackageKeepsLowConfidenceAndAmbiguousTextUnknown(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -244,6 +259,7 @@ func TestEliteFlightStatusPackageKeepsLowConfidenceAndAmbiguousTextUnknown(t *te
 		confidence float64
 	}{
 		{name: "below confidence threshold", text: "AUTO DOCK IN PROGRESS", confidence: 0.299},
+		{name: "slow down below confidence threshold", text: "SLOW DOWN FOR AUTO DOCK", confidence: 0.299},
 		{name: "ambiguous launch or dock", text: "AUTO IN PROGRESS", confidence: 0.99},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -254,6 +270,19 @@ func TestEliteFlightStatusPackageKeepsLowConfidenceAndAmbiguousTextUnknown(t *te
 				t.Fatalf("result = %#v", result)
 			}
 		})
+	}
+}
+
+func TestEliteFlightStatusPackageRejectsHighConfidenceUnrelatedText(t *testing.T) {
+	result := runFlightStatusPackage(t, flightPromptRawInput("CURIULIS STARP", 0.857365))
+	status := result["flightStatus"].(map[string]any)
+	decision := result["decision"].(map[string]any)
+	if status["state"] != "UNKNOWN" || decision["accepted"] != false || decision["candidateState"] != "FSD_CHARGING" {
+		t.Fatalf("result = %#v", result)
+	}
+	if decision["confidence"].(float64) <= decision["threshold"].(float64) ||
+		decision["textSimilarity"].(float64) >= decision["similarityThreshold"].(float64) {
+		t.Fatalf("similarity gate was not the rejecting evidence: %#v", decision)
 	}
 }
 

@@ -5,10 +5,20 @@ its imperfect OCR text into one finite flight status. Normalize only ASCII
 letters and digits, compare against the reviewed finite phrase catalog using
 Levenshtein similarity, and combine that similarity with the OCR confidence.
 
-Accept a status only when its combined confidence is at least `0.30` and its
-lead over the runner-up is at least `0.10`. These constants separate all 13
-reviewed positive images from all 15 reviewed unknown or interfering images in
-the 28-image, five-pass w480 calibration set. Missing, unrelated, ambiguous, or
+Accept a status only when its phrase similarity is at least `0.60`, its
+combined OCR-confidence score is at least `0.30`, and its lead over the
+runner-up is at least `0.10`. The similarity floor rejects unrelated text even
+when the OCR engine is confident: the reviewed `CURIULIS STARP` interference
+previously scored `0.342946` against `FSD_CHARGING`, but its phrase similarity
+is only `0.40`. It now remains `UNKNOWN`.
+
+This fail-closed boundary retains 12 clear positive images and all 15 reviewed
+unknown or interfering images in the original 28-image, five-pass w480
+calibration set. One heavily corrupted FSD image, `RESHAGINGORT`, deliberately
+changes from `FSD_CHARGING` to `UNKNOWN` because its phrase similarity is only
+`0.4167`; the following clear `PRESS TO ABORT` image remains accepted. The
+later reviewed Auto Dock capture adds `SLOW DOWN FOR AUTO DOCK` as the finite
+`SLOW_DOWN_FOR_AUTO_DOCK` state. Missing, unrelated, ambiguous, or
 low-confidence content remains `UNKNOWN`; never choose a status merely because
 it is the closest catalog phrase.
 

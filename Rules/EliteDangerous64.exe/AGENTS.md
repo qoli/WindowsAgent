@@ -24,11 +24,13 @@ raw OCR text evidence only.
 
 `elite-dangerous/flight-status` is its finite, pure post-processing Action. It
 accepts the complete raw OCR output and combines OCR confidence with reviewed
-phrase similarity. It returns `SUPERCRUISE`, `AUTO_LAUNCH`,
-`WAITING_IN_QUEUE`, `FSD_CHARGING`, `FSD_ALIGNMENT_REQUIRED`, `AUTO_DOCK`, or
-evidence-preserving `UNKNOWN`. It performs no capture or OCR and malformed raw
-input fails schema validation. Multi-frame confirmation, event emission, and
-follow-up execution remain registration concerns.
+phrase similarity. A candidate must also meet the explicit `0.60` phrase
+similarity floor; high-confidence unrelated OCR remains `UNKNOWN`. It returns `SUPERCRUISE`, `AUTO_LAUNCH`,
+`WAITING_IN_QUEUE`, `SLOW_DOWN_FOR_AUTO_DOCK`, `FSD_CHARGING`,
+`FSD_ALIGNMENT_REQUIRED`, `AUTO_DOCK`, or evidence-preserving `UNKNOWN`. It
+performs no capture or OCR and malformed raw input fails schema validation.
+Multi-frame confirmation, event emission, and follow-up execution remain
+registration concerns.
 
 `elite-dangerous/ship-status` is a finite composite Action over the reviewed
 lower-right HUD region. Its internal raw Action captures at reference density

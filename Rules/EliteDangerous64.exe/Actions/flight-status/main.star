@@ -1,5 +1,6 @@
 MIN_STATUS_CONFIDENCE = 0.30
 MIN_STATUS_MARGIN = 0.10
+MIN_TEXT_SIMILARITY = 0.60
 
 STATUS_RULES = [
     {
@@ -13,6 +14,10 @@ STATUS_RULES = [
     {
         "state": "WAITING_IN_QUEUE",
         "aliases": ["WAITING IN QUEUE"],
+    },
+    {
+        "state": "SLOW_DOWN_FOR_AUTO_DOCK",
+        "aliases": ["SLOW DOWN FOR AUTO DOCK"],
     },
     {
         "state": "FSD_CHARGING",
@@ -101,6 +106,7 @@ def empty_decision():
         "threshold": MIN_STATUS_CONFIDENCE,
         "margin": 0.0,
         "marginThreshold": MIN_STATUS_MARGIN,
+        "similarityThreshold": MIN_TEXT_SIMILARITY,
         "candidateState": None,
         "candidateAlias": None,
         "textSimilarity": 0.0,
@@ -116,7 +122,7 @@ def main(ctx):
     if len(normalized_text) > 0 and raw["confidence"] > 0.0:
         best, runner_up = classify(normalized_text, raw["confidence"])
         margin = best["confidence"] - runner_up["confidence"]
-        accepted = best["confidence"] >= MIN_STATUS_CONFIDENCE and margin >= MIN_STATUS_MARGIN
+        accepted = best["confidence"] >= MIN_STATUS_CONFIDENCE and best["textSimilarity"] >= MIN_TEXT_SIMILARITY and margin >= MIN_STATUS_MARGIN
         if accepted:
             state = best["state"]
         decision = {
@@ -125,6 +131,7 @@ def main(ctx):
             "threshold": MIN_STATUS_CONFIDENCE,
             "margin": margin,
             "marginThreshold": MIN_STATUS_MARGIN,
+            "similarityThreshold": MIN_TEXT_SIMILARITY,
             "candidateState": best["state"],
             "candidateAlias": best["alias"],
             "textSimilarity": best["textSimilarity"],
