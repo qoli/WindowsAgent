@@ -129,6 +129,15 @@ func shipStatusPackageRoot(t *testing.T) string {
 	return root
 }
 
+func shipSpeedPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-speed-classifier"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func flightStatusPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "flight-status"))
@@ -528,6 +537,86 @@ func TestEliteShipStatusClassifierDoesNotGuessMissingLabel(t *testing.T) {
 	mass := result["shipStatus"].(map[string]any)["massLock"].(map[string]any)
 	if mass["state"] != "UNKNOWN" || mass["on"] != nil || mass["evidence"].(map[string]any)["reason"] != "LABEL_NOT_CONFIRMED" {
 		t.Fatalf("mass lock = %#v", mass)
+	}
+}
+
+func shipSpeedClassifierInput(text string, recognitionConfidence float64, points []any) map[string]any {
+	regions := []any{}
+	if points != nil {
+		regions = append(regions, map[string]any{
+			"points": points, "referencePoints": points,
+			"detectionConfidence": 0.8, "text": text, "recognitionConfidence": recognitionConfidence,
+			"leftContext": map[string]any{
+				"x": int64(0), "y": int64(0), "w": int64(0), "h": int64(0), "pixels": []any{},
+				"referenceRegion": map[string]any{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0},
+			},
+		})
+	}
+	return map[string]any{
+		"schemaVersion": int64(1), "regions": regions,
+		"evidence": map[string]any{
+			"capturedAt":      "2026-08-08T00:00:00Z",
+			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
+			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+			"referenceRegion": map[string]any{"x": int64(1000), "y": int64(740), "w": int64(260), "h": int64(170)},
+			"physicalRegion":  map[string]any{"left": int64(2000), "top": int64(1480), "width": int64(520), "height": int64(340)},
+		},
+		"models": map[string]any{}, "timing": map[string]any{},
+	}
+}
+
+func runShipSpeedClassifier(t *testing.T, input map[string]any) map[string]any {
+	t.Helper()
+	pkg, err := scriptpackage.Load(shipSpeedPackageRoot(t), "elite-dangerous/ship-speed-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&fixtureBroker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := runner.Run(context.Background(), pkg, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func speedBox() []any {
+	return []any{
+		map[string]any{"x": 110.0, "y": 58.0}, map[string]any{"x": 155.0, "y": 76.0},
+		map[string]any{"x": 145.0, "y": 102.0}, map[string]any{"x": 100.0, "y": 84.0},
+	}
+}
+
+func TestEliteShipSpeedClassifierReturnsConfirmedDisplayValue(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("136", 0.81, speedBox()))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(136) || speed["unit"] != nil ||
+		speed["evidence"].(map[string]any)["reason"] != "VISUAL_SPEED_CONFIRMED" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierRejectsKnownHighConfidenceEightConfusion(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("288", 0.89, speedBox()))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
+		speed["evidence"].(map[string]any)["reason"] != "EIGHT_GLYPH_AMBIGUOUS" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierDoesNotFallbackWhenVisualBoxIsMissing(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("", 0, nil))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
+		speed["evidence"].(map[string]any)["reason"] != "SPEED_BOX_NOT_FOUND" {
+		t.Fatalf("speed = %#v", speed)
 	}
 }
 

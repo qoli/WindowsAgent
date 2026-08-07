@@ -32,14 +32,15 @@ registration forms:
 
 `registrableAs` is permission to register, not a registration. An empty
 `registrations` object means the Action remains directly callable only.
-For example, the Elite Dangerous compass, flight-status, and ship-status
-Actions are eligible for both registration types while their empty
+For example, the Elite Dangerous compass, flight-status, ship-status, and
+ship-speed Actions are eligible for both registration types while their empty
 registration catalog leaves them strictly on-demand. Flight-status is a pure
 postprocessor for the complete raw flight-prompt-text result; eligibility does
 not implicitly connect or schedule those two Actions. The ship-status Action's `UNKNOWN` results preserve
 insufficient visual evidence rather than silently converting it to `OFF`; its
 three-row relative-geometry check reports Mass Lock, Landing Gear, and Cargo
-Scoop independently.
+Scoop independently. Ship-speed likewise keeps ambiguous or covered OCR as
+`UNKNOWN`; registration must not substitute journal or command state.
 
 `execution` is required independently from registration. It declares whether
 direct invocation completes through the HTTP return value or a durable event

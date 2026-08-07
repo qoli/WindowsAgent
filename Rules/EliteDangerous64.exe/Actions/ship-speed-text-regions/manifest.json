@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous ship speed text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 1000, "y": 740, "w": 260, "h": 170},
+  "sampling": "reference",
+  "maxPixels": 44200,
+  "leftContextWidth": 1,
+  "verticalPadding": 0
+}

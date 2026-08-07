@@ -48,6 +48,10 @@ today:
   Action with a pure game classifier; it confirms only `MASS`, `LANDING`, and
   `CARGO`, then independently reports the three same-frame indicators as
   `ON`, `OFF`, or evidence-preserving `UNKNOWN`
+- `elite-dangerous/ship-speed` reads the fixed visual HUD speed-number region
+  and returns a unitless `displayValue` only when box geometry, digit count,
+  and recognition confidence agree; covered or ambiguous values remain
+  `UNKNOWN` without consulting journal, status-file, or throttle-command state
 - `elite-dangerous/flight-status` accepts the complete raw output of
   `elite-dangerous/flight-prompt-text`, combines OCR confidence with finite
   phrase similarity, and returns one reviewed flight state or `UNKNOWN`
@@ -102,6 +106,10 @@ The Action runtime and registration refactor is partially landed:
   quadrilaterals, recognition evidence, and bounded same-frame left context;
   the composite `elite-dangerous/ship-status` Action alone owns its three
   lower-right indicator semantics;
+- the composite `elite-dangerous/ship-speed` Action uses that same resident
+  text-regions profile over a separate reference ROI. It is eligible for
+  opt-in Monitor or Reaction registration, but no speed loop is active by
+  default;
 - `windows-key-action-v1` is a game-neutral finite runtime for one serialized,
   foreground-bound scan-code key press. A Rule package may declare literal
   canonical keys directly or select a game-specific binding source; callers
@@ -471,6 +479,11 @@ curl.exe `
   --data-binary '{"actionId":"elite-dangerous/ship-status","inputs":{}}' `
   http://127.0.0.1:8787/v1/actions/invoke
 ```
+
+Use `"actionId":"elite-dangerous/ship-speed"` on the same endpoint to read
+visual speed evidence. `speed.state: "KNOWN"` makes `speed.displayValue`
+available; `UNKNOWN` is a valid observation and must not be replaced with the
+last requested throttle setting.
 
 A finite Action returns HTTP `200`, `state: COMPLETED`, and `output`. A
 streaming Action returns HTTP `202`, `state: RUNNING`, and a `watch` object.

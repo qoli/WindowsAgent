@@ -189,6 +189,13 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if shipStatus.Runtime != CompositeActionRuntimeV1 || !reflect.DeepEqual(shipStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
 		t.Fatalf("ship-status action = %+v", shipStatus)
 	}
+	shipSpeed, err := store.ResolveAction("elite-dangerous/ship-speed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shipSpeed.Runtime != CompositeActionRuntimeV1 || !reflect.DeepEqual(shipSpeed.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
+		t.Fatalf("ship-speed action = %+v", shipSpeed)
+	}
 }
 
 func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "regions", "evidence", "models", "timing"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "regions": {"type": "array", "maxItems": 64, "items": {"type": "object"}},
+    "evidence": {"type": "object"},
+    "models": {"type": "object"},
+    "timing": {"type": "object"}
+  }
+}

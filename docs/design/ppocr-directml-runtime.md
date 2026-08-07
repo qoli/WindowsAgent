@@ -64,6 +64,20 @@ Boxes touching the ROI's left edge return an explicitly empty left context.
 Only the game classifier interprets left context; a required label with missing
 or ambiguous context becomes `UNKNOWN`.
 
+The visual ship-speed path reuses the same resident profile but owns a separate
+reference-density ROI:
+
+```text
+260x170 speed-number search ROI
+  -> PP-OCR quadrilateral and recognition evidence
+  -> game-specific geometry and digit-count checks
+  -> unitless KNOWN displayValue or UNKNOWN
+```
+
+The classifier is intentionally fail-closed around reviewed `0/8` and `6/8`
+confusions. The result is visual evidence only; Player Journal, `Status.json`,
+and requested throttle are not fallback sources.
+
 ## Rule lifecycle
 
 Rule schema version 5 declares worker residency independently from Action and

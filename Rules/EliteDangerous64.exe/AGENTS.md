@@ -38,11 +38,20 @@ only `MASS`, `LANDING`, and `CARGO`, then independently returns `massLock`,
 `landingGear`, and `cargoScoop` as cyan `ON`, orange `OFF`, or evidence-preserving
 `UNKNOWN`. It never falls back to the retired fixed-position triplet detector.
 
+`elite-dangerous/ship-speed` is a finite composite Action over the fixed visual
+speed-number region. It returns the displayed number only as `KNOWN` when the
+same-frame OCR box geometry, digit count, and recognition confidence satisfy
+the reviewed conservative contract; otherwise it returns `UNKNOWN`. Its value
+is observed HUD evidence, not the requested throttle setting. The unit remains
+unknown, and the Action never consults Player Journal, `Status.json`, prior
+commands, or another fallback source. It may be registered as a Monitor, but no
+speed loop is active by default.
+
 Target geometry uses 1080p reference pixels. `screenAngleDegrees` is clockwise
 from straight up. `centerZone.inside` is a current-frame circular membership
 state; do not infer an entered/exited transition without Monitor history.
 
-These four observation Actions declare that they may be registered as either a
+These five observation Actions declare that they may be registered as either a
 Monitor or Reaction, but the registration catalog is intentionally empty. Do not infer a
 timer or event subscription from `registrableAs`; declaring eligibility does
 not activate a registration. Likewise, `ocr/w480` and `ocr/text-regions`

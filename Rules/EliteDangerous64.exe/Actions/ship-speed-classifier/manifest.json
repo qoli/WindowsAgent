@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "title": "Classify Elite Dangerous visual ship speed evidence",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json"],
+  "permissions": {"memory": null, "file": null, "screen": null},
+  "limits": {"wallTimeMs": 1000, "maxSteps": 1000000, "maxResultBytes": 16384, "maxLogBytes": 1024}
+}
