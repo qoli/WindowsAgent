@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 3,
   "title": "Elite Dangerous bounded UI control",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -9,6 +9,9 @@
   "gesture": {"type": "press", "holdMs": 40},
   "selector": {"inputField": "control"},
   "bindings": {
+    "FOCUS_LEFT_PANEL": {"control": "FocusLeftPanel"},
+    "NEXT_PANEL": {"control": "CycleNextPanel"},
+    "PREVIOUS_PANEL": {"control": "CyclePreviousPanel"},
     "UP": {"control": "UI_Up"},
     "DOWN": {"control": "UI_Down"},
     "LEFT": {"control": "UI_Left"},

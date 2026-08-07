@@ -53,6 +53,73 @@ func TestControllerResolvesCurrentKeyboardBindingAndPressesIt(t *testing.T) {
 	}
 }
 
+func TestEliteUIControlResolvesFocusLeftPanel(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ui-control"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `
+<Root PresetName="ControlPadKeyboard">
+  <FocusLeftPanel>
+    <Primary Device="28DE11FF" Key="GamePad_DPadLeft" />
+    <Secondary Device="Keyboard" Key="Key_1" />
+  </FocusLeftPanel>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := controller.Run(context.Background(), pkg, map[string]any{"control": "FOCUS_LEFT_PANEL"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_1" ||
+		!strings.Contains(string(output), `"selection":"FOCUS_LEFT_PANEL"`) ||
+		!strings.Contains(string(output), `"control":"FocusLeftPanel"`) {
+		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
+func TestEliteUIControlResolvesDedicatedPanelCycleControls(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ui-control"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <CycleNextPanel><Primary Device="Keyboard" Key="Key_E"/><Secondary Device="{NoDevice}" Key=""/></CycleNextPanel>
+  <CyclePreviousPanel><Primary Device="Keyboard" Key="Key_Q"/><Secondary Device="{NoDevice}" Key=""/></CyclePreviousPanel>
+</Root>`)
+	for _, test := range []struct{ selection, control, key string }{
+		{"NEXT_PANEL", "CycleNextPanel", "Key_E"},
+		{"PREVIOUS_PANEL", "CyclePreviousPanel", "Key_Q"},
+	} {
+		t.Run(test.selection, func(t *testing.T) {
+			driver := &recordingDriver{}
+			controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := controller.Run(context.Background(), pkg, map[string]any{"control": test.selection}, "EliteDangerous64.exe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(driver.requests) != 1 || driver.requests[0].Key != test.key ||
+				!strings.Contains(string(output), `"control":"`+test.control+`"`) {
+				t.Fatalf("requests=%v output=%s", driver.requests, output)
+			}
+		})
+	}
+}
+
 func TestControllerRejectsMissingUnsupportedOrAmbiguousBindings(t *testing.T) {
 	pkg := writeInputPackage(t, Selector{Constant: "select"}, map[string]Binding{"select": {Control: "UI_Select"}})
 	for _, test := range []struct {
