@@ -48,35 +48,73 @@ def append_color_run(runs, color, y, start_x, length):
         })
 
 def build_box_candidates(runs):
+    bands = []
+    for run in runs:
+        band_index = -1
+        for index in range(len(bands)):
+            band = bands[index]
+            if (
+                band["color"] == run["color"] and
+                run["y"] >= band["endY"] and
+                run["y"] <= band["endY"] + 1 and
+                abs(run["centerX"] - band["centerX"]) <= MAX_BOX_CENTER_DELTA
+            ):
+                band_index = index
+                break
+        if band_index == -1:
+            bands.append({
+                "color": run["color"],
+                "startY": run["y"],
+                "endY": run["y"],
+                "centerX": run["centerX"],
+                "centerTotal": run["centerX"],
+                "widthTotal": run["width"],
+                "rowCount": 1,
+            })
+        elif run["y"] > bands[band_index]["endY"]:
+            band = bands[band_index]
+            band["endY"] = run["y"]
+            band["centerTotal"] += run["centerX"]
+            band["widthTotal"] += run["width"]
+            band["rowCount"] += 1
+            band["centerX"] = band["centerTotal"] // band["rowCount"]
+
     raw_candidates = []
-    for top in runs:
-        for bottom in runs:
-            edge_gap = bottom["y"] - top["y"]
+    for band in bands:
+        height = band["endY"] - band["startY"] + 1
+        if (
+            height >= MIN_BOX_EDGE_GAP and
+            height <= MAX_BOX_EDGE_GAP and
+            band["rowCount"] >= MIN_BOX_RUNS
+        ):
+            raw_candidates.append({
+                "color": band["color"],
+                "centerX": band["centerX"],
+                "centerY": (band["startY"] + band["endY"]) // 2,
+                "runCount": band["rowCount"],
+            })
+
+    for top in bands:
+        for bottom in bands:
+            edge_gap = bottom["endY"] - top["startY"]
+            top_width = top["widthTotal"] // top["rowCount"]
+            bottom_width = bottom["widthTotal"] // bottom["rowCount"]
             if (
                 bottom["color"] == top["color"] and
+                bottom["startY"] > top["endY"] + 1 and
                 edge_gap >= MIN_BOX_EDGE_GAP and
                 edge_gap <= MAX_BOX_EDGE_GAP and
                 abs(bottom["centerX"] - top["centerX"]) <= MAX_BOX_CENTER_DELTA and
-                abs(bottom["width"] - top["width"]) <= MAX_BOX_WIDTH_DELTA
+                abs(bottom_width - top_width) <= MAX_BOX_WIDTH_DELTA and
+                top["rowCount"] + bottom["rowCount"] >= MIN_BOX_RUNS
             ):
-                aligned_count = 0
-                center_total = 0
-                for candidate in runs:
-                    if (
-                        candidate["color"] == top["color"] and
-                        candidate["y"] >= top["y"] and
-                        candidate["y"] <= bottom["y"] and
-                        abs(candidate["centerX"] - top["centerX"]) <= MAX_BOX_CENTER_DELTA
-                    ):
-                        aligned_count += 1
-                        center_total += candidate["centerX"]
-                if aligned_count >= MIN_BOX_RUNS:
-                    raw_candidates.append({
-                        "color": top["color"],
-                        "centerX": center_total // aligned_count,
-                        "centerY": (top["y"] + bottom["y"]) // 2,
-                        "runCount": aligned_count,
-                    })
+                run_count = top["rowCount"] + bottom["rowCount"]
+                raw_candidates.append({
+                    "color": top["color"],
+                    "centerX": (top["centerTotal"] + bottom["centerTotal"]) // run_count,
+                    "centerY": (top["startY"] + bottom["endY"]) // 2,
+                    "runCount": run_count,
+                })
 
     candidates = []
     for candidate in raw_candidates:

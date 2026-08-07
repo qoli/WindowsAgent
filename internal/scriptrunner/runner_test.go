@@ -383,6 +383,29 @@ func TestEliteShipStatusPackageReportsEachHighlightedRowIndependently(t *testing
 	}
 }
 
+func TestEliteShipStatusPackageSeparatesAdjacentFilledRows(t *testing.T) {
+	pixels := shipStatusPixels(false, -1)
+	drawShipStatusBox(pixels, 40, 60, true)
+	drawShipStatusBox(pixels, 40, 79, true)
+	drawShipStatusBox(pixels, 40, 98, false)
+	result, _ := runShipStatusPackage(t, pixels)
+	shipStatus := result["shipStatus"].(map[string]any)
+	evidence := result["evidence"].(map[string]any)
+	for _, name := range []string{"massLock", "landingGear"} {
+		status := shipStatus[name].(map[string]any)
+		if status["state"] != "ON" || status["on"] != true || status["color"] != "cyan" {
+			t.Fatalf("%s = %#v", name, status)
+		}
+	}
+	cargoScoop := shipStatus["cargoScoop"].(map[string]any)
+	if cargoScoop["state"] != "OFF" || cargoScoop["on"] != false || cargoScoop["color"] != "orange" {
+		t.Fatalf("cargoScoop = %#v", cargoScoop)
+	}
+	if evidence["panelVisible"] != true || evidence["statusTripletDetected"] != true {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
 func TestEliteShipStatusPackageReportsUnknownWhenPanelEvidenceIsInsufficient(t *testing.T) {
 	result, _ := runShipStatusPackage(t, shipStatusPixels(false, -1))
 	shipStatus := result["shipStatus"].(map[string]any)
