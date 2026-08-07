@@ -27,6 +27,44 @@ type fixtureReporter struct {
 	payloads []json.RawMessage
 }
 
+type contactsPanelCaller struct {
+	states   []string
+	index    int
+	controls []string
+}
+
+func (c *contactsPanelCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	if id == "elite-dangerous/ui-control" {
+		control, _ := inputs["control"].(string)
+		c.controls = append(c.controls, control)
+		return json.RawMessage(`{"schemaVersion":1}`), nil
+	}
+	if id != "elite-dangerous/contacts-tab-state" || len(inputs) != 0 || c.index >= len(c.states) {
+		return nil, errors.New("unexpected select-Contacts child Action call")
+	}
+	state := c.states[c.index]
+	c.index++
+	var selected any
+	if state == "SELECTED" {
+		selected = true
+	} else if state == "NOT_SELECTED" {
+		selected = false
+	}
+	return json.Marshal(map[string]any{
+		"schemaVersion": 1,
+		"contactsTab":   map[string]any{"state": state, "selected": selected},
+	})
+}
+
+func selectContactsPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "select-contacts-panel"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func (f *fixtureReporter) Emit(_ context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
 	f.types = append(f.types, eventType)
 	f.payloads = append(f.payloads, append(json.RawMessage(nil), payload...))
@@ -96,6 +134,112 @@ def main(ctx):
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancelled streaming Action did not stop")
+	}
+}
+
+func TestEliteSelectContactsPanelIsIdempotentWhenAlreadySelected(t *testing.T) {
+	pkg, err := Load(selectContactsPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &contactsPanelCaller{states: []string{"SELECTED", "SELECTED"}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.controls) != 0 || !contains(string(output), `"contactsState":"SELECTED"`) ||
+		!contains(string(output), `"selected":true`) ||
+		!contains(string(output), `"cycleCount":0`) || !contains(string(output), `"openedPanel":false`) {
+		t.Fatalf("output=%s controls=%v", output, caller.controls)
+	}
+}
+
+func TestEliteSelectContactsPanelOpensAndCyclesWithVerification(t *testing.T) {
+	pkg, err := Load(selectContactsPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &contactsPanelCaller{states: []string{
+		"ABSENT", "ABSENT",
+		"NOT_SELECTED", "NOT_SELECTED",
+		"NOT_SELECTED", "NOT_SELECTED",
+		"SELECTED", "SELECTED",
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"FOCUS_LEFT_PANEL", "NEXT_PANEL", "NEXT_PANEL"}
+	if len(caller.controls) != len(wantControls) {
+		t.Fatalf("controls=%v output=%s", caller.controls, output)
+	}
+	for index := range wantControls {
+		if caller.controls[index] != wantControls[index] {
+			t.Fatalf("controls=%v", caller.controls)
+		}
+	}
+	if !contains(string(output), `"contactsState":"SELECTED"`) || !contains(string(output), `"openedPanel":true`) ||
+		!contains(string(output), `"cycleCount":2`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteSelectContactsPanelUsesThreeStepFourTabBound(t *testing.T) {
+	pkg, err := Load(selectContactsPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &contactsPanelCaller{states: []string{
+		"NOT_SELECTED", "NOT_SELECTED",
+		"NOT_SELECTED", "NOT_SELECTED",
+		"NOT_SELECTED", "NOT_SELECTED",
+		"SELECTED", "SELECTED",
+	}}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.controls) != 3 || !contains(string(output), `"cycleCount":3`) ||
+		!contains(string(output), `"contactsState":"SELECTED"`) {
+		t.Fatalf("output=%s controls=%v", output, caller.controls)
+	}
+}
+
+func TestEliteSelectContactsPanelStopsOnUnknownOrExhaustedCycle(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		states []string
+		want   string
+	}{
+		{"unknown", []string{"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"}, "did not produce two consecutive known observations"},
+		{"exhausted", []string{
+			"NOT_SELECTED", "NOT_SELECTED",
+			"NOT_SELECTED", "NOT_SELECTED",
+			"NOT_SELECTED", "NOT_SELECTED",
+			"NOT_SELECTED", "NOT_SELECTED",
+		}, "CONTACTS was not reached within three NEXT_PANEL inputs"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg, err := Load(selectContactsPackageRoot(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			caller := &contactsPanelCaller{states: test.states}
+			_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+				context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
+			)
+			if err == nil || !contains(err.Error(), test.want) {
+				t.Fatalf("error=%v controls=%v", err, caller.controls)
+			}
+		})
 	}
 }
 

@@ -72,12 +72,32 @@ it in the settled forward cockpit view before opening the Target panel. The
 Action is not registrable and never performs the docking request itself.
 
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
-supervising model chooses exactly one logical `UP`, `DOWN`, `LEFT`, `RIGHT`,
-`SELECT`, or `BACK` after inspecting a fresh screenshot. The runtime resolves
-that logical control from the game's active binding preset, then uses the
+supervising model chooses exactly one logical `FOCUS_LEFT_PANEL`, `NEXT_PANEL`,
+`PREVIOUS_PANEL`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, or `BACK` after
+inspecting a fresh screenshot.
+`FOCUS_LEFT_PANEL` resolves the dedicated Frontier control; `LEFT` remains
+in-panel navigation. `NEXT_PANEL` and `PREVIOUS_PANEL` resolve the dedicated
+Frontier panel-cycle controls and must not be replaced with `LEFT` or `RIGHT`.
+The runtime resolves that logical control from the game's active binding preset, then uses the
 game-neutral Windows scan-code input driver; never assume Space or any other
 fixed physical key. Successful output includes the binding source, backend,
 scan code, extended-key flag, and configured hold time.
+
+`elite-dangerous/contacts-tab-state` is a finite same-frame observation Action.
+It scans only the fixed filled-highlight region around the `CONTACTS` tab and
+returns `SELECTED`, `NOT_SELECTED`, `ABSENT`, or `UNKNOWN`. It does not OCR the
+header or identify the other active tab. The icon-only `SYSTEM` summary Tag to
+the left of `NAVIGATION` is not one of the four selectable tabs.
+
+`elite-dangerous/select-contacts-panel` is an interruptible linear Streaming
+Action. It opens a stably absent Target panel at most once, invokes only the
+dedicated `NEXT_PANEL` control, and verifies every transition with two current
+CONTACTS-region pixel scans. The four tabs cycle as `NAVIGATION`,
+`TRANSACTIONS`, `CONTACTS`, `TARGET`, then back to `NAVIGATION`. It completes
+only after `CONTACTS` is confirmed twice. Its scope ends before selecting a
+contact, focusing `REQUEST DOCKING`, or requesting docking. Follow its returned
+watch URL; unknown evidence or failure to reach Contacts within three cycles
+terminates the Action.
 
 ### Visual focus confirmation for the higher execution Agent
 
@@ -114,6 +134,34 @@ Use the following evidence loop before `SELECT`:
    menu state.
 4. Navigate one direction and one fresh frame at a time. Invoke `SELECT` only
    when the target has the calibrated focused appearance in the newest frame.
+
+Do not capture the navigation result in the middle of the Elite Dangerous UI
+animation. After each completed finite input, allow approximately one second
+for the panel or focus transition to settle before requesting the evidence
+frame. The capture artifact creation time includes later HDR conversion and PNG
+encoding and is not the frame acquisition time; neither an immediate animation
+frame nor the later artifact timestamp proves the settled UI state.
+
+The Target panel remembers its last tab. To reach station docking controls,
+invoke `FOCUS_LEFT_PANEL`, inspect the settled frame, and navigate to `CONTACTS`
+only if another tab is visibly active. Select a nearby Starport with one
+`UP`/`DOWN` input and one settled frame at a time. A selected contact alone is
+not a docking request. Continue only when a current frame exposes the contact's
+`REQUEST DOCKING` action. In a reviewed in-range flight state, the Starport row
+was already focused when `CONTACTS` opened and the action was visible but not
+focused; one `RIGHT` changed the action from a dark row to the calibrated filled
+highlight. That observed transition justifies `SELECT` for that state, but does
+not replace current-frame calibration. Never assume a fixed tab count, contact
+row, `RIGHT` step, or `SELECT` sequence. When already docked, the Starport can
+still appear in `CONTACTS` but `REQUEST DOCKING` is unavailable; that state is
+not valid evidence for the final action path.
+
+After selecting the focused action, require a settled success transition. The
+reviewed successful request replaced `REQUEST DOCKING` with `CANCEL DOCKING`
+and simultaneously displayed `DOCKING REQUEST GRANTED`. Either input completion
+or the panel closing is insufficient. If those current visual confirmations are
+missing, keep the request result `UNKNOWN`; do not issue another blind `SELECT`,
+which could activate a different current action or cancel an accepted request.
 
 A completed `ui-control` result proves only that WindowsAgent resolved and
 injected the configured key. It does not prove that the game accepted the key

@@ -39,6 +39,11 @@ type shipStatusBroker struct {
 	calls  []fixtureObserverCall
 }
 
+type contactsTabBroker struct {
+	pixels []any
+	calls  []fixtureObserverCall
+}
+
 func (b *compassBroker) BlobPath(context.Context, map[string]any) (string, error) {
 	return "", errors.New("unexpected compass blob path request")
 }
@@ -72,6 +77,26 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 			"width": int64(96), "height": int64(96),
 			"encoding": "rgb24-packed", "pixels": b.pixels,
 		},
+	}, nil
+}
+
+func (b *contactsTabBroker) BlobPath(context.Context, map[string]any) (string, error) {
+	return "", errors.New("unexpected Contacts-tab blob path request")
+}
+
+func (b *contactsTabBroker) RecordNative(context.Context, NativeRecord) error {
+	return errors.New("unexpected Contacts-tab native record")
+}
+
+func (b *contactsTabBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	return map[string]any{
+		"sampling":        "reference",
+		"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+		"frame":           map[string]any{"width": int64(3840), "height": int64(2160), "capturedAt": "2026-08-08T01:02:03Z"},
+		"region":          map[string]any{"x": int64(890), "y": int64(286), "w": int64(220), "h": int64(24)},
+		"physicalRegion":  map[string]any{"left": int64(1780), "top": int64(572), "width": int64(440), "height": int64(48)},
+		"image":           map[string]any{"width": int64(220), "height": int64(24), "encoding": "rgb24-packed", "pixels": b.pixels},
 	}, nil
 }
 
@@ -150,6 +175,15 @@ func flightStatusPackageRoot(t *testing.T) string {
 func requestDockingRangePackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "request-docking-range-classifier"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func contactsTabPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "contacts-tab-state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,6 +795,46 @@ func TestEliteRequestDockingRangeClassifierPreservesUnknownEvidence(t *testing.T
 				rangeResult["distanceMeters"] != nil ||
 				rangeResult["evidence"].(map[string]any)["reason"] != test.wantReason {
 				t.Fatalf("requestDockingRange = %#v", rangeResult)
+			}
+		})
+	}
+}
+
+func TestEliteContactsTabStateClassifiesSelectedNotSelectedAndAbsent(t *testing.T) {
+	for _, test := range []struct {
+		name, wantState string
+		highlighted     int
+	}{
+		{name: "selected", wantState: "SELECTED", highlighted: 2800},
+		{name: "not selected", wantState: "NOT_SELECTED", highlighted: 900},
+		{name: "absent", wantState: "ABSENT"},
+		{name: "ambiguous", wantState: "UNKNOWN", highlighted: 1800},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pixels := make([]any, 220*24)
+			for index := range pixels {
+				pixels[index] = uint32(0x202020)
+			}
+			for index := 0; index < test.highlighted; index++ {
+				pixels[index] = uint32(0xFFAA00)
+			}
+			pkg, err := scriptpackage.Load(contactsTabPackageRoot(t), "elite-dangerous/contacts-tab-state")
+			if err != nil {
+				t.Fatal(err)
+			}
+			broker := &contactsTabBroker{pixels: pixels}
+			runner, _ := New(broker)
+			output, err := runner.Run(context.Background(), pkg, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			contacts := result["contactsTab"].(map[string]any)
+			if contacts["state"] != test.wantState {
+				t.Fatalf("contactsTab = %#v", contacts)
 			}
 		})
 	}

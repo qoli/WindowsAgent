@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "contactsTab"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "profile": {"type": "object"},
+    "coordinateSpace": {"type": "object"},
+    "region": {"type": "object"},
+    "physicalRegion": {"type": "object"},
+    "contactsTab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "selected", "highlightRatio", "selectedMinimum", "notSelectedMinimum", "notSelectedMaximum", "absentMaximum", "reason"],
+      "properties": {
+        "state": {"enum": ["SELECTED", "NOT_SELECTED", "ABSENT", "UNKNOWN"]},
+        "selected": {"type": ["boolean", "null"]},
+        "highlightRatio": {"type": "number", "minimum": 0, "maximum": 1},
+        "selectedMinimum": {"const": 0.42},
+        "notSelectedMinimum": {"const": 0.08},
+        "notSelectedMaximum": {"const": 0.3},
+        "absentMaximum": {"const": 0.01},
+        "reason": {"type": "string", "maxLength": 64}
+      }
+    }
+  }
+}

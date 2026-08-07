@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.select-contacts-panel.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "observation", "cycleCount", "openedPanel", "command"],
+      "properties": {
+        "phase": {"enum": ["OBSERVING_INITIAL_STATE", "OPENING_LEFT_PANEL", "CYCLING_PANEL", "VERIFYING_CONTACTS", "CONTACTS_SELECTED"]},
+        "observation": {"type": ["object", "null"]},
+        "cycleCount": {"type": "integer", "minimum": 0, "maximum": 3},
+        "openedPanel": {"type": "boolean"},
+        "command": {"type": ["string", "null"], "enum": ["FOCUS_LEFT_PANEL", "NEXT_PANEL", null]}
+      }
+    }
+  }
+}
