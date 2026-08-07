@@ -50,6 +50,11 @@ native.blob_path(blob = blob_reference)
 library.bind(name = "...", parameters = [...], result = ...)
 function.call(...)
 
+math.hypot(...)
+math.atan2(...)
+math.degrees(...)
+math.round(...)
+
 job.input(name = "...")
 job.attempt(source = "...", function = ...)
 job.fail(code = "...", message = "...")

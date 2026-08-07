@@ -141,6 +141,8 @@ path, and runtime:
 - `native.load_library(alias)` loads only a declared package artifact.
 - `native.blob_path(blob=...)` resolves only a blob issued in the current job.
 - `library.bind(...)` and `function.call(...)` implement generic Windows FFI.
+- `math` is the deterministic standard Starlark math module; it requires no
+  permission and non-finite results cannot cross the JSON output boundary.
 - `job.input`, `job.attempt`, and `job.fail` own finite task flow.
 
 The runtime provides no network API, process launcher, environment access,

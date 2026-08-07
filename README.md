@@ -42,7 +42,8 @@ today:
   newest unambiguous save file inside its package-declared LocalAppData root
 - `elite-dangerous/compass` reads one fixed 96x96 reference-density region in
   the centered 1920x1080 coordinate space and returns the cyan target marker's
-  reference-coordinate offset from the game-specific compass center
+  reference-coordinate offset, clockwise screen angle, Euclidean center
+  distance, and circular center-zone membership
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,

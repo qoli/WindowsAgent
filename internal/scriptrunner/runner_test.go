@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"math"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -118,7 +119,45 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result["target"].(map[string]any)
-	if target["detected"] != true || target["offsetX"] != float64(11) || target["offsetY"] != float64(-7) || target["centered"] != false {
+	zone := target["centerZone"].(map[string]any)
+	if target["detected"] != true || target["offsetX"] != float64(11) || target["offsetY"] != float64(-7) ||
+		math.Abs(target["screenAngleDegrees"].(float64)-57.529) > 0.0001 ||
+		math.Abs(target["centerDistancePixels"].(float64)-13.038) > 0.0001 ||
+		zone["shape"] != "circle" || zone["radiusPixels"] != float64(4) || zone["inside"] != false {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestEliteCompassPackageReportsZeroDistanceAndUndefinedAngleAtCenter(t *testing.T) {
+	pixels := make([]any, 96*96)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	for index := 0; index < 200; index++ {
+		pixels[index] = uint32(0xFF7700)
+	}
+	for y := 47; y < 50; y++ {
+		for x := 47; x < 50; x++ {
+			pixels[y*96+x] = uint32(0x40DDEB)
+		}
+	}
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatalf("load package: %v", err)
+	}
+	runner, _ := New(&compassBroker{pixels: pixels})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	target := result["target"].(map[string]any)
+	zone := target["centerZone"].(map[string]any)
+	if target["detected"] != true || target["offsetX"] != float64(0) || target["offsetY"] != float64(0) ||
+		target["screenAngleDegrees"] != nil || target["centerDistancePixels"] != float64(0) || zone["inside"] != true {
 		t.Fatalf("target = %#v", target)
 	}
 }
@@ -162,7 +201,9 @@ func TestEliteCompassPackageReturnsNoTargetWithoutSubstitution(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := result["target"].(map[string]any)
-	if target["detected"] != false || target["referenceX"] != nil || target["offsetX"] != nil || target["centered"] != nil {
+	zone := target["centerZone"].(map[string]any)
+	if target["detected"] != false || target["referenceX"] != nil || target["offsetX"] != nil ||
+		target["screenAngleDegrees"] != nil || target["centerDistancePixels"] != nil || zone["inside"] != nil {
 		t.Fatalf("target = %#v", target)
 	}
 }

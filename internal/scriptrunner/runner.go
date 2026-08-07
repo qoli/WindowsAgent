@@ -13,6 +13,7 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/observationapi"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
+	starlarkmath "go.starlark.net/lib/math"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 )
@@ -269,6 +270,7 @@ func (h *host) predeclared() (starlark.StringDict, error) {
 		"observer": starlarkstruct.FromStringDict(starlark.String("observer"), observerFields),
 		"native":   h.native.module(),
 		"job":      job,
+		"math":     starlarkmath.Module,
 	}, nil
 }
 

@@ -152,7 +152,7 @@ func Load(root, capabilityID string) (*Package, error) {
 		manifest.Entrypoint,
 		script,
 		func(name string) bool {
-			return name == "observer" || name == "native" || name == "job"
+			return name == "observer" || name == "native" || name == "job" || name == "math"
 		},
 	)
 	if err != nil {

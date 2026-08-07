@@ -17,6 +17,10 @@ color interpretation. The game-neutral Observer maps that region through a
 centered 16:9 viewport and returns reference-density pixels. A changed
 foreground process or invalid compass evidence fails explicitly.
 
+Target geometry uses 1080p reference pixels. `screenAngleDegrees` is clockwise
+from straight up. `centerZone.inside` is a current-frame circular membership
+state; do not infer an entered/exited transition without Monitor history.
+
 The Action declares that it may be registered as either a Monitor or Reaction,
 but the registration catalog is intentionally empty. Do not infer a timer or
 event subscription from `registrableAs`; declaring eligibility does not

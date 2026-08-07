@@ -8,7 +8,11 @@ CENTER_X = 48
 CENTER_Y = 48
 MIN_ORANGE_PIXELS = 150
 MIN_CYAN_PIXELS = 4
-CENTER_TOLERANCE = 4
+CENTER_ZONE_RADIUS = 4
+OUTPUT_SCALE = 1000.0
+
+def round_output(value):
+    return math.round(value * OUTPUT_SCALE) / OUTPUT_SCALE
 
 def is_orange(red, green, blue):
     return red >= 170 and green >= 55 and green <= 210 and blue <= 110 and red >= green + 35
@@ -92,17 +96,30 @@ def main(ctx):
     target = {
         "detected": False,
         "cyanPixelCount": cyan_count,
-            "referenceX": None,
-            "referenceY": None,
+        "referenceX": None,
+        "referenceY": None,
         "offsetX": None,
         "offsetY": None,
-        "centered": None,
+        "screenAngleDegrees": None,
+        "centerDistancePixels": None,
+        "centerZone": {
+            "shape": "circle",
+            "radiusPixels": CENTER_ZONE_RADIUS,
+            "inside": None,
+        },
     }
     if cyan_count >= MIN_CYAN_PIXELS:
         local_x = cyan_x_total // cyan_count
         local_y = cyan_y_total // cyan_count
         offset_x = local_x - CENTER_X
         offset_y = local_y - CENTER_Y
+        distance = math.hypot(offset_x, offset_y)
+        angle = None
+        if distance != 0:
+            angle = math.degrees(math.atan2(offset_x, -offset_y))
+            if angle < 0:
+                angle += 360
+            angle = round_output(angle)
         target = {
             "detected": True,
             "cyanPixelCount": cyan_count,
@@ -110,11 +127,17 @@ def main(ctx):
             "referenceY": ROI_Y + local_y,
             "offsetX": offset_x,
             "offsetY": offset_y,
-            "centered": abs(offset_x) <= CENTER_TOLERANCE and abs(offset_y) <= CENTER_TOLERANCE,
+            "screenAngleDegrees": angle,
+            "centerDistancePixels": round_output(distance),
+            "centerZone": {
+                "shape": "circle",
+                "radiusPixels": CENTER_ZONE_RADIUS,
+                "inside": distance <= CENTER_ZONE_RADIUS,
+            },
         }
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profile": {
             "width": sample["frame"]["width"],
             "height": sample["frame"]["height"],

@@ -201,6 +201,11 @@ when explicitly declared, and every call must include bounded depth and entry
 limits. `print` output is discarded so stdout remains a framed protocol
 channel.
 
+The deterministic standard Starlark `math` module is predeclared. Packages may
+use its finite numeric functions such as `math.hypot`, `math.atan2`,
+`math.degrees`, and `math.round`; non-finite results remain invalid JSON and
+fail output serialization.
+
 Package code must:
 
 - read required values with `job.input(name = "...")`;

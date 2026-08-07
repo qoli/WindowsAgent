@@ -12,7 +12,7 @@
     "target"
   ],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "profile": {
       "type": "object",
       "additionalProperties": false,
@@ -76,7 +76,9 @@
         "referenceY",
         "offsetX",
         "offsetY",
-        "centered"
+        "screenAngleDegrees",
+        "centerDistancePixels",
+        "centerZone"
       ],
       "properties": {
         "detected": {"type": "boolean"},
@@ -85,7 +87,26 @@
         "referenceY": {"type": ["integer", "null"], "minimum": 771, "maximum": 866},
         "offsetX": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
         "offsetY": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
-        "centered": {"type": ["boolean", "null"]}
+        "screenAngleDegrees": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "exclusiveMaximum": 360
+        },
+        "centerDistancePixels": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 68
+        },
+        "centerZone": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["shape", "radiusPixels", "inside"],
+          "properties": {
+            "shape": {"const": "circle"},
+            "radiusPixels": {"const": 4},
+            "inside": {"type": ["boolean", "null"]}
+          }
+        }
       }
     }
   }
