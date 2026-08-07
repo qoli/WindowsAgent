@@ -6,7 +6,7 @@
 
 An Observation Script Package is one Action using the
 `windows-observation-v1` runtime below a Rule plugin's `Actions/` directory. It has one finite Starlark entrypoint, human task
-description, input and output schemas, Observer permissions, optional native
+description, input and output schemas, explicit Observer permissions, optional native
 DLL artifacts, and explicit limits.
 
 ## Layout
@@ -97,6 +97,11 @@ memory access to the executable named by the owning
 Manifest file-root entries combine a logical alias with a supported portable
 resolver. The Host resolves them locally; launcher callers cannot bind or
 override an absolute path.
+
+All permission values may be `null`. Such a package is a pure, bounded
+input-to-output Action: it may validate and interpret another Action's complete
+result without declaring fake screen, memory, or file access. The runtime does
+not synthesize capabilities for omitted permissions.
 
 Screen permission authorizes exactly one bounded primary-display observation.
 The call supplies `x`, `y`, `w`, and `h` in the fixed 1920x1080 reference

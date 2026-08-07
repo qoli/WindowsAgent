@@ -262,9 +262,6 @@ func validateManifest(manifest Manifest) error {
 	if filepath.Ext(manifest.OutputSchema) != ".json" {
 		return errors.New("outputSchema must be a JSON file")
 	}
-	if manifest.Permissions.Memory == nil && manifest.Permissions.File == nil && manifest.Permissions.Screen == nil && len(manifest.NativeLibraries) == 0 {
-		return errors.New("at least one observer permission or native library is required")
-	}
 	if memory := manifest.Permissions.Memory; memory != nil {
 		if memory.Target == "" || memory.MaxCalls == 0 || memory.MaxBytesRead == 0 {
 			return errors.New("memory target, maxCalls, and maxBytesRead are required")

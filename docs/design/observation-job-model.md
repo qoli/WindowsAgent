@@ -15,7 +15,7 @@ both execute the same local job command in the signed-in session.
 ```text
 windows-observation-job.exe
   |-- windows-observation-script-runner.exe --package-root <job snapshot>
-  `-- windows-observer.exe
+  `-- windows-observer.exe (only when a permission namespace is declared)
 ```
 
 The Go launcher uses `CreateProcessW`, `CREATE_NO_WINDOW`, restricted inherited
@@ -23,6 +23,12 @@ handles, and one Windows Job Object with active-process, per-process-memory,
 total-memory, deadline, and kill-on-close limits. It never launches
 PowerShell, `cmd.exe`, a native-extension worker, a polling loop, watcher, or
 HTTP observer.
+
+A package with `memory`, `file`, and `screen` all set to `null` is a pure
+input-to-output Action. Its job limit permits only the Script Runner child and
+does not launch or initialize an Observer. If that Runner nevertheless emits a
+`broker/call`, the Host fails the job explicitly. Packages declaring any
+Observer namespace retain the two-child model above.
 
 The launcher contains no game or capability allowlist. It derives the expected
 foreground executable from the capability's owning Rule folder, accepts only

@@ -47,6 +47,9 @@ today:
 - `elite-dangerous/ship-status` reads the reviewed lower-right HUD region at
   reference density without OCR and independently reports Mass Lock, Landing
   Gear, and Cargo Scoop as `ON`, `OFF`, or evidence-preserving `UNKNOWN`
+- `elite-dangerous/flight-status` accepts the complete raw output of
+  `elite-dangerous/flight-prompt-text`, combines OCR confidence with finite
+  phrase similarity, and returns one reviewed flight state or `UNKNOWN`
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,
@@ -84,7 +87,10 @@ The Action registration refactor is partially landed:
 - Elite Dangerous declares a Rule-resident `ocr/w480` DirectML worker and the
   finite `elite-dangerous/flight-prompt-text` Action. The Action captures one
   reviewed 400x40 reference-density region and returns raw OCR text, confidence,
-  provenance, model identity, and timing; it performs no state classification;
+  provenance, model identity, and timing;
+- its separate pure `elite-dangerous/flight-status` Action classifies that raw
+  output into a finite status only when both combined-confidence and
+  best-candidate-margin thresholds pass; unresolved content remains `UNKNOWN`;
 - Elite Dangerous also declares the finite non-OCR
   `elite-dangerous/ship-status` Action for its three lower-right indicators;
 - all shipped Rules have no active Monitor or Reaction registrations by

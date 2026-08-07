@@ -96,6 +96,20 @@ func TestValidateManifestAcceptsScreenOnlyPermission(t *testing.T) {
 	}
 }
 
+func TestValidateManifestAcceptsPureTransformPackage(t *testing.T) {
+	manifest := Manifest{
+		SchemaVersion: 2, Version: 1, Title: "Pure transform fixture",
+		Entrypoint: "main.star", TaskDocument: "TASK.md",
+		InputSchema: "input.schema.json", OutputSchema: "output.schema.json",
+		Files:       []string{"main.star", "TASK.md", "input.schema.json", "output.schema.json"},
+		Permissions: Permissions{},
+		Limits:      Limits{WallTimeMS: 1000, MaxSteps: 1000, MaxResultBytes: 1024, MaxLogBytes: 1024},
+	}
+	if err := validateManifest(manifest); err != nil {
+		t.Fatalf("pure transform manifest: %v", err)
+	}
+}
+
 func TestNestedPackageArtifactUsesPlatformIndependentSlashPath(t *testing.T) {
 	if err := validateRelativeName("native/windows-amd64/fixture.dll"); err != nil {
 		t.Fatalf("canonical nested package path was rejected: %v", err)

@@ -38,9 +38,12 @@ The Elite Dangerous path is:
 
 The Action requires the returned reference sample to remain exactly 10:1, then
 the model preprocessor scales it to 480x48. It returns no semantic `state`
-field. A separately declared Action or registration must decide whether text
-such as `SUPERCRUISE`, docking, or FSD alignment represents an accepted game
-state.
+field. The separately declared pure `elite-dangerous/flight-status` Action
+accepts its complete raw result and decides whether text such as
+`SUPERCRUISE`, docking, or FSD alignment reaches the reviewed confidence and
+separation thresholds. It returns `UNKNOWN` when the evidence does not support
+a finite state. Connecting repeated OCR results to events remains an explicit
+registration concern.
 
 ## Rule lifecycle
 
@@ -116,10 +119,19 @@ from `28.67 ms` to `167.77 ms`, with median `108.26 ms`. Inference median was
 bounded session is required before timer-driven use. These measurements are
 device- and contention-specific and are not a portable performance guarantee.
 
+The later flight-status calibration replayed 28 reviewed reference-density
+crops five times through one resident worker, for 140 recognition calls. Every
+image produced identical text and confidence across its five passes. Across
+all calls, inference median was `12.29 ms` and p95 was `30.61 ms`; total worker
+median was `30.76 ms` and p95 was `48.07 ms`. The separate semantic Action uses
+`OCR confidence * phrase similarity >= 0.30` and a best-versus-runner-up margin
+of at least `0.10`. In the reviewed set, the weakest accepted example scored
+`0.3149`, while the strongest unknown interference scored `0.2382`.
+
 ## Deferred
 
 - port the official DB text-detection and quadrilateral crop stages;
-- add a separate Elite Dangerous semantic Action or registration for prompt
-  state vocabulary and multi-frame confirmation;
+- add explicit registration execution for multi-frame confirmation and event
+  emission;
 - benchmark a separately declared PP-OCRv6 tiny artifact only if small remains
   too slow after session reuse.

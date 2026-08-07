@@ -172,6 +172,13 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if action.Runtime != PpOcrActionRuntimeV1 || action.RuntimeProfile != "ocr/w480" {
 		t.Fatalf("action = %+v", action)
 	}
+	flightStatus, err := store.ResolveAction("elite-dangerous/flight-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flightStatus.Runtime != ObservationRuntimeV1 || !reflect.DeepEqual(flightStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
+		t.Fatalf("flight-status action = %+v", flightStatus)
+	}
 	shipStatus, err := store.ResolveAction("elite-dangerous/ship-status")
 	if err != nil {
 		t.Fatal(err)

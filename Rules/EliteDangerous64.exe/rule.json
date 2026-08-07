@@ -24,6 +24,11 @@
       "runtime": "ppocr-w480-text-v1",
       "runtimeProfile": "ocr/w480",
       "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/flight-status": {
+      "path": "Actions/flight-status",
+      "runtime": "windows-observation-v1",
+      "registrableAs": ["monitor", "reaction"]
     }
   },
   "registrations": {}

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"path/filepath"
 	"reflect"
@@ -126,6 +127,141 @@ func shipStatusPackageRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func flightStatusPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "flight-status"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func flightPromptRawInput(text string, confidence float64) map[string]any {
+	return map[string]any{
+		"schemaVersion": int64(1),
+		"text":          text,
+		"confidence":    confidence,
+		"evidence":      map[string]any{},
+		"model":         map[string]any{},
+		"timing":        map[string]any{},
+	}
+}
+
+func runFlightStatusPackage(t *testing.T, inputs map[string]any) map[string]any {
+	t.Helper()
+	pkg, err := scriptpackage.Load(flightStatusPackageRoot(t), "elite-dangerous/flight-status")
+	if err != nil {
+		t.Fatalf("load package: %v", err)
+	}
+	runner, err := New(&fixtureBroker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, inputs)
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestEliteFlightStatusPackageClassifiesFivePassCalibrationCorpus(t *testing.T) {
+	tests := []struct {
+		sequence   int
+		text       string
+		confidence float64
+		want       string
+	}{
+		{1, "", 0, "UNKNOWN"},
+		{2, "", 0, "UNKNOWN"},
+		{3, "AUTO LAUNCH IN PROGRESS", 0.977601, "AUTO_LAUNCH"},
+		{4, "WAITINGNUEUE", 0.876809, "WAITING_IN_QUEUE"},
+		{5, "WAITING IN QUEUE", 0.891794, "WAITING_IN_QUEUE"},
+		{6, "", 0, "UNKNOWN"},
+		{7, "", 0, "UNKNOWN"},
+		{8, "", 0, "UNKNOWN"},
+		{9, "AUTO LAUNCHIN PROGRESS", 0.995785, "AUTO_LAUNCH"},
+		{10, "AUTO LAUNCHIN PROGRESS", 0.981162, "AUTO_LAUNCH"},
+		{11, "vOAVVM", 0.435403, "UNKNOWN"},
+		{12, "RESHAGINGORT", 0.75576, "FSD_CHARGING"},
+		{13, "PRESSTO ABORT", 0.92825, "FSD_CHARGING"},
+		{14, "ALIGN WITH TARGET DESTINATION", 0.990222, "FSD_ALIGNMENT_REQUIRED"},
+		{15, "ALIGN WITH TARGET DESTINATION", 0.987779, "FSD_ALIGNMENT_REQUIRED"},
+		{16, "の", 0.147477, "UNKNOWN"},
+		{17, "", 0, "UNKNOWN"},
+		{18, "arbour and a series of services to pilots granted", 0.976558, "UNKNOWN"},
+		{19, "とそど", 0.132321, "UNKNOWN"},
+		{20, "", 0, "UNKNOWN"},
+		{21, "", 0, "UNKNOWN"},
+		{22, "", 0, "UNKNOWN"},
+		{23, "", 0, "UNKNOWN"},
+		{24, "ATO DOCKINPAOGRESS", 0.847308, "AUTO_DOCK"},
+		{25, " AUTO DOCKIN PROGRESS", 0.91665, "AUTO_DOCK"},
+		{26, "AUTO DOCK IN PROGRESS", 0.95008, "AUTO_DOCK"},
+		{27, "", 0, "UNKNOWN"},
+		{28, "AUTO DOCKINPROGRESS", 0.849176, "AUTO_DOCK"},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("sequence-%02d", test.sequence), func(t *testing.T) {
+			for pass := 1; pass <= 5; pass++ {
+				result := runFlightStatusPackage(t, flightPromptRawInput(test.text, test.confidence))
+				status := result["flightStatus"].(map[string]any)
+				decision := result["decision"].(map[string]any)
+				if status["state"] != test.want || status["known"] != (test.want != "UNKNOWN") || decision["accepted"] != (test.want != "UNKNOWN") {
+					t.Fatalf("pass %d result = %#v, want %s", pass, result, test.want)
+				}
+			}
+		})
+	}
+}
+
+func TestEliteFlightStatusPackageRecognizesSupercruise(t *testing.T) {
+	result := runFlightStatusPackage(t, flightPromptRawInput("SUPERCRUISE", 0.95))
+	status := result["flightStatus"].(map[string]any)
+	if status["state"] != "SUPERCRUISE" || status["known"] != true {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEliteFlightStatusPackageKeepsLowConfidenceAndAmbiguousTextUnknown(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		text       string
+		confidence float64
+	}{
+		{name: "below confidence threshold", text: "AUTO DOCK IN PROGRESS", confidence: 0.299},
+		{name: "ambiguous launch or dock", text: "AUTO IN PROGRESS", confidence: 0.99},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := runFlightStatusPackage(t, flightPromptRawInput(test.text, test.confidence))
+			status := result["flightStatus"].(map[string]any)
+			decision := result["decision"].(map[string]any)
+			if status["state"] != "UNKNOWN" || decision["accepted"] != false {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestEliteFlightStatusPackageRejectsMalformedRawOCRInput(t *testing.T) {
+	pkg, err := scriptpackage.Load(flightStatusPackageRoot(t), "elite-dangerous/flight-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&fixtureBroker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), pkg, map[string]any{"text": "SUPERCRUISE", "confidence": 1.0})
+	var runError *Error
+	if !errors.As(err, &runError) || runError.Code != "SCRIPT_INPUT_INVALID" {
+		t.Fatalf("error = %#v", err)
+	}
 }
 
 func drawShipStatusBox(pixels []any, left, top int, highlighted bool) {

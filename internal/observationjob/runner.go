@@ -103,8 +103,13 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 	defer os.RemoveAll(blobRoot)
 	blobs := newBlobCatalog(blobRoot)
 
+	observerRequired := requiresObserver(pkg.Manifest.Permissions)
+	activeProcesses := uint32(1)
+	if observerRequired {
+		activeProcesses = 2
+	}
 	group, err := observationlauncher.NewGroup(observationlauncher.Limits{
-		ActiveProcesses:    2,
+		ActiveProcesses:    activeProcesses,
 		ProcessMemoryBytes: 768 << 20,
 		JobMemoryBytes:     2 << 30,
 	})
@@ -125,23 +130,27 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 	if err != nil {
 		return Result{}, &Error{Code: "LAUNCH_FAILED", Stage: "launching-script-runner", Cause: err}
 	}
-	observerChild, err := group.Start(spec.ObserverExecutable)
-	if err != nil {
-		return Result{}, &Error{Code: "LAUNCH_FAILED", Stage: "launching-observer", Cause: err}
-	}
 	scriptDiagnostics := startDiagnostics(scriptChild.Stderr, 32<<10)
-	observerDiagnostics := startDiagnostics(observerChild.Stderr, 32<<10)
 	scriptConn, err := observationprotocol.NewConn(scriptChild.Stdout, scriptChild.Stdin, observationprotocol.DefaultMaxFrameBytes)
 	if err != nil {
 		return Result{}, err
 	}
-	observerConn, err := observationprotocol.NewConn(observerChild.Stdout, observerChild.Stdin, observationprotocol.DefaultMaxFrameBytes)
-	if err != nil {
-		return Result{}, err
-	}
-
-	if err := initializeObserver(observerConn, spec, pkg, fileRoots, blobRoot); err != nil {
-		return Result{}, withDiagnostics("OBSERVER_INITIALIZE_FAILED", "initializing-observer", err, observerDiagnostics)
+	var observerChild *observationlauncher.Child
+	var observerDiagnostics *boundedBuffer
+	var observerConn *observationprotocol.Conn
+	if observerRequired {
+		observerChild, err = group.Start(spec.ObserverExecutable)
+		if err != nil {
+			return Result{}, &Error{Code: "LAUNCH_FAILED", Stage: "launching-observer", Cause: err}
+		}
+		observerDiagnostics = startDiagnostics(observerChild.Stderr, 32<<10)
+		observerConn, err = observationprotocol.NewConn(observerChild.Stdout, observerChild.Stdin, observationprotocol.DefaultMaxFrameBytes)
+		if err != nil {
+			return Result{}, err
+		}
+		if err := initializeObserver(observerConn, spec, pkg, fileRoots, blobRoot); err != nil {
+			return Result{}, withDiagnostics("OBSERVER_INITIALIZE_FAILED", "initializing-observer", err, observerDiagnostics)
+		}
 	}
 	if err := initializeScriptRunner(scriptConn, spec, pkg); err != nil {
 		return Result{}, withDiagnostics("SCRIPT_INITIALIZE_FAILED", "initializing-script-runner", err, scriptDiagnostics)
@@ -172,16 +181,22 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 			return Result{}, &Error{Code: "SCRIPT_PROTOCOL_INVALID", Stage: "shutting-down-script-runner", Cause: err}
 		}
 	}
-	if err := shutdown(observerConn, "observer-shutdown", spec.JobID); err != nil {
-		return Result{}, &Error{Code: "OBSERVER_PROTOCOL_INVALID", Stage: "shutting-down-observer", Cause: err}
+	if observerRequired {
+		if err := shutdown(observerConn, "observer-shutdown", spec.JobID); err != nil {
+			return Result{}, &Error{Code: "OBSERVER_PROTOCOL_INVALID", Stage: "shutting-down-observer", Cause: err}
+		}
 	}
 	scriptChild.Stdin.Close()
-	observerChild.Stdin.Close()
+	if observerRequired {
+		observerChild.Stdin.Close()
+	}
 	if code, err := scriptChild.Wait(); err != nil || code != 0 {
 		return Result{}, withDiagnostics("SCRIPT_EXIT_FAILED", "waiting-script-runner", childExitError(code, err), scriptDiagnostics)
 	}
-	if code, err := observerChild.Wait(); err != nil || code != 0 {
-		return Result{}, withDiagnostics("OBSERVER_EXIT_FAILED", "waiting-observer", childExitError(code, err), observerDiagnostics)
+	if observerRequired {
+		if code, err := observerChild.Wait(); err != nil || code != 0 {
+			return Result{}, withDiagnostics("OBSERVER_EXIT_FAILED", "waiting-observer", childExitError(code, err), observerDiagnostics)
+		}
 	}
 	if scriptFailure != nil {
 		var failure struct {
@@ -213,6 +228,10 @@ func validateBindings(pkg *scriptpackage.Package, spec Spec) error {
 		}
 	}
 	return nil
+}
+
+func requiresObserver(permissions scriptpackage.Permissions) bool {
+	return permissions.Memory != nil || permissions.File != nil || permissions.Screen != nil
 }
 
 func snapshotPackage(source string) (string, error) {
@@ -414,6 +433,9 @@ func brokerUntilResult(
 		if message.Method != "broker/call" {
 			return nil, provenance, nil, fmt.Errorf("unexpected script-runner message %q", message.Method)
 		}
+		if observerConn == nil {
+			return nil, provenance, nil, errors.New("pure Script Package emitted an observer call")
+		}
 		var call observationapi.Call
 		if err := decodeStrict(message.Params, &call); err != nil {
 			return nil, provenance, nil, err
@@ -543,6 +565,9 @@ func (b *boundedBuffer) String() string {
 func withDiagnostics(code, stage string, cause error, diagnostics ...*boundedBuffer) error {
 	message := cause.Error()
 	for _, diagnostic := range diagnostics {
+		if diagnostic == nil {
+			continue
+		}
 		if text := diagnostic.String(); text != "" {
 			message += "; stderr=" + text
 		}
@@ -559,6 +584,9 @@ func withNamedDiagnostics(code, stage string, cause error, script, observer *bou
 		{name: "script-runner", buffer: script},
 		{name: "observer", buffer: observer},
 	} {
+		if diagnostic.buffer == nil {
+			continue
+		}
 		if text := diagnostic.buffer.String(); text != "" {
 			message += "; " + diagnostic.name + " stderr=" + text
 		}
