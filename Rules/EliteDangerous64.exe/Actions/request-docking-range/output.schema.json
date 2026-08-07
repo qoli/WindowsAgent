@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "requestDockingRange", "evidence"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "profile": {"type": "object"},
+    "coordinateSpace": {"type": "object"},
+    "region": {"type": "object"},
+    "physicalRegion": {"type": "object"},
+    "requestDockingRange": {"type": "object"},
+    "evidence": {"type": "object"}
+  }
+}

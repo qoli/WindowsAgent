@@ -147,6 +147,15 @@ func flightStatusPackageRoot(t *testing.T) string {
 	return root
 }
 
+func requestDockingRangePackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "request-docking-range-classifier"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func flightPromptRawInput(text string, confidence float64) map[string]any {
 	return map[string]any{
 		"schemaVersion": int64(1),
@@ -609,6 +618,42 @@ func runShipSpeedClassifier(t *testing.T, input map[string]any) map[string]any {
 	return result
 }
 
+func requestDockingRangeClassifierInput(text string, confidence float64) map[string]any {
+	return map[string]any{
+		"schemaVersion": int64(1), "text": text, "confidence": confidence,
+		"decoding": map[string]any{"characterConstraint": "none"},
+		"evidence": map[string]any{
+			"capturedAt":      "2026-08-08T00:00:00Z",
+			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
+			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+			"referenceRegion": map[string]any{"x": int64(100), "y": int64(790), "w": int64(450), "h": int64(110)},
+			"physicalRegion":  map[string]any{"left": int64(200), "top": int64(1580), "width": int64(900), "height": int64(220)},
+		},
+		"model": map[string]any{}, "timing": map[string]any{},
+	}
+}
+
+func runRequestDockingRangeClassifier(t *testing.T, text string, confidence float64) map[string]any {
+	t.Helper()
+	pkg, err := scriptpackage.Load(requestDockingRangePackageRoot(t), "elite-dangerous/request-docking-range-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&fixtureBroker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := runner.Run(context.Background(), pkg, requestDockingRangeClassifierInput(text, confidence))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result["requestDockingRange"].(map[string]any)
+}
+
 func TestEliteShipSpeedClassifierReturnsConfirmedDisplayValue(t *testing.T) {
 	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("136", 0.81, "136", 0.81, 0))
 	speed := result["speed"].(map[string]any)
@@ -650,6 +695,74 @@ func TestEliteShipSpeedClassifierRejectsStrongRawLetterDisagreement(t *testing.T
 	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
 		speed["evidence"].(map[string]any)["reason"] != "RAW_CONSTRAINT_DISAGREEMENT_HIGH" {
 		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteRequestDockingRangeClassifierAllowsReviewedDistancesBelowGate(t *testing.T) {
+	for _, test := range []struct {
+		text       string
+		wantMeters float64
+	}{
+		{"CORIOLIS STARPORT 6.25km", 6250},
+		{"CORIOLIS STARPORT 5.18 km", 5180},
+		{"CORIOLIS STARPORT 698m", 698},
+	} {
+		t.Run(test.text, func(t *testing.T) {
+			rangeResult := runRequestDockingRangeClassifier(t, test.text, 0.91)
+			if rangeResult["state"] != "ALLOWED" || rangeResult["allowed"] != true ||
+				rangeResult["distanceMeters"] != test.wantMeters ||
+				rangeResult["evidence"].(map[string]any)["reason"] != "DISPLAY_DISTANCE_BELOW_THRESHOLD" {
+				t.Fatalf("requestDockingRange = %#v", rangeResult)
+			}
+		})
+	}
+}
+
+func TestEliteRequestDockingRangeClassifierDeniesThresholdAndLongerUnits(t *testing.T) {
+	for _, text := range []string{
+		"CORIOLIS STARPORT 7.50km",
+		"JAGDBADGER'S REST 8.72km",
+		"LP 470-30 4.21Ly",
+	} {
+		t.Run(text, func(t *testing.T) {
+			rangeResult := runRequestDockingRangeClassifier(t, text, 0.88)
+			if rangeResult["state"] != "DENIED" || rangeResult["allowed"] != false ||
+				rangeResult["evidence"].(map[string]any)["reason"] != "DISPLAY_DISTANCE_AT_OR_ABOVE_THRESHOLD" {
+				t.Fatalf("requestDockingRange = %#v", rangeResult)
+			}
+		})
+	}
+}
+
+func TestEliteRequestDockingRangeClassifierDoesNotMergeSeparatedNumbers(t *testing.T) {
+	rangeResult := runRequestDockingRangeClassifier(t, "LP 470-30 4.21Ly", 0.88)
+	if rangeResult["displayText"] != "4.21LY" || rangeResult["distanceValue"] != float64(4.21) ||
+		rangeResult["unit"] != "LY" {
+		t.Fatalf("requestDockingRange = %#v", rangeResult)
+	}
+}
+
+func TestEliteRequestDockingRangeClassifierPreservesUnknownEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		text       string
+		confidence float64
+		wantReason string
+	}{
+		{"missing", "CORIOLIS STARPORT", 0.90, "DISTANCE_TEXT_INVALID"},
+		{"low confidence", "CORIOLIS STARPORT 6.25km", 0.54, "OCR_CONFIDENCE_LOW"},
+		{"malformed", "CORIOLIS STARPORT S.18km", 0.90, "DISTANCE_TEXT_INVALID"},
+		{"ambiguous", "5.18km 698m", 0.90, "DISTANCE_TEXT_AMBIGUOUS"},
+		{"unknown unit", "CORIOLIS STARPORT 6.25parsec", 0.90, "DISTANCE_TEXT_INVALID"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rangeResult := runRequestDockingRangeClassifier(t, test.text, test.confidence)
+			if rangeResult["state"] != "UNKNOWN" || rangeResult["allowed"] != nil ||
+				rangeResult["distanceMeters"] != nil ||
+				rangeResult["evidence"].(map[string]any)["reason"] != test.wantReason {
+				t.Fatalf("requestDockingRange = %#v", rangeResult)
+			}
+		})
 	}
 }
 

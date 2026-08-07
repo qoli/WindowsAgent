@@ -61,6 +61,16 @@ not activate a registration. Likewise, `ocr/w480` and `ocr/text-regions`
 residency only keep model initialization alive while this Rule owns the
 foreground; neither invokes an OCR Action nor produces an event.
 
+`elite-dangerous/request-docking-range` is a finite composite Gate Action. It
+captures the fixed lower-left Target distance at reference density through the
+internal `request-docking-distance-text` OCR Action, then calls the pure
+`request-docking-range-classifier`. It returns `ALLOWED` only when exactly one
+current displayed distance is recognized with sufficient confidence and is
+strictly below `7500m`; `7.50km` is `DENIED`. Missing, malformed, low-confidence,
+or ambiguous evidence is `UNKNOWN`, never a prior-frame or inferred value. Run
+it in the settled forward cockpit view before opening the Target panel. The
+Action is not registrable and never performs the docking request itself.
+
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
 supervising model chooses exactly one logical `UP`, `DOWN`, `LEFT`, `RIGHT`,
 `SELECT`, or `BACK` after inspecting a fresh screenshot. The runtime resolves

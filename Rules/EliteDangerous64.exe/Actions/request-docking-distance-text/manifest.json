@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "title": "Read Elite Dangerous target distance text",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 100, "y": 790, "w": 450, "h": 110},
+  "sampling": "reference",
+  "maxPixels": 49500,
+  "characterConstraint": "none"
+}
