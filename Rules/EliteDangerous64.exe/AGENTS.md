@@ -41,9 +41,27 @@ Target geometry uses 1080p reference pixels. `screenAngleDegrees` is clockwise
 from straight up. `centerZone.inside` is a current-frame circular membership
 state; do not infer an entered/exited transition without Monitor history.
 
-All four Actions declare that they may be registered as either a Monitor or
-Reaction, but the registration catalog is intentionally empty. Do not infer a
+These four observation Actions declare that they may be registered as either a
+Monitor or Reaction, but the registration catalog is intentionally empty. Do not infer a
 timer or event subscription from `registrableAs`; declaring eligibility does
 not activate a registration. Likewise, `ocr/w480` residency only keeps model
 initialization alive while this Rule owns the foreground; it does not invoke
 the OCR Action or produce an event.
+
+`elite-dangerous/ui-control` is a finite slow-interaction primitive. A
+supervising model chooses exactly one logical `UP`, `DOWN`, `LEFT`, `RIGHT`,
+`SELECT`, or `BACK` after inspecting a fresh screenshot. The runtime resolves
+that logical control from the game's active binding preset; never assume Space
+or any other fixed physical key.
+
+`elite-dangerous/set-throttle` is deterministic. It accepts only `0` or `100`,
+resolves the corresponding logical throttle control from the active preset on
+each invocation, and reports the exact resolved key evidence.
+
+`elite-dangerous/leave-station` is an interruptible linear Streaming Action.
+Invoke it with `{"stationConfirmed":true}` only after high-level visual
+confirmation that the ship is inside a station, then follow the returned NDJSON
+watch URL. While its phase is `AWAITING_AUTO_LAUNCH`, arrange Auto Launch slowly
+with fresh screenshots and one `ui-control` call at a time. Once Auto Launch is
+observed, the workflow owns the 100% throttle, Mass Lock OFF, and 0% throttle
+sequence and reports `COMPLETED`, `FAILED`, or `CANCELLED` through the stream.

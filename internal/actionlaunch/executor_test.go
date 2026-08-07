@@ -11,6 +11,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -23,6 +24,12 @@ func (fakeObservationExecutor) Run(context.Context, scriptlaunch.Invocation) (js
 }
 
 type fakeRegionCapturer struct{ result capture.RegionResult }
+
+type fakeInputExecutor struct{}
+
+func (fakeInputExecutor) Run(context.Context, *inputaction.Package, map[string]any, string) (json.RawMessage, error) {
+	return json.RawMessage(`{"schemaVersion":1,"selection":"fixture","control":"Fixture","key":"Key_X"}`), nil
+}
 
 func (f fakeRegionCapturer) CaptureRegion(context.Context, capture.RegionRequest) (capture.RegionResult, error) {
 	return f.result, nil
@@ -63,7 +70,7 @@ func TestStreamingActionCallsSameRuleFiniteChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor, err := New(
-		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{},
+		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{},
 		func() (foreground.Info, error) { return foreground.Info{ExecutableName: "game.exe"}, nil },
 	)
 	if err != nil {
@@ -160,6 +167,7 @@ func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 			Foreground:     foregroundInfo,
 		}},
 		recognizer,
+		fakeInputExecutor{},
 		func() (foreground.Info, error) { return foregroundInfo, nil },
 	)
 	if err != nil {

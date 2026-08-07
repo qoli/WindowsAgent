@@ -24,6 +24,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/eventclient"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/httpapi"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -97,7 +98,11 @@ func run() (runErr error) {
 			logger.Error("ocr_runtime_shutdown_failed", "error", err)
 		}
 	}()
-	actionExecutor, err := actionlaunch.New(ruleStore, observationExecutor, capturer, ocrManager, foreground.Snapshot)
+	inputController, err := inputaction.NewController(cfg.FrontierBindingsRoot, inputaction.WindowsSender{}, foreground.Snapshot)
+	if err != nil {
+		return fmt.Errorf("initialize Frontier key Action controller: %w", err)
+	}
+	actionExecutor, err := actionlaunch.New(ruleStore, observationExecutor, capturer, ocrManager, inputController, foreground.Snapshot)
 	if err != nil {
 		return fmt.Errorf("initialize Action executor: %w", err)
 	}
@@ -162,6 +167,7 @@ func run() (runErr error) {
 		"rules_root", ruleStore.Root(),
 		"script_api_auth", "none",
 		"event_api_url", cfg.EventAPIURL,
+		"frontier_bindings_root", cfg.FrontierBindingsRoot,
 	)
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

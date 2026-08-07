@@ -12,6 +12,7 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocraction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
@@ -25,6 +26,11 @@ type Executor struct {
 	capturer    capture.RegionCapturer
 	ocr         ocrworker.Recognizer
 	foreground  func() (foreground.Info, error)
+	input       InputExecutor
+}
+
+type InputExecutor interface {
+	Run(context.Context, *inputaction.Package, map[string]any, string) (json.RawMessage, error)
 }
 
 type Result struct {
@@ -39,14 +45,15 @@ func New(
 	observation scriptlaunch.Executor,
 	capturer capture.RegionCapturer,
 	ocr ocrworker.Recognizer,
+	input InputExecutor,
 	foregroundSnapshot func() (foreground.Info, error),
 ) (*Executor, error) {
-	if ruleStore == nil || observation == nil || capturer == nil || ocr == nil || foregroundSnapshot == nil {
-		return nil, errors.New("Rule store, observation executor, region capturer, OCR recognizer, and foreground resolver are required")
+	if ruleStore == nil || observation == nil || capturer == nil || ocr == nil || input == nil || foregroundSnapshot == nil {
+		return nil, errors.New("Rule store, observation executor, region capturer, OCR recognizer, input executor, and foreground resolver are required")
 	}
 	return &Executor{
 		rules: ruleStore, observation: observation, capturer: capturer, ocr: ocr,
-		foreground: foregroundSnapshot,
+		foreground: foregroundSnapshot, input: input,
 	}, nil
 }
 
@@ -82,6 +89,15 @@ func (e *Executor) RunAction(ctx context.Context, invocation scriptlaunch.Invoca
 		}
 	case rules.PpOcrActionRuntimeV1:
 		output, err = e.runOCR(ctx, action, invocation.Inputs)
+		if err != nil {
+			return Result{}, err
+		}
+	case rules.FrontierKeyActionRuntimeV1:
+		pkg, err := inputaction.Load(action.Root)
+		if err != nil {
+			return Result{}, fmt.Errorf("load Frontier key Action %q: %w", action.ID, err)
+		}
+		output, err = e.input.Run(ctx, pkg, invocation.Inputs, action.RuleID)
 		if err != nil {
 			return Result{}, err
 		}

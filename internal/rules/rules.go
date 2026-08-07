@@ -21,29 +21,30 @@ import (
 )
 
 const (
-	StatusMatched            = "matched"
-	StatusUnmatched          = "unmatched"
-	UnmatchedDescription     = "No rule guidance is available for this foreground process."
-	RuleFilename             = "rule.json"
-	AgentsFilename           = "AGENTS.md"
-	AgentsMediaType          = "text/markdown; charset=utf-8"
-	ScriptsMediaType         = "application/json; charset=utf-8"
-	ActionsMediaType         = "application/json; charset=utf-8"
-	RegistrationsMediaType   = "application/json; charset=utf-8"
-	RuntimesMediaType        = "application/json; charset=utf-8"
-	ObservationRuntimeV1     = "windows-observation-v1"
-	PpOcrActionRuntimeV1     = "ppocr-w480-text-v1"
-	StreamingActionRuntimeV1 = "windows-streaming-action-v1"
-	PpOcrWorkerRuntimeV1     = "ppocr-onnx-dml-worker-v1"
-	ResidencyRuleActive      = "while-rule-active"
-	RegistrationMonitor      = "monitor"
-	RegistrationReaction     = "reaction"
-	CompletionReturn         = "return"
-	CompletionStream         = "stream"
-	LifecycleLinear          = "linear"
-	LifecycleLoop            = "loop"
-	maxRuleJSONBytes         = 64 << 10
-	maxAgentsBytes           = 1 << 20
+	StatusMatched              = "matched"
+	StatusUnmatched            = "unmatched"
+	UnmatchedDescription       = "No rule guidance is available for this foreground process."
+	RuleFilename               = "rule.json"
+	AgentsFilename             = "AGENTS.md"
+	AgentsMediaType            = "text/markdown; charset=utf-8"
+	ScriptsMediaType           = "application/json; charset=utf-8"
+	ActionsMediaType           = "application/json; charset=utf-8"
+	RegistrationsMediaType     = "application/json; charset=utf-8"
+	RuntimesMediaType          = "application/json; charset=utf-8"
+	ObservationRuntimeV1       = "windows-observation-v1"
+	PpOcrActionRuntimeV1       = "ppocr-w480-text-v1"
+	StreamingActionRuntimeV1   = "windows-streaming-action-v1"
+	FrontierKeyActionRuntimeV1 = "frontier-key-action-v1"
+	PpOcrWorkerRuntimeV1       = "ppocr-onnx-dml-worker-v1"
+	ResidencyRuleActive        = "while-rule-active"
+	RegistrationMonitor        = "monitor"
+	RegistrationReaction       = "reaction"
+	CompletionReturn           = "return"
+	CompletionStream           = "stream"
+	LifecycleLinear            = "linear"
+	LifecycleLoop              = "loop"
+	maxRuleJSONBytes           = 64 << 10
+	maxAgentsBytes             = 1 << 20
 )
 
 type Document struct {

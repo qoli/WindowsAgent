@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Elite Dangerous set throttle",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md",
+  "selector": {"inputField": "percent"},
+  "bindings": {
+    "0": {"control": "SetSpeedZero"},
+    "100": {"control": "SetSpeed100"}
+  },
+  "files": ["TASK.md", "input.schema.json", "output.schema.json"]
+}

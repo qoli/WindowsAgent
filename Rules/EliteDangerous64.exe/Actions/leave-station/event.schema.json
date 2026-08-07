@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.leave-station.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "flightStatus", "massLock", "throttle", "instruction", "throttleCommand"],
+      "properties": {
+        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "DEPARTING", "COMPLETED"]},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
+        "flightStatus": {"enum": ["SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "AUTO_DOCK", "UNKNOWN"]},
+        "massLock": {"enum": ["ON", "OFF", "UNKNOWN"]},
+        "throttle": {"type": ["integer", "null"], "enum": [0, 100, null]},
+        "instruction": {"type": ["string", "null"], "maxLength": 256},
+        "throttleCommand": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["schemaVersion", "selection", "control", "key", "activePreset", "bindingFile"],
+              "properties": {
+                "schemaVersion": {"const": 1},
+                "selection": {"enum": ["0", "100"]},
+                "control": {"enum": ["SetSpeedZero", "SetSpeed100"]},
+                "key": {"type": "string", "pattern": "^Key_[A-Za-z0-9]+$", "maxLength": 32},
+                "activePreset": {"type": "string", "minLength": 1, "maxLength": 128},
+                "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260}
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

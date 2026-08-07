@@ -5,7 +5,8 @@
 **Landed.** Rule schema version 5, unified invocation, durable callbacks,
 natural linear completion, interruptible linear or loop execution, strict
 Starlark orchestration, and the HTTP start/watch/status/stop surface are
-implemented and tested. No shipped Game Rule declares a streaming Action yet.
+implemented and tested. Elite Dangerous ships the first supervised linear
+workflow, `elite-dangerous/leave-station`.
 
 ## Model
 
@@ -72,9 +73,18 @@ contradictory declarations, cross-Rule calls, streaming children, invalid
 events, and invalid terminal output fail explicitly; no runtime or provider
 fallback is attempted.
 
+## Shipped supervised workflow
+
+`elite-dangerous/leave-station` returns its watch URL immediately and emits
+`AWAITING_AUTO_LAUNCH`. The higher model remains responsible for slow menu
+arrangement through one-key `elite-dangerous/ui-control` calls. The workflow
+then consumes finite `flight-status` and `ship-status` evidence, invokes the
+binding-resolved `set-throttle` Action at 100% and 0%, and naturally completes.
+Unknown evidence, contradictory transitions, and sample limits are terminal;
+there is no inferred state or alternate execution path.
+
 ## Deferred
 
-- shipping the first executable-specific streaming workflow;
 - restart recovery for invocations interrupted by Agent process exit;
 - retention or external indexing of the in-memory invocation status map;
 - registration scheduler and Reaction dispatcher.

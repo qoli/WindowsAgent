@@ -98,6 +98,17 @@ The Action runtime and registration refactor is partially landed:
   best-candidate-margin thresholds pass; unresolved content remains `UNKNOWN`;
 - Elite Dangerous also declares the finite non-OCR
   `elite-dangerous/ship-status` Action for its three lower-right indicators;
+- `elite-dangerous/ui-control` performs exactly one model-selected logical UI
+  movement or selection. It is intentionally a slow screenshot/one-key
+  interaction surface for tasks such as arranging `AUTO LAUNCH`;
+- `elite-dangerous/set-throttle` resolves `SetSpeedZero` or `SetSpeed100` from
+  the game's currently active `.binds` preset on every invocation, reports the
+  resolved preset/file/key, rechecks the foreground game, and sends one
+  key-down/key-up pair;
+- `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
+  It immediately returns a durable watch URL, asks the supervising model to
+  arrange Auto Launch, observes flight and Mass Lock state, then commands 100%
+  and 0% throttle at its declared gates;
 - all shipped Rules have no active Monitor or Reaction registrations by
   default; no scheduler or reaction dispatcher is shipped yet.
 
@@ -158,6 +169,7 @@ Available options:
 --retention           number of artifacts to retain (default 100)
 --log-level           debug, info, warn, or error
 --log-file            optional JSON log file
+--frontier-bindings-root  Elite Dangerous bindings directory (default under LOCALAPPDATA)
 ```
 
 The process must not run as a traditional Session 0 Windows service because WGC
@@ -450,6 +462,22 @@ Follow its returned URL with `curl.exe -N`; the NDJSON connection replays the
 durable invocation events and closes when the Action completes, fails, or is
 cancelled. The `stop` object appears only when that Action explicitly declares
 itself interruptible.
+
+Start the supervised Elite Dangerous departure only after the higher model has
+confirmed the ship is inside a station:
+
+```powershell
+curl.exe `
+  -H "Content-Type: application/json" `
+  --data-binary '{"actionId":"elite-dangerous/leave-station","inputs":{"stationConfirmed":true}}' `
+  http://127.0.0.1:8787/v1/actions/invoke
+```
+
+The initial stream event is `AWAITING_AUTO_LAUNCH`. During that phase the
+supervising model captures the screen and invokes `elite-dangerous/ui-control`
+one logical key at a time. The Streaming Action does not guess a fixed Auto
+Launch key sequence. Once the prompt pipeline observes Auto Launch, the
+workflow continues autonomously through the Mass Lock and throttle gates.
 
 Only one capture can run at a time. A concurrent request receives
 `409 capture_busy`. Each completed artifact contains `capture.png` and

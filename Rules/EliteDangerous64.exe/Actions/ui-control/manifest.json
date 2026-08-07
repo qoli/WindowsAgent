@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Elite Dangerous bounded UI control",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md",
+  "selector": {"inputField": "control"},
+  "bindings": {
+    "UP": {"control": "UI_Up"},
+    "DOWN": {"control": "UI_Down"},
+    "LEFT": {"control": "UI_Left"},
+    "RIGHT": {"control": "UI_Right"},
+    "SELECT": {"control": "UI_Select"},
+    "BACK": {"control": "UI_Back"}
+  },
+  "files": ["TASK.md", "input.schema.json", "output.schema.json"]
+}

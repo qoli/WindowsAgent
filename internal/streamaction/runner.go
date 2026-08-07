@@ -23,9 +23,11 @@ type Reporter interface {
 	Emit(context.Context, string, json.RawMessage) (eventstream.Event, error)
 }
 
-type Runner struct{}
+type Runner struct {
+	Sleep func(context.Context, time.Duration) error
+}
 
-func (Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, caller Caller, reporter Reporter) (json.RawMessage, error) {
+func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, caller Caller, reporter Reporter) (json.RawMessage, error) {
 	if ctx == nil || pkg == nil || caller == nil || reporter == nil {
 		return nil, errors.New("context, streaming Action package, child caller, and reporter are required")
 	}
@@ -35,7 +37,11 @@ func (Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, call
 	if err := pkg.ValidateInput(inputs); err != nil {
 		return nil, fmt.Errorf("streaming Action input schema: %w", err)
 	}
-	host := &host{ctx: ctx, pkg: pkg, caller: caller, reporter: reporter}
+	sleep := r.Sleep
+	if sleep == nil {
+		sleep = sleepContext
+	}
+	host := &host{ctx: ctx, pkg: pkg, caller: caller, reporter: reporter, sleepFn: sleep}
 	thread := &starlark.Thread{Name: pkg.Manifest.Title}
 	thread.SetMaxExecutionSteps(pkg.Manifest.Limits.MaxSteps)
 	thread.Print = func(*starlark.Thread, string) {}
@@ -92,6 +98,7 @@ type host struct {
 	pkg      *Package
 	caller   Caller
 	reporter Reporter
+	sleepFn  func(context.Context, time.Duration) error
 }
 
 func (h *host) predeclared() starlark.StringDict {
@@ -173,13 +180,20 @@ func (h *host) sleep(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tupl
 	if milliseconds < 1 || uint64(milliseconds) > h.pkg.Manifest.Limits.MaxSleepMs {
 		return nil, fmt.Errorf("task.sleep milliseconds must be from 1 through %d", h.pkg.Manifest.Limits.MaxSleepMs)
 	}
-	timer := time.NewTimer(time.Duration(milliseconds) * time.Millisecond)
+	if err := h.sleepFn(h.ctx, time.Duration(milliseconds)*time.Millisecond); err != nil {
+		return nil, err
+	}
+	return starlark.None, nil
+}
+
+func sleepContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	select {
-	case <-h.ctx.Done():
-		return nil, h.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-timer.C:
-		return starlark.None, nil
+		return nil
 	}
 }
 
