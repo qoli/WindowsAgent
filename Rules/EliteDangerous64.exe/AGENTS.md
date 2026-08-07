@@ -57,6 +57,42 @@ game-neutral Windows scan-code input driver; never assume Space or any other
 fixed physical key. Successful output includes the binding source, backend,
 scan code, extended-key flag, and configured hold time.
 
+### Visual focus confirmation for the higher execution Agent
+
+Do not call a menu item selected merely because its label is visible, orange,
+or placed on a brown or grey row. In the reviewed station cockpit UI, keyboard
+focus is shown by a saturated bright-yellow filled tile with a dark glyph or
+dark label. Unfocused main-menu rows retain orange labels without that
+bright-yellow fill.
+
+The focus is not confined to the vertical text menu. It may be on the icon row
+above it. In the reviewed sequence, the `RETURN TO SURFACE` elevator icon at
+the upper right of that row had the bright-yellow filled tile while every main
+menu row was unfocused. One `UP` produced no visible movement at that boundary.
+One subsequent `DOWN` moved the bright-yellow fill to `STARPORT SERVICES`; a
+second `DOWN` moved it to `AUTO LAUNCH`.
+
+Use the following evidence loop before `SELECT`:
+
+1. Capture a fresh frame and identify the one bright-yellow filled focus tile,
+   including the icon row as well as the text rows.
+2. If the target itself does not have that fill and dark label or glyph, send
+   exactly one directional `ui-control` invocation.
+3. Wait for that invocation to return, then capture a new frame. Associate the
+   frame only with that completed invocation and compare the focus tile with
+   the immediately preceding frame.
+4. Repeat one direction at a time. Invoke `SELECT` only when the target label
+   itself is inside the bright-yellow filled tile in the newest frame.
+
+A completed `ui-control` result proves only that WindowsAgent resolved and
+injected the configured key. It does not prove that the game accepted the key
+or moved focus. If the new frame is unavailable, a capture times out, multiple
+inputs could fall between frames, or no focus delta is visible, report focus as
+`UNKNOWN`; do not reuse an older frame and do not invoke `SELECT`. After
+`SELECT`, treat the item as activated only after a fresh visual transition or
+the relevant observation Action provides matching evidence. Input completion
+alone is not activation or workflow completion.
+
 `elite-dangerous/set-throttle` is deterministic. It accepts only `0` or `100`,
 resolves the corresponding logical throttle control from the active preset on
 each invocation, and reports the exact resolved key and injection evidence.
@@ -65,6 +101,6 @@ each invocation, and reports the exact resolved key and injection evidence.
 Invoke it with `{"stationConfirmed":true}` only after high-level visual
 confirmation that the ship is inside a station, then follow the returned NDJSON
 watch URL. While its phase is `AWAITING_AUTO_LAUNCH`, arrange Auto Launch slowly
-with fresh screenshots and one `ui-control` call at a time. Once Auto Launch is
-observed, the workflow owns the 100% throttle, Mass Lock OFF, and 0% throttle
-sequence and reports `COMPLETED`, `FAILED`, or `CANCELLED` through the stream.
+with the visual focus evidence loop above. Once Auto Launch is observed, the
+workflow owns the 100% throttle, Mass Lock OFF, and 0% throttle sequence and
+reports `COMPLETED`, `FAILED`, or `CANCELLED` through the stream.
