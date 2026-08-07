@@ -186,6 +186,10 @@ func testResult(content string) capture.Result {
 				URL:         "/v3/rules/game.exe/registrations",
 				ContentType: "application/json; charset=utf-8",
 			},
+			Runtimes: &rules.Document{
+				URL:         "/v4/rules/game.exe/runtimes",
+				ContentType: "application/json; charset=utf-8",
+			},
 		},
 		CapturePixelFormat: "B8G8R8A8_UNORM",
 	}

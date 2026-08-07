@@ -146,19 +146,47 @@ func TestRepositoryRulesUseActionModelWithoutDefaultRegistrations(t *testing.T) 
 	}
 }
 
+func TestEliteRuleDeclaresResidentW480RuntimeAndRawTextAction(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles, _, err := store.ReadRuntimeProfiles("EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 1 || profiles[0].ID != "ocr/w480" ||
+		profiles[0].Runtime != PpOcrWorkerRuntimeV1 || profiles[0].Residency != ResidencyRuleActive ||
+		profiles[0].ArtifactID != "ppocrv6-small-rec-onnx-official-w480" {
+		t.Fatalf("profiles = %+v", profiles)
+	}
+	action, err := store.ResolveAction("elite-dangerous/flight-prompt-text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action.Runtime != PpOcrActionRuntimeV1 || action.RuntimeProfile != "ocr/w480" {
+		t.Fatalf("action = %+v", action)
+	}
+}
+
 func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
 	tests := []struct{ name, body, want string }{
-		{"old schema", `{"schemaVersion":2,"description":"Valid.","actions":{},"registrations":{}}`, "schemaVersion"},
-		{"missing actions", `{"schemaVersion":3,"description":"Valid.","registrations":{}}`, "actions is required"},
-		{"missing registrations", `{"schemaVersion":3,"description":"Valid.","actions":{}}`, "registrations is required"},
-		{"unknown field", `{"schemaVersion":3,"description":"Valid.","actions":{},"registrations":{},"extra":true}`, "unknown field"},
-		{"action path", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Modules/a","runtime":"r","registrableAs":[]}},"registrations":{}}`, "below Actions/"},
-		{"missing registrable", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r"}},"registrations":{}}`, "registrableAs"},
-		{"unknown registration type", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["timer"]}},"registrations":{}}`, "unsupported registration type"},
-		{"unknown action", `{"schemaVersion":3,"description":"Valid.","actions":{},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
-		{"not declared", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
-		{"zero interval", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["monitor"]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
-		{"invalid regex", `{"schemaVersion":3,"description":"Valid.","actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["reaction"]}},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
+		{"old schema", `{"schemaVersion":3,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{}}`, "schemaVersion"},
+		{"missing actions", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"registrations":{}}`, "actions is required"},
+		{"missing registrations", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{}}`, "registrations is required"},
+		{"missing runtime profiles", `{"schemaVersion":4,"description":"Valid.","actions":{},"registrations":{}}`, "runtimeProfiles is required"},
+		{"unknown field", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{},"extra":true}`, "unknown field"},
+		{"action path", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Modules/a","runtime":"r","registrableAs":[]}},"registrations":{}}`, "below Actions/"},
+		{"missing registrable", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r"}},"registrations":{}}`, "registrableAs"},
+		{"unknown registration type", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["timer"]}},"registrations":{}}`, "unsupported registration type"},
+		{"unknown action", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
+		{"not declared", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
+		{"zero interval", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["monitor"]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
+		{"invalid regex", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":["reaction"]}},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -227,7 +255,11 @@ func writeRule(t *testing.T, root, id, description, agents string, actions map[s
 	if err := os.MkdirAll(ruleRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	descriptor := Descriptor{SchemaVersion: 3, Description: description, Actions: actions, Registrations: registrations}
+	descriptor := Descriptor{
+		SchemaVersion: 4, Description: description,
+		RuntimeProfiles: map[string]RuntimeProfileDeclaration{},
+		Actions:         actions, Registrations: registrations,
+	}
 	encoded, err := json.MarshalIndent(descriptor, "", "  ")
 	if err != nil {
 		t.Fatal(err)

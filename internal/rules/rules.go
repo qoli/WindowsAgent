@@ -30,7 +30,11 @@ const (
 	ScriptsMediaType       = "application/json; charset=utf-8"
 	ActionsMediaType       = "application/json; charset=utf-8"
 	RegistrationsMediaType = "application/json; charset=utf-8"
+	RuntimesMediaType      = "application/json; charset=utf-8"
 	ObservationRuntimeV1   = "windows-observation-v1"
+	PpOcrActionRuntimeV1   = "ppocr-w480-text-v1"
+	PpOcrWorkerRuntimeV1   = "ppocr-onnx-dml-worker-v1"
+	ResidencyRuleActive    = "while-rule-active"
 	RegistrationMonitor    = "monitor"
 	RegistrationReaction   = "reaction"
 	maxRuleJSONBytes       = 64 << 10
@@ -50,6 +54,7 @@ type Resolution struct {
 	Scripts       *Document `json:"scripts,omitempty"`
 	Actions       *Document `json:"actions,omitempty"`
 	Registrations *Document `json:"registrations,omitempty"`
+	Runtimes      *Document `json:"runtimes,omitempty"`
 }
 
 func (r Resolution) Validate() error {
@@ -58,7 +63,7 @@ func (r Resolution) Validate() error {
 		if r.Description != UnmatchedDescription {
 			return errors.New("unmatched rule description is invalid")
 		}
-		if r.ID != "" || r.Agents != nil || r.Scripts != nil || r.Actions != nil || r.Registrations != nil {
+		if r.ID != "" || r.Agents != nil || r.Scripts != nil || r.Actions != nil || r.Registrations != nil || r.Runtimes != nil {
 			return errors.New("unmatched rule must not contain an ID or Rule documents")
 		}
 		return nil
@@ -99,6 +104,9 @@ func (r Resolution) Validate() error {
 		if r.Registrations.URL != registrationsURL(r.ID) || r.Registrations.ContentType != RegistrationsMediaType {
 			return errors.New("matched rule Registrations document is invalid")
 		}
+		if r.Runtimes == nil || r.Runtimes.URL != runtimesURL(r.ID) || r.Runtimes.ContentType != RuntimesMediaType {
+			return errors.New("matched rule Runtimes document is invalid")
+		}
 		return nil
 	default:
 		return fmt.Errorf("invalid rule status %q", r.Status)
@@ -106,24 +114,41 @@ func (r Resolution) Validate() error {
 }
 
 type ActionDeclaration struct {
-	Path          string   `json:"path"`
-	Runtime       string   `json:"runtime"`
-	RegistrableAs []string `json:"registrableAs"`
+	Path           string   `json:"path"`
+	Runtime        string   `json:"runtime"`
+	RuntimeProfile string   `json:"runtimeProfile,omitempty"`
+	RegistrableAs  []string `json:"registrableAs"`
+}
+
+type RuntimeProfileDeclaration struct {
+	Runtime    string `json:"runtime"`
+	Residency  string `json:"residency"`
+	ArtifactID string `json:"artifactId"`
 }
 
 type Descriptor struct {
-	SchemaVersion uint32                             `json:"schemaVersion"`
-	Description   string                             `json:"description"`
-	Actions       map[string]ActionDeclaration       `json:"actions"`
-	Registrations map[string]RegistrationDeclaration `json:"registrations"`
+	SchemaVersion   uint32                               `json:"schemaVersion"`
+	Description     string                               `json:"description"`
+	RuntimeProfiles map[string]RuntimeProfileDeclaration `json:"runtimeProfiles"`
+	Actions         map[string]ActionDeclaration         `json:"actions"`
+	Registrations   map[string]RegistrationDeclaration   `json:"registrations"`
 }
 
 type Action struct {
-	ID            string   `json:"id"`
-	RuleID        string   `json:"ruleId"`
-	Runtime       string   `json:"runtime"`
-	RegistrableAs []string `json:"registrableAs"`
-	Root          string   `json:"-"`
+	ID             string   `json:"id"`
+	RuleID         string   `json:"ruleId"`
+	Runtime        string   `json:"runtime"`
+	RuntimeProfile string   `json:"runtimeProfile,omitempty"`
+	RegistrableAs  []string `json:"registrableAs"`
+	Root           string   `json:"-"`
+}
+
+type RuntimeProfile struct {
+	ID         string `json:"id"`
+	RuleID     string `json:"ruleId"`
+	Runtime    string `json:"runtime"`
+	Residency  string `json:"residency"`
+	ArtifactID string `json:"artifactId"`
 }
 
 type EventTarget struct {
@@ -290,11 +315,12 @@ func (s *Store) ResolveAction(actionID string) (Action, error) {
 			return Action{}, fmt.Errorf("resolve rule %s action %s: %w", id, actionID, err)
 		}
 		matched = &Action{
-			ID:            actionID,
-			RuleID:        id,
-			Runtime:       declaration.Runtime,
-			RegistrableAs: append([]string(nil), declaration.RegistrableAs...),
-			Root:          root,
+			ID:             actionID,
+			RuleID:         id,
+			Runtime:        declaration.Runtime,
+			RuntimeProfile: declaration.RuntimeProfile,
+			RegistrableAs:  append([]string(nil), declaration.RegistrableAs...),
+			Root:           root,
 		}
 	}
 	if matched == nil {
@@ -419,6 +445,37 @@ func (s *Store) ReadRegistrations(id string) ([]Registration, Resolution, error)
 	return registrations, matchedResolution(canonicalID, descriptor.Description), nil
 }
 
+func (s *Store) ReadRuntimeProfiles(id string) ([]RuntimeProfile, Resolution, error) {
+	if s == nil {
+		return nil, Resolution{}, errors.New("rule store is required")
+	}
+	canonicalID, found, err := s.findRule(id, true)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	if !found {
+		return nil, Resolution{}, fs.ErrNotExist
+	}
+	descriptor, err := s.readDescriptor(canonicalID)
+	if err != nil {
+		return nil, Resolution{}, err
+	}
+	ids := make([]string, 0, len(descriptor.RuntimeProfiles))
+	for profileID := range descriptor.RuntimeProfiles {
+		ids = append(ids, profileID)
+	}
+	sort.Strings(ids)
+	profiles := make([]RuntimeProfile, 0, len(ids))
+	for _, profileID := range ids {
+		declaration := descriptor.RuntimeProfiles[profileID]
+		profiles = append(profiles, RuntimeProfile{
+			ID: profileID, RuleID: canonicalID, Runtime: declaration.Runtime,
+			Residency: declaration.Residency, ArtifactID: declaration.ArtifactID,
+		})
+	}
+	return profiles, matchedResolution(canonicalID, descriptor.Description), nil
+}
+
 func (s *Store) findRule(executableName string, requireCanonical bool) (string, bool, error) {
 	directories, err := s.ruleDirectories()
 	if err != nil {
@@ -516,8 +573,8 @@ func (s *Store) resolveActionRoot(id, name string) (string, error) {
 }
 
 func validateDescriptor(descriptor Descriptor) error {
-	if descriptor.SchemaVersion != 3 {
-		return fmt.Errorf("schemaVersion must equal 3, got %d", descriptor.SchemaVersion)
+	if descriptor.SchemaVersion != 4 {
+		return fmt.Errorf("schemaVersion must equal 4, got %d", descriptor.SchemaVersion)
 	}
 	if strings.TrimSpace(descriptor.Description) == "" ||
 		strings.TrimSpace(descriptor.Description) != descriptor.Description {
@@ -528,6 +585,23 @@ func validateDescriptor(descriptor Descriptor) error {
 	}
 	if descriptor.Registrations == nil {
 		return errors.New("registrations is required")
+	}
+	if descriptor.RuntimeProfiles == nil {
+		return errors.New("runtimeProfiles is required")
+	}
+	for id, profile := range descriptor.RuntimeProfiles {
+		if err := validateRegistryID(id, "runtime profile"); err != nil {
+			return err
+		}
+		if profile.Runtime != PpOcrWorkerRuntimeV1 {
+			return fmt.Errorf("runtime profile %s runtime must equal %s", id, PpOcrWorkerRuntimeV1)
+		}
+		if profile.Residency != ResidencyRuleActive {
+			return fmt.Errorf("runtime profile %s residency must equal %s", id, ResidencyRuleActive)
+		}
+		if err := validateRegistryID(profile.ArtifactID, "runtime artifact"); err != nil {
+			return fmt.Errorf("runtime profile %s: %w", id, err)
+		}
 	}
 	for id, declaration := range descriptor.Actions {
 		if err := validateRegistryID(id, "action"); err != nil {
@@ -542,6 +616,17 @@ func validateDescriptor(descriptor Descriptor) error {
 		}
 		if declaration.RegistrableAs == nil {
 			return fmt.Errorf("action %s registrableAs is required", id)
+		}
+		if declaration.Runtime == PpOcrActionRuntimeV1 {
+			profile, exists := descriptor.RuntimeProfiles[declaration.RuntimeProfile]
+			if declaration.RuntimeProfile == "" || !exists {
+				return fmt.Errorf("action %s requires a declared runtimeProfile", id)
+			}
+			if profile.Runtime != PpOcrWorkerRuntimeV1 {
+				return fmt.Errorf("action %s runtimeProfile must use %s", id, PpOcrWorkerRuntimeV1)
+			}
+		} else if declaration.RuntimeProfile != "" {
+			return fmt.Errorf("action %s runtimeProfile is only supported by %s", id, PpOcrActionRuntimeV1)
 		}
 		seen := map[string]struct{}{}
 		for _, registrationType := range declaration.RegistrableAs {
@@ -751,6 +836,10 @@ func matchedResolution(id, description string) Resolution {
 			URL:         registrationsURL(id),
 			ContentType: RegistrationsMediaType,
 		},
+		Runtimes: &Document{
+			URL:         runtimesURL(id),
+			ContentType: RuntimesMediaType,
+		},
 	}
 }
 
@@ -772,4 +861,8 @@ func actionsURL(id string) string {
 
 func registrationsURL(id string) string {
 	return "/v3/rules/" + url.PathEscape(id) + "/registrations"
+}
+
+func runtimesURL(id string) string {
+	return "/v4/rules/" + url.PathEscape(id) + "/runtimes"
 }

@@ -2,9 +2,9 @@
 
 ## Status
 
-**Partially landed.** Rule schema version 3, strict Action declarations,
-explicit Monitor and Reaction registrations, and read-only HTTP catalogs are
-implemented. Registration execution is deferred.
+**Partially landed.** Rule schema version 4, strict runtime-profile and Action
+declarations, explicit Monitor and Reaction registrations, and read-only HTTP
+catalogs are implemented. Registration execution is deferred.
 
 ## Model
 
@@ -14,8 +14,9 @@ registration forms:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "description": "Read the live Rule before acting.",
+  "runtimeProfiles": {},
   "actions": {
     "game/status": {
       "path": "Actions/status",
@@ -79,9 +80,16 @@ the Action ID remains executable capability identity.
 The live catalogs are:
 
 ```text
+GET /v4/rules/{canonical-rule-id}/runtimes
 GET /v3/rules/{canonical-rule-id}/actions
 GET /v3/rules/{canonical-rule-id}/registrations
 ```
+
+A runtime profile is lifecycle configuration, not executable capability and
+not a registration. For example, an OCR worker may use
+`residency: while-rule-active` so model initialization follows foreground Rule
+activation. An Action must still reference that profile explicitly, and no
+timer, event, or Action invocation is synthesized from residency.
 
 The v1 Script catalog remains a compatibility projection of Actions using the
 `windows-observation-v1` runtime. It does not change Action or registration

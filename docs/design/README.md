@@ -14,6 +14,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Action registration model](action-registration-model.md) | Partially landed | Declare executable Actions and separately register selected Actions as timer-driven Monitors or event-driven Reactions. |
 | [Game module registry v2](game-module-registry-v2.md) | Retired | Historical classified-module model, replaced by Action declarations and explicit registrations. |
 | [ScreenParser Action](screenparser-action.md) | Partially landed | Run the pinned ScreenParser v2 detector Action once for an explicitly supplied, hash-pinned RGB24 frame. |
+| [PP-OCR DirectML runtime](ppocr-directml-runtime.md) | Landed | Keep a Rule-declared DirectML worker resident while its game is active and expose one finite raw-text Action for a fixed-aspect native-density ROI. |
 | [ScreenParser loop module](screenparser-loop-module.md) | Retired | Historical autonomous capture/inference/event-loop design, replaced by the on-demand Action. |
 | [Screen scene reducer](screen-scene-reducer.md) | Retired | Historical reducer for the retired raw ScreenParser event stream. |
 | [Mini reaction runtime](mini-reaction-runtime.md) | Draft | Subscribe a configured small VLM to events and allow only declared Game actions. |

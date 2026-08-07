@@ -62,3 +62,14 @@ or runtime artifact, CPU substitution, a frame outside the declared artifact
 root, a frame digest mismatch, or an unknown manifest/request field. Its result
 may expose the layout and semantic classes of visible browser or game UI; treat
 the request, frame, and response as sensitive host data.
+
+The PP-OCR DirectML runtime is self-contained and may remain resident only while
+an executable Rule that declares its runtime profile is active. Its framed
+worker accepts one bounded RGB24 text line per call and validates dimensions,
+digest, fixed-shape model, generated character dictionary, request identity,
+and capture time before returning raw recognized text evidence. It sets
+`session.disable_cpu_ep_fallback=1`; unavailable DirectML, model mismatch,
+malformed framing, or any graph that requires CPU provider assignment is
+terminal for that Rule activation. The manager does not silently restart the
+worker, switch provider, or choose another model. OCR request, region, response,
+and recognized text are sensitive host data and must not be committed.

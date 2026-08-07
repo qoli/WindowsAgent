@@ -127,7 +127,7 @@ func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
 	server, _, ruleRoot := newTestServerAndRuleRoot(t, &fakeCapturer{status: testStatus(), result: testResult()}, time.Second)
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":3,"description":"Updated live.","actions":{},"registrations":{}}`),
+		[]byte(`{"schemaVersion":4,"description":"Updated live.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -196,8 +196,9 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	scriptRoot := filepath.Join(ruleRoot, "Actions", "status")
 	writeTestScriptPackage(t, scriptRoot)
 	descriptor := `{
-	  "schemaVersion": 3,
+	  "schemaVersion": 4,
 	  "description": "Read the live Rule before acting.",
+	  "runtimeProfiles": {},
 	  "actions": {
 	    "game/status": {
 	      "path": "Actions/status",
@@ -257,8 +258,9 @@ func TestRuleActionAndRegistrationCatalogsReturnExplicitContracts(t *testing.T) 
 		}
 	}
 	descriptor := `{
-	  "schemaVersion": 3,
+	  "schemaVersion": 4,
 	  "description": "Read the live Rule before acting.",
+	  "runtimeProfiles": {},
 	  "actions": {
 	    "game/read": {"path":"Actions/read","runtime":"windows-observation-v1","registrableAs":["monitor","reaction"]},
 	    "game/open": {"path":"Actions/open","runtime":"windows-action-v1","registrableAs":["reaction"]}
@@ -554,7 +556,7 @@ func newTestServerAndRuleRootWithExecutor(
 	}
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":3,"description":"Read the live Rule before acting.","actions":{},"registrations":{}}`),
+		[]byte(`{"schemaVersion":4,"description":"Read the live Rule before acting.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

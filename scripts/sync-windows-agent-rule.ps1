@@ -41,26 +41,39 @@ try {
 } catch {
     throw "Rule plugin rule.json is invalid JSON: $($_.Exception.Message)"
 }
-$allowedDescriptorFields = @("schemaVersion", "description", "actions", "registrations")
+$allowedDescriptorFields = @("schemaVersion", "description", "runtimeProfiles", "actions", "registrations")
 foreach ($property in $descriptor.PSObject.Properties) {
     if ($allowedDescriptorFields -notcontains $property.Name) {
         throw "Rule plugin rule.json contains unknown field: $($property.Name)"
     }
 }
-if ($descriptor.schemaVersion -ne 3) {
-    throw "Rule plugin schemaVersion must equal 3"
+if ($descriptor.schemaVersion -ne 4) {
+    throw "Rule plugin schemaVersion must equal 4"
 }
 if ([String]::IsNullOrWhiteSpace([string]$descriptor.description) -or `
     ([string]$descriptor.description).Trim() -ne [string]$descriptor.description) {
     throw "Rule plugin description must be non-empty and canonical"
 }
-if ($null -eq $descriptor.actions -or $null -eq $descriptor.registrations) {
-    throw "Rule plugin actions and registrations registries are required"
+if ($null -eq $descriptor.runtimeProfiles -or $null -eq $descriptor.actions -or $null -eq $descriptor.registrations) {
+    throw "Rule plugin runtimeProfiles, actions, and registrations registries are required"
+}
+foreach ($profileProperty in $descriptor.runtimeProfiles.PSObject.Properties) {
+    $profile = $profileProperty.Value
+    $profileFields = @($profile.PSObject.Properties.Name)
+    if ($profileFields.Count -ne 3 -or $profileFields -notcontains "runtime" -or `
+        $profileFields -notcontains "residency" -or $profileFields -notcontains "artifactId") {
+        throw "Rule plugin runtime profile '$($profileProperty.Name)' has an invalid shape"
+    }
+    if ([string]$profile.runtime -ne "ppocr-onnx-dml-worker-v1" -or `
+        [string]$profile.residency -ne "while-rule-active" -or `
+        [String]::IsNullOrWhiteSpace([string]$profile.artifactId)) {
+        throw "Rule plugin runtime profile '$($profileProperty.Name)' has an unsupported contract"
+    }
 }
 foreach ($actionProperty in $descriptor.actions.PSObject.Properties) {
     $action = $actionProperty.Value
     foreach ($property in $action.PSObject.Properties) {
-        if (@("path", "runtime", "registrableAs") -notcontains $property.Name) {
+        if (@("path", "runtime", "runtimeProfile", "registrableAs") -notcontains $property.Name) {
             throw "Rule plugin action '$($actionProperty.Name)' contains unknown field: $($property.Name)"
         }
     }
@@ -72,6 +85,15 @@ foreach ($actionProperty in $descriptor.actions.PSObject.Properties) {
     }
     if ($null -eq $action.registrableAs) {
         throw "Rule plugin action '$($actionProperty.Name)' registrableAs is required"
+    }
+    $actionFields = @($action.PSObject.Properties.Name)
+    if ($runtime -eq "ppocr-w480-text-v1") {
+        if ($actionFields -notcontains "runtimeProfile" -or `
+            $null -eq $descriptor.runtimeProfiles.PSObject.Properties[[string]$action.runtimeProfile]) {
+            throw "Rule plugin OCR action '$($actionProperty.Name)' requires a declared runtimeProfile"
+        }
+    } elseif ($actionFields -contains "runtimeProfile") {
+        throw "Rule plugin action '$($actionProperty.Name)' runtimeProfile is only valid for ppocr-w480-text-v1"
     }
     $seenRegistrationTypes = @{}
     foreach ($registrationType in @($action.registrableAs)) {

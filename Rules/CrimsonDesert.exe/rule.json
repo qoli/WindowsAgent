@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "description": "The executing agent must read the live Action and registration catalogs before using this Rule.",
+  "runtimeProfiles": {},
   "actions": {
     "crimson-desert/inventory": {
       "path": "Actions/inventory",

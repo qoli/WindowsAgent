@@ -18,6 +18,7 @@ func TestParseDefaults(t *testing.T) {
 	if cfg.Listen != "0.0.0.0:8787" ||
 		cfg.DataDir != filepath.Join(root, "gameGuide", "windows-capture-agent") ||
 		cfg.RulesDir != filepath.Join(root, "gameGuide", "windows-capture-agent", "Rules") ||
+		cfg.OCRRuntimeRoot != filepath.Join(root, "gameGuide", "windows-capture-agent", "runtimes", "ppocr-w480") ||
 		cfg.CaptureTimeout != 5*time.Second ||
 		cfg.Retention != 100 ||
 		cfg.LogLevel != slog.LevelInfo ||
@@ -36,6 +37,7 @@ func TestParseOverrides(t *testing.T) {
 		"--retention", "7",
 		"--log-level", "debug",
 		"--log-file", filepath.Join(root, "agent.jsonl"),
+		"--ocr-runtime-root", filepath.Join(root, "ocr"),
 	}, filepath.Dir(root))
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +48,8 @@ func TestParseOverrides(t *testing.T) {
 		cfg.CaptureTimeout != 2*time.Second ||
 		cfg.Retention != 7 ||
 		cfg.LogLevel != slog.LevelDebug ||
-		cfg.LogFile != filepath.Join(root, "agent.jsonl") {
+		cfg.LogFile != filepath.Join(root, "agent.jsonl") ||
+		cfg.OCRRuntimeRoot != filepath.Join(root, "ocr") {
 		t.Fatalf("unexpected overrides: %+v", cfg)
 	}
 }
@@ -65,6 +68,7 @@ func TestParseRejectsInvalidRequiredState(t *testing.T) {
 		{name: "zero retention", args: []string{"--retention", "0"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "unknown log level", args: []string{"--log-level", "verbose"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative log file", args: []string{"--log-file", "agent.jsonl"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
+		{name: "relative OCR runtime root", args: []string{"--ocr-runtime-root", "runtime"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "removed script token flag", args: []string{"--script-api-token-file", filepath.Join(string(filepath.Separator), "token")}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "positional argument", args: []string{"unexpected"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 	}

@@ -20,6 +20,7 @@ type Config struct {
 	Retention      int
 	LogLevel       slog.Level
 	LogFile        string
+	OCRRuntimeRoot string
 }
 
 func Parse(args []string, localAppData string) (Config, error) {
@@ -38,6 +39,7 @@ func Parse(args []string, localAppData string) (Config, error) {
 	flagSet.IntVar(&cfg.Retention, "retention", 100, "maximum number of screenshot artifacts")
 	flagSet.StringVar(&level, "log-level", "info", "debug, info, warn, or error")
 	flagSet.StringVar(&cfg.LogFile, "log-file", "", "absolute path for persistent JSON logs; empty writes to stdout")
+	flagSet.StringVar(&cfg.OCRRuntimeRoot, "ocr-runtime-root", "", "absolute resident w480 OCR runtime bundle root; empty uses <data-dir>/runtimes/ppocr-w480")
 	if err := flagSet.Parse(args); err != nil {
 		return Config{}, fmt.Errorf("parse flags: %w", err)
 	}
@@ -63,6 +65,11 @@ func Parse(args []string, localAppData string) (Config, error) {
 	}
 	if cfg.LogFile != "" && !filepath.IsAbs(cfg.LogFile) {
 		return Config{}, errors.New("--log-file must be empty or an absolute path")
+	}
+	if cfg.OCRRuntimeRoot == "" {
+		cfg.OCRRuntimeRoot = filepath.Join(cfg.DataDir, "runtimes", "ppocr-w480")
+	} else if !filepath.IsAbs(cfg.OCRRuntimeRoot) {
+		return Config{}, errors.New("--ocr-runtime-root must be empty or an absolute path")
 	}
 	switch strings.ToLower(level) {
 	case "debug":

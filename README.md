@@ -68,8 +68,9 @@ request to the local launcher inside the signed-in Windows session.
 
 The Action registration refactor is partially landed:
 
-- Rule schema version 3 declares executable Actions and separately registers
-  selected Actions as timer-driven Monitors or event-driven Reactions;
+- Rule schema version 4 declares executable Actions, optional resident runtime
+  profiles, and separately registers selected Actions as timer-driven Monitors
+  or event-driven Reactions;
 - `windows-event-stream.exe` owns a strict append-only JSONL journal and an
   authenticated loopback append/replay API;
 - Crimson Desert inventory remains a finite Action using the landed v1
@@ -77,14 +78,18 @@ The Action registration refactor is partially landed:
 - `screenparser/ui-elements` is a Palworld-configured on-demand Action
   that transforms one caller-supplied, hash-pinned RGB24 frame through the
   verified FP16 ScreenParser v2 ONNX model and then exits;
+- Elite Dangerous declares a Rule-resident `ocr/w480` DirectML worker and the
+  finite `elite-dangerous/flight-prompt-text` Action. The Action captures one
+  reviewed 400x40 reference-density region and returns raw OCR text, confidence,
+  provenance, model identity, and timing; it performs no state classification;
 - all shipped Rules have no active Monitor or Reaction registrations by
   default; no scheduler or reaction dispatcher is shipped yet.
 
 ## Build
 
 Go 1.23 or newer is required. .NET 8 SDK is required only to build the
-self-contained ScreenParser DirectML runtime; it is not required on the target
-Windows machine.
+self-contained ScreenParser and PP-OCR DirectML runtimes; it is not required on
+the target Windows machine.
 
 ```bash
 mkdir -p .build
@@ -220,26 +225,30 @@ From the repository root in PowerShell:
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
   -ExecutablePath .\.build\windows-capture-agent-background.exe `
-  -RulesPath .\.build\Rules
+  -RulesPath .\.build\Rules `
+  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle
 ```
 
 The installer copies the capture executable, generic Starlark launcher,
-Script Runner, Observer, event-stream executable, and external Rule plugins
-under the current user's `%LOCALAPPDATA%`. It registers separate
+Script Runner, Observer, event-stream executable, external Rule plugins, and
+any Rule-declared resident runtime bundle under the current user's
+`%LOCALAPPDATA%`. It registers separate
 interactive-token at-logon Scheduled Tasks for capture and event streaming,
 starts them, and verifies both `/healthz` endpoints. All five executables must
 be present beside the selected capture build artifact before installation.
 The installer does not create an SCM service or modify Windows Firewall.
 
 Builds that stored `rule.agents.sha256`, or matched Rule metadata without
-`rule.scripts`, `rule.actions`, or `rule.registrations`, use an incompatible capture metadata
-contract. The installer detects those captures before stopping the current
-task and refuses the migration unless explicitly asked to preserve them:
+`rule.scripts`, `rule.actions`, `rule.registrations`, or `rule.runtimes`, use an
+incompatible capture metadata contract. The installer detects those captures
+before stopping the current task and refuses the migration unless explicitly
+asked to preserve them:
 
 ```powershell
 .\scripts\install-windows-capture-agent.ps1 `
   -ExecutablePath .\.build\windows-capture-agent-background.exe `
   -RulesPath .\.build\Rules `
+  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
   -ArchiveIncompatibleCaptures
 ```
 
@@ -254,6 +263,28 @@ python3 tools/screenparser-runtime/publish.py \
   --dotnet "$(command -v dotnet)" \
   --output-dir "$PWD/.build/screenparser-directml"
 ```
+
+Prepare the official PP-OCRv6 small detection and recognition ONNX artifacts,
+generate the character dictionary, and specialize recognition to the reviewed
+text-line width. The output directory must be empty:
+
+```bash
+python3 -m pip install -r tools/ppocr-model/requirements-build.in
+python3 tools/ppocr-model/prepare.py \
+  --output-dir "$PWD/.build/ppocrv6-small-w480" \
+  --recognition-input-width 480
+python3 tools/ppocr-runtime/publish.py \
+  --dotnet "$(command -v dotnet)" \
+  --output-dir "$PWD/.build/ppocr-directml"
+```
+
+The PP-OCR runtime implements fixed-aspect text-line recognition only. It
+disables ONNX Runtime CPU-provider fallback; dynamic-shape models and regions
+whose natural 48-pixel-height width differs from the pinned model fail. Its
+framed worker mode loads the model once and serves finite recognition calls.
+WindowsAgent starts that worker only while the owning Rule is active, as
+declared by `runtimeProfiles`; residency is not a Monitor and emits no event.
+The developer benchmark tool remains a separate bounded diagnostic.
 
 For bounded precision or provider diagnostics, publish the separate one-shot
 console tool. It reads one hash-pinned RGB24 frame, performs a bounded number
@@ -474,10 +505,13 @@ internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
 internal/wgc/                    WGC and Direct3D 11 implementation
-Rules/<Executable.exe>/          distributable Rule v3 Actions, registrations, and guidance
+Rules/<Executable.exe>/          distributable Rule v4 runtimes, Actions, registrations, and guidance
 runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
+runtimes/ppocr-directml/          strict fixed-shape resident PP-OCR worker
 tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter
 tools/screenparser-runtime/       reproducible Windows runtime publisher
+tools/ppocr-model/                official PP-OCR artifacts and shape specialization
+tools/ppocr-runtime/              PP-OCR publisher and bounded benchmark tool
 scripts/                         Windows installation helpers
 ```
 

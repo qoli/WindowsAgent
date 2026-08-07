@@ -80,6 +80,11 @@ type registrationCatalogResponse struct {
 	Registrations []rules.Registration `json:"registrations"`
 }
 
+type runtimeCatalogResponse struct {
+	RuleID   string                 `json:"ruleId"`
+	Runtimes []rules.RuntimeProfile `json:"runtimes"`
+}
+
 type scriptCapabilityResponse struct {
 	ID           string          `json:"id"`
 	Runtime      string          `json:"runtime"`
@@ -175,11 +180,38 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleRuleResource(recorder, r, requestID)
 	case strings.HasPrefix(r.URL.Path, "/v3/rules/"):
 		s.handleActionResource(recorder, r, requestID)
+	case strings.HasPrefix(r.URL.Path, "/v4/rules/"):
+		s.handleRuntimeResource(recorder, r, requestID)
 	case r.URL.Path == "/v1/scripts/run":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleScriptRun)
 	default:
 		writeError(recorder, requestID, http.StatusNotFound, "route_not_found", "route not found")
 	}
+}
+
+func (s *Server) handleRuntimeResource(w http.ResponseWriter, r *http.Request, requestID string) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeError(w, requestID, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	remainder := strings.TrimPrefix(r.URL.Path, "/v4/rules/")
+	parts := strings.Split(remainder, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] != "runtimes" {
+		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
+		return
+	}
+	profiles, resolution, err := s.rules.ReadRuntimeProfiles(parts[0])
+	if errors.Is(err, fs.ErrNotExist) {
+		writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
+		return
+	}
+	if err != nil {
+		s.writeMappedError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, runtimeCatalogResponse{RuleID: resolution.ID, Runtimes: profiles})
 }
 
 func (s *Server) handleActionResource(w http.ResponseWriter, r *http.Request, requestID string) {

@@ -17,9 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/qoli/WindowsAgent/internal/actionlaunch"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/config"
+	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/httpapi"
+	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/wgc"
@@ -79,15 +82,28 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
-	scriptExecutor, err := scriptlaunch.NewLocalExecutor(filepath.Dir(executable), cfg.RulesDir)
+	observationExecutor, err := scriptlaunch.NewLocalExecutor(filepath.Dir(executable), cfg.RulesDir)
 	if err != nil {
 		return fmt.Errorf("initialize local Script executor: %w", err)
+	}
+	ocrManager, err := ocrworker.NewManager(ruleStore, cfg.OCRRuntimeRoot, logger)
+	if err != nil {
+		return fmt.Errorf("initialize resident OCR runtime manager: %w", err)
+	}
+	defer func() {
+		if err := ocrManager.Close(); err != nil {
+			logger.Error("ocr_runtime_shutdown_failed", "error", err)
+		}
+	}()
+	actionExecutor, err := actionlaunch.New(ruleStore, observationExecutor, capturer, ocrManager, foreground.Snapshot)
+	if err != nil {
+		return fmt.Errorf("initialize Action executor: %w", err)
 	}
 	api, err := httpapi.New(
 		capturer,
 		store,
 		ruleStore,
-		scriptExecutor,
+		actionExecutor,
 		cfg.CaptureTimeout,
 		version,
 		logger,
@@ -122,6 +138,7 @@ func run() (runErr error) {
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go reconcileOCRRuntime(signalContext, ocrManager, logger)
 	serveError := make(chan error, 1)
 	go func() {
 		serveError <- server.Serve(listener)
@@ -146,6 +163,24 @@ func run() (runErr error) {
 		}
 		logger.Info("capture_agent_stopped")
 		return nil
+	}
+}
+
+func reconcileOCRRuntime(ctx context.Context, manager *ocrworker.Manager, logger *slog.Logger) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		info, err := foreground.Snapshot()
+		if err != nil {
+			logger.Error("ocr_runtime_foreground_failed", "error", err)
+		} else if err := manager.Reconcile(ctx, info.ExecutableName); err != nil {
+			logger.Error("ocr_runtime_reconcile_failed", "foreground", info.ExecutableName, "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

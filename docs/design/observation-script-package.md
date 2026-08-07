@@ -117,8 +117,9 @@ path, and runtime:
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "description": "Read the live Rule before acting.",
+  "runtimeProfiles": {},
   "actions": {
     "example/read": {
       "path": "Actions/read",

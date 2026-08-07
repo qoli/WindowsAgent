@@ -7,6 +7,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RulesPath,
 
+    [string]$OCRRuntimeBundlePath,
+
     [switch]$ArchiveIncompatibleCaptures,
 
     [string]$Listen = "0.0.0.0:8787",
@@ -58,6 +60,38 @@ $sourceRules = [IO.Path]::GetFullPath($RulesPath)
 if (-not (Test-Path -LiteralPath $sourceRules -PathType Container)) {
     throw "Rules directory does not exist: $sourceRules"
 }
+$sourceRuleDirectories = @(Get-ChildItem -LiteralPath $sourceRules -Directory)
+if ($sourceRuleDirectories.Count -eq 0) {
+    throw "Rules directory must contain at least one executable Rule plugin"
+}
+$requiresOCRRuntime = $false
+foreach ($sourceRuleDirectory in $sourceRuleDirectories) {
+    $ruleDescriptor = Get-Content -LiteralPath (Join-Path $sourceRuleDirectory.FullName "rule.json") `
+        -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    if (@($ruleDescriptor.runtimeProfiles.PSObject.Properties).Count -ne 0) {
+        $requiresOCRRuntime = $true
+    }
+}
+$sourceOCRRuntime = $null
+if ($requiresOCRRuntime) {
+    if ([String]::IsNullOrWhiteSpace($OCRRuntimeBundlePath)) {
+        throw "at least one Rule declares a resident runtime profile; OCRRuntimeBundlePath is required"
+    }
+    $sourceOCRRuntime = [IO.Path]::GetFullPath($OCRRuntimeBundlePath)
+    if (-not (Test-Path -LiteralPath $sourceOCRRuntime -PathType Container)) {
+        throw "OCR runtime bundle directory does not exist: $sourceOCRRuntime"
+    }
+    foreach ($name in @(
+        "PpOcr.DirectML.exe",
+        "runtime-config.json",
+        "ppocrv6-small-rec-w480.onnx",
+        "ppocrv6-small-characters.json"
+    )) {
+        if (-not (Test-Path -LiteralPath (Join-Path $sourceOCRRuntime $name) -PathType Leaf)) {
+            throw "OCR runtime bundle is missing required file: $name"
+        }
+    }
+}
 $resolvedDataDir = [IO.Path]::GetFullPath($DataDir)
 if (-not [IO.Path]::IsPathRooted($resolvedDataDir)) {
     throw "DataDir must be an absolute path"
@@ -105,7 +139,14 @@ if (Test-Path -LiteralPath $capturesDir -PathType Container) {
             $metadata.rule.status -eq "matched" -and
             -not ($ruleProperties -contains "registrations")
         )
-        if ($usesRemovedAgentSHA -or $missingScriptNavigation -or $missingActionNavigation -or $missingRegistrationNavigation) {
+        $missingRuntimeNavigation = (
+            $hasRule -and
+            $ruleProperties -contains "status" -and
+            $metadata.rule.status -eq "matched" -and
+            -not ($ruleProperties -contains "runtimes")
+        )
+        if ($usesRemovedAgentSHA -or $missingScriptNavigation -or $missingActionNavigation -or `
+            $missingRegistrationNavigation -or $missingRuntimeNavigation) {
             $incompatibleCaptureMetadata += $metadataFile.FullName
         }
     }
@@ -150,6 +191,7 @@ $eventLogFile = Join-Path $logDir "event-stream.jsonl"
 $eventDataDir = Join-Path $resolvedDataDir "events"
 $eventTokenFile = Join-Path $resolvedDataDir "event-api.token"
 $installedEventExecutable = Join-Path $binDir "windows-event-stream.exe"
+$installedOCRRuntime = Join-Path $resolvedDataDir "runtimes\ppocr-w480"
 $legacyScriptAPITokenFile = Join-Path $resolvedDataDir "script-api.token"
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -216,6 +258,18 @@ if ($sourceExecutable -ne $installedExecutable) {
 foreach ($runtime in $runtimeSources.GetEnumerator()) {
     Copy-Item -LiteralPath $runtime.Value -Destination (Join-Path $binDir $runtime.Key) -Force
 }
+if ($requiresOCRRuntime) {
+    New-Item -ItemType Directory -Path $installedOCRRuntime -Force | Out-Null
+    foreach ($name in @(
+        "PpOcr.DirectML.exe",
+        "runtime-config.json",
+        "ppocrv6-small-rec-w480.onnx",
+        "ppocrv6-small-characters.json"
+    )) {
+        Copy-Item -LiteralPath (Join-Path $sourceOCRRuntime $name) `
+            -Destination (Join-Path $installedOCRRuntime $name) -Force
+    }
+}
 if (Test-Path -LiteralPath $eventTokenFile) {
     $eventTokenInfo = Get-Item -LiteralPath $eventTokenFile -Force
     if ($eventTokenInfo.PSIsContainer -or $eventTokenInfo.Length -lt 32 -or $eventTokenInfo.Length -gt 4096) {
@@ -238,10 +292,6 @@ if (Test-Path -LiteralPath $eventTokenFile) {
 }
 New-Item -ItemType Directory -Path $eventDataDir -Force | Out-Null
 New-Item -ItemType Directory -Path $installedRules -Force | Out-Null
-$sourceRuleDirectories = @(Get-ChildItem -LiteralPath $sourceRules -Directory)
-if ($sourceRuleDirectories.Count -eq 0) {
-    throw "Rules directory must contain at least one executable Rule plugin"
-}
 foreach ($sourceRuleDirectory in $sourceRuleDirectories) {
     & (Join-Path $PSScriptRoot "sync-windows-agent-rule.ps1") `
         -SourceRulePath $sourceRuleDirectory.FullName `
@@ -263,7 +313,8 @@ $agentArguments = @(
     "--capture-timeout", (ConvertTo-NativeQuotedArgument $captureTimeoutArgument),
     "--retention", (ConvertTo-NativeQuotedArgument $Retention.ToString()),
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
-    "--log-file", (ConvertTo-NativeQuotedArgument $logFile)
+    "--log-file", (ConvertTo-NativeQuotedArgument $logFile),
+    "--ocr-runtime-root", (ConvertTo-NativeQuotedArgument $installedOCRRuntime)
 ) -join " "
 $eventArguments = @(
     "--listen", (ConvertTo-NativeQuotedArgument $EventListen),
@@ -386,6 +437,7 @@ if ($process.SessionId -eq 0) {
     event_health = $eventHealth.status
     data_dir = $resolvedDataDir
     rules_dir = $installedRules
+    ocr_runtime_root = $installedOCRRuntime
     legacy_script_api_token_removed = $legacyScriptAPITokenRemoved
     capture_archive = $captureArchive
     log_file = $logFile

@@ -7,6 +7,7 @@ Issues and focused pull requests are welcome.
 - Go 1.23 or newer
 - macOS, Linux, or Windows for platform-independent tests
 - Windows 10 1903+ amd64 for WGC runtime validation
+- .NET 8 SDK for ScreenParser or PP-OCR DirectML runtime changes
 
 Run before submitting a change:
 
@@ -34,6 +35,13 @@ interactive Windows session. Include only privacy-minimized metadata and
 failure codes in the pull request; do not attach private screenshots, save
 files, memory contents, inventory results, or logs containing sensitive local
 paths.
+
+PP-OCR runtime changes must additionally run
+`PpOcr.DirectML.ContractTests` on Windows and validate the exact prepared model
+with CPU execution-provider fallback disabled. Exercise worker initialization,
+multiple framed recognition calls, and shutdown in one process. Performance
+evidence must split model load, preprocessing, inference, postprocessing, and
+external wall time; do not commit the private RGB test region or OCR response.
 
 New or changed packages under `Rules/<Executable.exe>/Scripts/` must satisfy
 the [`Script Package development contract`](docs/script-development-contract.md),

@@ -1,10 +1,23 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "description": "Elite Dangerous exposes finite game-specific Actions; registrations remain opt-in.",
+  "runtimeProfiles": {
+    "ocr/w480": {
+      "runtime": "ppocr-onnx-dml-worker-v1",
+      "residency": "while-rule-active",
+      "artifactId": "ppocrv6-small-rec-onnx-official-w480"
+    }
+  },
   "actions": {
     "elite-dangerous/compass": {
       "path": "Actions/compass",
       "runtime": "windows-observation-v1",
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/flight-prompt-text": {
+      "path": "Actions/flight-prompt-text",
+      "runtime": "ppocr-w480-text-v1",
+      "runtimeProfile": "ocr/w480",
       "registrableAs": ["monitor", "reaction"]
     }
   },

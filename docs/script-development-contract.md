@@ -3,7 +3,7 @@
 ## Status and authority
 
 This document is the authoring and review contract for every observation
-package below `Rules/<Executable.exe>/Actions/` declared by a Rule v3 Action
+package below `Rules/<Executable.exe>/Actions/` declared by a Rule v4 Action
 using `windows-observation-v1`.
 
 An Observation Script Package is trusted local task code, not an untrusted
