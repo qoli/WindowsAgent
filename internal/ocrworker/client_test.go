@@ -8,7 +8,7 @@ import (
 )
 
 func TestWorkerFrameRoundTrip(t *testing.T) {
-	body := []byte(`{"schemaVersion":1,"id":"ocr-1","ok":true,"result":{"state":"ready"}}`)
+	body := []byte(`{"schemaVersion":2,"id":"ocr-1","ok":true,"result":{"state":"ready"}}`)
 	var framed bytes.Buffer
 	if err := writeFrame(&framed, body); err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestWorkerFrameRoundTrip(t *testing.T) {
 
 func TestWorkerResponseRejectsUnknownFields(t *testing.T) {
 	var response responseEnvelope
-	err := decodeStrict([]byte(`{"schemaVersion":1,"id":"ocr-1","ok":true,"result":{},"extra":true}`), &response)
+	err := decodeStrict([]byte(`{"schemaVersion":2,"id":"ocr-1","ok":true,"result":{},"extra":true}`), &response)
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("error = %v", err)
 	}

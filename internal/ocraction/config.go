@@ -18,13 +18,14 @@ import (
 const maxManifestBytes = 32 << 10
 
 type Config struct {
-	SchemaVersion   uint32                  `json:"schemaVersion"`
-	Title           string                  `json:"title"`
-	InputSchema     string                  `json:"inputSchema"`
-	OutputSchema    string                  `json:"outputSchema"`
-	ReferenceRegion capture.ReferenceRegion `json:"referenceRegion"`
-	Sampling        capture.Sampling        `json:"sampling"`
-	MaxPixels       uint64                  `json:"maxPixels"`
+	SchemaVersion       uint32                  `json:"schemaVersion"`
+	Title               string                  `json:"title"`
+	InputSchema         string                  `json:"inputSchema"`
+	OutputSchema        string                  `json:"outputSchema"`
+	ReferenceRegion     capture.ReferenceRegion `json:"referenceRegion"`
+	Sampling            capture.Sampling        `json:"sampling"`
+	MaxPixels           uint64                  `json:"maxPixels"`
+	CharacterConstraint string                  `json:"characterConstraint"`
 }
 
 func Load(root string) (Config, error) {
@@ -63,8 +64,8 @@ func Load(root string) (Config, error) {
 }
 
 func (c Config) Validate(root string) error {
-	if c.SchemaVersion != 1 {
-		return errors.New("OCR Action manifest schemaVersion must equal 1")
+	if c.SchemaVersion != 2 {
+		return errors.New("OCR Action manifest schemaVersion must equal 2")
 	}
 	if strings.TrimSpace(c.Title) == "" || strings.TrimSpace(c.Title) != c.Title {
 		return errors.New("OCR Action title must be non-empty and canonical")
@@ -89,8 +90,8 @@ func (c Config) Validate(root string) error {
 	if c.ReferenceRegion.Width*c.ReferenceRegion.Height > int(c.MaxPixels) {
 		return errors.New("OCR Action reference region exceeds maxPixels at reference density")
 	}
-	if c.ReferenceRegion.Width != c.ReferenceRegion.Height*10 {
-		return errors.New("OCR Action referenceRegion must have a 10:1 aspect ratio")
+	if c.CharacterConstraint != "none" && c.CharacterConstraint != "digits" {
+		return errors.New("OCR Action characterConstraint must equal none or digits")
 	}
 	return nil
 }

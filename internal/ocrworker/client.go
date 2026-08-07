@@ -21,18 +21,26 @@ import (
 )
 
 const (
-	ProtocolVersion = 1
+	ProtocolVersion = 2
 	MaxFrameBytes   = 512 << 10
 )
 
 type Request struct {
-	RequestID  string
-	ArtifactID string
-	CapturedAt time.Time
-	Width      int
-	Height     int
-	RGB        []byte
+	RequestID           string
+	ArtifactID          string
+	CapturedAt          time.Time
+	Width               int
+	Height              int
+	RGB                 []byte
+	CharacterConstraint CharacterConstraint
 }
+
+type CharacterConstraint string
+
+const (
+	CharacterConstraintNone   CharacterConstraint = "none"
+	CharacterConstraintDigits CharacterConstraint = "digits"
+)
 
 type Evidence struct {
 	ArtifactID string    `json:"artifactId"`
@@ -62,9 +70,19 @@ type Result struct {
 	CompletedAt time.Time `json:"completedAt"`
 	Text        string    `json:"text"`
 	Confidence  float64   `json:"confidence"`
+	Decoding    Decoding  `json:"decoding"`
 	Evidence    Evidence  `json:"evidence"`
 	Model       Model     `json:"model"`
 	Timing      Timing    `json:"timing"`
+}
+
+type Decoding struct {
+	CharacterConstraint   CharacterConstraint `json:"characterConstraint"`
+	RawText               string              `json:"rawText"`
+	RawConfidence         float64             `json:"rawConfidence"`
+	ConstrainedText       string              `json:"constrainedText"`
+	ConstrainedConfidence float64             `json:"constrainedConfidence"`
+	RawConstraintMargin   float64             `json:"rawConstraintMargin"`
 }
 
 type Initialized struct {
@@ -183,6 +201,9 @@ func (c *Client) Recognize(ctx context.Context, request Request) (Result, error)
 		request.Width <= 0 || request.Height <= 0 {
 		return Result{}, errors.New("OCR request identity, capture time, and dimensions are required")
 	}
+	if request.CharacterConstraint != CharacterConstraintNone && request.CharacterConstraint != CharacterConstraintDigits {
+		return Result{}, errors.New("OCR character constraint must equal none or digits")
+	}
 	expectedBytes := request.Width * request.Height * 3
 	if expectedBytes <= 0 || len(request.RGB) != expectedBytes {
 		return Result{}, fmt.Errorf("OCR RGB byte length mismatch: expected=%d actual=%d", expectedBytes, len(request.RGB))
@@ -190,8 +211,9 @@ func (c *Client) Recognize(ctx context.Context, request Request) (Result, error)
 	digest := sha256.Sum256(request.RGB)
 	parameters := map[string]any{
 		"requestId": request.RequestID, "artifactId": request.ArtifactID,
-		"capturedAt": request.CapturedAt.UTC().Format("2006-01-02T15:04:05.000000Z07:00"),
-		"width":      request.Width, "height": request.Height, "rgbBase64": request.RGB,
+		"capturedAt":          request.CapturedAt.UTC().Format("2006-01-02T15:04:05.000000Z07:00"),
+		"characterConstraint": request.CharacterConstraint,
+		"width":               request.Width, "height": request.Height, "rgbBase64": request.RGB,
 		"sha256": hex.EncodeToString(digest[:]),
 	}
 	var result Result
@@ -203,6 +225,11 @@ func (c *Client) Recognize(ctx context.Context, request Request) (Result, error)
 		result.Evidence.RGBSHA256 != hex.EncodeToString(digest[:]) || result.Model.Provider != "DirectML" ||
 		result.Model.AdapterIndex != 0 || result.Model.ArtifactID != c.initialized.Model.ArtifactID {
 		return Result{}, errors.New("OCR worker result provenance does not match the request or initialized model")
+	}
+	if result.Decoding.CharacterConstraint != request.CharacterConstraint ||
+		result.Text != result.Decoding.ConstrainedText || result.Confidence != result.Decoding.ConstrainedConfidence ||
+		result.Decoding.RawConstraintMargin < 0 {
+		return Result{}, errors.New("OCR worker decoding evidence does not match the request or selected result")
 	}
 	return result, nil
 }

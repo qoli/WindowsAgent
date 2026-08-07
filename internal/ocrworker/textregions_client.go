@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const textRegionsProtocolVersion = 1
+
 const MaxTextRegionsFrameBytes = 8 << 20
 
 type TextRegionPoint struct {
@@ -227,7 +229,7 @@ func (c *TextRegionsClient) call(ctx context.Context, method string, parameters 
 	}
 	c.nextID++
 	id := fmt.Sprintf("ocr-regions-%d", c.nextID)
-	request := map[string]any{"schemaVersion": ProtocolVersion, "id": id, "method": method, "params": parameters}
+	request := map[string]any{"schemaVersion": textRegionsProtocolVersion, "id": id, "method": method, "params": parameters}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return fmt.Errorf("encode OCR text regions worker request: %w", err)
@@ -248,7 +250,7 @@ func (c *TextRegionsClient) call(ctx context.Context, method string, parameters 
 			result <- fmt.Errorf("decode OCR text regions worker response: %w", err)
 			return
 		}
-		if envelope.SchemaVersion != ProtocolVersion || envelope.ID != id {
+		if envelope.SchemaVersion != textRegionsProtocolVersion || envelope.ID != id {
 			result <- errors.New("OCR text regions worker response version or ID mismatch")
 			return
 		}

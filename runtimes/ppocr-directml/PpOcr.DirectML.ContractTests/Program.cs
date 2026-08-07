@@ -25,10 +25,31 @@ output[0, 3, 0] = 0.9f;
 output[0, 4, 2] = 0.6f;
 output[0, 5, 0] = 0.9f;
 var decoded = TextLineRecognizer.DecodeCtc(output, new[] { "A", "B", "C" });
-Equal(decoded.Text, "AB", "CTC text");
-if (Math.Abs(decoded.Confidence - 0.7) > 0.0001)
+Equal(decoded.ConstrainedText, "AB", "CTC text");
+if (Math.Abs(decoded.ConstrainedConfidence - 0.7) > 0.0001)
 {
-    throw new Exception($"CTC confidence: expected=0.7 actual={decoded.Confidence}");
+    throw new Exception($"CTC confidence: expected=0.7 actual={decoded.ConstrainedConfidence}");
+}
+
+var ambiguousCharacters = new[] { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "V" };
+var ambiguousDigitOutput = new DenseTensor<float>(new[] { 1, 1, ambiguousCharacters.Length + 1 });
+ambiguousDigitOutput[0, 0, 0] = 0.01f;
+ambiguousDigitOutput[0, 0, 8] = 0.58f;
+ambiguousDigitOutput[0, 0, 11] = 0.62f;
+var constrained = TextLineRecognizer.DecodeCtc(ambiguousDigitOutput, ambiguousCharacters, "digits");
+Equal(constrained.RawText, "V", "raw ambiguous text");
+Equal(constrained.ConstrainedText, "7", "digit-constrained text");
+if (Math.Abs(constrained.RawConfidence - 0.62) > 0.0001 ||
+    Math.Abs(constrained.ConstrainedConfidence - 0.58) > 0.0001)
+{
+    throw new Exception("digit-constrained confidence evidence is incorrect");
+}
+
+var padded = TextLineRecognizer.Preprocess(
+    new CapturedRegion(1, 1, new byte[] { 255, 255, 255 }, new string('0', 64)), 2, 4);
+if (Math.Abs(padded[0, 0, 1, 1] - 1f) > 0.0001f || Math.Abs(padded[0, 0, 1, 2]) > 0.0001f)
+{
+    throw new Exception("aspect-preserving recognition preprocessing did not right-pad the input");
 }
 
 try
@@ -65,6 +86,7 @@ using var workerDocument = System.Text.Json.JsonDocument.Parse(System.Text.Json.
     requestId = "request-1",
     artifactId = "artifact-1",
     capturedAt = "2026-08-07T01:02:03.123456Z",
+    characterConstraint = "digits",
     width = 2,
     height = 1,
     rgbBase64 = Convert.ToBase64String(workerRgb),
@@ -72,6 +94,7 @@ using var workerDocument = System.Text.Json.JsonDocument.Parse(System.Text.Json.
 }));
 var workerRequest = WorkerProtocol.ParseRecognition(workerDocument.RootElement);
 Equal(workerRequest.Region.RgbSha256, workerSha, "worker RGB SHA-256");
+Equal(workerRequest.CharacterConstraint, "digits", "worker character constraint");
 
 var fullSizeRgb = new byte[800 * 80 * 3];
 var fullSizeSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fullSizeRgb)).ToLowerInvariant();
@@ -80,6 +103,7 @@ using var fullSizeDocument = System.Text.Json.JsonDocument.Parse(System.Text.Jso
     requestId = "request-full-size",
     artifactId = "artifact-full-size",
     capturedAt = "2026-08-07T01:02:03.123456Z",
+    characterConstraint = "none",
     width = 800,
     height = 80,
     rgbBase64 = Convert.ToBase64String(fullSizeRgb),
@@ -93,6 +117,7 @@ using var nonCanonicalBase64Document = System.Text.Json.JsonDocument.Parse(Syste
     requestId = "request-noncanonical",
     artifactId = "artifact-noncanonical",
     capturedAt = "2026-08-07T01:02:03.123456Z",
+    characterConstraint = "none",
     width = 2,
     height = 1,
     rgbBase64 = Convert.ToBase64String(workerRgb) + "\n",
@@ -181,4 +206,4 @@ var rectified = TextRegionDetector.Rectify(
 Equal(rectified.Rgb.Length, 480 * 48 * 3, "rectified RGB length");
 Equal(rectified.RgbSha256.Length, 64, "rectified RGB SHA length");
 
-Console.WriteLine("15 PP-OCR DirectML contract tests passed");
+Console.WriteLine("18 PP-OCR DirectML contract tests passed");

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "title": "Read Elite Dangerous central prompt text",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -10,5 +10,6 @@
     "h": 40
   },
   "sampling": "reference",
-  "maxPixels": 16000
+  "maxPixels": 16000,
+  "characterConstraint": "none"
 }

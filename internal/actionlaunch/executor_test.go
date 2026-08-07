@@ -126,6 +126,11 @@ func (f *fakeOCRRecognizer) Recognize(_ context.Context, ruleID, profileID strin
 	return ocrworker.Result{
 		RequestID: request.RequestID, CompletedAt: request.CapturedAt.Add(time.Millisecond),
 		Text: "ALIGN WITH TARGET DESTINATION", Confidence: .998932,
+		Decoding: ocrworker.Decoding{
+			CharacterConstraint: request.CharacterConstraint,
+			RawText:             "ALIGN WITH TARGET DESTINATION", RawConfidence: .998932,
+			ConstrainedText: "ALIGN WITH TARGET DESTINATION", ConstrainedConfidence: .998932,
+		},
 		Evidence: ocrworker.Evidence{
 			ArtifactID: request.ArtifactID, CapturedAt: request.CapturedAt,
 			Width: request.Width, Height: request.Height,
@@ -201,8 +206,47 @@ func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 		recognizer.request.Width != 400 || recognizer.request.Height != 40 || len(recognizer.request.RGB) != 400*40*3 {
 		t.Fatalf("OCR request dimensions = %dx%d, RGB bytes = %d", recognizer.request.Width, recognizer.request.Height, len(recognizer.request.RGB))
 	}
+	if recognizer.request.CharacterConstraint != ocrworker.CharacterConstraintNone {
+		t.Fatalf("character constraint = %q", recognizer.request.CharacterConstraint)
+	}
 	if recognizer.request.RGB[0] != 1 || recognizer.request.RGB[1] != 2 || recognizer.request.RGB[2] != 3 {
 		t.Fatal("packed pixels were not converted to RGB24")
+	}
+}
+
+func TestDigitOCRActionCapturesFixedSpeedROIWithoutDetector(t *testing.T) {
+	rulesRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ruleStore, err := rules.New(rulesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Date(2026, 8, 8, 2, 3, 4, 0, time.UTC)
+	foregroundInfo := foreground.Info{ObservedAt: observedAt, ProcessID: 42, ExecutableName: "EliteDangerous64.exe"}
+	recognizer := &fakeOCRRecognizer{}
+	executor, err := New(
+		ruleStore, fakeObservationExecutor{},
+		fakeRegionCapturer{result: capture.RegionResult{
+			Pixels: make([]uint32, 65*50), ImageWidth: 65, ImageHeight: 50,
+			FrameWidth: 3840, FrameHeight: 2160,
+			PhysicalRegion: capture.PixelRegion{Left: 2200, Top: 1630, Width: 130, Height: 100},
+			Foreground:     foregroundInfo,
+		}},
+		recognizer, fakeInputExecutor{}, func() (foreground.Info, error) { return foregroundInfo, nil },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.Run(context.Background(), scriptlaunch.Invocation{
+		Capability: "elite-dangerous/ship-speed-text", Inputs: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if recognizer.request.Width != 65 || recognizer.request.Height != 50 ||
+		recognizer.request.CharacterConstraint != ocrworker.CharacterConstraintDigits {
+		t.Fatalf("OCR request = %#v", recognizer.request)
 	}
 }
 

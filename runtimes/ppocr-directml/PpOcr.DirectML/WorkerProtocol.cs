@@ -9,11 +9,12 @@ public sealed record WorkerRecognitionRequest(
     string RequestId,
     string ArtifactId,
     DateTimeOffset CapturedAt,
+    string CharacterConstraint,
     CapturedRegion Region);
 
 public static class WorkerProtocol
 {
-    public const int ProtocolVersion = 1;
+    public const int ProtocolVersion = 2;
     public const int MaxFrameBytes = 512 << 10;
 
     public static int Run(
@@ -93,7 +94,7 @@ public static class WorkerProtocol
             try
             {
                 var timer = Stopwatch.StartNew();
-                var recognition = recognizer.Recognize(request.Region);
+                var recognition = recognizer.Recognize(request.Region, request.CharacterConstraint);
                 timer.Stop();
                 WriteFrame(output, new
                 {
@@ -106,6 +107,15 @@ public static class WorkerProtocol
                         completedAt = Contract.FormatTimestamp(DateTimeOffset.UtcNow),
                         text = recognition.Text,
                         confidence = recognition.Confidence,
+                        decoding = new
+                        {
+                            characterConstraint = recognition.Constraint,
+                            rawText = recognition.RawText,
+                            rawConfidence = recognition.RawConfidence,
+                            constrainedText = recognition.ConstrainedText,
+                            constrainedConfidence = recognition.ConstrainedConfidence,
+                            rawConstraintMargin = recognition.RawConstraintMargin,
+                        },
                         evidence = new
                         {
                             artifactId = request.ArtifactId,
@@ -150,10 +160,15 @@ public static class WorkerProtocol
     {
         Contract.RequireProperties(
             value, "worker request.params", "requestId", "artifactId", "capturedAt",
-            "width", "height", "rgbBase64", "sha256");
+            "characterConstraint", "width", "height", "rgbBase64", "sha256");
         var requestId = Contract.RequireIdentifier(Contract.RequireString(value, "requestId"), "worker request.params.requestId");
         var artifactId = Contract.RequireIdentifier(Contract.RequireString(value, "artifactId"), "worker request.params.artifactId");
         var capturedAt = Contract.RequireTimestamp(Contract.RequireString(value, "capturedAt"), "worker request.params.capturedAt");
+        var characterConstraint = Contract.RequireString(value, "characterConstraint");
+        if (characterConstraint is not ("none" or "digits"))
+        {
+            throw new ContractException("worker request.params.characterConstraint must equal none or digits");
+        }
         var width = Contract.RequireIntRange(value, "width", 1, 4096, "worker request.params.width");
         var height = Contract.RequireIntRange(value, "height", 1, 1024, "worker request.params.height");
         var expectedSha256 = Contract.RequireSha256(Contract.RequireString(value, "sha256"), "worker request.params.sha256");
@@ -187,7 +202,7 @@ public static class WorkerProtocol
             throw new ContractException($"worker RGB sha256 mismatch: expected={expectedSha256} actual={actualSha256}");
         }
         return new WorkerRecognitionRequest(
-            requestId, artifactId, capturedAt,
+            requestId, artifactId, capturedAt, characterConstraint,
             new CapturedRegion(width, height, rgb, actualSha256));
     }
 

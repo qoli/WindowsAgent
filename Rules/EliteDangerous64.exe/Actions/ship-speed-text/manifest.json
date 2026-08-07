@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 2,
+  "title": "Read Elite Dangerous ship speed digits",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 1100, "y": 815, "w": 65, "h": 50},
+  "sampling": "reference",
+  "maxPixels": 3250,
+  "characterConstraint": "digits"
+}

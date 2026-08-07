@@ -219,9 +219,6 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 	if region.ImageWidth <= 0 || region.ImageHeight <= 0 || len(region.Pixels) != region.ImageWidth*region.ImageHeight {
 		return nil, errors.New("OCR Action captured an invalid pixel region")
 	}
-	if region.ImageWidth != region.ImageHeight*10 {
-		return nil, fmt.Errorf("OCR Action reference sample must preserve a 10:1 aspect ratio, got %dx%d", region.ImageWidth, region.ImageHeight)
-	}
 	rgb := make([]byte, len(region.Pixels)*3)
 	for index, pixel := range region.Pixels {
 		rgb[index*3] = byte(pixel >> 16)
@@ -235,6 +232,7 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		ArtifactID: "screen-region-" + identity,
 		CapturedAt: capturedAt,
 		Width:      region.ImageWidth, Height: region.ImageHeight, RGB: rgb,
+		CharacterConstraint: ocrworker.CharacterConstraint(config.CharacterConstraint),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("run resident OCR profile %s: %w", action.RuntimeProfile, err)
@@ -243,6 +241,7 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		"schemaVersion": 1,
 		"text":          result.Text,
 		"confidence":    result.Confidence,
+		"decoding":      result.Decoding,
 		"evidence": map[string]any{
 			"artifactId": result.Evidence.ArtifactID,
 			"capturedAt": result.Evidence.CapturedAt,

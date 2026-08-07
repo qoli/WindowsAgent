@@ -7,6 +7,12 @@ namespace PpOcr.DirectML;
 public sealed record RecognitionResult(
     string Text,
     double Confidence,
+    string Constraint,
+    string RawText,
+    double RawConfidence,
+    string ConstrainedText,
+    double ConstrainedConfidence,
+    double RawConstraintMargin,
     int InputWidth,
     double PreprocessMs,
     double InferenceMs,
@@ -43,15 +49,9 @@ public sealed class TextLineRecognizer : IDisposable
         ValidateModelContract();
     }
 
-    public RecognitionResult Recognize(CapturedRegion region)
+    public RecognitionResult Recognize(CapturedRegion region, string constraint = "none")
     {
         var timer = Stopwatch.StartNew();
-        var naturalWidth = Math.Min(3200, (int)Math.Ceiling(_config.Model.InputHeight * ((double)region.Width / region.Height)));
-        if (naturalWidth != _config.Model.InputWidth)
-        {
-            throw new ContractException(
-                $"region aspect ratio requires recognition input width {naturalWidth}, but the pinned model requires {_config.Model.InputWidth}");
-        }
         var tensor = Preprocess(region, _config.Model.InputHeight, _config.Model.InputWidth);
         timer.Stop();
         var preprocessMs = timer.Elapsed.TotalMilliseconds;
@@ -73,11 +73,17 @@ public sealed class TextLineRecognizer : IDisposable
         var inferenceMs = timer.Elapsed.TotalMilliseconds;
 
         timer.Restart();
-        var (text, confidence) = DecodeCtc(output, _characters);
+        var decoded = DecodeCtc(output, _characters, constraint);
         timer.Stop();
         return new RecognitionResult(
-            text,
-            Math.Round(confidence, 6),
+            decoded.ConstrainedText,
+            Math.Round(decoded.ConstrainedConfidence, 6),
+            decoded.Constraint,
+            decoded.RawText,
+            Math.Round(decoded.RawConfidence, 6),
+            decoded.ConstrainedText,
+            Math.Round(decoded.ConstrainedConfidence, 6),
+            Math.Round(Math.Max(0, decoded.RawConfidence - decoded.ConstrainedConfidence), 6),
             _config.Model.InputWidth,
             Math.Round(preprocessMs, 2),
             Math.Round(inferenceMs, 2),
@@ -95,7 +101,9 @@ public sealed class TextLineRecognizer : IDisposable
             throw new ContractException("recognition input dimensions must be positive");
         }
         var tensor = new DenseTensor<float>(new[] { 1, 3, inputHeight, inputWidth });
-        var scaleX = (double)region.Width / inputWidth;
+        var contentWidth = Math.Min(inputWidth, Math.Max(1,
+            (int)Math.Ceiling(inputHeight * ((double)region.Width / region.Height))));
+        var scaleX = (double)region.Width / contentWidth;
         var scaleY = (double)region.Height / inputHeight;
         for (var y = 0; y < inputHeight; y++)
         {
@@ -105,7 +113,7 @@ public sealed class TextLineRecognizer : IDisposable
             var y0 = Math.Clamp(sourceY0, 0, region.Height - 1);
             var y1 = Math.Clamp(sourceY1, 0, region.Height - 1);
             var weightY = sourceY - Math.Floor(sourceY);
-            for (var x = 0; x < inputWidth; x++)
+            for (var x = 0; x < contentWidth; x++)
             {
                 var sourceX = (x + 0.5) * scaleX - 0.5;
                 var sourceX0 = (int)Math.Floor(sourceX);
@@ -128,7 +136,17 @@ public sealed class TextLineRecognizer : IDisposable
         return tensor;
     }
 
-    public static (string Text, double Confidence) DecodeCtc(Tensor<float> output, IReadOnlyList<string> characters)
+    public sealed record CtcDecodeResult(
+        string Constraint,
+        string RawText,
+        double RawConfidence,
+        string ConstrainedText,
+        double ConstrainedConfidence);
+
+    public static CtcDecodeResult DecodeCtc(
+        Tensor<float> output,
+        IReadOnlyList<string> characters,
+        string constraint = "none")
     {
         var dimensions = output.Dimensions.ToArray();
         if (dimensions.Length != 3 || dimensions[0] != 1 || dimensions[2] != characters.Count + 1)
@@ -136,15 +154,47 @@ public sealed class TextLineRecognizer : IDisposable
             throw new ContractException(
                 $"recognition output shape must equal [1,T,{characters.Count + 1}], actual=[{string.Join(',', dimensions)}]");
         }
-        var text = new System.Text.StringBuilder();
-        var confidence = 0.0;
-        var kept = 0;
-        var previous = -1;
+        if (constraint is not ("none" or "digits"))
+        {
+            throw new ContractException("recognition character constraint must equal none or digits");
+        }
+        var digitIndexes = new HashSet<int>();
+        if (constraint == "digits")
+        {
+            for (var digit = 0; digit <= 9; digit++)
+            {
+                var index = -1;
+                for (var characterIndex = 0; characterIndex < characters.Count; characterIndex++)
+                {
+                    if (characters[characterIndex] == digit.ToString())
+                    {
+                        index = characterIndex + 1;
+                        break;
+                    }
+                }
+                if (index < 0)
+                {
+                    throw new ContractException($"recognition character dictionary is missing digit {digit}");
+                }
+                digitIndexes.Add(index);
+            }
+        }
+
+        var rawText = new System.Text.StringBuilder();
+        var constrainedText = new System.Text.StringBuilder();
+        var rawConfidence = 0.0;
+        var constrainedConfidence = 0.0;
+        var rawKept = 0;
+        var constrainedKept = 0;
+        var rawPrevious = -1;
+        var constrainedPrevious = -1;
         for (var time = 0; time < dimensions[1]; time++)
         {
-            var bestIndex = 0;
-            var bestValue = output[0, time, 0];
-            if (!float.IsFinite(bestValue))
+            var rawBestIndex = 0;
+            var rawBestValue = output[0, time, 0];
+            var constrainedBestIndex = 0;
+            var constrainedBestValue = rawBestValue;
+            if (!float.IsFinite(rawBestValue))
             {
                 throw new ContractException($"recognition output contains non-finite score at time {time}, class 0");
             }
@@ -155,21 +205,38 @@ public sealed class TextLineRecognizer : IDisposable
                 {
                     throw new ContractException($"recognition output contains non-finite score at time {time}, class {classIndex}");
                 }
-                if (value > bestValue)
+                if (value > rawBestValue)
                 {
-                    bestValue = value;
-                    bestIndex = classIndex;
+                    rawBestValue = value;
+                    rawBestIndex = classIndex;
+                }
+                if ((constraint == "none" || digitIndexes.Contains(classIndex)) && value > constrainedBestValue)
+                {
+                    constrainedBestValue = value;
+                    constrainedBestIndex = classIndex;
                 }
             }
-            if (bestIndex != 0 && bestIndex != previous)
+            if (rawBestIndex != 0 && rawBestIndex != rawPrevious)
             {
-                text.Append(characters[bestIndex - 1]);
-                confidence += bestValue;
-                kept++;
+                rawText.Append(characters[rawBestIndex - 1]);
+                rawConfidence += rawBestValue;
+                rawKept++;
             }
-            previous = bestIndex;
+            if (constrainedBestIndex != 0 && constrainedBestIndex != constrainedPrevious)
+            {
+                constrainedText.Append(characters[constrainedBestIndex - 1]);
+                constrainedConfidence += constrainedBestValue;
+                constrainedKept++;
+            }
+            rawPrevious = rawBestIndex;
+            constrainedPrevious = constrainedBestIndex;
         }
-        return (text.ToString(), kept == 0 ? 0 : confidence / kept);
+        return new CtcDecodeResult(
+            constraint,
+            rawText.ToString(),
+            rawKept == 0 ? 0 : rawConfidence / rawKept,
+            constrainedText.ToString(),
+            constrainedKept == 0 ? 0 : constrainedConfidence / constrainedKept);
     }
 
     private void ValidateModelContract()

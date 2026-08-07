@@ -45,6 +45,13 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
+    "elite-dangerous/ship-speed-text": {
+      "path": "Actions/ship-speed-text",
+      "runtime": "ppocr-w480-text-v1",
+      "runtimeProfile": "ocr/w480",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/ship-speed-text-regions": {
       "path": "Actions/ship-speed-text-regions",
       "runtime": "ppocr-text-regions-v1",
