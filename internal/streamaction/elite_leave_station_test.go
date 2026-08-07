@@ -82,21 +82,24 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 			value = 99
 		}
 		rawText := any(nil)
-		detectionConfidence := 0.0
-		recognitionConfidence := 0.0
+		constrainedText := any(nil)
+		rawConfidence := 0.0
+		constrainedConfidence := 0.0
+		margin := 0.0
 		reason := "SPEED_BOX_NOT_FOUND"
 		if state == "KNOWN" {
 			rawText = strconv.Itoa(value.(int))
-			detectionConfidence = 0.91
-			recognitionConfidence = 0.88
+			constrainedText = rawText
+			rawConfidence = 0.88
+			constrainedConfidence = 0.88
 			reason = "VISUAL_SPEED_CONFIRMED"
 		}
 		return json.Marshal(map[string]any{"speed": map[string]any{
 			"state": state, "displayValue": value,
 			"evidence": map[string]any{
 				"reason": reason, "rawText": rawText,
-				"detectionConfidence":   detectionConfidence,
-				"recognitionConfidence": recognitionConfidence,
+				"rawConfidence": rawConfidence, "constrainedText": constrainedText,
+				"constrainedConfidence": constrainedConfidence, "rawConstraintMargin": margin,
 			},
 		}})
 	case "elite-dangerous/set-throttle":

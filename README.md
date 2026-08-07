@@ -333,7 +333,10 @@ python3 tools/ppocr-runtime/publish.py \
 ```
 
 The PP-OCR executable implements two separately declared framed pipelines:
-fixed-aspect text-line recognition and region detection plus w480 recognition.
+aspect-preserved, right-padded text-line recognition and region detection plus
+w480 recognition. Recognition requests explicitly choose unrestricted or
+digit-only CTC decoding; digit-only responses retain the unrestricted candidate
+and confidence margin as evidence.
 The latter returns quadrilateral boxes rather than game state. Both disable
 ONNX Runtime CPU-provider fallback and validate pinned artifacts exactly.
 WindowsAgent starts either worker only while the owning Rule is active, as

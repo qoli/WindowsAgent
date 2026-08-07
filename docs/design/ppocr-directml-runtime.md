@@ -37,12 +37,14 @@ The Elite Dangerous path is:
 1920x1080 reference rectangle
   -> centered 16:9 reference-density 400x40 WGC region capture
   -> RGB24 w480 text-line worker request
-  -> raw text, confidence, provenance, model identity, and timing
+  -> unrestricted CTC text, confidence, provenance, model identity, and timing
 ```
 
-The Action requires the returned reference sample to remain exactly 10:1, then
-the model preprocessor scales it to 480x48. It returns no semantic `state`
-field. The separately declared pure `elite-dangerous/flight-status` Action
+The preprocessor preserves the supplied region's aspect ratio at height 48 and
+right-pads the remaining model width instead of stretching the content. For
+the 10:1 flight-prompt region this still fills 480x48 exactly. The Action
+returns no semantic `state` field. The separately declared pure
+`elite-dangerous/flight-status` Action
 accepts its complete raw result and decides whether text such as
 `SUPERCRUISE`, docking, or FSD alignment reaches the reviewed confidence and
 separation thresholds. It returns `UNKNOWN` when the evidence does not support
@@ -68,15 +70,21 @@ The visual ship-speed path reuses the same resident profile but owns a separate
 reference-density ROI:
 
 ```text
-260x170 speed-number search ROI
-  -> PP-OCR quadrilateral and recognition evidence
-  -> game-specific geometry and digit-count checks
+65x50 fixed speed-number ROI
+  -> aspect-preserved 480x48 recognition input with right padding
+  -> unrestricted and digit-only CTC candidates
+  -> confidence and raw-versus-constrained margin checks
   -> unitless KNOWN displayValue or UNKNOWN
 ```
 
-The classifier is intentionally fail-closed around reviewed `0/8` and `6/8`
-confusions. The result is visual evidence only; Player Journal, `Status.json`,
-and requested throttle are not fallback sources.
+The recognition model and its complete character dictionary are unchanged.
+Digit-constrained decoding restricts each CTC timestep to blank plus `0`–`9`,
+while retaining the unrestricted candidate as evidence. The classifier accepts
+one through four digits only when constrained confidence is at least `0.55`
+and `max(0, rawConfidence - constrainedConfidence)` is at most `0.12`.
+Otherwise it reports `UNKNOWN`; Player Journal, `Status.json`, and requested
+throttle are not fallback sources. The detector-based speed Action remains a
+separate diagnostic and is not in the fixed-coordinate pipeline.
 
 ## Rule lifecycle
 
@@ -138,7 +146,7 @@ to the default CPU provider. The fixed `w480` graph initializes and runs with
 CPU provider fallback disabled.
 
 Unknown fields or arguments, path escape, missing artifacts, filename or hash
-mismatch, malformed RGB length, incompatible aspect ratio, changed model I/O,
+mismatch, malformed RGB length, unsupported character constraint, changed model I/O,
 non-finite model output, malformed worker frame, unavailable DirectML, and any
 required CPU provider assignment are terminal. The runtime never switches to
 the dynamic model, CPU, PP-OCR tiny, a different width, or stretched input.

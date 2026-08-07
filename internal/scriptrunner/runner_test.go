@@ -540,32 +540,22 @@ func TestEliteShipStatusClassifierDoesNotGuessMissingLabel(t *testing.T) {
 	}
 }
 
-func shipSpeedClassifierInput(text string, recognitionConfidence float64, points []any) map[string]any {
-	regions := []any{}
-	if points != nil {
-		regions = append(regions, map[string]any{
-			"points": points, "referencePoints": points,
-			"detectionConfidence": 0.8, "text": text, "recognitionConfidence": recognitionConfidence,
-			"leftContext": map[string]any{
-				"x": int64(0), "y": int64(0), "w": int64(0), "h": int64(0), "pixels": []any{},
-				"referenceRegion": map[string]any{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0},
-			},
-		})
-	}
-	return shipSpeedClassifierInputWithRegions(regions)
-}
-
-func shipSpeedClassifierInputWithRegions(regions []any) map[string]any {
+func shipSpeedClassifierInput(rawText string, rawConfidence float64, constrainedText string, constrainedConfidence, margin float64) map[string]any {
 	return map[string]any{
-		"schemaVersion": int64(1), "regions": regions,
+		"schemaVersion": int64(1), "text": constrainedText, "confidence": constrainedConfidence,
+		"decoding": map[string]any{
+			"characterConstraint": "digits", "rawText": rawText, "rawConfidence": rawConfidence,
+			"constrainedText": constrainedText, "constrainedConfidence": constrainedConfidence,
+			"rawConstraintMargin": margin,
+		},
 		"evidence": map[string]any{
 			"capturedAt":      "2026-08-08T00:00:00Z",
 			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
 			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
-			"referenceRegion": map[string]any{"x": int64(1000), "y": int64(740), "w": int64(260), "h": int64(170)},
-			"physicalRegion":  map[string]any{"left": int64(2000), "top": int64(1480), "width": int64(520), "height": int64(340)},
+			"referenceRegion": map[string]any{"x": int64(1100), "y": int64(815), "w": int64(65), "h": int64(50)},
+			"physicalRegion":  map[string]any{"left": int64(2200), "top": int64(1630), "width": int64(130), "height": int64(100)},
 		},
-		"models": map[string]any{}, "timing": map[string]any{},
+		"model": map[string]any{}, "timing": map[string]any{},
 	}
 }
 
@@ -590,15 +580,8 @@ func runShipSpeedClassifier(t *testing.T, input map[string]any) map[string]any {
 	return result
 }
 
-func speedBox() []any {
-	return []any{
-		map[string]any{"x": 110.0, "y": 58.0}, map[string]any{"x": 155.0, "y": 76.0},
-		map[string]any{"x": 145.0, "y": 102.0}, map[string]any{"x": 100.0, "y": 84.0},
-	}
-}
-
 func TestEliteShipSpeedClassifierReturnsConfirmedDisplayValue(t *testing.T) {
-	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("136", 0.81, speedBox()))
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("136", 0.81, "136", 0.81, 0))
 	speed := result["speed"].(map[string]any)
 	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(136) || speed["unit"] != nil ||
 		speed["evidence"].(map[string]any)["reason"] != "VISUAL_SPEED_CONFIRMED" {
@@ -606,46 +589,37 @@ func TestEliteShipSpeedClassifierReturnsConfirmedDisplayValue(t *testing.T) {
 	}
 }
 
-func TestEliteShipSpeedClassifierRejectsKnownHighConfidenceEightConfusion(t *testing.T) {
-	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("288", 0.89, speedBox()))
+func TestEliteShipSpeedClassifierAcceptsDigitsIncludingEight(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("288", 0.89, "288", 0.89, 0))
 	speed := result["speed"].(map[string]any)
-	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
-		speed["evidence"].(map[string]any)["reason"] != "EIGHT_GLYPH_AMBIGUOUS" {
+	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(288) {
 		t.Fatalf("speed = %#v", speed)
 	}
 }
 
-func TestEliteShipSpeedClassifierDoesNotFallbackWhenVisualBoxIsMissing(t *testing.T) {
-	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("", 0, nil))
+func TestEliteShipSpeedClassifierDoesNotGuessMissingDigits(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("", 0, "", 0, 0))
 	speed := result["speed"].(map[string]any)
 	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
-		speed["evidence"].(map[string]any)["reason"] != "SPEED_BOX_NOT_FOUND" {
+		speed["evidence"].(map[string]any)["reason"] != "DIGIT_TEXT_INVALID" {
 		t.Fatalf("speed = %#v", speed)
 	}
 }
 
-func TestEliteShipSpeedClassifierPrefersAcceptedSevenOverHigherDetectionRejectedBox(t *testing.T) {
-	rejectedPoints := speedBox()
-	sevenPoints := []any{
-		map[string]any{"x": 145.0, "y": 68.0}, map[string]any{"x": 163.0, "y": 68.0},
-		map[string]any{"x": 163.0, "y": 98.0}, map[string]any{"x": 145.0, "y": 98.0},
-	}
-	regions := []any{
-		map[string]any{
-			"points": rejectedPoints, "referencePoints": rejectedPoints,
-			"detectionConfidence": 0.99, "text": "288", "recognitionConfidence": 0.95,
-			"leftContext": map[string]any{"x": int64(0), "y": int64(0), "w": int64(0), "h": int64(0), "pixels": []any{}, "referenceRegion": map[string]any{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}},
-		},
-		map[string]any{
-			"points": sevenPoints, "referencePoints": sevenPoints,
-			"detectionConfidence": 0.71, "text": "7", "recognitionConfidence": 0.90,
-			"leftContext": map[string]any{"x": int64(0), "y": int64(0), "w": int64(0), "h": int64(0), "pixels": []any{}, "referenceRegion": map[string]any{"x": 0.0, "y": 0.0, "w": 0.0, "h": 0.0}},
-		},
-	}
-	result := runShipSpeedClassifier(t, shipSpeedClassifierInputWithRegions(regions))
+func TestEliteShipSpeedClassifierAcceptsNearbyRawLetterAndDigitSeven(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("V", 0.62, "7", 0.58, 0.04))
 	speed := result["speed"].(map[string]any)
 	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(7) ||
-		speed["evidence"].(map[string]any)["rawText"] != "7" {
+		speed["evidence"].(map[string]any)["rawText"] != "V" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierRejectsStrongRawLetterDisagreement(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("V", 0.91, "7", 0.70, 0.21))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
+		speed["evidence"].(map[string]any)["reason"] != "RAW_CONSTRAINT_DISAGREEMENT_HIGH" {
 		t.Fatalf("speed = %#v", speed)
 	}
 }

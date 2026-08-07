@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 3,
+  "version": 4,
   "title": "Elite Dangerous supervised leave station",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

@@ -30,8 +30,10 @@ def observe():
         "observedSpeedDisplayValue": speed_value,
         "observedSpeedReason": speed_evidence["reason"],
         "observedSpeedRawText": speed_evidence["rawText"],
-        "observedSpeedDetectionConfidence": speed_evidence["detectionConfidence"],
-        "observedSpeedRecognitionConfidence": speed_evidence["recognitionConfidence"],
+        "observedSpeedRawConfidence": speed_evidence["rawConfidence"],
+        "observedSpeedConstrainedText": speed_evidence["constrainedText"],
+        "observedSpeedConstrainedConfidence": speed_evidence["constrainedConfidence"],
+        "observedSpeedRawConstraintMargin": speed_evidence["rawConstraintMargin"],
     }
 
 def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, movement_seen=False, maximum_observed_speed=None, low_speed_confirmations=0, handover_candidate=False, decision="WAITING_FOR_AUTO_LAUNCH"):
@@ -58,8 +60,10 @@ def emit_update(phase, sample, observation, gate, commanded_throttle=None, instr
             "observedSpeedDisplayValue": observation["observedSpeedDisplayValue"],
             "observedSpeedReason": observation["observedSpeedReason"],
             "observedSpeedRawText": observation["observedSpeedRawText"],
-            "observedSpeedDetectionConfidence": observation["observedSpeedDetectionConfidence"],
-            "observedSpeedRecognitionConfidence": observation["observedSpeedRecognitionConfidence"],
+            "observedSpeedRawConfidence": observation["observedSpeedRawConfidence"],
+            "observedSpeedConstrainedText": observation["observedSpeedConstrainedText"],
+            "observedSpeedConstrainedConfidence": observation["observedSpeedConstrainedConfidence"],
+            "observedSpeedRawConstraintMargin": observation["observedSpeedRawConstraintMargin"],
             "autoLaunchSeen": gate["autoLaunchSeen"],
             "samplesSinceAutoLaunchSeen": gate["samplesSinceAutoLaunchSeen"],
             "movementSeen": gate["movementSeen"],
@@ -86,8 +90,10 @@ def main(ctx):
         "observedSpeedDisplayValue": None,
         "observedSpeedReason": None,
         "observedSpeedRawText": None,
-        "observedSpeedDetectionConfidence": None,
-        "observedSpeedRecognitionConfidence": None,
+        "observedSpeedRawConfidence": None,
+        "observedSpeedConstrainedText": None,
+        "observedSpeedConstrainedConfidence": None,
+        "observedSpeedRawConstraintMargin": None,
     }
     gate = gate_state()
     emit_update(

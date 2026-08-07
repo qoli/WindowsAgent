@@ -2,12 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "regions", "evidence", "models", "timing"],
+  "required": ["schemaVersion", "text", "confidence", "decoding", "evidence", "model", "timing"],
   "properties": {
     "schemaVersion": {"const": 1},
-    "regions": {"type": "array", "maxItems": 64, "items": {"type": "object"}},
+    "text": {"type": "string"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "decoding": {"type": "object"},
     "evidence": {"type": "object"},
-    "models": {"type": "object"},
+    "model": {"type": "object"},
     "timing": {"type": "object"}
   }
 }
