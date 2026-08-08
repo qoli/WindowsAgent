@@ -1,7 +1,7 @@
 # Elite Dangerous set throttle
 
-This finite Action sets the requested throttle to exactly `0` or `100` by
-looking up `SetSpeedZero` or `SetSpeed100` in the game's currently active
+This finite Action sets the requested throttle to exactly `-100`, `0`, or `100` by
+looking up `SetSpeedMinus100`, `SetSpeedZero`, or `SetSpeed100` in the game's currently active
 binding preset. It never assumes a preset filename or physical key.
 
 The runtime requires exactly one supported Keyboard binding for the selected

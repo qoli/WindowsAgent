@@ -83,8 +83,13 @@ focus is on the row. It returns `AVAILABLE`, `FOCUSED`, `UNAVAILABLE`,
 docking. Only `FOCUSED`, together with the independent allowed range Gate,
 permits a later `SELECT`; the Action itself never navigates or injects input.
 
-`elite-dangerous/dock-at-station` is a linear Streaming Action. After its
-one-time range admission and verified docking request, monitoring uses explicit
+`elite-dangerous/dock-at-station` is a linear Streaming Action. Its range Gate
+watches indefinitely and builds a temporal distance trend: two readings within
+`1000m` establish continuity, a larger one-frame jump is rejected, and two
+mutually continuous readings can rebase the track. Admission requires at least
+three trusted trend samples followed by two accepted `ALLOWED` samples;
+`DENIED` and `UNKNOWN` remain visible waiting states. After its one-time range admission
+and verified docking request, monitoring uses explicit
 `action.try_call` results. A failed child observation is written as
 `OBSERVATION_ERROR`, does not advance the prompt-disappearance or Landing Gear
 Gates, and fails the workflow after three consecutive errors. It never changes
@@ -119,7 +124,7 @@ watch URL; unknown evidence or failure to reach Contacts within three cycles
 terminates the Action.
 
 `elite-dangerous/dock-at-station` is the complete interruptible linear docking
-workflow. It owns view normalization, the one-time `request-docking-range`
+workflow. It owns view normalization, the watched `request-docking-range`
 admission Gate, CONTACTS navigation, Request Docking focus and one-shot
 selection, `CANCEL DOCKING` verification, panel closure, throttle-zero handoff,
 and the subsequent `AUTO_DOCK` plus Landing Gear monitor. After range admission
@@ -201,7 +206,7 @@ inputs could fall between frames, or no focus delta is visible, report focus as
 the relevant observation Action provides matching evidence. Input completion
 alone is not activation or workflow completion.
 
-`elite-dangerous/set-throttle` is deterministic. It accepts only `0` or `100`,
+`elite-dangerous/set-throttle` is deterministic. It accepts only `-100`, `0`, or `100`,
 resolves the corresponding logical throttle control from the active preset on
 each invocation, and reports the exact resolved key and injection evidence.
 
@@ -231,3 +236,8 @@ OFF gate. The workflow-local temporal gate does not weaken the finite
 confirmed within 60 samples, the workflow fails explicitly.
 Stream events distinguish `commandedThrottle` from the independently observed
 speed fields and report `COMPLETED`, `FAILED`, or `CANCELLED`.
+Up to five explicitly coded transient WGC capture failures may be skipped and
+are emitted as `OBSERVATION_ERROR`; the sixth fails the workflow. Immediately
+before the 100% command, the workflow registers a runtime failure compensation
+that sends 0% if any later path fails. A successful explicit 0% command clears
+that compensation.

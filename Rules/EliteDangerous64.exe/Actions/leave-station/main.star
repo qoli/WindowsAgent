@@ -16,9 +16,34 @@ STOP_VERIFICATION_LIMIT = 60
 ZERO_SPEED_CONFIRMATIONS = 3
 ZERO_SPEED_MIN_CONSTRAINED_CONFIDENCE = 0.45
 ZERO_SPEED_MAX_RAW_CONSTRAINT_MARGIN = 0.02
+MAX_WGC_ERRORS = 5
+RETRYABLE_WGC_ERROR_CODES = [
+    "capture_device_failed",
+    "capture_frame_failed",
+    "capture_readback_failed",
+    "capture_region_shader_failed",
+    "capture_session_failed",
+    "capture_timeout",
+    "capture_tone_map_failed",
+]
 
-def read_speed():
-    speed = action.call(id="elite-dangerous/ship-speed", inputs={})
+def unknown_observation(scope):
+    return {
+        "observationScope": scope,
+        "flightStatus": "UNKNOWN",
+        "flightPromptText": None,
+        "massLock": "UNKNOWN",
+        "observedSpeedState": "UNKNOWN",
+        "observedSpeedDisplayValue": None,
+        "observedSpeedReason": None,
+        "observedSpeedRawText": None,
+        "observedSpeedRawConfidence": None,
+        "observedSpeedConstrainedText": None,
+        "observedSpeedConstrainedConfidence": None,
+        "observedSpeedRawConstraintMargin": None,
+    }
+
+def parse_speed(speed):
     speed_state = speed["speed"]["state"]
     speed_value = speed["speed"]["displayValue"]
     speed_evidence = speed["speed"]["evidence"]
@@ -37,12 +62,27 @@ def read_speed():
         "observedSpeedRawConstraintMargin": speed_evidence["rawConstraintMargin"],
     }
 
+def failed_observation(attempt):
+    return {"ok": False, "output": None, "error": attempt["error"], "errorCode": attempt["errorCode"]}
+
 def observe():
-    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
-    flight = action.call(id="elite-dangerous/flight-status", inputs=raw)
-    ship = action.call(id="elite-dangerous/ship-status", inputs={})
-    speed = read_speed()
-    return {
+    raw_attempt = action.try_call(id="elite-dangerous/flight-prompt-text", inputs={})
+    if not raw_attempt["ok"]:
+        return failed_observation(raw_attempt)
+    raw = raw_attempt["output"]
+    flight_attempt = action.try_call(id="elite-dangerous/flight-status", inputs=raw)
+    if not flight_attempt["ok"]:
+        return failed_observation(flight_attempt)
+    ship_attempt = action.try_call(id="elite-dangerous/ship-status", inputs={})
+    if not ship_attempt["ok"]:
+        return failed_observation(ship_attempt)
+    speed_attempt = action.try_call(id="elite-dangerous/ship-speed", inputs={})
+    if not speed_attempt["ok"]:
+        return failed_observation(speed_attempt)
+    flight = flight_attempt["output"]
+    ship = ship_attempt["output"]
+    speed = parse_speed(speed_attempt["output"])
+    return {"ok": True, "error": None, "errorCode": None, "output": {
         "observationScope": "FULL",
         "flightStatus": flight["flightStatus"]["state"],
         "flightPromptText": raw["text"],
@@ -55,11 +95,14 @@ def observe():
         "observedSpeedConstrainedText": speed["observedSpeedConstrainedText"],
         "observedSpeedConstrainedConfidence": speed["observedSpeedConstrainedConfidence"],
         "observedSpeedRawConstraintMargin": speed["observedSpeedRawConstraintMargin"],
-    }
+    }}
 
 def observe_stop_speed():
-    speed = read_speed()
-    return {
+    speed_attempt = action.try_call(id="elite-dangerous/ship-speed", inputs={})
+    if not speed_attempt["ok"]:
+        return failed_observation(speed_attempt)
+    speed = parse_speed(speed_attempt["output"])
+    return {"ok": True, "error": None, "errorCode": None, "output": {
         "observationScope": "SPEED_ONLY",
         "flightStatus": "UNKNOWN",
         "flightPromptText": None,
@@ -72,7 +115,10 @@ def observe_stop_speed():
         "observedSpeedConstrainedText": speed["observedSpeedConstrainedText"],
         "observedSpeedConstrainedConfidence": speed["observedSpeedConstrainedConfidence"],
         "observedSpeedRawConstraintMargin": speed["observedSpeedRawConstraintMargin"],
-    }
+    }}
+
+def is_retryable_wgc_error(attempt):
+    return attempt["errorCode"] in RETRYABLE_WGC_ERROR_CODES
 
 def is_handover_low_speed_text(text):
     return text in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
@@ -94,7 +140,7 @@ def gate_state(auto_launch_seen=False, samples_since_auto_launch_seen=None, move
         "stopGateDecision": stop_decision,
     }
 
-def emit_update(phase, sample, observation, gate, commanded_throttle=None, instruction=None, throttle_command=None):
+def emit_update(phase, sample, observation, gate, commanded_throttle=None, instruction=None, throttle_command=None, observation_error_count=0, observation_error=None):
     stream.emit(
         type="action.leave-station.update",
         payload={
@@ -128,6 +174,8 @@ def emit_update(phase, sample, observation, gate, commanded_throttle=None, instr
             "commandedThrottle": commanded_throttle,
             "instruction": instruction,
             "throttleCommand": throttle_command,
+            "observationErrorCount": observation_error_count,
+            "observationError": observation_error,
         },
     )
 
@@ -136,21 +184,9 @@ def main(ctx):
         fail("stationConfirmed must be true")
 
     sample = 0
-    unknown = {
-        "observationScope": "NONE",
-        "flightStatus": "UNKNOWN",
-        "flightPromptText": None,
-        "massLock": "UNKNOWN",
-        "observedSpeedState": "UNKNOWN",
-        "observedSpeedDisplayValue": None,
-        "observedSpeedReason": None,
-        "observedSpeedRawText": None,
-        "observedSpeedRawConfidence": None,
-        "observedSpeedConstrainedText": None,
-        "observedSpeedConstrainedConfidence": None,
-        "observedSpeedRawConstraintMargin": None,
-    }
+    unknown = unknown_observation("NONE")
     gate = gate_state()
+    wgc_error_count = 0
     emit_update(
         "AWAITING_AUTO_LAUNCH",
         sample,
@@ -162,8 +198,18 @@ def main(ctx):
     auto_launch_seen = False
     unknown_mass_lock_count = 0
     for _ in range(AUTO_LAUNCH_START_LIMIT):
-        observation = observe()
+        attempt = observe()
         sample += 1
+        if not attempt["ok"]:
+            if not is_retryable_wgc_error(attempt):
+                fail(attempt["error"])
+            wgc_error_count += 1
+            if wgc_error_count > MAX_WGC_ERRORS:
+                fail("WGC observation error limit exceeded after five skipped errors: " + attempt["error"])
+            emit_update("OBSERVATION_ERROR", sample, unknown_observation("FULL"), gate, observation_error_count=wgc_error_count, observation_error=attempt["error"])
+            task.sleep(milliseconds=POLL_MS)
+            continue
+        observation = attempt["output"]
         if observation["massLock"] == "OFF":
             fail("Mass Lock became OFF before Auto Launch was observed")
         if observation["massLock"] == "UNKNOWN":
@@ -194,8 +240,18 @@ def main(ctx):
     handover_confirmed = False
     unknown_mass_lock_count = 0
     for _ in range(AUTO_LAUNCH_HANDOVER_LIMIT):
-        observation = observe()
+        attempt = observe()
         sample += 1
+        if not attempt["ok"]:
+            if not is_retryable_wgc_error(attempt):
+                fail(attempt["error"])
+            wgc_error_count += 1
+            if wgc_error_count > MAX_WGC_ERRORS:
+                fail("WGC observation error limit exceeded after five skipped errors: " + attempt["error"])
+            emit_update("OBSERVATION_ERROR", sample, unknown_observation("FULL"), gate, observation_error_count=wgc_error_count, observation_error=attempt["error"])
+            task.sleep(milliseconds=POLL_MS)
+            continue
+        observation = attempt["output"]
         mass_lock = observation["massLock"]
         if mass_lock == "UNKNOWN":
             unknown_mass_lock_count += 1
@@ -296,14 +352,25 @@ def main(ctx):
     if not handover_confirmed:
         fail("Auto Launch visual handover was not confirmed before the sample limit")
 
+    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     throttle_100 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
     emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100, throttle_command=throttle_100)
 
     mass_lock_off_count = 0
     unknown_mass_lock_count = 0
     for _ in range(DEPARTURE_LIMIT):
-        observation = observe()
+        attempt = observe()
         sample += 1
+        if not attempt["ok"]:
+            if not is_retryable_wgc_error(attempt):
+                fail(attempt["error"])
+            wgc_error_count += 1
+            if wgc_error_count > MAX_WGC_ERRORS:
+                fail("WGC observation error limit exceeded after five skipped errors: " + attempt["error"])
+            emit_update("OBSERVATION_ERROR", sample, unknown_observation("FULL"), gate, commanded_throttle=100, observation_error_count=wgc_error_count, observation_error=attempt["error"])
+            task.sleep(milliseconds=POLL_MS)
+            continue
+        observation = attempt["output"]
         mass_lock = observation["massLock"]
         if mass_lock == "UNKNOWN":
             unknown_mass_lock_count += 1
@@ -332,6 +399,7 @@ def main(ctx):
         emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100)
         if mass_lock_off_count >= MASS_LOCK_OFF_STABLE:
             throttle_0 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+            action.clear_on_failure()
             gate = gate_state(
                 auto_launch_seen=True,
                 samples_since_auto_launch_seen=samples_since_auto_launch_seen,
@@ -351,8 +419,18 @@ def main(ctx):
 
             zero_speed_confirmations = 0
             for samples_since_throttle_zero in range(1, STOP_VERIFICATION_LIMIT + 1):
-                observation = observe_stop_speed()
+                attempt = observe_stop_speed()
                 sample += 1
+                if not attempt["ok"]:
+                    if not is_retryable_wgc_error(attempt):
+                        fail(attempt["error"])
+                    wgc_error_count += 1
+                    if wgc_error_count > MAX_WGC_ERRORS:
+                        fail("WGC observation error limit exceeded after five skipped errors: " + attempt["error"])
+                    emit_update("OBSERVATION_ERROR", sample, unknown_observation("SPEED_ONLY"), gate, commanded_throttle=0, observation_error_count=wgc_error_count, observation_error=attempt["error"])
+                    task.sleep(milliseconds=POLL_MS)
+                    continue
+                observation = attempt["output"]
 
                 weak_zero = (
                     (observation["observedSpeedState"] != "KNOWN" or observation["observedSpeedDisplayValue"] == 0) and

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 )
 
@@ -26,6 +27,7 @@ type leaveStationCaller struct {
 	temporalLowSpeedAlternates  bool
 	temporalLowSpeedRawMismatch bool
 	stopEvidenceNever           bool
+	wgcFailuresAfterThrottle100 int
 	throttleZeroCommanded       bool
 	flightPromptCalls           int
 	shipStatusCalls             int
@@ -86,6 +88,10 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		return json.Marshal(map[string]any{"shipStatus": map[string]any{"massLock": map[string]any{"state": state}}})
 	case "elite-dangerous/ship-speed":
 		c.shipSpeedCalls++
+		if len(c.throttles) > 0 && c.throttles[len(c.throttles)-1] == 100 && c.wgcFailuresAfterThrottle100 > 0 {
+			c.wgcFailuresAfterThrottle100--
+			return nil, capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", errors.New("HRESULT 0x80070057"))
+		}
 		if c.throttleZeroCommanded {
 			if c.stopEvidenceNever {
 				return json.Marshal(map[string]any{"speed": map[string]any{
@@ -266,6 +272,44 @@ func TestEliteLeaveStationWorkflowFailsWhenZeroSpeedIsNotVisuallyConfirmed(t *te
 	}
 	if strings.Contains(strings.Join(reporter.phases, ","), "COMPLETED") {
 		t.Fatalf("unexpected completed phase=%v", reporter.phases)
+	}
+}
+
+func TestEliteLeaveStationWorkflowSkipsFiveWGCErrorsAfterThrottle100(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{massOffAt: 20, wgcFailuresAfterThrottle100: 5}
+	reporter := &leaveStationReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("throttle controls=%v", caller.throttles)
+	}
+	errorsSeen := 0
+	for _, payload := range reporter.payloads {
+		if payload["phase"] == "OBSERVATION_ERROR" {
+			errorsSeen++
+		}
+	}
+	if errorsSeen != 5 {
+		t.Fatalf("observation errors=%d payloads=%v", errorsSeen, reporter.payloads)
+	}
+}
+
+func TestEliteLeaveStationWorkflowSendsThrottleZeroWhenSixthWGCErrorFailsDeparture(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{massOffAt: 2000, wgcFailuresAfterThrottle100: 6}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "WGC observation error limit exceeded after five skipped errors") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("failure compensation throttle controls=%v", caller.throttles)
 	}
 }
 

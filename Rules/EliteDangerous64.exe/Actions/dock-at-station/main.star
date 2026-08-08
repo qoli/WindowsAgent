@@ -14,8 +14,13 @@ AUTO_DOCK_MISSING_CONFIRMATIONS = 5
 LANDING_GEAR_ON_CONFIRMATIONS = 2
 LANDING_GEAR_UNKNOWN_LIMIT = 20
 OBSERVATION_ERROR_LIMIT = 3
+RANGE_POLL_MS = 1000
+RANGE_ALLOWED_CONFIRMATIONS = 2
+RANGE_OBSERVATION_ERROR_LIMIT = 5
+RANGE_TREND_MIN_SAMPLES = 3
+RANGE_MAX_STEP_METERS = 1000
 
-def emit_update(phase, sample, contact_index, range_state, distance_meters, request_state, flight_status, landing_gear, auto_dock_seen, auto_dock_consecutive, auto_dock_missing, landing_gear_on_consecutive, last_command=None, reason=None, observation_error_count=0, observation_error=None):
+def emit_update(phase, sample, contact_index, range_state, distance_meters, request_state, flight_status, landing_gear, auto_dock_seen, auto_dock_consecutive, auto_dock_missing, landing_gear_on_consecutive, last_command=None, reason=None, observation_error_count=0, observation_error=None, range_wait_samples=0, range_trend_state="NOT_STARTED", range_trend_samples=0, accepted_distance_meters=None, range_outlier_count=0):
     stream.emit(
         type="action.dock-at-station.update",
         payload={
@@ -35,6 +40,11 @@ def emit_update(phase, sample, contact_index, range_state, distance_meters, requ
             "reason": reason,
             "observationErrorCount": observation_error_count,
             "observationError": observation_error,
+            "rangeWaitSamples": range_wait_samples,
+            "rangeTrendState": range_trend_state,
+            "rangeTrendSamples": range_trend_samples,
+            "acceptedDistanceMeters": accepted_distance_meters,
+            "rangeOutlierCount": range_outlier_count,
         },
     )
 
@@ -62,6 +72,81 @@ def normalize_range_view(sample):
         if contacts["contactsTab"]["state"] != "ABSENT":
             fail("left panel remained visible before request-docking-range Gate")
     task.sleep(milliseconds=UI_SETTLE_MS)
+
+def wait_for_range(sample):
+    range_wait_samples = 0
+    allowed_confirmations = 0
+    observation_errors = 0
+    baseline_candidate = None
+    rebase_candidate = None
+    accepted_distance = None
+    trend_samples = 0
+    outlier_count = 0
+    while True:
+        range_wait_samples += 1
+        attempt = action.try_call(id="elite-dangerous/request-docking-range", inputs={})
+        if not attempt["ok"]:
+            observation_errors += 1
+            allowed_confirmations = 0
+            emit_update("RANGE_OBSERVATION_ERROR", sample, 0, None, None, None, None, None, False, 0, 0, 0, reason="RANGE_SAMPLE_FAILED", observation_error_count=observation_errors, observation_error=attempt["error"], range_wait_samples=range_wait_samples, range_trend_state="OBSERVATION_ERROR", range_trend_samples=trend_samples, accepted_distance_meters=accepted_distance, range_outlier_count=outlier_count)
+            if observation_errors >= RANGE_OBSERVATION_ERROR_LIMIT:
+                fail("five consecutive request-docking-range observations failed: " + attempt["error"])
+            task.sleep(milliseconds=RANGE_POLL_MS)
+            continue
+        observation_errors = 0
+        range_observation = attempt["output"]
+        range_gate = range_observation["requestDockingRange"]
+        range_state = range_gate["state"]
+        distance_meters = range_gate["distanceMeters"]
+        accepted_current = False
+        trend_state = "SEEKING_BASELINE"
+        if range_state in ["ALLOWED", "DENIED"] and distance_meters != None:
+            if accepted_distance == None:
+                if baseline_candidate == None:
+                    baseline_candidate = distance_meters
+                elif abs(distance_meters - baseline_candidate) <= RANGE_MAX_STEP_METERS:
+                    accepted_distance = distance_meters
+                    trend_samples = 2
+                    baseline_candidate = None
+                    accepted_current = True
+                    trend_state = "TRACKING"
+                else:
+                    baseline_candidate = distance_meters
+                    outlier_count += 1
+                    trend_state = "OUTLIER_REJECTED"
+            elif abs(distance_meters - accepted_distance) <= RANGE_MAX_STEP_METERS:
+                accepted_distance = distance_meters
+                trend_samples += 1
+                rebase_candidate = None
+                accepted_current = True
+                trend_state = "TRACKING"
+            else:
+                outlier_count += 1
+                trend_state = "OUTLIER_REJECTED"
+                if rebase_candidate != None and abs(distance_meters - rebase_candidate) <= RANGE_MAX_STEP_METERS:
+                    accepted_distance = distance_meters
+                    trend_samples = 2
+                    rebase_candidate = None
+                    accepted_current = True
+                    trend_state = "REBASED"
+                else:
+                    rebase_candidate = distance_meters
+        else:
+            trend_state = "EVIDENCE_UNKNOWN"
+        if accepted_current and trend_samples >= RANGE_TREND_MIN_SAMPLES and range_state == "ALLOWED":
+            allowed_confirmations += 1
+        else:
+            allowed_confirmations = 0
+        emit_update("RANGE_WAIT", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, reason=range_gate["evidence"]["reason"], range_wait_samples=range_wait_samples, range_trend_state=trend_state, range_trend_samples=trend_samples, accepted_distance_meters=accepted_distance, range_outlier_count=outlier_count)
+        if allowed_confirmations >= RANGE_ALLOWED_CONFIRMATIONS:
+            return {
+                "rangeState": range_state,
+                "distanceMeters": accepted_distance,
+                "rangeWaitSamples": range_wait_samples,
+                "rangeTrendSamples": trend_samples,
+                "rangeOutlierCount": outlier_count,
+            }
+        task.sleep(milliseconds=RANGE_POLL_MS)
 
 def open_contacts(sample, range_state, distance_meters):
     action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
@@ -174,13 +259,13 @@ def observe_flight_and_gear():
 def main(ctx):
     sample = 0
     normalize_range_view(sample)
-    range_observation = action.call(id="elite-dangerous/request-docking-range", inputs={})
-    range_gate = range_observation["requestDockingRange"]
-    range_state = range_gate["state"]
-    distance_meters = range_gate["distanceMeters"]
-    if range_state != "ALLOWED":
-        fail("request-docking-range Gate must be ALLOWED, got " + range_state + ": " + range_gate["evidence"]["reason"])
-    emit_update("RANGE_ADMITTED", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, reason="DISPLAY_DISTANCE_BELOW_THRESHOLD")
+    range_admission = wait_for_range(sample)
+    range_state = range_admission["rangeState"]
+    distance_meters = range_admission["distanceMeters"]
+    range_wait_samples = range_admission["rangeWaitSamples"]
+    range_trend_samples = range_admission["rangeTrendSamples"]
+    range_outlier_count = range_admission["rangeOutlierCount"]
+    emit_update("RANGE_ADMITTED", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, reason="TREND_CONFIRMED_WITH_TWO_ALLOWED_SAMPLES", range_wait_samples=range_wait_samples, range_trend_state="ADMITTED", range_trend_samples=range_trend_samples, accepted_distance_meters=distance_meters, range_outlier_count=range_outlier_count)
 
     open_contacts(sample, range_state, distance_meters)
     target = locate_and_focus_request(sample, range_state, distance_meters)
@@ -289,6 +374,9 @@ def main(ctx):
                 "visualConfirmed": False,
                 "sampleCount": sample,
                 "observationErrorCount": total_observation_errors,
+                "rangeWaitSamples": range_wait_samples,
+                "rangeTrendSamples": range_trend_samples,
+                "rangeOutlierCount": range_outlier_count,
             }
         task.sleep(milliseconds=MONITOR_POLL_MS)
     fail("Auto Dock did not reach the visual confirmation Gate before the active limit")

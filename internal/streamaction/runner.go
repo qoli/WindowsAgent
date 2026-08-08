@@ -10,9 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
+	"go.starlark.net/syntax"
 )
 
 type Caller interface {
@@ -27,7 +29,14 @@ type Runner struct {
 	Sleep func(context.Context, time.Duration) error
 }
 
-func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, caller Caller, reporter Reporter) (json.RawMessage, error) {
+const maxFailureActions = 8
+
+type deferredAction struct {
+	id     string
+	inputs map[string]any
+}
+
+func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, caller Caller, reporter Reporter) (output json.RawMessage, runErr error) {
 	if ctx == nil || pkg == nil || caller == nil || reporter == nil {
 		return nil, errors.New("context, streaming Action package, child caller, and reporter are required")
 	}
@@ -42,6 +51,16 @@ func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, ca
 		sleep = sleepContext
 	}
 	host := &host{ctx: ctx, pkg: pkg, caller: caller, reporter: reporter, sleepFn: sleep}
+	defer func() {
+		if runErr == nil || len(host.failureActions) == 0 {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if cleanupErr := host.runFailureActions(cleanupCtx); cleanupErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("streaming Action failure compensation: %w", cleanupErr))
+		}
+	}()
 	thread := &starlark.Thread{Name: pkg.Manifest.Title}
 	thread.SetMaxExecutionSteps(pkg.Manifest.Limits.MaxSteps)
 	thread.Print = func(*starlark.Thread, string) {}
@@ -55,7 +74,7 @@ func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, ca
 		}
 	}()
 	defer close(done)
-	globals, err := starlark.ExecFile(thread, pkg.Manifest.Entrypoint, pkg.Script, host.predeclared())
+	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{While: true}, thread, pkg.Manifest.Entrypoint, pkg.Script, host.predeclared())
 	if err != nil {
 		return nil, runtimeError(ctx, err)
 	}
@@ -76,14 +95,14 @@ func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, ca
 	if err != nil {
 		return nil, runtimeError(ctx, err)
 	}
-	output, err := fromStarlark(value)
+	nativeOutput, err := fromStarlark(value)
 	if err != nil {
 		return nil, fmt.Errorf("convert streaming Action output: %w", err)
 	}
-	if err := pkg.ValidateOutput(output); err != nil {
+	if err := pkg.ValidateOutput(nativeOutput); err != nil {
 		return nil, fmt.Errorf("streaming Action output schema: %w", err)
 	}
-	encoded, err := json.Marshal(output)
+	encoded, err := json.Marshal(nativeOutput)
 	if err != nil {
 		return nil, err
 	}
@@ -94,17 +113,20 @@ func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, ca
 }
 
 type host struct {
-	ctx      context.Context
-	pkg      *Package
-	caller   Caller
-	reporter Reporter
-	sleepFn  func(context.Context, time.Duration) error
+	ctx            context.Context
+	pkg            *Package
+	caller         Caller
+	reporter       Reporter
+	sleepFn        func(context.Context, time.Duration) error
+	failureActions []deferredAction
 }
 
 func (h *host) predeclared() starlark.StringDict {
 	actionModule := starlarkstruct.FromStringDict(starlark.String("action"), starlark.StringDict{
-		"call":     starlark.NewBuiltin("action.call", h.call),
-		"try_call": starlark.NewBuiltin("action.try_call", h.tryCall),
+		"call":             starlark.NewBuiltin("action.call", h.call),
+		"try_call":         starlark.NewBuiltin("action.try_call", h.tryCall),
+		"on_failure":       starlark.NewBuiltin("action.on_failure", h.onFailure),
+		"clear_on_failure": starlark.NewBuiltin("action.clear_on_failure", h.clearOnFailure),
 	})
 	streamModule := starlarkstruct.FromStringDict(starlark.String("stream"), starlark.StringDict{
 		"emit": starlark.NewBuiltin("stream.emit", h.emit),
@@ -138,16 +160,57 @@ func (h *host) tryCall(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tu
 			return nil, h.ctx.Err()
 		}
 		return toStarlark(map[string]any{
-			"ok":     false,
-			"output": nil,
-			"error":  err.Error(),
+			"ok":        false,
+			"output":    nil,
+			"error":     err.Error(),
+			"errorCode": captureErrorCode(err),
 		})
 	}
 	return toStarlark(map[string]any{
-		"ok":     true,
-		"output": decoded,
-		"error":  nil,
+		"ok":        true,
+		"output":    decoded,
+		"error":     nil,
+		"errorCode": nil,
 	})
+}
+
+func (h *host) onFailure(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	actionID, inputMap, err := unpackActionCall("action.on_failure", args, kwargs)
+	if err != nil {
+		return nil, err
+	}
+	if len(h.failureActions) >= maxFailureActions {
+		return nil, fmt.Errorf("action.on_failure supports at most %d registrations", maxFailureActions)
+	}
+	h.failureActions = append(h.failureActions, deferredAction{id: actionID, inputs: inputMap})
+	return starlark.MakeInt(len(h.failureActions)), nil
+}
+
+func (h *host) clearOnFailure(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	if len(args) != 0 || len(kwargs) != 0 {
+		return nil, errors.New("action.clear_on_failure accepts no arguments")
+	}
+	h.failureActions = nil
+	return starlark.None, nil
+}
+
+func (h *host) runFailureActions(ctx context.Context) error {
+	var result error
+	for index := len(h.failureActions) - 1; index >= 0; index-- {
+		action := h.failureActions[index]
+		if _, err := h.caller.Call(ctx, action.id, action.inputs); err != nil {
+			result = errors.Join(result, fmt.Errorf("child Action %s failed: %w", action.id, err))
+		}
+	}
+	return result
+}
+
+func captureErrorCode(err error) any {
+	var captureErr *capture.Error
+	if errors.As(err, &captureErr) && captureErr.Code != "" {
+		return captureErr.Code
+	}
+	return nil
 }
 
 func unpackActionCall(name string, args starlark.Tuple, kwargs []starlark.Tuple) (string, map[string]any, error) {

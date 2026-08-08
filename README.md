@@ -89,10 +89,14 @@ The Action runtime and registration refactor is partially landed:
   return terminal output directly; streaming Actions first commit a durable
   start event and immediately return a callback URL, optional stop URL, and
   their declared linear or loop lifecycle;
-- streaming Starlark exposes strict `action.call` and explicit
-  `action.try_call`. The latter returns `{ok, output, error}` so a workflow may
+- streaming Starlark exposes strict `action.call`, explicit `action.try_call`,
+  and bounded failure compensation registration. `action.try_call` returns
+  `{ok, output, error, errorCode}` so a workflow may
   emit and bound a failed observation sample without changing providers or
-  silently converting an execution failure into domain `UNKNOWN`;
+  silently converting an execution failure into domain `UNKNOWN`.
+  `action.on_failure` registers child Actions that run in reverse order only
+  when the streaming Action fails; `action.clear_on_failure` removes them after
+  the protected state has been restored;
 - Crimson Desert inventory remains a finite Action using the landed v1
   observation runtime;
 - `screenparser/ui-elements` is a Palworld-configured on-demand Action
@@ -121,7 +125,7 @@ The Action runtime and registration refactor is partially landed:
 - `elite-dangerous/ui-control` performs exactly one model-selected logical UI
   movement or selection. It is intentionally a slow screenshot/one-key
   interaction surface for tasks such as arranging `AUTO LAUNCH`;
-- `elite-dangerous/set-throttle` resolves `SetSpeedZero` or `SetSpeed100` from
+- `elite-dangerous/set-throttle` resolves `SetSpeedMinus100`, `SetSpeedZero`, or `SetSpeed100` from
   the game's currently active `.binds` preset on every invocation, reports the
   resolved preset/file/key, rechecks the foreground game, and sends one
   scan-code key-down/key-up pair with backend and timing evidence;

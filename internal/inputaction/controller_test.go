@@ -53,6 +53,34 @@ func TestControllerResolvesCurrentKeyboardBindingAndPressesIt(t *testing.T) {
 	}
 }
 
+func TestEliteSetThrottleResolvesMinus100Binding(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "set-throttle"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <SetSpeedMinus100><Primary Device="Keyboard" Key="Key_F8"/><Secondary Device="{NoDevice}" Key=""/></SetSpeedMinus100>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := controller.Run(context.Background(), pkg, map[string]any{"percent": int64(-100)}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_F8" ||
+		!strings.Contains(string(output), `"selection":"-100"`) ||
+		!strings.Contains(string(output), `"control":"SetSpeedMinus100"`) {
+		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
 func TestEliteUIControlResolvesFocusLeftPanel(t *testing.T) {
 	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ui-control"))
 	if err != nil {

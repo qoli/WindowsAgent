@@ -1,6 +1,6 @@
 # Elite Dangerous supervised leave station
 
-This version 6 interruptible linear Streaming Action begins only after a supervising
+This version 7 interruptible linear Streaming Action begins only after a supervising
 model supplies `stationConfirmed: true`. It immediately starts observing raw
 flight prompt text, classified flight status, ship status, and visual ship
 speed, then emits `AWAITING_AUTO_LAUNCH` with instructions for the model.
@@ -48,7 +48,14 @@ terminal result records the final command and the evidence from the final
 independent visual speed observation.
 
 The fixed observation interval is 250 ms between sequential samples. The
-workflow fails explicitly if Auto Launch is not observed within 600 samples,
+workflow skips at most five explicitly coded transient WGC capture failures,
+emitting every skipped sample as `OBSERVATION_ERROR`; a sixth such failure or
+any non-WGC child failure terminates explicitly. Before commanding 100%, it
+registers a runtime failure compensation that unconditionally invokes throttle
+0 if any later failure occurs. A successful normal-path throttle-0 command
+clears the compensation.
+
+The workflow fails explicitly if Auto Launch is not observed within 600 samples,
 if lifecycle handover is not confirmed within 720 samples, if Mass Lock becomes
 `OFF` before the 100% command, if Mass Lock remains `UNKNOWN` for 20 samples,
 if speed state and value contradict each other, if departure does not release

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Elite Dangerous set throttle",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -9,6 +9,7 @@
   "gesture": {"type": "press", "holdMs": 40},
   "selector": {"inputField": "percent"},
   "bindings": {
+    "-100": {"control": "SetSpeedMinus100"},
     "0": {"control": "SetSpeedZero"},
     "100": {"control": "SetSpeed100"}
   },

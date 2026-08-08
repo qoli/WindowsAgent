@@ -2,9 +2,14 @@
 
 This interruptible linear streaming Action owns the complete low-latency
 docking workflow. It first closes the left panel and waits for the canonical
-forward view, then admits the task only when the finite
-`request-docking-range` Action returns `ALLOWED`. That distance is recorded
-once and is never sampled again after admission.
+forward view, then treats each finite `request-docking-range` result as a
+candidate in a temporal distance trend. Two readings no more than `1000m`
+apart establish a track; a larger one-frame jump is rejected as an OCR outlier
+and cannot admit the workflow. Two mutually continuous readings on the new
+scale deliberately rebase the track. Admission needs at least three trusted
+trend samples and the last two accepted samples must both be `ALLOWED`.
+`DENIED` and `UNKNOWN` remain streamed waiting states. The admitted distance is
+recorded once and is never sampled again after admission.
 
 The Action opens CONTACTS, scans at most sixteen current targets for a confirmed
 `REQUEST DOCKING` row, focuses it, sends `SELECT` exactly once, and requires two

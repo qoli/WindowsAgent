@@ -8,9 +8,9 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "observationScope", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedReason", "observedSpeedRawText", "observedSpeedRawConfidence", "observedSpeedConstrainedText", "observedSpeedConstrainedConfidence", "observedSpeedRawConstraintMargin", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "temporalLowSpeedText", "temporalLowSpeedConfirmations", "handoverEvidence", "handoverCandidate", "gateDecision", "samplesSinceThrottleZero", "zeroSpeedConfirmations", "stopGateDecision", "commandedThrottle", "instruction", "throttleCommand"],
+      "required": ["phase", "sample", "observationScope", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedReason", "observedSpeedRawText", "observedSpeedRawConfidence", "observedSpeedConstrainedText", "observedSpeedConstrainedConfidence", "observedSpeedRawConstraintMargin", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "temporalLowSpeedText", "temporalLowSpeedConfirmations", "handoverEvidence", "handoverCandidate", "gateDecision", "samplesSinceThrottleZero", "zeroSpeedConfirmations", "stopGateDecision", "commandedThrottle", "instruction", "throttleCommand", "observationErrorCount", "observationError"],
       "properties": {
-        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "HANDOVER_CANDIDATE", "DEPARTING", "VERIFYING_STOP", "COMPLETED"]},
+        "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "HANDOVER_CANDIDATE", "DEPARTING", "VERIFYING_STOP", "OBSERVATION_ERROR", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
         "observationScope": {"enum": ["NONE", "FULL", "SPEED_ONLY"]},
         "flightStatus": {"enum": ["SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "AUTO_DOCK", "UNKNOWN"]},
@@ -41,6 +41,8 @@
         "stopGateDecision": {"enum": ["NOT_STARTED", "WAITING_FOR_ZERO_SPEED", "ZERO_SPEED_CONFIRMED"]},
         "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 100, null]},
         "instruction": {"type": ["string", "null"], "maxLength": 256},
+        "observationErrorCount": {"type": "integer", "minimum": 0, "maximum": 5},
+        "observationError": {"type": ["string", "null"], "maxLength": 512},
         "throttleCommand": {
           "oneOf": [
             {"type": "null"},

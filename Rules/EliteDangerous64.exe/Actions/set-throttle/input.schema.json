@@ -4,6 +4,6 @@
   "additionalProperties": false,
   "required": ["percent"],
   "properties": {
-    "percent": {"enum": [0, 100]}
+    "percent": {"enum": [-100, 0, 100]}
   }
 }
