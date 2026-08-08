@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "requestDocking", "source", "decision"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "requestDocking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "available", "focused"],
+      "properties": {
+        "state": {"enum": ["AVAILABLE", "FOCUSED", "UNAVAILABLE", "DOCKING_ACTIVE", "UNKNOWN"]},
+        "available": {"type": ["boolean", "null"]},
+        "focused": {"type": ["boolean", "null"]}
+      }
+    },
+    "source": {"type": "object"},
+    "decision": {"type": "object"}
+  }
+}

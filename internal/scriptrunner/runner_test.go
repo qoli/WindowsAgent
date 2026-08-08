@@ -190,6 +190,15 @@ func contactsTabPackageRoot(t *testing.T) string {
 	return root
 }
 
+func eliteActionPackageRoot(t *testing.T, name string) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func flightPromptRawInput(text string, confidence float64) map[string]any {
 	return map[string]any{
 		"schemaVersion": int64(1),
@@ -837,6 +846,94 @@ func TestEliteContactsTabStateClassifiesSelectedNotSelectedAndAbsent(t *testing.
 				t.Fatalf("contactsTab = %#v", contacts)
 			}
 		})
+	}
+}
+
+func requestDockingRegionsInput(text string, detection, recognition float64, bright, dark int) map[string]any {
+	regions := []any{}
+	if text != "" {
+		pixels := make([]any, 100*50)
+		for index := range pixels {
+			pixels[index] = uint32(0x202020)
+		}
+		for index := 0; index < bright; index++ {
+			pixels[index] = uint32(0xFFAA00)
+		}
+		for index := bright; index < bright+dark; index++ {
+			pixels[index] = uint32(0x501E10)
+		}
+		regions = append(regions, map[string]any{
+			"points": []any{}, "referencePoints": []any{},
+			"detectionConfidence": detection, "text": text, "recognitionConfidence": recognition,
+			"leftContext": map[string]any{
+				"x": int64(0), "y": int64(0), "w": int64(100), "h": int64(50), "pixels": pixels,
+				"referenceRegion": map[string]any{"x": 820.0, "y": 543.0, "w": 100.0, "h": 50.0},
+			},
+		})
+	}
+	return map[string]any{
+		"schemaVersion": int64(1), "regions": regions,
+		"evidence": map[string]any{}, "models": map[string]any{}, "timing": map[string]any{},
+	}
+}
+
+func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels(t *testing.T) {
+	for _, test := range []struct {
+		name, text, want       string
+		detection, recognition float64
+		bright, dark           int
+	}{
+		{name: "available", text: "REQUEST DOCKING", detection: .86, recognition: .99, dark: 625, want: "AVAILABLE"},
+		{name: "focused", text: "REQUEST DOCKIN", detection: .86, recognition: .91, bright: 750, want: "FOCUSED"},
+		{name: "empty action area", want: "UNKNOWN"},
+		{name: "already active", text: "CANCEL DOCKING", detection: .84, recognition: .95, dark: 625, want: "DOCKING_ACTIVE"},
+		{name: "unrelated text proves absent", text: "INTERNAL SECURITY", detection: .90, recognition: .94, want: "UNAVAILABLE"},
+		{name: "weak plausible text remains unknown", text: "REQUEST DOCK", detection: .85, recognition: .20, dark: 625, want: "UNKNOWN"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+			if err != nil {
+				t.Fatal(err)
+			}
+			inputs := map[string]any{
+				"contacts": map[string]any{
+					"contactsTab": map[string]any{"state": "SELECTED", "selected": true},
+				},
+				"regions": requestDockingRegionsInput(test.text, test.detection, test.recognition, test.bright, test.dark),
+			}
+			runner, _ := New(&fixtureBroker{})
+			output, err := runner.Run(context.Background(), pkg, inputs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			requestDocking := result["requestDocking"].(map[string]any)
+			if requestDocking["state"] != test.want {
+				t.Fatalf("requestDocking=%#v output=%s", requestDocking, output)
+			}
+		})
+	}
+}
+
+func TestEliteRequestDockingAvailabilityStopsBeforeButtonEvidenceWhenContactsIsNotSelected(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := map[string]any{
+		"contacts": map[string]any{"contactsTab": map[string]any{"state": "ABSENT", "selected": nil}},
+		"regions":  nil,
+	}
+	runner, _ := New(&fixtureBroker{})
+	output, err := runner.Run(context.Background(), pkg, inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), `"state":"UNKNOWN"`) || !strings.Contains(string(output), `"reason":"CONTACTS_TAB_NOT_SELECTED"`) {
+		t.Fatalf("output=%s", output)
 	}
 }
 

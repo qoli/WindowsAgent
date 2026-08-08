@@ -71,6 +71,18 @@ or ambiguous evidence is `UNKNOWN`, never a prior-frame or inferred value. Run
 it in the settled forward cockpit view before opening the Target panel. The
 Action is not registrable and never performs the docking request itself.
 
+`elite-dangerous/request-docking-availability` is a finite composite visual
+Gate for the currently selected Contacts target. Its raw text-regions Action
+scans a broad action area; PP-OCR dynamically locates each quadrilateral and
+rectifies that line before recognition, so a shifted cockpit view is not
+interpreted through a fixed action-row crop. The pure classifier distinguishes
+`REQUEST DOCKING` from `CANCEL DOCKING` and reads the matched line's same-frame
+left context to tell a visible dark row from the bright fill that means keyboard
+focus is on the row. It returns `AVAILABLE`, `FOCUSED`, `UNAVAILABLE`,
+`DOCKING_ACTIVE`, or `UNKNOWN`. A selected target is never assumed to support
+docking. Only `FOCUSED`, together with the independent allowed range Gate,
+permits a later `SELECT`; the Action itself never navigates or injects input.
+
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
 supervising model chooses exactly one logical `FOCUS_LEFT_PANEL`, `NEXT_PANEL`,
 `PREVIOUS_PANEL`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, or `BACK` after
