@@ -33,7 +33,7 @@ domain payloads and does not tail process logs as a substitute.
 The overlay occupies a compact transparent region at the top-left of the
 foreground monitor. It has no panel, card, border, status label, elapsed time,
 or per-record timestamps. While an Action is running it shows only a fixed-size
-red dot that alternates every 500 milliseconds between fully visible and fully
+red dot that alternates every 1000 milliseconds between fully visible and fully
 absent, the short current Action name (the final segment of its canonical ID),
 and at most three distinct activity records from oldest to newest. There is no
 fade, opacity ramp, size change, or color change. The full canonical ID remains

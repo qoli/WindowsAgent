@@ -284,7 +284,7 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 	}
 	window := &overlayWindow{hwnd: hwnd, dotHWND: dotHWND, model: model, dotOn: true, streamErr: make(chan error, 1)}
 	activeWindow = window
-	win.SetTimer(hwnd, timerID, 500, 0)
+	win.SetTimer(hwnd, timerID, 1000, 0)
 	return window, nil
 }
 
