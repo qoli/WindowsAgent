@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -27,13 +28,14 @@ import (
 )
 
 const (
-	windowWidth  = int32(520)
-	windowHeight = int32(214)
-	margin       = int32(28)
+	windowWidth  = int32(360)
+	windowHeight = int32(110)
+	dotWidth     = int32(18)
+	dotHeight    = int32(24)
+	margin       = int32(16)
 
-	lwaColorKey = 0x00000001
-	lwaAlpha    = 0x00000002
-
+	lwaColorKey          = 0x00000001
+	lwaAlpha             = 0x00000002
 	wmNCHitTest          = 0x0084
 	wmModelChanged       = win.WM_APP + 1
 	wmStreamFailed       = win.WM_APP + 2
@@ -47,7 +49,6 @@ var (
 	setWindowDisplayAffinity   = user32.NewProc("SetWindowDisplayAffinity")
 
 	backgroundColor win.COLORREF = rgb(255, 0, 255)
-	cardColor       win.COLORREF = rgb(19, 24, 33)
 	primaryColor    win.COLORREF = rgb(242, 246, 252)
 	secondaryColor  win.COLORREF = rgb(160, 174, 192)
 	dimColor        win.COLORREF = rgb(101, 115, 134)
@@ -67,8 +68,9 @@ type config struct {
 
 type overlayWindow struct {
 	hwnd      win.HWND
+	dotHWND   win.HWND
 	model     *actionosd.Model
-	pulse     bool
+	dotOn     bool
 	streamErr chan error
 	closeOnce sync.Once
 }
@@ -249,7 +251,7 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 		win.DeleteObject(win.HGDIOBJ(backgroundBrush))
 		return nil, errorsFromLast("create OSD window")
 	}
-	layered, _, _ := setLayeredWindowAttributes.Call(uintptr(hwnd), uintptr(backgroundColor), 235, lwaColorKey|lwaAlpha)
+	layered, _, _ := setLayeredWindowAttributes.Call(uintptr(hwnd), uintptr(backgroundColor), 255, lwaColorKey)
 	if layered == 0 {
 		win.DestroyWindow(hwnd)
 		return nil, errorsFromLast("configure OSD layered window")
@@ -261,7 +263,26 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 			return nil, errorsFromLast("exclude OSD from capture")
 		}
 	}
-	window := &overlayWindow{hwnd: hwnd, model: model, pulse: true, streamErr: make(chan error, 1)}
+	dotHWND := win.CreateWindowEx(exStyle, className, windowName, win.WS_POPUP, x, y, dotWidth, dotHeight, 0, 0, instance, nil)
+	if dotHWND == 0 {
+		win.DestroyWindow(hwnd)
+		return nil, errorsFromLast("create OSD pulse window")
+	}
+	dotLayered, _, _ := setLayeredWindowAttributes.Call(uintptr(dotHWND), uintptr(backgroundColor), 255, lwaColorKey|lwaAlpha)
+	if dotLayered == 0 {
+		win.DestroyWindow(dotHWND)
+		win.DestroyWindow(hwnd)
+		return nil, errorsFromLast("configure OSD pulse window")
+	}
+	if !allowCapture {
+		excluded, _, _ := setWindowDisplayAffinity.Call(uintptr(dotHWND), wdExcludeFromCapture)
+		if excluded == 0 {
+			win.DestroyWindow(dotHWND)
+			win.DestroyWindow(hwnd)
+			return nil, errorsFromLast("exclude OSD pulse from capture")
+		}
+	}
+	window := &overlayWindow{hwnd: hwnd, dotHWND: dotHWND, model: model, dotOn: true, streamErr: make(chan error, 1)}
 	activeWindow = window
 	win.SetTimer(hwnd, timerID, 500, 0)
 	return window, nil
@@ -269,6 +290,10 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 
 func (w *overlayWindow) destroy() {
 	w.closeOnce.Do(func() {
+		if w.dotHWND != 0 {
+			win.DestroyWindow(w.dotHWND)
+			w.dotHWND = 0
+		}
 		if w.hwnd != 0 {
 			win.KillTimer(w.hwnd, timerID)
 			win.DestroyWindow(w.hwnd)
@@ -282,12 +307,12 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 	switch message {
 	case win.WM_PAINT:
 		if activeWindow != nil {
-			activeWindow.paint()
+			activeWindow.paint(hwnd)
 		}
 		return 0
 	case win.WM_TIMER:
 		if activeWindow != nil {
-			activeWindow.pulse = !activeWindow.pulse
+			activeWindow.toggleDot()
 			activeWindow.refresh()
 		}
 		return 0
@@ -305,8 +330,14 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 		win.DestroyWindow(hwnd)
 		return 0
 	case win.WM_DESTROY:
-		if activeWindow != nil && activeWindow.hwnd == hwnd {
-			activeWindow.hwnd = 0
+		if activeWindow != nil {
+			if activeWindow.dotHWND == hwnd {
+				activeWindow.dotHWND = 0
+				return 0
+			}
+			if activeWindow.hwnd == hwnd {
+				activeWindow.hwnd = 0
+			}
 		}
 		win.PostQuitMessage(0)
 		return 0
@@ -319,14 +350,30 @@ func (w *overlayWindow) refresh() {
 	snapshot := w.model.Snapshot(time.Now().UTC())
 	if !snapshot.Visible {
 		win.ShowWindow(w.hwnd, win.SW_HIDE)
+		win.ShowWindow(w.dotHWND, win.SW_HIDE)
 		return
 	}
 	x, y := overlayPosition(win.GetForegroundWindow())
 	win.SetWindowPos(w.hwnd, win.HWND_TOPMOST, x, y, windowWidth, windowHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
+	win.SetWindowPos(w.dotHWND, win.HWND_TOPMOST, x, y, dotWidth, dotHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
+	alpha := byte(255)
+	if snapshot.Status == actionosd.StatusLive && !w.dotOn {
+		alpha = 0
+	}
+	setLayeredWindowAttributes.Call(uintptr(w.dotHWND), uintptr(backgroundColor), uintptr(alpha), lwaColorKey|lwaAlpha)
 	win.InvalidateRect(w.hwnd, nil, true)
+	win.InvalidateRect(w.dotHWND, nil, true)
 }
 
-func (w *overlayWindow) paint() {
+func (w *overlayWindow) paint(hwnd win.HWND) {
+	if hwnd == w.dotHWND {
+		w.paintDot()
+		return
+	}
+	w.paintText()
+}
+
+func (w *overlayWindow) paintText() {
 	snapshot := w.model.Snapshot(time.Now().UTC())
 	var paint win.PAINTSTRUCT
 	hdc := win.BeginPaint(w.hwnd, &paint)
@@ -337,59 +384,61 @@ func (w *overlayWindow) paint() {
 	if !snapshot.Visible {
 		return
 	}
-	cardBrush := solidBrush(cardColor)
-	statusColor := colorForStatus(snapshot.Status)
-	statusBrush := solidBrush(statusColor)
-	if cardBrush == 0 || statusBrush == 0 {
-		return
-	}
-	defer win.DeleteObject(win.HGDIOBJ(cardBrush))
-	defer win.DeleteObject(win.HGDIOBJ(statusBrush))
-	previousBrush := win.SelectObject(hdc, win.HGDIOBJ(cardBrush))
-	win.RoundRect(hdc, 0, 0, windowWidth, windowHeight, 22, 22)
-	if snapshot.Status != actionosd.StatusLive || w.pulse {
-		win.SelectObject(hdc, win.HGDIOBJ(statusBrush))
-		win.Ellipse(hdc, 22, 22, 38, 38)
-	}
-	win.SelectObject(hdc, previousBrush)
 	win.SetBkMode(hdc, win.TRANSPARENT)
-	drawText(hdc, snapshot.Status, 48, 15, 150, 45, 18, win.FW_BOLD, statusColor, win.DT_LEFT)
-	drawText(hdc, elapsed(snapshot, time.Now().UTC()), 400, 15, 494, 45, 17, win.FW_NORMAL, secondaryColor, win.DT_RIGHT)
-	drawText(hdc, snapshot.ActionID, 22, 51, 494, 84, 23, win.FW_BOLD, primaryColor, win.DT_LEFT|win.DT_END_ELLIPSIS)
+	drawText(hdc, displayActionName(snapshot.ActionID), 22, 1, 354, 27, 15, win.FW_BOLD, primaryColor, win.DT_LEFT|win.DT_END_ELLIPSIS)
 	for index, activity := range snapshot.Activities {
-		y := int32(99 + index*34)
+		y := int32(32 + index*24)
 		color := dimColor
 		if index == len(snapshot.Activities)-1 {
 			color = activityColor(activity.Level)
 		} else if index == len(snapshot.Activities)-2 {
 			color = secondaryColor
 		}
-		timestamp := activity.ObservedAt.Local().Format("15:04:05")
-		drawText(hdc, timestamp, 22, y, 96, y+27, 14, win.FW_NORMAL, dimColor, win.DT_LEFT)
-		drawText(hdc, activity.Message, 104, y, 494, y+27, 16, win.FW_NORMAL, color, win.DT_LEFT|win.DT_END_ELLIPSIS)
+		drawText(hdc, activity.Message, 2, y, 354, y+21, 13, win.FW_NORMAL, color, win.DT_LEFT|win.DT_END_ELLIPSIS)
 	}
+}
+
+func (w *overlayWindow) paintDot() {
+	snapshot := w.model.Snapshot(time.Now().UTC())
+	var paint win.PAINTSTRUCT
+	hdc := win.BeginPaint(w.dotHWND, &paint)
+	if hdc == 0 {
+		return
+	}
+	defer win.EndPaint(w.dotHWND, &paint)
+	if !snapshot.Visible {
+		return
+	}
+	brush := solidBrush(colorForStatus(snapshot.Status))
+	if brush == 0 {
+		return
+	}
+	defer win.DeleteObject(win.HGDIOBJ(brush))
+	previousPen := win.SelectObject(hdc, win.GetStockObject(win.NULL_PEN))
+	defer win.SelectObject(hdc, previousPen)
+	previousBrush := win.SelectObject(hdc, win.HGDIOBJ(brush))
+	win.Ellipse(hdc, 2, 6, 16, 20)
+	win.SelectObject(hdc, previousBrush)
+}
+
+func displayActionName(actionID string) string {
+	if separator := strings.LastIndexByte(actionID, '/'); separator >= 0 && separator+1 < len(actionID) {
+		return actionID[separator+1:]
+	}
+	return actionID
+}
+
+func (w *overlayWindow) toggleDot() {
+	w.dotOn = !w.dotOn
 }
 
 func overlayPosition(foreground win.HWND) (int32, int32) {
 	monitor := win.MonitorFromWindow(foreground, win.MONITOR_DEFAULTTOPRIMARY)
 	info := win.MONITORINFO{CbSize: uint32(unsafe.Sizeof(win.MONITORINFO{}))}
 	if monitor != 0 && win.GetMonitorInfo(monitor, &info) {
-		return info.RcWork.Right - windowWidth - margin, info.RcWork.Top + margin
+		return info.RcWork.Left + margin, info.RcWork.Top + margin
 	}
-	return 1920 - windowWidth - margin, margin
-}
-
-func elapsed(snapshot actionosd.Snapshot, now time.Time) string {
-	end := now
-	if snapshot.Status != actionosd.StatusLive && !snapshot.TerminalAt.IsZero() {
-		end = snapshot.TerminalAt
-	}
-	duration := end.Sub(snapshot.StartedAt)
-	if duration < 0 {
-		duration = 0
-	}
-	total := int(duration.Seconds())
-	return fmt.Sprintf("%02d:%02d", total/60, total%60)
+	return margin, margin
 }
 
 func colorForStatus(status string) win.COLORREF {
@@ -419,7 +468,7 @@ func activityColor(level string) win.COLORREF {
 func drawText(hdc win.HDC, value string, left, top, right, bottom, height, weight int32, color win.COLORREF, format uint32) {
 	font := win.CreateFontIndirect(&win.LOGFONT{
 		LfHeight: -height, LfWeight: weight, LfCharSet: win.DEFAULT_CHARSET,
-		LfQuality: win.CLEARTYPE_QUALITY, LfFaceName: utf16Face("Segoe UI"),
+		LfQuality: win.NONANTIALIASED_QUALITY, LfFaceName: utf16Face("Segoe UI"),
 	})
 	if font == 0 {
 		return

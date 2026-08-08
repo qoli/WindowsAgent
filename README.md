@@ -209,8 +209,9 @@ Install the optional Action OSD after the loopback event stream is healthy:
 ```
 
 The independent interactive-user task stays hidden until a Streaming Action
-starts. While the Action is running it shows `LIVE`, the canonical Action ID,
-elapsed time, and the latest three explicit `stream.activity` records. Terminal
+starts. While the Action is running its compact, background-free top-left
+viewfinder shows a blinking red dot, the short Action name, and at most the
+latest three explicit `stream.activity` records. Terminal
 states disappear automatically. The OSD is excluded from screen capture by
 default; `-AllowCapture` is intended only for visual acceptance evidence.
 

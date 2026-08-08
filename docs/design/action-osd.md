@@ -5,10 +5,9 @@
 **Landed.** The maintained companion, explicit activity contract, bounded
 startup reconstruction, installer, lifecycle expiry, and live event client are
 implemented and tested. Real-device acceptance used
-`elite-dangerous/select-contacts-panel` over a live 4K HDR game: the overlay
-showed `LIVE`, elapsed time, the Action ID, and committed activity while the
-Action ran; `DONE` then disappeared automatically. The installed production
-task excludes the OSD from capture.
+`elite-dangerous/select-contacts-panel` over a live 4K HDR game. The installed
+production task excludes the OSD from capture. The original card presentation
+was subsequently replaced by the landed compact viewfinder presentation.
 
 ## Responsibility
 
@@ -31,13 +30,23 @@ domain payloads and does not tail process logs as a substitute.
 
 ## Display
 
-While an Action is running, the overlay shows a pulsing red dot, `LIVE`, elapsed
-time, the canonical current Action ID, and the latest three distinct activity
-records from oldest to newest. The newest record is visually strongest. A
-running Action remains visible even when no new activity has arrived.
+The overlay occupies a compact transparent region at the top-left of the
+foreground monitor. It has no panel, card, border, status label, elapsed time,
+or per-record timestamps. While an Action is running it shows only a fixed-size
+red dot that alternates every 500 milliseconds between fully visible and fully
+absent, the short current Action name (the final segment of its canonical ID),
+and at most three distinct activity records from oldest to newest. There is no
+fade, opacity ramp, size change, or color change. The full canonical ID remains
+in the event model. The newest record is
+visually strongest. Text and the status dot are flat colors with no outline,
+shadow, contrast plate, or readability fallback; insufficient contrast against
+the foreground content is accepted. A running Action remains visible even when
+no new activity has arrived.
 
 Terminal presentation is `DONE`, `STOPPED`, or `FAILED`. Successful and stopped
-Actions remain for three seconds; failed Actions remain for eight seconds.
+Actions remain for three seconds; failed Actions remain for eight seconds. The
+compact presentation does not render those status words: a static green, grey,
+or red dot communicates the respective terminal state until expiry.
 
 The window is topmost, layered, click-through, tool-only, and non-activating.
 It follows the foreground monitor and is excluded from capture by default.
