@@ -1,5 +1,7 @@
 # WindowsAgent
 
+**[Website](https://qoli.github.io/WindowsAgent/)** · [Design docs](docs/design/README.md) · [Contributing](CONTRIBUTING.md)
+
 WindowsAgent is an extensible Go agent for capabilities that must run inside a
 signed-in Windows user's interactive session.
 

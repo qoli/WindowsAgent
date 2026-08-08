@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WindowsAgent — Let your agent build the assist</title>
+<meta name="description" content="A two-speed runtime where AI agents author and execute actions for Windows games.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <a class="nav-brand" href="#top">
+    <svg class="nav-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="3.5" fill="currentColor"/><path d="M16 1v6M16 25v6M1 16h6M25 16h6" stroke="currentColor" stroke-width="2"/></svg>
+    <span>WindowsAgent</span>
+  </a>
+  <nav class="nav-links">
+    <a href="#loop" data-i18n="nav.loop">The Loop</a>
+    <a href="#runtime" data-i18n="nav.runtime">Runtime</a>
+    <a href="#design" data-i18n="nav.design">Design</a>
+    <a href="#rules" data-i18n="nav.rules">Rules</a>
+    <a href="#quickstart" data-i18n="nav.quickstart">Quick Start</a>
+  </nav>
+  <div class="nav-actions">
+    <button id="lang-toggle" class="lang-toggle" type="button" aria-label="Switch language">中文</button>
+    <a class="btn btn-ghost btn-sm" href="https://github.com/qoli/WindowsAgent">GitHub</a>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <p class="hero-kicker" data-i18n="hero.kicker">Agent-facing game runtime for Windows</p>
+      <h1 data-i18n-html="hero.title">Fast reflexes.<br>Slow reasoning.<br><span class="accent">Your agent plays the game.</span></h1>
+      <p class="hero-sub" data-i18n="hero.sub">WindowsAgent is a runtime where AI agents author and execute actions for Windows games — perception, sandboxed execution, and input control under one strict contract.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="https://github.com/qoli/WindowsAgent" data-i18n="hero.cta1">View on GitHub</a>
+        <a class="btn btn-ghost" href="https://github.com/qoli/WindowsAgent/tree/main/docs" data-i18n="hero.cta2">Read the docs</a>
+      </div>
+      <ul class="hero-badges">
+        <li>Go 1.23+</li>
+        <li>Windows 10 1903+ amd64</li>
+        <li>MIT</li>
+        <li>Codex · OpenCode</li>
+      </ul>
+    </div>
+    <div class="hero-terminal" aria-hidden="true">
+      <div class="term-bar"><span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span><span class="term-title">POST /v1/captures</span></div>
+<pre class="term-body">{
+  "foreground": {
+    "executable_name": <em>"EliteDangerous64.exe"</em>,
+    "window_title": "Elite - Dangerous (CLIENT)"
+  },
+  "rule": {
+    "status": <strong>"matched"</strong>,
+    "id": "EliteDangerous64.exe",
+    "actions": { "url": "/v3/rules/.../actions" }
+  }
+}</pre>
+      <div class="term-bar term-bar-alt"><span class="term-title">POST /v1/actions/invoke</span></div>
+<pre class="term-body">{"actionId": <em>"elite-dangerous/leave-station"</em>,
+ "inputs": {"stationConfirmed": true}}
+
+→ 202 RUNNING  <strong>watch: /v1/action-invocations/act_9f2e…/events</strong></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE LOOP ============ -->
+<section id="loop" class="section">
+  <p class="section-kicker" data-i18n="loop.kicker">How it works</p>
+  <h2 data-i18n="loop.title">The agent is the developer — and the pilot</h2>
+  <p class="section-sub" data-i18n="loop.sub">One capture is the agent's single perception entry point. From there the agent reads the rule, authors or invokes an action, and receives durable evidence back.</p>
+  <ol class="loop-grid">
+    <li class="loop-card">
+      <span class="loop-num">01</span>
+      <h3 data-i18n="loop.1.t">Perceive</h3>
+      <p data-i18n="loop.1.d">WGC captures the primary monitor; every artifact carries foreground process metadata and a SHA-256 hash.</p>
+    </li>
+    <li class="loop-card">
+      <span class="loop-num">02</span>
+      <h3 data-i18n="loop.2.t">Navigate</h3>
+      <p data-i18n="loop.2.d">The capture resolves the foreground game to its Rule plugin — AGENTS.md guidance plus a live action catalog.</p>
+    </li>
+    <li class="loop-card">
+      <span class="loop-num">03</span>
+      <h3 data-i18n="loop.3.t">Author</h3>
+      <p data-i18n="loop.3.d">The agent writes Starlark script packages and declares actions; manifests are validated against strict schemas.</p>
+    </li>
+    <li class="loop-card">
+      <span class="loop-num">04</span>
+      <h3 data-i18n="loop.4.t">Execute</h3>
+      <p data-i18n="loop.4.d">Finite actions return one validated result; streaming actions run reflex loops with explicit evidence gates.</p>
+    </li>
+    <li class="loop-card">
+      <span class="loop-num">05</span>
+      <h3 data-i18n="loop.5.t">Feedback</h3>
+      <p data-i18n="loop.5.d">Every step lands in an append-only event journal the agent can replay — the shared timeline for planning.</p>
+    </li>
+  </ol>
+</section>
+
+<!-- ============ RUNTIME ============ -->
+<section id="runtime" class="section section-alt">
+  <p class="section-kicker" data-i18n="rt.kicker">What the runtime provides</p>
+  <h2 data-i18n="rt.title">Ground truth for your agent</h2>
+  <div class="pillar-grid">
+    <article class="pillar">
+      <h3><span class="pillar-tag">EYE</span><span data-i18n="rt.p1.t">Perception</span></h3>
+      <ul>
+        <li data-i18n="rt.p1.1">Windows Graphics Capture + D3D11, HDR tone-mapped to SDR</li>
+        <li data-i18n="rt.p1.2">Resident PP-OCRv6 DirectML workers, declared per Rule</li>
+        <li data-i18n="rt.p1.3">ScreenParser v2 ONNX detector on hash-pinned frames</li>
+        <li data-i18n="rt.p1.4">Reference-density screen regions mapped through a 16:9 viewport</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">CORE</span><span data-i18n="rt.p2.t">Execution</span></h3>
+      <ul>
+        <li data-i18n="rt.p2.1">Sandboxed Starlark script packages with strict limits</li>
+        <li data-i18n="rt.p2.2">Package-owned native DLLs via a generic Windows amd64 FFI</li>
+        <li data-i18n="rt.p2.3">Finite and streaming actions with durable invocation IDs</li>
+        <li data-i18n="rt.p2.4">Append-only event journal with authenticated loopback replay</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">HAND</span><span data-i18n="rt.p3.t">Control</span></h3>
+      <ul>
+        <li data-i18n="rt.p3.1">Foreground-bound scan-code key injection, one press at a time</li>
+        <li data-i18n="rt.p3.2">Game key bindings resolved live from the active .binds preset</li>
+        <li data-i18n="rt.p3.3">Logical UI moves selected by the supervising model</li>
+        <li data-i18n="rt.p3.4">Action OSD overlay shows the live action without stealing focus</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">LAW</span><span data-i18n="rt.p4.t">Contracts</span></h3>
+      <ul>
+        <li data-i18n="rt.p4.1">Manifest, input, and output schemas validated on every call</li>
+        <li data-i18n="rt.p4.2">UNKNOWN is a first-class result — evidence is never invented</li>
+        <li data-i18n="rt.p4.3">SHA-256 pinned models and artifacts, verified before use</li>
+        <li data-i18n="rt.p4.4">Bad requests fail explicitly; nothing degrades silently</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<!-- ============ DUAL-SPEED DESIGN ============ -->
+<section id="design" class="section">
+  <p class="section-kicker" data-i18n="ds.kicker">Two-speed architecture</p>
+  <h2 data-i18n="ds.title">Slow planning meets fast reflexes</h2>
+  <p class="section-sub" data-i18n="ds.sub">The high-level model never sits in the fast path. It plans and supervises; streaming actions react in real time behind hard evidence gates. The event journal joins the two.</p>
+  <div class="dual">
+    <div class="dual-col dual-slow">
+      <h3 data-i18n="ds.slow.t">Slow · The Planner</h3>
+      <p class="dual-role" data-i18n="ds.slow.role">High-level model · Codex / OpenCode</p>
+      <ul>
+        <li data-i18n="ds.slow.1">Captures the screen and reasons about the goal</li>
+        <li data-i18n="ds.slow.2">Arranges UI one logical key at a time</li>
+        <li data-i18n="ds.slow.3">Starts, watches, and stops streaming actions</li>
+        <li data-i18n="ds.slow.4">Replays the event timeline to plan the next move</li>
+      </ul>
+    </div>
+    <div class="dual-seam">
+      <span class="dual-seam-label" data-i18n="ds.seam">event journal</span>
+      <span class="dual-seam-line"></span>
+      <span class="dual-seam-sub" data-i18n="ds.seam.sub">append-only · durable · replayable</span>
+    </div>
+    <div class="dual-col dual-fast">
+      <h3 data-i18n="ds.fast.t">Fast · The Reflex</h3>
+      <p class="dual-role" data-i18n="ds.fast.role">Streaming Starlark actions</p>
+      <ul>
+        <li data-i18n="ds.fast.1">Observe → gate → key pulse → emit event</li>
+        <li data-i18n="ds.fast.2">Hard gates: consecutive frames, confidence margins</li>
+        <li data-i18n="ds.fast.3">Fails explicitly when evidence runs out</li>
+        <li data-i18n="ds.fast.4">Interruptible, always bounded, never guessing</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SHIPPED RULES ============ -->
+<section id="rules" class="section section-alt">
+  <p class="section-kicker" data-i18n="rules.kicker">Proof, not promise</p>
+  <h2 data-i18n="rules.title">Shipped Rules</h2>
+  <p class="section-sub" data-i18n="rules.sub">Every capability below was built on the same runtime your agent gets.</p>
+  <div class="rules-grid">
+    <article class="rule-card rule-card-featured">
+      <header>
+        <h3>Elite Dangerous</h3>
+        <span class="rule-tag" data-i18n="rules.ed.tag">Full docking workflow</span>
+      </header>
+      <p data-i18n="rules.ed.d">A supervised departure: the planner arranges AUTO LAUNCH key-by-key, then the leave-station streaming action takes over — throttle gates, mass-lock checks, and three consecutive zero-speed OCR confirmations before it reports completion.</p>
+      <ul class="rule-caps">
+        <li>compass</li><li>ship-status</li><li>ship-speed</li><li>flight-status</li><li>leave-station</li><li>align-station-target</li><li>ui-control</li><li>set-throttle</li>
+      </ul>
+    </article>
+    <article class="rule-card">
+      <header>
+        <h3>Crimson Desert</h3>
+        <span class="rule-tag" data-i18n="rules.cd.tag">Memory + save decode</span>
+      </header>
+      <p data-i18n="rules.cd.d">The inventory action reads game memory first; only when that fails does it locate the newest save file and decode it through a package-declared native DLL over the sandboxed FFI.</p>
+      <ul class="rule-caps"><li>inventory</li><li>native FFI</li></ul>
+    </article>
+    <article class="rule-card">
+      <header>
+        <h3>Palworld</h3>
+        <span class="rule-tag" data-i18n="rules.pw.tag">On-device vision</span>
+      </header>
+      <p data-i18n="rules.pw.d">The screenparser action runs a pinned FP16 ScreenParser v2 ONNX model over DirectML on one caller-supplied, hash-pinned frame — then exits. No loop, no fallback, no residue.</p>
+      <ul class="rule-caps"><li>ui-elements</li><li>ONNX · DirectML</li></ul>
+    </article>
+  </div>
+</section>
+
+<!-- ============ QUICK START ============ -->
+<section id="quickstart" class="section">
+  <p class="section-kicker" data-i18n="qs.kicker">Quick start</p>
+  <h2 data-i18n="qs.title">From clone to first capture</h2>
+  <div class="qs-grid">
+    <div class="qs-step">
+      <h3 data-i18n="qs.1.t">1 · Build</h3>
+      <pre><code>go test ./...
+./scripts/build-windows-capture-agent.sh</code></pre>
+    </div>
+    <div class="qs-step">
+      <h3 data-i18n="qs.2.t">2 · Run in the signed-in session</h3>
+      <pre><code>.\.build\windows-capture-agent-console.exe `
+  --rules-dir (Resolve-Path .\.build\Rules)</code></pre>
+    </div>
+    <div class="qs-step">
+      <h3 data-i18n="qs.3.t">3 · Capture &amp; invoke</h3>
+      <pre><code>curl.exe --data-binary '{"include_cursor":true}' `
+  http://127.0.0.1:8787/v1/captures
+
+curl.exe --data-binary '{"actionId":"elite-dangerous/ship-status","inputs":{}}' `
+  http://127.0.0.1:8787/v1/actions/invoke</code></pre>
+    </div>
+  </div>
+  <div class="warning" role="note">
+    <strong data-i18n="qs.warn.t">Trusted networks only.</strong>
+    <span data-i18n="qs.warn.d">The HTTP server listens on 0.0.0.0:8787 without authentication, TLS, or CORS by default. Anyone who can reach that port can trigger captures and read foreground process metadata. Use it only on a trusted LAN or private overlay network.</span>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <span>WindowsAgent · MIT License</span>
+    <nav>
+      <a href="https://github.com/qoli/WindowsAgent">GitHub</a>
+      <a href="https://github.com/qoli/WindowsAgent/blob/main/CONTRIBUTING.md" data-i18n="footer.contrib">Contributing</a>
+      <a href="https://github.com/qoli/WindowsAgent/blob/main/SECURITY.md" data-i18n="footer.security">Security</a>
+      <a href="https://github.com/qoli/WindowsAgent/tree/main/docs/design" data-i18n="footer.design">Design docs</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
