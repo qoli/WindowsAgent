@@ -103,7 +103,8 @@ type host struct {
 
 func (h *host) predeclared() starlark.StringDict {
 	actionModule := starlarkstruct.FromStringDict(starlark.String("action"), starlark.StringDict{
-		"call": starlark.NewBuiltin("action.call", h.call),
+		"call":     starlark.NewBuiltin("action.call", h.call),
+		"try_call": starlark.NewBuiltin("action.try_call", h.tryCall),
 	})
 	streamModule := starlarkstruct.FromStringDict(starlark.String("stream"), starlark.StringDict{
 		"emit": starlark.NewBuiltin("stream.emit", h.emit),
@@ -115,22 +116,61 @@ func (h *host) predeclared() starlark.StringDict {
 }
 
 func (h *host) call(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var actionID string
-	var inputs *starlark.Dict
-	if err := starlark.UnpackArgs("action.call", args, kwargs, "id", &actionID, "inputs", &inputs); err != nil {
-		return nil, err
-	}
-	if actionID == "" || strings.TrimSpace(actionID) != actionID || inputs == nil {
-		return nil, errors.New("action.call requires canonical id and inputs object")
-	}
-	native, err := fromStarlark(inputs)
+	actionID, inputMap, err := unpackActionCall("action.call", args, kwargs)
 	if err != nil {
 		return nil, err
 	}
+	decoded, err := h.invokeChild(actionID, inputMap)
+	if err != nil {
+		return nil, err
+	}
+	return toStarlark(decoded)
+}
+
+func (h *host) tryCall(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	actionID, inputMap, err := unpackActionCall("action.try_call", args, kwargs)
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := h.invokeChild(actionID, inputMap)
+	if err != nil {
+		if h.ctx.Err() != nil {
+			return nil, h.ctx.Err()
+		}
+		return toStarlark(map[string]any{
+			"ok":     false,
+			"output": nil,
+			"error":  err.Error(),
+		})
+	}
+	return toStarlark(map[string]any{
+		"ok":     true,
+		"output": decoded,
+		"error":  nil,
+	})
+}
+
+func unpackActionCall(name string, args starlark.Tuple, kwargs []starlark.Tuple) (string, map[string]any, error) {
+	var actionID string
+	var inputs *starlark.Dict
+	if err := starlark.UnpackArgs(name, args, kwargs, "id", &actionID, "inputs", &inputs); err != nil {
+		return "", nil, err
+	}
+	if actionID == "" || strings.TrimSpace(actionID) != actionID || inputs == nil {
+		return "", nil, fmt.Errorf("%s requires canonical id and inputs object", name)
+	}
+	native, err := fromStarlark(inputs)
+	if err != nil {
+		return "", nil, err
+	}
 	inputMap, ok := native.(map[string]any)
 	if !ok {
-		return nil, errors.New("action.call inputs must be an object")
+		return "", nil, fmt.Errorf("%s inputs must be an object", name)
 	}
+	return actionID, inputMap, nil
+}
+
+func (h *host) invokeChild(actionID string, inputMap map[string]any) (any, error) {
 	output, err := h.caller.Call(h.ctx, actionID, inputMap)
 	if err != nil {
 		return nil, fmt.Errorf("child Action %s failed: %w", actionID, err)
@@ -141,7 +181,7 @@ func (h *host) call(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple
 	if err := decoder.Decode(&decoded); err != nil {
 		return nil, fmt.Errorf("decode child Action %s output: %w", actionID, err)
 	}
-	return toStarlark(decoded)
+	return decoded, nil
 }
 
 func (h *host) emit(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {

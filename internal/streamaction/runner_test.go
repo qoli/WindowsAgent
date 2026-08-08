@@ -33,6 +33,85 @@ type contactsPanelCaller struct {
 	controls []string
 }
 
+type dockAtStationCaller struct {
+	contactsStates       []string
+	requestStates        []string
+	flightStates         []string
+	gearStates           []string
+	rangeState           string
+	contactsIndex        int
+	requestIndex         int
+	flightIndex          int
+	gearIndex            int
+	flightPromptFailures int
+	rangeCalls           int
+	controls             []string
+}
+
+func (c *dockAtStationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	switch id {
+	case "elite-dangerous/contacts-tab-state":
+		if c.contactsIndex >= len(c.contactsStates) {
+			return nil, errors.New("unexpected Contacts observation")
+		}
+		state := c.contactsStates[c.contactsIndex]
+		c.contactsIndex++
+		return json.Marshal(map[string]any{"contactsTab": map[string]any{"state": state}})
+	case "elite-dangerous/request-docking-range":
+		c.rangeCalls++
+		distance := any(nil)
+		reason := "OCR_CONFIDENCE_LOW"
+		if c.rangeState == "ALLOWED" {
+			distance = 5390.0
+			reason = "DISPLAY_DISTANCE_BELOW_THRESHOLD"
+		}
+		return json.Marshal(map[string]any{"requestDockingRange": map[string]any{
+			"state": c.rangeState, "distanceMeters": distance, "evidence": map[string]any{"reason": reason},
+		}})
+	case "elite-dangerous/request-docking-availability":
+		if c.requestIndex >= len(c.requestStates) {
+			return nil, errors.New("unexpected Request Docking observation")
+		}
+		state := c.requestStates[c.requestIndex]
+		c.requestIndex++
+		return json.Marshal(map[string]any{
+			"requestDocking": map[string]any{"state": state},
+			"decision":       map[string]any{"reason": "FIXTURE_" + state},
+		})
+	case "elite-dangerous/ui-control":
+		control, _ := inputs["control"].(string)
+		c.controls = append(c.controls, control)
+		return json.RawMessage(`{"schemaVersion":1}`), nil
+	case "elite-dangerous/set-throttle":
+		if inputs["percent"] != int64(0) && inputs["percent"] != 0 {
+			return nil, errors.New("unexpected throttle input")
+		}
+		return json.RawMessage(`{"control":"SetSpeedZero"}`), nil
+	case "elite-dangerous/flight-prompt-text":
+		if c.flightPromptFailures > 0 {
+			c.flightPromptFailures--
+			return nil, errors.New("capture OCR Action region: primary monitor capture size is invalid")
+		}
+		return json.RawMessage(`{"text":""}`), nil
+	case "elite-dangerous/flight-status":
+		if c.flightIndex >= len(c.flightStates) {
+			return nil, errors.New("unexpected flight-status observation")
+		}
+		state := c.flightStates[c.flightIndex]
+		c.flightIndex++
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
+	case "elite-dangerous/ship-status":
+		if c.gearIndex >= len(c.gearStates) {
+			return nil, errors.New("unexpected ship-status observation")
+		}
+		state := c.gearStates[c.gearIndex]
+		c.gearIndex++
+		return json.Marshal(map[string]any{"shipStatus": map[string]any{"landingGear": map[string]any{"state": state}}})
+	default:
+		return nil, errors.New("unexpected dock-at-station child Action: " + id)
+	}
+}
+
 func (c *contactsPanelCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	if id == "elite-dangerous/ui-control" {
 		control, _ := inputs["control"].(string)
@@ -65,6 +144,15 @@ func selectContactsPackageRoot(t *testing.T) string {
 	return root
 }
 
+func dockAtStationPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "dock-at-station"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func (f *fixtureReporter) Emit(_ context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
 	f.types = append(f.types, eventType)
 	f.payloads = append(f.payloads, append(json.RawMessage(nil), payload...))
@@ -91,6 +179,52 @@ def main(ctx):
 	}
 	if string(output) != `{"done":true,"sequence":1}` || caller.calls != 1 || len(reporter.types) != 1 || reporter.types[0] != "action.phase.changed" {
 		t.Fatalf("output=%s calls=%d events=%v", output, caller.calls, reporter.types)
+	}
+}
+
+func TestRunnerTryCallReturnsExplicitChildFailure(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    attempt = action.try_call(id="game/status", inputs={"detail": False})
+    if attempt["ok"]:
+        fail("failed child Action was reported as successful")
+    if attempt["output"] != None:
+        fail("failed child Action returned output")
+    if "child Action game/status failed: unexpected child Action call" not in attempt["error"]:
+        fail("child failure was not preserved")
+    return {"done": True, "sequence": 0}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, &fixtureCaller{}, &fixtureReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != `{"done":true,"sequence":0}` {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestRunnerTryCallReturnsSuccessfulOutput(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    attempt = action.try_call(id="game/status", inputs={"detail": True})
+    if not attempt["ok"] or attempt["error"] != None or attempt["output"]["massLock"] != "OFF":
+        fail("successful child Action attempt lost its output")
+    return {"done": True, "sequence": 0}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, &fixtureCaller{}, &fixtureReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != `{"done":true,"sequence":0}` {
+		t.Fatalf("output=%s", output)
 	}
 }
 
@@ -240,6 +374,129 @@ func TestEliteSelectContactsPanelStopsOnUnknownOrExhaustedCycle(t *testing.T) {
 				t.Fatalf("error=%v controls=%v", err, caller.controls)
 			}
 		})
+	}
+}
+
+func TestEliteDockAtStationCompletesAtVisualConfirmationHandoff(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED", "ABSENT", "ABSENT"},
+		requestStates:  []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
+		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
+		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
+		rangeState:     "ALLOWED",
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.rangeCalls != 1 || !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
+		!contains(string(output), `"admittedDistanceMeters":5390`) || !contains(string(output), `"visualConfirmed":false`) {
+		t.Fatalf("output=%s rangeCalls=%d", output, caller.rangeCalls)
+	}
+	wantControls := []string{"FOCUS_LEFT_PANEL", "RIGHT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if len(caller.controls) != len(wantControls) {
+		t.Fatalf("controls=%v", caller.controls)
+	}
+	for index := range wantControls {
+		if caller.controls[index] != wantControls[index] {
+			t.Fatalf("controls=%v", caller.controls)
+		}
+	}
+	if len(reporter.types) == 0 || reporter.types[len(reporter.types)-1] != "action.dock-at-station.update" ||
+		!contains(string(reporter.payloads[len(reporter.payloads)-1]), `"phase":"VISUAL_CONFIRMATION_REQUIRED"`) {
+		t.Fatalf("events=%v payloads=%s", reporter.types, reporter.payloads)
+	}
+}
+
+func TestEliteDockAtStationRecordsOneFailedObservationWithoutAdvancingGates(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates:       []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED", "ABSENT", "ABSENT"},
+		requestStates:        []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
+		flightPromptFailures: 1,
+		flightStates:         []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
+		gearStates:           []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
+		rangeState:           "ALLOWED",
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"observationErrorCount":1`) {
+		t.Fatalf("output=%s", output)
+	}
+	found := false
+	for _, payload := range reporter.payloads {
+		if contains(string(payload), `"phase":"OBSERVATION_ERROR"`) &&
+			contains(string(payload), `"observationErrorCount":1`) &&
+			contains(string(payload), `primary monitor capture size is invalid`) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("observation failure was not emitted: %s", reporter.payloads)
+	}
+}
+
+func TestEliteDockAtStationFailsWhenRangeGateIsUnknown(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{contactsStates: []string{"ABSENT", "ABSENT"}, rangeState: "UNKNOWN"}
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "request-docking-range Gate must be ALLOWED, got UNKNOWN") {
+		t.Fatalf("error=%v", err)
+	}
+	if caller.rangeCalls != 1 || len(caller.controls) != 0 {
+		t.Fatalf("rangeCalls=%d controls=%v", caller.rangeCalls, caller.controls)
+	}
+}
+
+func TestEliteDockAtStationNeverResendsSelectWithoutCancelDocking(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestStates := []string{"AVAILABLE", "FOCUSED"}
+	for index := 0; index < 12; index++ {
+		requestStates = append(requestStates, "FOCUSED")
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED"},
+		requestStates:  requestStates,
+		rangeState:     "ALLOWED",
+	}
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "SELECT was not followed by two consecutive CANCEL DOCKING observations") {
+		t.Fatalf("error=%v", err)
+	}
+	selects := 0
+	for _, control := range caller.controls {
+		if control == "SELECT" {
+			selects++
+		}
+	}
+	if selects != 1 {
+		t.Fatalf("controls=%v", caller.controls)
 	}
 }
 

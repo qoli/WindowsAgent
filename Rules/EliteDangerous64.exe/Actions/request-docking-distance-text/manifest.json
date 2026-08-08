@@ -3,8 +3,8 @@
   "title": "Read Elite Dangerous target distance text",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
-  "referenceRegion": {"x": 100, "y": 790, "w": 450, "h": 110},
+  "referenceRegion": {"x": 380, "y": 780, "w": 200, "h": 60},
   "sampling": "reference",
-  "maxPixels": 49500,
+  "maxPixels": 12000,
   "characterConstraint": "none"
 }

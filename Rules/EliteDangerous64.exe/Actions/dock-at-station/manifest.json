@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "version": 2,
+  "title": "Elite Dangerous dock at station",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "eventSchema": "event.schema.json",
+  "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
+  "limits": {"maxSteps": 4000000, "maxOutputBytes": 8192, "maxEventBytes": 4096, "maxSleepMs": 1000}
+}

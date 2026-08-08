@@ -89,6 +89,10 @@ The Action runtime and registration refactor is partially landed:
   return terminal output directly; streaming Actions first commit a durable
   start event and immediately return a callback URL, optional stop URL, and
   their declared linear or loop lifecycle;
+- streaming Starlark exposes strict `action.call` and explicit
+  `action.try_call`. The latter returns `{ok, output, error}` so a workflow may
+  emit and bound a failed observation sample without changing providers or
+  silently converting an execution failure into domain `UNKNOWN`;
 - Crimson Desert inventory remains a finite Action using the landed v1
   observation runtime;
 - `screenparser/ui-elements` is a Palworld-configured on-demand Action

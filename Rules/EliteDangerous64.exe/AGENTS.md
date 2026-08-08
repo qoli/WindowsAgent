@@ -83,6 +83,13 @@ focus is on the row. It returns `AVAILABLE`, `FOCUSED`, `UNAVAILABLE`,
 docking. Only `FOCUSED`, together with the independent allowed range Gate,
 permits a later `SELECT`; the Action itself never navigates or injects input.
 
+`elite-dangerous/dock-at-station` is a linear Streaming Action. After its
+one-time range admission and verified docking request, monitoring uses explicit
+`action.try_call` results. A failed child observation is written as
+`OBSERVATION_ERROR`, does not advance the prompt-disappearance or Landing Gear
+Gates, and fails the workflow after three consecutive errors. It never changes
+capture or state providers.
+
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
 supervising model chooses exactly one logical `FOCUS_LEFT_PANEL`, `NEXT_PANEL`,
 `PREVIOUS_PANEL`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, or `BACK` after
@@ -110,6 +117,16 @@ only after `CONTACTS` is confirmed twice. Its scope ends before selecting a
 contact, focusing `REQUEST DOCKING`, or requesting docking. Follow its returned
 watch URL; unknown evidence or failure to reach Contacts within three cycles
 terminates the Action.
+
+`elite-dangerous/dock-at-station` is the complete interruptible linear docking
+workflow. It owns view normalization, the one-time `request-docking-range`
+admission Gate, CONTACTS navigation, Request Docking focus and one-shot
+selection, `CANCEL DOCKING` verification, panel closure, throttle-zero handoff,
+and the subsequent `AUTO_DOCK` plus Landing Gear monitor. After range admission
+it never samples or reasons about distance again. It completes only with the
+domain phase `VISUAL_CONFIRMATION_REQUIRED`, after Auto Dock was observed and
+then stably disappeared while Landing Gear remained ON; a supervising model
+must still inspect the final current frame before claiming the ship is docked.
 
 ### Visual focus confirmation for the higher execution Agent
 

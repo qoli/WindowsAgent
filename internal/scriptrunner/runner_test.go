@@ -669,8 +669,8 @@ func requestDockingRangeClassifierInput(text string, confidence float64) map[str
 			"capturedAt":      "2026-08-08T00:00:00Z",
 			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
 			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
-			"referenceRegion": map[string]any{"x": int64(100), "y": int64(790), "w": int64(450), "h": int64(110)},
-			"physicalRegion":  map[string]any{"left": int64(200), "top": int64(1580), "width": int64(900), "height": int64(220)},
+			"referenceRegion": map[string]any{"x": int64(380), "y": int64(780), "w": int64(200), "h": int64(60)},
+			"physicalRegion":  map[string]any{"left": int64(760), "top": int64(1560), "width": int64(400), "height": int64(120)},
 		},
 		"model": map[string]any{}, "timing": map[string]any{},
 	}

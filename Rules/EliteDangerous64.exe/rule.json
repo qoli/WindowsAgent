@@ -140,6 +140,12 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/dock-at-station": {
+      "path": "Actions/dock-at-station",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
     "elite-dangerous/leave-station": {
       "path": "Actions/leave-station",
       "runtime": "windows-streaming-action-v1",

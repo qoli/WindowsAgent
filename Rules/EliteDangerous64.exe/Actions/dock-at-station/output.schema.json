@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "rangeState", "admittedDistanceMeters", "contactIndex", "dockingRequestConfirmed", "panelClosed", "commandedThrottle", "autoDockSeen", "autoDockMissingSamples", "finalFlightStatus", "finalLandingGear", "landingGearOnConfirmations", "visualConfirmed", "sampleCount", "observationErrorCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "DOCK_AT_STATION"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "VISUAL_CONFIRMATION_REQUIRED"},
+    "rangeState": {"const": "ALLOWED"},
+    "admittedDistanceMeters": {"type": "number", "minimum": 0, "exclusiveMaximum": 7500},
+    "contactIndex": {"type": "integer", "minimum": 0, "maximum": 15},
+    "dockingRequestConfirmed": {"const": true},
+    "panelClosed": {"const": true},
+    "commandedThrottle": {"const": 0},
+    "autoDockSeen": {"const": true},
+    "autoDockMissingSamples": {"type": "integer", "minimum": 5, "maximum": 1800},
+    "finalFlightStatus": {"const": "UNKNOWN"},
+    "finalLandingGear": {"const": "ON"},
+    "landingGearOnConfirmations": {"type": "integer", "minimum": 2, "maximum": 1800},
+    "visualConfirmed": {"const": false},
+    "sampleCount": {"type": "integer", "minimum": 1, "maximum": 2000},
+    "observationErrorCount": {"type": "integer", "minimum": 0, "maximum": 2000}
+  }
+}
