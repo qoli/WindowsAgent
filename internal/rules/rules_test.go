@@ -204,6 +204,17 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 		distanceRegions.Execution.Completion != CompletionReturn || len(distanceRegions.RegistrableAs) != 0 {
 		t.Fatalf("request-docking-distance-regions action = %+v", distanceRegions)
 	}
+	leftPanelTabState, err := store.ResolveAction("elite-dangerous/left-panel-tab-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leftPanelTabState.Runtime != ObservationRuntimeV1 ||
+		!reflect.DeepEqual(leftPanelTabState.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
+		t.Fatalf("left-panel-tab-state action = %+v", leftPanelTabState)
+	}
+	if _, err := store.ResolveAction("elite-dangerous/contacts-tab-state"); err == nil {
+		t.Fatal("retired contacts-tab-state action still resolves")
+	}
 	if _, err := store.ResolveAction("elite-dangerous/request-docking-distance-text"); err == nil {
 		t.Fatal("retired fixed request-docking-distance-text action still resolves")
 	}

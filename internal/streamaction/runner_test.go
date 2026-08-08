@@ -84,7 +84,7 @@ type dockAtStationCaller struct {
 
 func (c *dockAtStationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
-	case "elite-dangerous/contacts-tab-state":
+	case "elite-dangerous/left-panel-tab-state":
 		if c.contactsIndex >= len(c.contactsStates) {
 			return nil, errors.New("unexpected Contacts observation")
 		}
@@ -170,7 +170,7 @@ func (c *contactsPanelCaller) Call(_ context.Context, id string, inputs map[stri
 		c.controls = append(c.controls, control)
 		return json.RawMessage(`{"schemaVersion":1}`), nil
 	}
-	if id != "elite-dangerous/contacts-tab-state" || len(inputs) != 0 || c.index >= len(c.states) {
+	if id != "elite-dangerous/left-panel-tab-state" || len(inputs) != 0 || c.index >= len(c.states) {
 		return nil, errors.New("unexpected select-Contacts child Action call")
 	}
 	state := c.states[c.index]
@@ -183,7 +183,7 @@ func (c *contactsPanelCaller) Call(_ context.Context, id string, inputs map[stri
 
 func (c *stationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
-	case "elite-dangerous/contacts-tab-state":
+	case "elite-dangerous/left-panel-tab-state":
 		if len(inputs) != 0 || c.contactsIndex >= len(c.contactsStates) {
 			return nil, errors.New("unexpected Station target Contacts observation")
 		}

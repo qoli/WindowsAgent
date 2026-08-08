@@ -18,7 +18,7 @@ type selectAndLockDestinationCaller struct {
 
 func (c *selectAndLockDestinationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
-	case "elite-dangerous/contacts-tab-state":
+	case "elite-dangerous/left-panel-tab-state":
 		if len(c.contacts) == 0 {
 			return nil, errors.New("unexpected Contacts observation")
 		}

@@ -22,7 +22,7 @@ def observe_stable(phase, cycle_count, opened_panel):
     previous_key = None
     observation_count = 0
     for attempt in range(STABLE_ATTEMPTS):
-        observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
+        observation = action.call(id="elite-dangerous/left-panel-tab-state", inputs={})
         observation_count += 1
         emit_update(phase, observation, cycle_count, opened_panel)
         contacts = observation["activeTab"]
@@ -35,7 +35,7 @@ def observe_stable(phase, cycle_count, opened_panel):
             previous_key = key
         if attempt + 1 < STABLE_ATTEMPTS:
             task.sleep(milliseconds=STABLE_SAMPLE_MS)
-    fail("Contacts tab state did not produce two consecutive known observations")
+    fail("Left-panel tab state did not produce two consecutive known observations")
 
 def main(ctx):
     stream.activity(message="Inspecting Contacts panel", level="info")
@@ -61,7 +61,7 @@ def main(ctx):
             fail("Contacts scan region was still absent after FOCUS_LEFT_PANEL")
 
     if contacts["state"] == "UNKNOWN":
-        fail("Contacts tab state is UNKNOWN")
+        fail("Left-panel tab state is UNKNOWN")
 
     for _ in range(MAX_CYCLES):
         if contacts["state"] == "CONTACTS":

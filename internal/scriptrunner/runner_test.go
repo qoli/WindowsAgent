@@ -39,7 +39,7 @@ type shipStatusBroker struct {
 	calls  []fixtureObserverCall
 }
 
-type contactsTabBroker struct {
+type leftPanelTabBroker struct {
 	pixels map[string][]any
 	calls  []fixtureObserverCall
 }
@@ -80,15 +80,15 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 	}, nil
 }
 
-func (b *contactsTabBroker) BlobPath(context.Context, map[string]any) (string, error) {
-	return "", errors.New("unexpected Contacts-tab blob path request")
+func (b *leftPanelTabBroker) BlobPath(context.Context, map[string]any) (string, error) {
+	return "", errors.New("unexpected left-panel-tab blob path request")
 }
 
-func (b *contactsTabBroker) RecordNative(context.Context, NativeRecord) error {
-	return errors.New("unexpected Contacts-tab native record")
+func (b *leftPanelTabBroker) RecordNative(context.Context, NativeRecord) error {
+	return errors.New("unexpected left-panel-tab native record")
 }
 
-func (b *contactsTabBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+func (b *leftPanelTabBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
 	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
 	x, xOK := arguments["x"].(int64)
 	y, yOK := arguments["y"].(int64)
@@ -192,9 +192,9 @@ func requestDockingRangePackageRoot(t *testing.T) string {
 	return root
 }
 
-func contactsTabPackageRoot(t *testing.T) string {
+func leftPanelTabPackageRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "contacts-tab-state"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "left-panel-tab-state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -841,16 +841,16 @@ func TestEliteRequestDockingRangeClassifierPreservesUnknownEvidence(t *testing.T
 	}
 }
 
-var contactsTabSampleCoordinates = map[string][2]int64{
+var leftPanelTabSampleCoordinates = map[string][2]int64{
 	"SYSTEM":       {328, 295},
 	"NAVIGATION":   {475, 302},
 	"TRANSACTIONS": {720, 298},
 	"CONTACTS":     {929, 296},
 }
 
-func contactsTabSamplePixels(fills map[string]int) map[string][]any {
-	result := make(map[string][]any, len(contactsTabSampleCoordinates))
-	for name, point := range contactsTabSampleCoordinates {
+func leftPanelTabSamplePixels(fills map[string]int) map[string][]any {
+	result := make(map[string][]any, len(leftPanelTabSampleCoordinates))
+	for name, point := range leftPanelTabSampleCoordinates {
 		pixels := make([]any, 16)
 		for index := range pixels {
 			pixels[index] = uint32(0x202020)
@@ -863,7 +863,7 @@ func contactsTabSamplePixels(fills map[string]int) map[string][]any {
 	return result
 }
 
-func TestEliteContactsTabStateClassifiesAllFourTabsAbsentAndAmbiguous(t *testing.T) {
+func TestEliteLeftPanelTabStateClassifiesAllFourTabsAbsentAndAmbiguous(t *testing.T) {
 	for _, test := range []struct {
 		name, wantState string
 		fills           map[string]int
@@ -877,11 +877,11 @@ func TestEliteContactsTabStateClassifiesAllFourTabsAbsentAndAmbiguous(t *testing
 		{name: "multiple selected", wantState: "UNKNOWN", fills: map[string]int{"NAVIGATION": 16, "TRANSACTIONS": 16}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			pkg, err := scriptpackage.Load(contactsTabPackageRoot(t), "elite-dangerous/contacts-tab-state")
+			pkg, err := scriptpackage.Load(leftPanelTabPackageRoot(t), "elite-dangerous/left-panel-tab-state")
 			if err != nil {
 				t.Fatal(err)
 			}
-			broker := &contactsTabBroker{pixels: contactsTabSamplePixels(test.fills)}
+			broker := &leftPanelTabBroker{pixels: leftPanelTabSamplePixels(test.fills)}
 			runner, _ := New(broker)
 			output, err := runner.Run(context.Background(), pkg, map[string]any{})
 			if err != nil {
@@ -907,14 +907,14 @@ func TestEliteContactsTabStateClassifiesAllFourTabsAbsentAndAmbiguous(t *testing
 	}
 }
 
-func TestEliteContactsTabStateRejectsIncompletePixelEvidence(t *testing.T) {
-	pkg, err := scriptpackage.Load(contactsTabPackageRoot(t), "elite-dangerous/contacts-tab-state")
+func TestEliteLeftPanelTabStateRejectsIncompletePixelEvidence(t *testing.T) {
+	pkg, err := scriptpackage.Load(leftPanelTabPackageRoot(t), "elite-dangerous/left-panel-tab-state")
 	if err != nil {
 		t.Fatal(err)
 	}
-	pixels := contactsTabSamplePixels(nil)
+	pixels := leftPanelTabSamplePixels(nil)
 	pixels["328,295"] = make([]any, 10)
-	broker := &contactsTabBroker{pixels: pixels}
+	broker := &leftPanelTabBroker{pixels: pixels}
 	runner, _ := New(broker)
 	_, err = runner.Run(context.Background(), pkg, map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "LEFT_PANEL_TAB_EVIDENCE_INVALID") || !strings.Contains(err.Error(), "pixel count is incomplete") {

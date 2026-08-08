@@ -144,7 +144,7 @@ game-neutral Windows scan-code input driver; never assume Space or any other
 fixed physical key. Successful output includes the binding source, backend,
 scan code, extended-key flag, and configured hold time.
 
-`elite-dangerous/contacts-tab-state` is a finite observation Action. It scans
+`elite-dangerous/left-panel-tab-state` is a finite observation Action. It scans
 four fixed `4x4` header squares and returns the active member of the four-state
 cycle: `SYSTEM`, `NAVIGATION`, `TRANSACTIONS`, or `CONTACTS`. `SYSTEM` is the
 icon-only overview Tab immediately left of `NAVIGATION`. Missing header evidence

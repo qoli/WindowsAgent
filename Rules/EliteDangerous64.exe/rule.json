@@ -122,8 +122,8 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
-    "elite-dangerous/contacts-tab-state": {
-      "path": "Actions/contacts-tab-state",
+    "elite-dangerous/left-panel-tab-state": {
+      "path": "Actions/left-panel-tab-state",
       "runtime": "windows-observation-v1",
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]

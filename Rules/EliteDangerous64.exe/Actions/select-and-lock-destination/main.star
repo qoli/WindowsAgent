@@ -170,7 +170,7 @@ def observe_target_stable(target_name, phase, panel_cycles, navigation_count, op
 def observe_contacts_stable():
     previous = None
     for attempt in range(STABLE_ATTEMPTS):
-        observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
+        observation = action.call(id="elite-dangerous/left-panel-tab-state", inputs={})
         state = observation["activeTab"]["state"]
         if state != "UNKNOWN" and state == previous:
             return {"observation": observation, "count": attempt + 1}

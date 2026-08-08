@@ -53,7 +53,7 @@ def emit_update(phase, sample, contact_index, range_state, distance_meters, requ
 def observe_contacts_stable():
     previous = None
     for attempt in range(PANEL_STABLE_ATTEMPTS):
-        observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
+        observation = action.call(id="elite-dangerous/left-panel-tab-state", inputs={})
         state = observation["activeTab"]["state"]
         if state != "UNKNOWN" and state == previous:
             return observation
