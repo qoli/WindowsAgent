@@ -20,6 +20,8 @@ type Config struct {
 	Retention            int
 	LogLevel             slog.Level
 	LogFile              string
+	RuntimeLogFile       string
+	WGCTrace             bool
 	OCRRuntimeRoot       string
 	EventAPIURL          string
 	EventTokenFile       string
@@ -42,6 +44,8 @@ func Parse(args []string, localAppData string) (Config, error) {
 	flagSet.IntVar(&cfg.Retention, "retention", 100, "maximum number of screenshot artifacts")
 	flagSet.StringVar(&level, "log-level", "info", "debug, info, warn, or error")
 	flagSet.StringVar(&cfg.LogFile, "log-file", "", "absolute path for persistent JSON logs; empty writes to stdout")
+	flagSet.StringVar(&cfg.RuntimeLogFile, "runtime-log-file", "", "absolute path for Go runtime and fatal stderr logs; empty preserves stderr")
+	flagSet.BoolVar(&cfg.WGCTrace, "wgc-trace", false, "log every WGC capture operation lifecycle at info level")
 	flagSet.StringVar(&cfg.OCRRuntimeRoot, "ocr-runtime-root", "", "absolute resident w480 OCR runtime bundle root; empty uses <data-dir>/runtimes/ppocr-w480")
 	flagSet.StringVar(&cfg.EventAPIURL, "event-api-url", "http://127.0.0.1:8788", "loopback windows-event-stream HTTP origin")
 	flagSet.StringVar(&cfg.EventTokenFile, "event-token-file", "", "absolute windows-event-stream token file; empty uses <data-dir>/event-api.token")
@@ -71,6 +75,9 @@ func Parse(args []string, localAppData string) (Config, error) {
 	}
 	if cfg.LogFile != "" && !filepath.IsAbs(cfg.LogFile) {
 		return Config{}, errors.New("--log-file must be empty or an absolute path")
+	}
+	if cfg.RuntimeLogFile != "" && !filepath.IsAbs(cfg.RuntimeLogFile) {
+		return Config{}, errors.New("--runtime-log-file must be empty or an absolute path")
 	}
 	if cfg.OCRRuntimeRoot == "" {
 		cfg.OCRRuntimeRoot = filepath.Join(cfg.DataDir, "runtimes", "ppocr-w480")

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -73,7 +74,10 @@ var (
 )
 
 type Capturer struct {
-	logger *slog.Logger
+	logger   *slog.Logger
+	sequence atomic.Uint64
+	active   atomic.Int64
+	trace    atomic.Bool
 }
 
 type rect struct {
@@ -222,6 +226,10 @@ func New(logger *slog.Logger) (*Capturer, error) {
 	return &Capturer{logger: logger}, nil
 }
 
+func (c *Capturer) SetTrace(enabled bool) {
+	c.trace.Store(enabled)
+}
+
 func (c *Capturer) Status(ctx context.Context) (capture.Status, error) {
 	return onWinRTThread(ctx, func() (capture.Status, error) {
 		supported, err := graphicsCaptureSupported()
@@ -245,7 +253,7 @@ func (c *Capturer) Status(ctx context.Context) (capture.Status, error) {
 
 func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Result, error) {
 	var result capture.Result
-	err := c.withCapturedFrame(ctx, includeCursor, func(frame capturedFrame) error {
+	err := c.withCapturedFrame(ctx, "full", includeCursor, func(frame capturedFrame) error {
 		image, width, height, err := readFrame(frame.frame, frame.device, frame.context3D, frame.pixelFormat, frame.display)
 		if err != nil {
 			return err
@@ -287,7 +295,7 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 	}
 
 	var result capture.RegionResult
-	err := c.withCapturedFrame(ctx, false, func(frame capturedFrame) error {
+	err := c.withCapturedFrame(ctx, "region", false, func(frame capturedFrame) error {
 		viewport, physical, err := capture.MapReferenceRegion(frame.width, frame.height, request.Region)
 		if err != nil {
 			return capture.Failure("screen_region_invalid", "failed to map the reference screen region", err)
@@ -333,11 +341,54 @@ type capturedFrame struct {
 	height          int
 }
 
-func (c *Capturer) withCapturedFrame(ctx context.Context, includeCursor bool, process func(capturedFrame) error) error {
+func (c *Capturer) withCapturedFrame(
+	ctx context.Context,
+	captureKind string,
+	includeCursor bool,
+	process func(capturedFrame) error,
+) (returnErr error) {
 	if process == nil {
 		return errors.New("captured frame processor is required")
 	}
-	_, err := onWinRTThread(ctx, func() (struct{}, error) {
+	operationID := c.sequence.Add(1)
+	active := c.active.Add(1)
+	started := time.Now()
+	attempts := 0
+	frameWidth := 0
+	frameHeight := 0
+	c.logCaptureLifecycle(
+		ctx,
+		"wgc_capture_started",
+		"operation_id", operationID,
+		"capture_kind", captureKind,
+		"include_cursor", includeCursor,
+		"active_operations", active,
+	)
+	defer func() {
+		activeAfter := c.active.Add(-1)
+		attributes := []any{
+			"operation_id", operationID,
+			"capture_kind", captureKind,
+			"attempts", attempts,
+			"duration_ms", time.Since(started).Milliseconds(),
+			"active_operations", activeAfter,
+			"frame_width", frameWidth,
+			"frame_height", frameHeight,
+		}
+		if returnErr != nil {
+			attributes = append(attributes, "capture_error_code", captureErrorCode(returnErr), "error", returnErr)
+			c.logger.ErrorContext(ctx, "wgc_capture_failed", attributes...)
+			return
+		}
+		c.logCaptureLifecycle(ctx, "wgc_capture_completed", attributes...)
+	}()
+
+	wrappedProcess := func(frame capturedFrame) error {
+		frameWidth = frame.width
+		frameHeight = frame.height
+		return process(frame)
+	}
+	_, returnErr = onWinRTThread(ctx, func() (struct{}, error) {
 		supported, err := graphicsCaptureSupported()
 		if err != nil {
 			return struct{}{}, capture.Failure("capture_support_check_failed", "failed to query Windows Graphics Capture support", err)
@@ -388,15 +439,25 @@ func (c *Capturer) withCapturedFrame(ctx context.Context, includeCursor bool, pr
 			wgcCaptureAttempts,
 			wgcRetryDelay,
 			func() error {
+				attempts++
+				c.logCaptureLifecycle(
+					ctx,
+					"wgc_capture_attempt_started",
+					"operation_id", operationID,
+					"capture_kind", captureKind,
+					"attempt", attempts,
+				)
 				return captureFrameAttempt(
 					ctx, target.desc, monitor, device, context3D, winRTDevice,
-					pixelFormat, pixelFormatName, includeCursor, process,
+					pixelFormat, pixelFormatName, includeCursor, wrappedProcess,
 				)
 			},
 			func(attempt int, err error) {
 				c.logger.WarnContext(
 					ctx,
 					"retrying transient WGC capture failure",
+					"operation_id", operationID,
+					"capture_kind", captureKind,
 					"attempt", attempt,
 					"max_attempts", wgcCaptureAttempts,
 					"error", err,
@@ -405,7 +466,23 @@ func (c *Capturer) withCapturedFrame(ctx context.Context, includeCursor bool, pr
 		)
 		return struct{}{}, err
 	})
-	return err
+	return returnErr
+}
+
+func (c *Capturer) logCaptureLifecycle(ctx context.Context, message string, attributes ...any) {
+	if c.trace.Load() {
+		c.logger.InfoContext(ctx, message, attributes...)
+		return
+	}
+	c.logger.DebugContext(ctx, message, attributes...)
+}
+
+func captureErrorCode(err error) string {
+	var captureErr *capture.Error
+	if errors.As(err, &captureErr) {
+		return captureErr.Code
+	}
+	return ""
 }
 
 func captureFrameAttempt(

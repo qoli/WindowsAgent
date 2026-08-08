@@ -46,6 +46,9 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
+	if _, err := configureRuntimeDiagnostics(cfg.RuntimeLogFile); err != nil {
+		return fmt.Errorf("configure runtime diagnostics: %w", err)
+	}
 	logOutput := os.Stdout
 	var logFile *os.File
 	if cfg.LogFile != "" {
@@ -78,6 +81,7 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize WGC capturer: %w", err)
 	}
+	capturer.SetTrace(cfg.WGCTrace)
 	ruleStore, err := rules.New(cfg.RulesDir)
 	if err != nil {
 		return fmt.Errorf("initialize rule store: %w", err)
@@ -160,6 +164,7 @@ func run() (runErr error) {
 		ErrorLog:          log.New(&slogWriter{logger: logger}, "", 0),
 	}
 	logger.Info("capture_agent_started",
+		"process_id", os.Getpid(),
 		"version", version,
 		"listen", listener.Addr().String(),
 		"artifact_root", store.Root(),
@@ -169,6 +174,8 @@ func run() (runErr error) {
 		"script_api_auth", "none",
 		"event_api_url", cfg.EventAPIURL,
 		"frontier_bindings_root", cfg.FrontierBindingsRoot,
+		"runtime_stderr_log", cfg.RuntimeLogFile,
+		"wgc_trace", cfg.WGCTrace,
 	)
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

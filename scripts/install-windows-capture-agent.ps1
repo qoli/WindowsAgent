@@ -18,6 +18,7 @@ param(
     [int]$Retention = 100,
     [ValidateSet("debug", "info", "warn", "error")]
     [string]$LogLevel = "info",
+    [bool]$WGCTrace = $true,
     [string]$TaskName = "gameGuide Windows Capture Agent",
     [string]$EventListen = "127.0.0.1:8788",
     [string]$EventTaskName = "gameGuide Windows Event Stream"
@@ -217,14 +218,23 @@ $logDir = Join-Path $resolvedDataDir "logs"
 $installedExecutable = Join-Path $binDir "windows-capture-agent.exe"
 $installedRules = Join-Path $resolvedDataDir "Rules"
 $logFile = Join-Path $logDir "agent.jsonl"
+$runtimeLogFile = Join-Path $logDir "runtime-stderr.log"
 $eventLogFile = Join-Path $logDir "event-stream.jsonl"
 $eventDataDir = Join-Path $resolvedDataDir "events"
+$dumpDir = Join-Path $resolvedDataDir "dumps"
 $eventTokenFile = Join-Path $resolvedDataDir "event-api.token"
 $installedEventExecutable = Join-Path $binDir "windows-event-stream.exe"
 $installedOCRRuntime = Join-Path $resolvedDataDir "runtimes\ppocr-w480"
 $legacyScriptAPITokenFile = Join-Path $resolvedDataDir "script-api.token"
 New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+New-Item -ItemType Directory -Path $dumpDir -Force | Out-Null
+
+$dumpRegistryPath = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\windows-capture-agent.exe"
+New-Item -Path $dumpRegistryPath -Force | Out-Null
+New-ItemProperty -Path $dumpRegistryPath -Name "DumpFolder" -PropertyType ExpandString -Value $dumpDir -Force | Out-Null
+New-ItemProperty -Path $dumpRegistryPath -Name "DumpType" -PropertyType DWord -Value 2 -Force | Out-Null
+New-ItemProperty -Path $dumpRegistryPath -Name "DumpCount" -PropertyType DWord -Value 5 -Force | Out-Null
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {
@@ -346,6 +356,8 @@ $agentArguments = @(
     "--retention", (ConvertTo-NativeQuotedArgument $Retention.ToString()),
     "--log-level", (ConvertTo-NativeQuotedArgument $LogLevel),
     "--log-file", (ConvertTo-NativeQuotedArgument $logFile),
+    "--runtime-log-file", (ConvertTo-NativeQuotedArgument $runtimeLogFile),
+    ("--wgc-trace=" + $WGCTrace.ToString().ToLowerInvariant()),
     "--ocr-runtime-root", (ConvertTo-NativeQuotedArgument $installedOCRRuntime),
     "--event-api-url", (ConvertTo-NativeQuotedArgument ("http://" + $EventListen)),
     "--event-token-file", (ConvertTo-NativeQuotedArgument $eventTokenFile)
@@ -475,6 +487,10 @@ if ($process.SessionId -eq 0) {
     legacy_script_api_token_removed = $legacyScriptAPITokenRemoved
     capture_archive = $captureArchive
     log_file = $logFile
+    runtime_log_file = $runtimeLogFile
+    wgc_trace = $WGCTrace
+    crash_dump_dir = $dumpDir
+    crash_dump_registry = $dumpRegistryPath
     listen = $Listen
     process_id = $process.Id
     session_id = $process.SessionId

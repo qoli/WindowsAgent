@@ -197,6 +197,8 @@ Available options:
 --retention           number of artifacts to retain (default 100)
 --log-level           debug, info, warn, or error
 --log-file            optional JSON log file
+--runtime-log-file    optional Go runtime and fatal stderr log file
+--wgc-trace           emit every WGC operation lifecycle at info level
 --frontier-bindings-root  Elite Dangerous bindings directory (default under LOCALAPPDATA)
 ```
 
@@ -310,6 +312,15 @@ The installer does not create an SCM service or modify Windows Firewall.
 It validates that both persistent executables use PE subsystem `Windows GUI`
 before stopping any existing task. A console build is rejected because Task
 Scheduler's `Hidden` setting cannot suppress its console window.
+
+The persistent installation enables bounded crash diagnostics for the capture
+process. Structured WGC lifecycle records are written to `logs/agent.jsonl`;
+Go runtime and fatal stderr output is appended to `logs/runtime-stderr.log`.
+The current user's Windows Error Reporting `LocalDumps` entry is scoped to
+`windows-capture-agent.exe` and retains at most five full dumps under `dumps/`.
+These dumps can contain private process memory and must never be published or
+committed. Pass `-WGCTrace $false` when reinstalling to keep only retry and
+failure records after an incident has been bounded.
 
 For a code-only update of an existing installation, use the transactional
 updater. It checks the GUI subsystem and SHA-256 before stopping the task,

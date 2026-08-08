@@ -25,7 +25,9 @@ func TestParseDefaults(t *testing.T) {
 		cfg.CaptureTimeout != 5*time.Second ||
 		cfg.Retention != 100 ||
 		cfg.LogLevel != slog.LevelInfo ||
-		cfg.LogFile != "" {
+		cfg.LogFile != "" ||
+		cfg.RuntimeLogFile != "" ||
+		cfg.WGCTrace {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }
@@ -40,6 +42,8 @@ func TestParseOverrides(t *testing.T) {
 		"--retention", "7",
 		"--log-level", "debug",
 		"--log-file", filepath.Join(root, "agent.jsonl"),
+		"--runtime-log-file", filepath.Join(root, "runtime-stderr.log"),
+		"--wgc-trace=true",
 		"--ocr-runtime-root", filepath.Join(root, "ocr"),
 		"--event-api-url", "http://127.0.0.1:9876",
 		"--event-token-file", filepath.Join(root, "event.token"),
@@ -55,6 +59,8 @@ func TestParseOverrides(t *testing.T) {
 		cfg.Retention != 7 ||
 		cfg.LogLevel != slog.LevelDebug ||
 		cfg.LogFile != filepath.Join(root, "agent.jsonl") ||
+		cfg.RuntimeLogFile != filepath.Join(root, "runtime-stderr.log") ||
+		!cfg.WGCTrace ||
 		cfg.OCRRuntimeRoot != filepath.Join(root, "ocr") ||
 		cfg.EventAPIURL != "http://127.0.0.1:9876" ||
 		cfg.EventTokenFile != filepath.Join(root, "event.token") ||
@@ -77,6 +83,7 @@ func TestParseRejectsInvalidRequiredState(t *testing.T) {
 		{name: "zero retention", args: []string{"--retention", "0"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "unknown log level", args: []string{"--log-level", "verbose"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative log file", args: []string{"--log-file", "agent.jsonl"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
+		{name: "relative runtime log file", args: []string{"--runtime-log-file", "runtime.log"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative OCR runtime root", args: []string{"--ocr-runtime-root", "runtime"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "empty event API URL", args: []string{"--event-api-url", ""}, localAppData: filepath.Join(string(filepath.Separator), "data")},
 		{name: "relative event token", args: []string{"--event-token-file", "event.token"}, localAppData: filepath.Join(string(filepath.Separator), "data")},
