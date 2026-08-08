@@ -108,9 +108,11 @@ never performs the docking request itself.
 
 `elite-dangerous/request-docking-availability` is a finite composite visual
 Gate for the currently selected Contacts target. Its raw text-regions Action
-scans a broad action area; PP-OCR dynamically locates each quadrilateral and
-rectifies that line before recognition, so a shifted cockpit view is not
-interpreted through a fixed action-row crop. The pure classifier distinguishes
+scans a broad detail-panel area; PP-OCR dynamically locates the stable
+`FACTION` heading and the action lines in the same frame. The classifier only
+accepts Request/Cancel candidates inside a bounded zone relative to that
+anchor, so a shifted cockpit view is not interpreted through a fixed action-row
+crop or a later capture. The pure classifier distinguishes
 `REQUEST DOCKING` from `CANCEL DOCKING` and reads the matched line's same-frame
 left context to tell a visible dark row from the bright fill that means keyboard
 focus is on the row. It returns `AVAILABLE`, `FOCUSED`, `UNAVAILABLE`,
@@ -142,17 +144,18 @@ game-neutral Windows scan-code input driver; never assume Space or any other
 fixed physical key. Successful output includes the binding source, backend,
 scan code, extended-key flag, and configured hold time.
 
-`elite-dangerous/contacts-tab-state` is a finite same-frame observation Action.
-It scans only the fixed filled-highlight region around the `CONTACTS` tab and
-returns `SELECTED`, `NOT_SELECTED`, `ABSENT`, or `UNKNOWN`. It does not OCR the
-header or identify the other active tab. The icon-only `SYSTEM` summary Tag to
-the left of `NAVIGATION` is not one of the four selectable tabs.
+`elite-dangerous/contacts-tab-state` is a finite observation Action. It scans
+four fixed `4x4` header squares and returns the active member of the four-state
+cycle: `SYSTEM`, `NAVIGATION`, `TRANSACTIONS`, or `CONTACTS`. `SYSTEM` is the
+icon-only overview Tab immediately left of `NAVIGATION`. Missing header evidence
+returns `ABSENT`; conflicting or insufficient highlight evidence returns
+`UNKNOWN`. It does not OCR the header or infer state from prior samples.
 
 `elite-dangerous/select-contacts-panel` is an interruptible linear Streaming
-Action. It opens a stably absent Target panel at most once, invokes only the
+Action. It opens a stably absent left panel at most once, invokes only the
 dedicated `NEXT_PANEL` control, and verifies every transition with two current
-CONTACTS-region pixel scans. The four tabs cycle as `NAVIGATION`,
-`TRANSACTIONS`, `CONTACTS`, `TARGET`, then back to `NAVIGATION`. It completes
+header pixel scans. The four tabs cycle as `SYSTEM`, `NAVIGATION`,
+`TRANSACTIONS`, `CONTACTS`, then back to `SYSTEM`. It completes
 only after `CONTACTS` is confirmed twice. Its scope ends before selecting a
 contact, focusing `REQUEST DOCKING`, or requesting docking. Follow its returned
 watch URL; unknown evidence or failure to reach Contacts within three cycles
@@ -163,12 +166,15 @@ Streaming Action. It is not a child phase of `dock-at-station`. The caller must
 provide the exact Station name. In CONTACTS, a filled row proves keyboard focus
 only; angle brackets around the recognized row text, for example
 `< MOONGLOW CITY >`, are the direct Station target-lock evidence. The Action
-sends `SELECT` at most once and only after two current OCR observations prove
-the named visible row is focused. It then requires two current angle-bracketed
-observations before reporting `ACQUIRED`; an already bracketed row reports
-`EXISTING` without input. A missing visible target, ambiguous OCR, or unknown
-focus fails explicitly and never falls back to the first CONTACTS row. The
-Action restores the forward view only when it opened the left panel itself.
+sends `SELECT` only after two current OCR observations prove the named visible
+row is focused. It then requires two current angle-bracketed observations
+before reporting `ACQUIRED`. If four post-input observations remain on the
+same confirmed focused row, it emits that the game rejected the input and
+permits exactly one second `SELECT`; an ambiguous transition or second
+rejection fails explicitly. An already bracketed row reports `EXISTING`
+without input. A missing visible target, ambiguous OCR, or unknown focus fails
+explicitly and never falls back to the first CONTACTS row. The Action restores
+the forward view only when it opened the left panel itself.
 
 `elite-dangerous/lock-destination` is a separate interruptible linear
 Streaming Action for an already-open Navigation detail card. The higher agent

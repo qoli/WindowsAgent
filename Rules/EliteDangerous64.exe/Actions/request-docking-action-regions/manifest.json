@@ -3,9 +3,9 @@
   "title": "Detect Elite Dangerous Contacts action text regions",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
-  "referenceRegion": {"x": 820, "y": 430, "w": 550, "h": 300},
+  "referenceRegion": {"x": 700, "y": 300, "w": 650, "h": 400},
   "sampling": "reference",
-  "maxPixels": 165000,
+  "maxPixels": 260000,
   "leftContextWidth": 128,
   "verticalPadding": 8
 }

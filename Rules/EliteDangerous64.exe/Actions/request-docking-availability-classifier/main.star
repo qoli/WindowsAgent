@@ -3,6 +3,12 @@ MIN_RECOGNITION_CONFIDENCE = 0.50
 MIN_TEXT_SIMILARITY = 0.70
 MIN_TEXT_MARGIN = 0.12
 AMBIGUOUS_TEXT_SIMILARITY = 0.45
+MIN_ANCHOR_SIMILARITY = 0.75
+MIN_ANCHOR_MARGIN = 0.12
+MIN_ACTION_VERTICAL_OFFSET = 4.0
+MAX_ACTION_VERTICAL_OFFSET = 170.0
+MIN_ACTION_HORIZONTAL_OFFSET = -96.0
+MAX_ACTION_HORIZONTAL_OFFSET = 320.0
 FOCUSED_BRIGHT_MINIMUM = 0.10
 VISIBLE_DARK_MINIMUM = 0.08
 OUTPUT_SCALE = 10000.0
@@ -56,17 +62,68 @@ def candidate_for(region, label, expected):
         "score": region["recognitionConfidence"] * text_similarity,
     }
 
-def select_candidate(regions, label, expected):
+def reference_bounds(region):
+    points = region["referencePoints"]
+    if len(points) != 4:
+        return None
+    minimum_x = points[0]["x"]
+    maximum_x = points[0]["x"]
+    minimum_y = points[0]["y"]
+    maximum_y = points[0]["y"]
+    for point in points[1:]:
+        if point["x"] < minimum_x:
+            minimum_x = point["x"]
+        if point["x"] > maximum_x:
+            maximum_x = point["x"]
+        if point["y"] < minimum_y:
+            minimum_y = point["y"]
+        if point["y"] > maximum_y:
+            maximum_y = point["y"]
+    if maximum_x <= minimum_x or maximum_y <= minimum_y:
+        return None
+    return {"left": minimum_x, "top": minimum_y, "right": maximum_x, "bottom": maximum_y}
+
+def select_candidate(regions, label, expected, anchor_bounds=None):
     best = None
     for region in regions:
+        bounds = reference_bounds(region)
+        if bounds == None:
+            continue
+        if anchor_bounds != None:
+            horizontal_offset = bounds["left"] - anchor_bounds["left"]
+            vertical_offset = bounds["top"] - anchor_bounds["bottom"]
+            if horizontal_offset < MIN_ACTION_HORIZONTAL_OFFSET or horizontal_offset > MAX_ACTION_HORIZONTAL_OFFSET:
+                continue
+            if vertical_offset < MIN_ACTION_VERTICAL_OFFSET or vertical_offset > MAX_ACTION_VERTICAL_OFFSET:
+                continue
         candidate = candidate_for(region, label, expected)
+        candidate["bounds"] = bounds
         if best == None or candidate["score"] > best["score"]:
             best = candidate
     return best
 
-def select_candidates(regions):
-    request = select_candidate(regions, "REQUEST", "REQUESTDOCKING")
-    cancel = select_candidate(regions, "CANCEL", "CANCELDOCKING")
+def select_anchor(regions):
+    best = None
+    runner_up = None
+    for region in regions:
+        candidate = candidate_for(region, "FACTION", "FACTION")
+        bounds = reference_bounds(region)
+        if bounds == None:
+            continue
+        candidate["bounds"] = bounds
+        if best == None or candidate["score"] > best["score"]:
+            runner_up = best
+            best = candidate
+        elif runner_up == None or candidate["score"] > runner_up["score"]:
+            runner_up = candidate
+    runner_score = 0.0 if runner_up == None else runner_up["score"]
+    margin = 0.0 if best == None else best["score"] - runner_score
+    accepted = best != None and best["region"]["detectionConfidence"] >= MIN_DETECTION_CONFIDENCE and best["region"]["recognitionConfidence"] >= MIN_RECOGNITION_CONFIDENCE and best["similarity"] >= MIN_ANCHOR_SIMILARITY and margin >= MIN_ANCHOR_MARGIN
+    return best, accepted, margin
+
+def select_candidates(regions, anchor_bounds):
+    request = select_candidate(regions, "REQUEST", "REQUESTDOCKING", anchor_bounds=anchor_bounds)
+    cancel = select_candidate(regions, "CANCEL", "CANCELDOCKING", anchor_bounds=anchor_bounds)
     if request == None or (cancel != None and cancel["score"] > request["score"]):
         return cancel, request
     return request, cancel
@@ -113,23 +170,75 @@ def unknown_result(contacts, reason):
     return {
         "schemaVersion": 1,
         "requestDocking": {"state": "UNKNOWN", "available": None, "focused": None},
-        "source": {"contactsTab": contacts["contactsTab"], "regionCount": None, "text": None, "normalizedText": None, "referencePoints": None, "leftContextRegion": None, "visual": None},
+        "source": {"activeTab": contacts["activeTab"], "searchRegion": None, "ocrTiming": None, "regionCount": None, "anchor": None, "text": None, "normalizedText": None, "referencePoints": None, "leftContextRegion": None, "visual": None},
         "decision": {"accepted": False, "candidate": None, "candidateScore": 0.0, "candidateSimilarity": 0.0, "margin": 0.0, "reason": reason},
+    }
+
+def evidence_unknown_result(contacts, raw, reason, anchor, anchor_margin, candidate=None):
+    regions = raw["regions"]
+    anchor_source = None
+    if anchor != None:
+        anchor_source = {
+            "text": anchor["region"]["text"],
+            "normalizedText": anchor["normalizedText"],
+            "referencePoints": anchor["region"]["referencePoints"],
+            "bounds": anchor["bounds"],
+            "similarity": anchor["similarity"],
+            "margin": anchor_margin,
+        }
+    return {
+        "schemaVersion": 1,
+        "requestDocking": {"state": "UNKNOWN", "available": None, "focused": None},
+        "source": {
+            "activeTab": contacts["activeTab"],
+            "searchRegion": raw["evidence"]["referenceRegion"],
+            "ocrTiming": raw["timing"],
+            "regionCount": len(regions),
+            "anchor": anchor_source,
+            "text": None if candidate == None else candidate["region"]["text"],
+            "normalizedText": None if candidate == None else candidate["normalizedText"],
+            "referencePoints": None if candidate == None else candidate["region"]["referencePoints"],
+            "leftContextRegion": None if candidate == None else candidate["region"]["leftContext"]["referenceRegion"],
+            "visual": None,
+        },
+        "decision": {
+            "accepted": False,
+            "candidate": None if candidate == None else candidate["label"],
+            "candidateScore": 0.0 if candidate == None else candidate["score"],
+            "candidateSimilarity": 0.0 if candidate == None else candidate["similarity"],
+            "margin": 0.0,
+            "anchorMargin": anchor_margin,
+            "reason": reason,
+        },
     }
 
 def main(ctx):
     contacts = ctx.inputs["contacts"]
-    if contacts["contactsTab"]["state"] != "SELECTED":
+    contacts_state = contacts["activeTab"]["state"]
+    if contacts_state not in ["CONTACTS", "UNKNOWN"]:
         return unknown_result(contacts, "CONTACTS_TAB_NOT_SELECTED")
     raw = ctx.inputs["regions"]
     if raw == None:
         return unknown_result(contacts, "TEXT_REGIONS_MISSING")
     regions = raw["regions"]
     meaningful_count = meaningful_region_count(regions)
-    best, runner_up = select_candidates(regions)
+    anchor, anchor_accepted, anchor_margin = select_anchor(regions)
+    if not anchor_accepted:
+        return evidence_unknown_result(contacts, raw, "CONTACTS_ACTION_ANCHOR_NOT_CONFIRMED", anchor, anchor_margin)
+    best, runner_up = select_candidates(regions, anchor["bounds"])
+    unbounded_best, unused_unbounded_runner = select_candidates(regions, None)
+    if best == None and unbounded_best != None and unbounded_best["similarity"] >= AMBIGUOUS_TEXT_SIMILARITY:
+        return evidence_unknown_result(contacts, raw, "ACTION_TEXT_OUTSIDE_ANCHORED_ZONE", anchor, anchor_margin, candidate=unbounded_best)
     runner_score = 0.0 if runner_up == None else runner_up["score"]
     margin = 0.0 if best == None else best["score"] - runner_score
     accepted = best != None and best["region"]["detectionConfidence"] >= MIN_DETECTION_CONFIDENCE and best["region"]["recognitionConfidence"] >= MIN_RECOGNITION_CONFIDENCE and best["similarity"] >= MIN_TEXT_SIMILARITY and margin >= MIN_TEXT_MARGIN
+
+    # Once Auto Dock begins moving the cockpit, the fixed tab probe can be
+    # transiently UNKNOWN even though the dynamic OCR box still confirms
+    # CANCEL DOCKING. Only that one-way post-submit evidence is admitted while
+    # the tab is UNKNOWN; REQUEST and all weaker candidates remain UNKNOWN.
+    if contacts_state == "UNKNOWN" and (not accepted or best["label"] != "CANCEL"):
+        return unknown_result(contacts, "CONTACTS_TAB_NOT_CONFIRMED")
 
     state = "UNKNOWN"
     available = None
@@ -167,8 +276,18 @@ def main(ctx):
         "schemaVersion": 1,
         "requestDocking": {"state": state, "available": available, "focused": focused},
         "source": {
-            "contactsTab": contacts["contactsTab"],
+            "activeTab": contacts["activeTab"],
+            "searchRegion": raw["evidence"]["referenceRegion"],
+            "ocrTiming": raw["timing"],
             "regionCount": len(regions),
+            "anchor": {
+                "text": anchor["region"]["text"],
+                "normalizedText": anchor["normalizedText"],
+                "referencePoints": anchor["region"]["referencePoints"],
+                "bounds": anchor["bounds"],
+                "similarity": anchor["similarity"],
+                "margin": anchor_margin,
+            },
             "text": None if best == None else best["region"]["text"],
             "normalizedText": None if best == None else best["normalizedText"],
             "referencePoints": None if best == None else best["region"]["referencePoints"],
@@ -186,6 +305,14 @@ def main(ctx):
             "minimumRecognitionConfidence": MIN_RECOGNITION_CONFIDENCE,
             "minimumTextSimilarity": MIN_TEXT_SIMILARITY,
             "minimumTextMargin": MIN_TEXT_MARGIN,
+            "minimumAnchorSimilarity": MIN_ANCHOR_SIMILARITY,
+            "minimumAnchorMargin": MIN_ANCHOR_MARGIN,
+            "actionOffsetBounds": {
+                "minimumX": MIN_ACTION_HORIZONTAL_OFFSET,
+                "maximumX": MAX_ACTION_HORIZONTAL_OFFSET,
+                "minimumY": MIN_ACTION_VERTICAL_OFFSET,
+                "maximumY": MAX_ACTION_VERTICAL_OFFSET,
+            },
             "focusedBrightMinimum": FOCUSED_BRIGHT_MINIMUM,
             "visibleDarkMinimum": VISIBLE_DARK_MINIMUM,
             "reason": reason,

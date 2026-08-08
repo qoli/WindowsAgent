@@ -2,16 +2,20 @@
 
 This interruptible linear Streaming Action accepts an exact visible Navigation
 row name and owns the complete interaction from the forward cockpit view. It
-opens the left panel when absent, establishes the CONTACTS tab as an observed
-cycle anchor, moves exactly two `PREVIOUS_PANEL` steps to NAVIGATION, locates
+opens the left panel when absent, reads the active four-state tab directly,
+cycles with `NEXT_PANEL` until NAVIGATION is observed, locates
 the named row through current PP-OCR boxes, moves focus one settled row at a
 time, opens its detail card, activates the confirmed focused `LOCK DESTINATION`
 tile, and requires two angle-bracketed observations of the named row.
 
-An already angle-bracketed row or a confirmed focused `UNLOCK DESTINATION`
-detail returns `EXISTING` without toggling the lock. When the Action opened the
-panel, it restores the forward view on success and registers the same close
-operation as failure compensation.
+Within NAVIGATION, an already angle-bracketed named row is direct destination
+lock evidence and returns `EXISTING`. This meaning is deliberately local to
+NAVIGATION; angle brackets in CONTACTS describe a different ship-target lock.
+For an unlocked row, highlight is only keyboard focus: the Action must move the
+highlight to the named row before `SELECT` may enter its destination detail.
+A confirmed focused `UNLOCK DESTINATION` detail also returns `EXISTING` without
+toggling the lock. When the Action opened the panel, it restores the forward
+view on success and registers the same close operation as failure compensation.
 
 The Action scans only the currently visible Navigation list. A missing target,
 ambiguous OCR match, non-unique focused row, unknown detail label, unexpected

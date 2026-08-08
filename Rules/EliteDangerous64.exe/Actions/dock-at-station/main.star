@@ -2,6 +2,8 @@ UI_SETTLE_MS = 1000
 OBSERVATION_SETTLE_MS = 250
 MONITOR_POLL_MS = 500
 STABLE_ATTEMPTS = 4
+PANEL_STABLE_ATTEMPTS = 8
+PANEL_OBSERVATION_SETTLE_MS = 500
 MAX_PANEL_CYCLES = 3
 MAX_CONTACTS = 16
 REQUEST_UNKNOWN_LIMIT = 4
@@ -50,26 +52,26 @@ def emit_update(phase, sample, contact_index, range_state, distance_meters, requ
 
 def observe_contacts_stable():
     previous = None
-    for attempt in range(STABLE_ATTEMPTS):
+    for attempt in range(PANEL_STABLE_ATTEMPTS):
         observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
-        state = observation["contactsTab"]["state"]
+        state = observation["activeTab"]["state"]
         if state != "UNKNOWN" and state == previous:
             return observation
         previous = None if state == "UNKNOWN" else state
-        if attempt + 1 < STABLE_ATTEMPTS:
-            task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
+        if attempt + 1 < PANEL_STABLE_ATTEMPTS:
+            task.sleep(milliseconds=PANEL_OBSERVATION_SETTLE_MS)
     fail("Contacts tab did not produce two consecutive known observations")
 
 def normalize_range_view(sample):
     contacts = observe_contacts_stable()
-    state = contacts["contactsTab"]["state"]
+    state = contacts["activeTab"]["state"]
     emit_update("NORMALIZING_RANGE_VIEW", sample, 0, None, None, None, None, None, False, 0, 0, 0, reason="CONTACTS_" + state)
     if state != "ABSENT":
         action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
         emit_update("NORMALIZING_RANGE_VIEW", sample, 0, None, None, None, None, None, False, 0, 0, 0, last_command="FOCUS_LEFT_PANEL", reason="CLOSING_LEFT_PANEL")
         task.sleep(milliseconds=UI_SETTLE_MS)
         contacts = observe_contacts_stable()
-        if contacts["contactsTab"]["state"] != "ABSENT":
+        if contacts["activeTab"]["state"] != "ABSENT":
             fail("left panel remained visible before request-docking-range Gate")
     task.sleep(milliseconds=UI_SETTLE_MS)
 
@@ -153,11 +155,11 @@ def open_contacts(sample, range_state, distance_meters):
     emit_update("OPENING_CONTACTS", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, last_command="FOCUS_LEFT_PANEL")
     task.sleep(milliseconds=UI_SETTLE_MS)
     contacts = observe_contacts_stable()
-    state = contacts["contactsTab"]["state"]
+    state = contacts["activeTab"]["state"]
     if state == "ABSENT":
         fail("left panel remained absent after FOCUS_LEFT_PANEL")
     for cycle in range(MAX_PANEL_CYCLES + 1):
-        if state == "SELECTED":
+        if state == "CONTACTS":
             return
         if cycle == MAX_PANEL_CYCLES:
             break
@@ -165,7 +167,7 @@ def open_contacts(sample, range_state, distance_meters):
         emit_update("OPENING_CONTACTS", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, last_command="NEXT_PANEL", reason="CONTACTS_" + state)
         task.sleep(milliseconds=UI_SETTLE_MS)
         contacts = observe_contacts_stable()
-        state = contacts["contactsTab"]["state"]
+        state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("left panel became absent while selecting CONTACTS")
     fail("CONTACTS was not reached within three NEXT_PANEL inputs")
@@ -231,7 +233,7 @@ def close_panel(sample, contact_index, range_state, distance_meters):
     emit_update("CLOSING_PANEL", sample, contact_index, range_state, distance_meters, "DOCKING_ACTIVE", None, None, False, 0, 0, 0, last_command="FOCUS_LEFT_PANEL")
     task.sleep(milliseconds=UI_SETTLE_MS)
     contacts = observe_contacts_stable()
-    if contacts["contactsTab"]["state"] != "ABSENT":
+    if contacts["activeTab"]["state"] != "ABSENT":
         fail("left panel remained visible after docking request")
     task.sleep(milliseconds=UI_SETTLE_MS)
 

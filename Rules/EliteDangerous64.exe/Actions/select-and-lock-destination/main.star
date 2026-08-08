@@ -7,7 +7,7 @@ MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 MIN_TEXT_SIMILARITY = 0.75
 MIN_TEXT_MARGIN = 0.15
-FOCUSED_FILL_MINIMUM = 0.025
+FOCUSED_FILL_MINIMUM = 0.50
 LIST_MIN_Y = 320.0
 LIST_MAX_Y = 760.0
 LIST_MAX_X = 920.0
@@ -95,7 +95,7 @@ def focus_fill_ratio(region):
     for index in range(0, len(pixels), 8):
         red, green, blue = pixel_channels(pixels[index])
         inspected += 1
-        if red >= 60 and green >= 12 and blue <= 40 and red >= green + 10:
+        if red >= 180 and green >= 70 and blue <= 100:
             focused += 1
     return float(focused) / float(inspected)
 
@@ -134,9 +134,12 @@ def inspect_target(raw, target_name):
     locked = "<" in text and ">" in text
     target_fill = focus_fill_ratio(best["region"])
     focused = target_fill != None and target_fill >= FOCUSED_FILL_MINIMUM
+    # These rows belong specifically to NAVIGATION: angle brackets are direct
+    # LOCK DESTINATION evidence here. CONTACTS uses the same glyphs for a
+    # different ship-target concept and is classified by another Action.
     state = "LOCKED" if locked else ("FOCUSED" if focused else "VISIBLE")
     direction = None
-    reason = "ANGLE_BRACKETS_CONFIRMED" if locked else ("TARGET_ROW_FOCUSED" if focused else "TARGET_ROW_VISIBLE")
+    reason = "NAVIGATION_DESTINATION_BRACKETS_CONFIRMED" if locked else ("TARGET_ROW_FOCUSED" if focused else "TARGET_ROW_VISIBLE")
     if not locked and not focused:
         if len(focused_rows) != 1:
             state = "UNKNOWN"
@@ -168,7 +171,7 @@ def observe_contacts_stable():
     previous = None
     for attempt in range(STABLE_ATTEMPTS):
         observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
-        state = observation["contactsTab"]["state"]
+        state = observation["activeTab"]["state"]
         if state != "UNKNOWN" and state == previous:
             return {"observation": observation, "count": attempt + 1}
         previous = None if state == "UNKNOWN" else state
@@ -216,7 +219,7 @@ def restore_owned_panel(target_name, observation, panel_cycles, navigation_count
     action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
     task.sleep(milliseconds=UI_SETTLE_MS)
     stable = observe_contacts_stable()
-    if stable["observation"]["contactsTab"]["state"] != "ABSENT":
+    if stable["observation"]["activeTab"]["state"] != "ABSENT":
         fail("left panel remained visible after restoring the owned view")
     action.clear_on_failure()
     return True
@@ -235,7 +238,7 @@ def main(ctx):
     contacts_stable = observe_contacts_stable()
     observation_count += contacts_stable["count"]
     contacts = contacts_stable["observation"]
-    state = contacts["contactsTab"]["state"]
+    state = contacts["activeTab"]["state"]
     emit_update("OPENING_PANEL", target_name, None, contacts, None, panel_cycles, navigation_count, opened_panel)
     if state == "ABSENT":
         action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
@@ -246,11 +249,11 @@ def main(ctx):
         contacts_stable = observe_contacts_stable()
         observation_count += contacts_stable["count"]
         contacts = contacts_stable["observation"]
-        state = contacts["contactsTab"]["state"]
+        state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("left panel remained absent after FOCUS_LEFT_PANEL")
     for _ in range(MAX_PANEL_CYCLES):
-        if state == "SELECTED":
+        if state == "NAVIGATION":
             break
         action.call(id="elite-dangerous/ui-control", inputs={"control": "NEXT_PANEL"})
         panel_cycles += 1
@@ -259,16 +262,11 @@ def main(ctx):
         contacts_stable = observe_contacts_stable()
         observation_count += contacts_stable["count"]
         contacts = contacts_stable["observation"]
-        state = contacts["contactsTab"]["state"]
+        state = contacts["activeTab"]["state"]
         if state == "ABSENT":
-            fail("Contacts region became absent while cycling the open panel")
-    if state != "SELECTED":
-        fail("CONTACTS was not reached within three NEXT_PANEL inputs")
-
-    for _ in range(2):
-        emit_update("SELECTING_NAVIGATION", target_name, None, contacts, "PREVIOUS_PANEL", panel_cycles, navigation_count, opened_panel)
-        action.call(id="elite-dangerous/ui-control", inputs={"control": "PREVIOUS_PANEL"})
-        task.sleep(milliseconds=UI_SETTLE_MS)
+            fail("Left panel header became absent while selecting NAVIGATION")
+    if state != "NAVIGATION":
+        fail("NAVIGATION was not reached within three NEXT_PANEL inputs")
 
     final_observation = None
     result = None

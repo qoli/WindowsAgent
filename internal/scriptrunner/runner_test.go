@@ -40,7 +40,7 @@ type shipStatusBroker struct {
 }
 
 type contactsTabBroker struct {
-	pixels []any
+	pixels map[string][]any
 	calls  []fixtureObserverCall
 }
 
@@ -90,13 +90,24 @@ func (b *contactsTabBroker) RecordNative(context.Context, NativeRecord) error {
 
 func (b *contactsTabBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
 	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	x, xOK := arguments["x"].(int64)
+	y, yOK := arguments["y"].(int64)
+	w, wOK := arguments["w"].(int64)
+	h, hOK := arguments["h"].(int64)
+	if !xOK || !yOK || !wOK || !hOK {
+		return nil, errors.New("tab sample coordinates are invalid")
+	}
+	pixels, exists := b.pixels[fmt.Sprintf("%d,%d", x, y)]
+	if !exists {
+		return nil, fmt.Errorf("unexpected tab sample at %d,%d", x, y)
+	}
 	return map[string]any{
 		"sampling":        "reference",
 		"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
 		"frame":           map[string]any{"width": int64(3840), "height": int64(2160), "capturedAt": "2026-08-08T01:02:03Z"},
-		"region":          map[string]any{"x": int64(890), "y": int64(286), "w": int64(220), "h": int64(24)},
-		"physicalRegion":  map[string]any{"left": int64(1780), "top": int64(572), "width": int64(440), "height": int64(48)},
-		"image":           map[string]any{"width": int64(220), "height": int64(24), "encoding": "rgb24-packed", "pixels": b.pixels},
+		"region":          map[string]any{"x": x, "y": y, "w": w, "h": h},
+		"physicalRegion":  map[string]any{"left": x * 2, "top": y * 2, "width": w * 2, "height": h * 2},
+		"image":           map[string]any{"width": w, "height": h, "encoding": "rgb24-packed", "pixels": pixels},
 	}, nil
 }
 
@@ -830,29 +841,47 @@ func TestEliteRequestDockingRangeClassifierPreservesUnknownEvidence(t *testing.T
 	}
 }
 
-func TestEliteContactsTabStateClassifiesSelectedNotSelectedAndAbsent(t *testing.T) {
+var contactsTabSampleCoordinates = map[string][2]int64{
+	"SYSTEM":       {328, 295},
+	"NAVIGATION":   {475, 302},
+	"TRANSACTIONS": {720, 298},
+	"CONTACTS":     {929, 296},
+}
+
+func contactsTabSamplePixels(fills map[string]int) map[string][]any {
+	result := make(map[string][]any, len(contactsTabSampleCoordinates))
+	for name, point := range contactsTabSampleCoordinates {
+		pixels := make([]any, 16)
+		for index := range pixels {
+			pixels[index] = uint32(0x202020)
+		}
+		for index := 0; index < fills[name]; index++ {
+			pixels[index] = uint32(0xFFAA00)
+		}
+		result[fmt.Sprintf("%d,%d", point[0], point[1])] = pixels
+	}
+	return result
+}
+
+func TestEliteContactsTabStateClassifiesAllFourTabsAbsentAndAmbiguous(t *testing.T) {
 	for _, test := range []struct {
 		name, wantState string
-		highlighted     int
+		fills           map[string]int
 	}{
-		{name: "selected", wantState: "SELECTED", highlighted: 2800},
-		{name: "not selected", wantState: "NOT_SELECTED", highlighted: 900},
+		{name: "system", wantState: "SYSTEM", fills: map[string]int{"SYSTEM": 16}},
+		{name: "navigation", wantState: "NAVIGATION", fills: map[string]int{"NAVIGATION": 16}},
+		{name: "transactions", wantState: "TRANSACTIONS", fills: map[string]int{"TRANSACTIONS": 16}},
+		{name: "contacts", wantState: "CONTACTS", fills: map[string]int{"CONTACTS": 16}},
 		{name: "absent", wantState: "ABSENT"},
-		{name: "ambiguous", wantState: "UNKNOWN", highlighted: 1800},
+		{name: "insufficient highlight", wantState: "UNKNOWN", fills: map[string]int{"NAVIGATION": 8}},
+		{name: "multiple selected", wantState: "UNKNOWN", fills: map[string]int{"NAVIGATION": 16, "TRANSACTIONS": 16}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			pixels := make([]any, 220*24)
-			for index := range pixels {
-				pixels[index] = uint32(0x202020)
-			}
-			for index := 0; index < test.highlighted; index++ {
-				pixels[index] = uint32(0xFFAA00)
-			}
 			pkg, err := scriptpackage.Load(contactsTabPackageRoot(t), "elite-dangerous/contacts-tab-state")
 			if err != nil {
 				t.Fatal(err)
 			}
-			broker := &contactsTabBroker{pixels: pixels}
+			broker := &contactsTabBroker{pixels: contactsTabSamplePixels(test.fills)}
 			runner, _ := New(broker)
 			output, err := runner.Run(context.Background(), pkg, map[string]any{})
 			if err != nil {
@@ -862,16 +891,58 @@ func TestEliteContactsTabStateClassifiesSelectedNotSelectedAndAbsent(t *testing.
 			if err := json.Unmarshal(output, &result); err != nil {
 				t.Fatal(err)
 			}
-			contacts := result["contactsTab"].(map[string]any)
-			if contacts["state"] != test.wantState {
-				t.Fatalf("contactsTab = %#v", contacts)
+			activeTab := result["activeTab"].(map[string]any)
+			if activeTab["state"] != test.wantState {
+				t.Fatalf("activeTab = %#v", activeTab)
+			}
+			if len(broker.calls) != 4 {
+				t.Fatalf("screen calls = %d, want 4", len(broker.calls))
+			}
+			for _, call := range broker.calls {
+				if call.arguments["w"] != int64(4) || call.arguments["h"] != int64(4) || call.arguments["sampling"] != "reference" {
+					t.Fatalf("screen arguments = %#v", call.arguments)
+				}
 			}
 		})
 	}
 }
 
-func requestDockingRegionsInput(text string, detection, recognition float64, bright, dark int) map[string]any {
+func TestEliteContactsTabStateRejectsIncompletePixelEvidence(t *testing.T) {
+	pkg, err := scriptpackage.Load(contactsTabPackageRoot(t), "elite-dangerous/contacts-tab-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pixels := contactsTabSamplePixels(nil)
+	pixels["328,295"] = make([]any, 10)
+	broker := &contactsTabBroker{pixels: pixels}
+	runner, _ := New(broker)
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "LEFT_PANEL_TAB_EVIDENCE_INVALID") || !strings.Contains(err.Error(), "pixel count is incomplete") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func requestDockingReferencePoints(left, top float64) []any {
+	return []any{
+		map[string]any{"x": left, "y": top},
+		map[string]any{"x": left + 140, "y": top},
+		map[string]any{"x": left + 140, "y": top + 24},
+		map[string]any{"x": left, "y": top + 24},
+	}
+}
+
+func requestDockingRegionsInputAt(text string, detection, recognition float64, bright, dark int, offsetX, offsetY float64, includeAnchor bool) map[string]any {
 	regions := []any{}
+	if includeAnchor {
+		regions = append(regions, map[string]any{
+			"points": []any{}, "referencePoints": requestDockingReferencePoints(900+offsetX, 500+offsetY),
+			"detectionConfidence": .94, "text": "FACTION", "recognitionConfidence": .99,
+			"leftContext": map[string]any{
+				"x": int64(0), "y": int64(0), "w": int64(1), "h": int64(1), "pixels": []any{uint32(0x202020)},
+				"referenceRegion": map[string]any{"x": 899.0 + offsetX, "y": 500.0 + offsetY, "w": 1.0, "h": 24.0},
+			},
+		})
+	}
 	if text != "" {
 		pixels := make([]any, 100*50)
 		for index := range pixels {
@@ -884,18 +955,25 @@ func requestDockingRegionsInput(text string, detection, recognition float64, bri
 			pixels[index] = uint32(0x501E10)
 		}
 		regions = append(regions, map[string]any{
-			"points": []any{}, "referencePoints": []any{},
+			"points": []any{}, "referencePoints": requestDockingReferencePoints(905+offsetX, 560+offsetY),
 			"detectionConfidence": detection, "text": text, "recognitionConfidence": recognition,
 			"leftContext": map[string]any{
 				"x": int64(0), "y": int64(0), "w": int64(100), "h": int64(50), "pixels": pixels,
-				"referenceRegion": map[string]any{"x": 820.0, "y": 543.0, "w": 100.0, "h": 50.0},
+				"referenceRegion": map[string]any{"x": 805.0 + offsetX, "y": 552.0 + offsetY, "w": 100.0, "h": 50.0},
 			},
 		})
 	}
 	return map[string]any{
 		"schemaVersion": int64(1), "regions": regions,
-		"evidence": map[string]any{}, "models": map[string]any{}, "timing": map[string]any{},
+		"evidence": map[string]any{
+			"referenceRegion": map[string]any{"x": 700.0, "y": 300.0, "w": 650.0, "h": 400.0},
+		},
+		"models": map[string]any{}, "timing": map[string]any{"ocrTotalMs": 100.0},
 	}
+}
+
+func requestDockingRegionsInput(text string, detection, recognition float64, bright, dark int) map[string]any {
+	return requestDockingRegionsInputAt(text, detection, recognition, bright, dark, 0, 0, true)
 }
 
 func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels(t *testing.T) {
@@ -906,7 +984,7 @@ func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels
 	}{
 		{name: "available", text: "REQUEST DOCKING", detection: .86, recognition: .99, dark: 625, want: "AVAILABLE"},
 		{name: "focused", text: "REQUEST DOCKIN", detection: .86, recognition: .91, bright: 750, want: "FOCUSED"},
-		{name: "empty action area", want: "UNKNOWN"},
+		{name: "anchored action absent", want: "UNAVAILABLE"},
 		{name: "already active", text: "CANCEL DOCKING", detection: .84, recognition: .95, dark: 625, want: "DOCKING_ACTIVE"},
 		{name: "unrelated text proves absent", text: "INTERNAL SECURITY", detection: .90, recognition: .94, want: "UNAVAILABLE"},
 		{name: "weak plausible text remains unknown", text: "REQUEST DOCK", detection: .85, recognition: .20, dark: 625, want: "UNKNOWN"},
@@ -918,7 +996,7 @@ func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels
 			}
 			inputs := map[string]any{
 				"contacts": map[string]any{
-					"contactsTab": map[string]any{"state": "SELECTED", "selected": true},
+					"activeTab": map[string]any{"state": "CONTACTS"},
 				},
 				"regions": requestDockingRegionsInput(test.text, test.detection, test.recognition, test.bright, test.dark),
 			}
@@ -939,13 +1017,74 @@ func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels
 	}
 }
 
+func TestEliteRequestDockingAvailabilityAlignsActionZoneToShiftedFactionAnchor(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := New(&fixtureBroker{})
+	for _, offset := range [][2]float64{{0, 0}, {-140, -95}, {170, 110}} {
+		inputs := map[string]any{
+			"contacts": map[string]any{"activeTab": map[string]any{"state": "CONTACTS"}},
+			"regions":  requestDockingRegionsInputAt("REQUEST DOCKING", .90, .98, 0, 625, offset[0], offset[1], true),
+		}
+		output, err := runner.Run(context.Background(), pkg, inputs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(output), `"state":"AVAILABLE"`) || !strings.Contains(string(output), `"reason":"REQUEST_DOCKING_VISIBLE"`) {
+			t.Fatalf("offset=%v output=%s", offset, output)
+		}
+	}
+}
+
+func TestEliteRequestDockingAvailabilityRequiresCurrentFrameFactionAnchor(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := New(&fixtureBroker{})
+	inputs := map[string]any{
+		"contacts": map[string]any{"activeTab": map[string]any{"state": "CONTACTS"}},
+		"regions":  requestDockingRegionsInputAt("REQUEST DOCKING", .90, .98, 0, 625, 0, 0, false),
+	}
+	output, err := runner.Run(context.Background(), pkg, inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), `"state":"UNKNOWN"`) || !strings.Contains(string(output), `"reason":"CONTACTS_ACTION_ANCHOR_NOT_CONFIRMED"`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteRequestDockingAvailabilityRejectsPlausibleTextOutsideAnchoredZone(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := requestDockingRegionsInputAt("REQUEST DOCKING", .90, .98, 0, 625, 0, 0, true)
+	regions := input["regions"].([]any)
+	regions[1].(map[string]any)["referencePoints"] = requestDockingReferencePoints(300, 860)
+	runner, _ := New(&fixtureBroker{})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{
+		"contacts": map[string]any{"activeTab": map[string]any{"state": "CONTACTS"}},
+		"regions":  input,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), `"state":"UNKNOWN"`) || !strings.Contains(string(output), `"reason":"ACTION_TEXT_OUTSIDE_ANCHORED_ZONE"`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
 func TestEliteRequestDockingAvailabilityStopsBeforeButtonEvidenceWhenContactsIsNotSelected(t *testing.T) {
 	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
 	if err != nil {
 		t.Fatal(err)
 	}
 	inputs := map[string]any{
-		"contacts": map[string]any{"contactsTab": map[string]any{"state": "ABSENT", "selected": nil}},
+		"contacts": map[string]any{"activeTab": map[string]any{"state": "ABSENT"}},
 		"regions":  nil,
 	}
 	runner, _ := New(&fixtureBroker{})
@@ -955,6 +1094,32 @@ func TestEliteRequestDockingAvailabilityStopsBeforeButtonEvidenceWhenContactsIsN
 	}
 	if !strings.Contains(string(output), `"state":"UNKNOWN"`) || !strings.Contains(string(output), `"reason":"CONTACTS_TAB_NOT_SELECTED"`) {
 		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteRequestDockingAvailabilityAcceptsCancelDuringTransientTabDrift(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := New(&fixtureBroker{})
+	for _, test := range []struct {
+		text, wantState, wantReason string
+	}{
+		{text: "CANCEL DOCKING", wantState: "DOCKING_ACTIVE", wantReason: "CANCEL_DOCKING_CONFIRMED"},
+		{text: "REQUEST DOCKING", wantState: "UNKNOWN", wantReason: "CONTACTS_TAB_NOT_CONFIRMED"},
+	} {
+		inputs := map[string]any{
+			"contacts": map[string]any{"activeTab": map[string]any{"state": "UNKNOWN"}},
+			"regions":  requestDockingRegionsInput(test.text, .90, .98, 0, 625),
+		}
+		output, err := runner.Run(context.Background(), pkg, inputs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(output), `"state":"`+test.wantState+`"`) || !strings.Contains(string(output), `"reason":"`+test.wantReason+`"`) {
+			t.Fatalf("text=%q output=%s", test.text, output)
+		}
 	}
 }
 

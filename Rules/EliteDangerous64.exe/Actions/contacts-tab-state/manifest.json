@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "version": 1,
-  "title": "Read Elite Dangerous Contacts tab selection",
+  "version": 3,
+  "title": "Read Elite Dangerous left-panel active tab",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
@@ -10,7 +10,7 @@
   "permissions": {
     "memory": null,
     "file": null,
-    "screen": {"operations": ["readRegion"], "maxCalls": 1, "maxPixels": 5280}
+    "screen": {"operations": ["readRegion"], "maxCalls": 4, "maxPixels": 64}
   },
   "limits": {"wallTimeMs": 10000, "maxSteps": 1000000, "maxResultBytes": 4096, "maxLogBytes": 2048}
 }

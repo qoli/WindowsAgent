@@ -1,26 +1,29 @@
-ROI_X = 890
-ROI_Y = 286
-ROI_WIDTH = 220
-ROI_HEIGHT = 24
-SELECTED_MINIMUM = 0.42
-NOT_SELECTED_MINIMUM = 0.08
-NOT_SELECTED_MAXIMUM = 0.30
-ABSENT_MAXIMUM = 0.01
+SAMPLE_SIZE = 4
+SELECTED_MINIMUM = 0.75
+INACTIVE_MAXIMUM = 0.25
+ABSENT_MAXIMUM = 0.125
 OUTPUT_SCALE = 10000.0
+
+TAB_POINTS = [
+    {"name": "SYSTEM", "x": 328, "y": 295},
+    {"name": "NAVIGATION", "x": 475, "y": 302},
+    {"name": "TRANSACTIONS", "x": 720, "y": 298},
+    {"name": "CONTACTS", "x": 929, "y": 296},
+]
 
 def is_highlight(red, green, blue):
     return red >= 180 and green >= 70 and green <= 220 and blue <= 90 and red >= green + 45
 
-def main(ctx):
-    sample = observer.screen.read_region(x=ROI_X, y=ROI_Y, w=ROI_WIDTH, h=ROI_HEIGHT, sampling="reference")
+def read_tab_sample(point):
+    sample = observer.screen.read_region(x=point["x"], y=point["y"], w=SAMPLE_SIZE, h=SAMPLE_SIZE, sampling="reference")
     if sample["sampling"] != "reference":
-        return job.fail(code="CONTACTS_TAB_EVIDENCE_INVALID", message="Contacts tab sampling is not reference")
+        return job.fail(code="LEFT_PANEL_TAB_EVIDENCE_INVALID", message=point["name"] + " tab sampling is not reference")
     image = sample["image"]
-    if image["width"] != ROI_WIDTH or image["height"] != ROI_HEIGHT or image["encoding"] != "rgb24-packed":
-        return job.fail(code="CONTACTS_TAB_EVIDENCE_INVALID", message="Contacts tab image shape or encoding is invalid")
+    if image["width"] != SAMPLE_SIZE or image["height"] != SAMPLE_SIZE or image["encoding"] != "rgb24-packed":
+        return job.fail(code="LEFT_PANEL_TAB_EVIDENCE_INVALID", message=point["name"] + " tab image shape or encoding is invalid")
     pixels = image["pixels"]
-    if len(pixels) != ROI_WIDTH * ROI_HEIGHT:
-        return job.fail(code="CONTACTS_TAB_EVIDENCE_INVALID", message="Contacts tab pixel count is incomplete")
+    if len(pixels) != SAMPLE_SIZE * SAMPLE_SIZE:
+        return job.fail(code="LEFT_PANEL_TAB_EVIDENCE_INVALID", message=point["name"] + " tab pixel count is incomplete")
 
     highlighted = 0
     for pixel in pixels:
@@ -30,35 +33,80 @@ def main(ctx):
         if is_highlight(red, green, blue):
             highlighted += 1
     ratio = math.round(float(highlighted) / float(len(pixels)) * OUTPUT_SCALE) / OUTPUT_SCALE
+    return {
+        "name": point["name"],
+        "referenceRegion": {"x": point["x"], "y": point["y"], "w": SAMPLE_SIZE, "h": SAMPLE_SIZE},
+        "physicalRegion": sample["physicalRegion"],
+        "capturedAt": sample["frame"]["capturedAt"],
+        "frameWidth": sample["frame"]["width"],
+        "frameHeight": sample["frame"]["height"],
+        "coordinateSpace": sample["coordinateSpace"],
+        "highlightRatio": ratio,
+    }
+
+def main(ctx):
+    samples = {}
+    ratios = {}
+    selected_tabs = []
+    all_absent = True
+    first = None
+    last = None
+
+    for point in TAB_POINTS:
+        sample = read_tab_sample(point)
+        if first == None:
+            first = sample
+        elif sample["frameWidth"] != first["frameWidth"] or sample["frameHeight"] != first["frameHeight"] or sample["coordinateSpace"] != first["coordinateSpace"]:
+            return job.fail(code="LEFT_PANEL_TAB_EVIDENCE_INVALID", message="tab samples do not share one screen geometry")
+        last = sample
+        name = point["name"]
+        ratio = sample["highlightRatio"]
+        samples[name] = {
+            "referenceRegion": sample["referenceRegion"],
+            "physicalRegion": sample["physicalRegion"],
+            "capturedAt": sample["capturedAt"],
+            "highlightRatio": ratio,
+        }
+        ratios[name] = ratio
+        if ratio > ABSENT_MAXIMUM:
+            all_absent = False
+        if ratio >= SELECTED_MINIMUM:
+            selected_tabs.append(name)
 
     state = "UNKNOWN"
-    selected = None
-    reason = "HIGHLIGHT_RATIO_AMBIGUOUS"
-    if ratio <= ABSENT_MAXIMUM:
+    reason = "TAB_HIGHLIGHT_AMBIGUOUS"
+    if all_absent:
         state = "ABSENT"
-        reason = "CONTACTS_REGION_ABSENT"
-    elif ratio >= SELECTED_MINIMUM:
-        state = "SELECTED"
-        selected = True
-        reason = "CONTACTS_FILL_CONFIRMED"
-    elif ratio >= NOT_SELECTED_MINIMUM and ratio <= NOT_SELECTED_MAXIMUM:
-        state = "NOT_SELECTED"
-        selected = False
-        reason = "CONTACTS_FILL_NOT_SELECTED"
+        reason = "LEFT_PANEL_HEADER_ABSENT"
+    elif len(selected_tabs) == 1:
+        candidate = selected_tabs[0]
+        inactive_valid = True
+        for name in ratios:
+            if name != candidate and ratios[name] > INACTIVE_MAXIMUM:
+                inactive_valid = False
+        if inactive_valid:
+            state = candidate
+            reason = candidate + "_POINT_CONFIRMED"
+        else:
+            reason = "MULTIPLE_TAB_POINTS_AMBIGUOUS"
+    elif len(selected_tabs) > 1:
+        reason = "MULTIPLE_SELECTED_TAB_POINTS_AMBIGUOUS"
 
     return {
-        "schemaVersion": 1,
-        "profile": {"width": sample["frame"]["width"], "height": sample["frame"]["height"], "capturedAt": sample["frame"]["capturedAt"]},
-        "coordinateSpace": sample["coordinateSpace"],
-        "region": {"x": ROI_X, "y": ROI_Y, "w": ROI_WIDTH, "h": ROI_HEIGHT},
-        "physicalRegion": sample["physicalRegion"],
-        "contactsTab": {
+        "schemaVersion": 3,
+        "profile": {
+            "width": first["frameWidth"],
+            "height": first["frameHeight"],
+            "capturedFrom": first["capturedAt"],
+            "capturedThrough": last["capturedAt"],
+        },
+        "coordinateSpace": first["coordinateSpace"],
+        "samples": samples,
+        "activeTab": {
             "state": state,
-            "selected": selected,
-            "highlightRatio": ratio,
+            "highlightRatios": ratios,
             "selectedMinimum": SELECTED_MINIMUM,
-            "notSelectedMinimum": NOT_SELECTED_MINIMUM,
-            "notSelectedMaximum": NOT_SELECTED_MAXIMUM,
+            "inactiveMaximum": INACTIVE_MAXIMUM,
             "absentMaximum": ABSENT_MAXIMUM,
             "reason": reason,
         },

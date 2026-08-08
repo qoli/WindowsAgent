@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Elite Dangerous select Station target",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

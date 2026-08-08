@@ -11,6 +11,8 @@ import (
 type selectAndLockDestinationCaller struct {
 	contacts []string
 	regions  []json.RawMessage
+	buttons  []json.RawMessage
+	details  []json.RawMessage
 	controls []string
 }
 
@@ -22,13 +24,27 @@ func (c *selectAndLockDestinationCaller) Call(_ context.Context, id string, inpu
 		}
 		state := c.contacts[0]
 		c.contacts = c.contacts[1:]
-		return json.Marshal(map[string]any{"contactsTab": map[string]any{"state": state}})
+		return json.Marshal(map[string]any{"activeTab": map[string]any{"state": state}})
 	case "elite-dangerous/navigation-list-text-regions":
 		if len(c.regions) == 0 {
 			return nil, errors.New("unexpected Navigation OCR observation")
 		}
 		value := c.regions[0]
 		c.regions = c.regions[1:]
+		return value, nil
+	case "elite-dangerous/lock-destination-button-state":
+		if len(c.buttons) == 0 {
+			return nil, errors.New("unexpected lock button observation")
+		}
+		value := c.buttons[0]
+		c.buttons = c.buttons[1:]
+		return value, nil
+	case "elite-dangerous/lock-destination-text-regions":
+		if len(c.details) == 0 {
+			return nil, errors.New("unexpected lock detail observation")
+		}
+		value := c.details[0]
+		c.details = c.details[1:]
 		return value, nil
 	case "elite-dangerous/ui-control":
 		control, ok := inputs["control"].(string)
@@ -59,6 +75,29 @@ func navigationTargetRow(text string) json.RawMessage {
 	return value
 }
 
+func navigationRows(targetText string, targetY int, focusedText string, focusedY int) json.RawMessage {
+	row := func(text string, y int, focused bool) map[string]any {
+		pixel := 0
+		if focused {
+			pixel = 0xff9000
+		}
+		return map[string]any{
+			"detectionConfidence": 0.92, "recognitionConfidence": 0.98, "text": text,
+			"referencePoints": []any{
+				map[string]any{"x": 520, "y": y}, map[string]any{"x": 700, "y": y},
+				map[string]any{"x": 700, "y": y + 30}, map[string]any{"x": 520, "y": y + 30},
+			},
+			"leftContext": map[string]any{"w": 1, "h": 1, "pixels": []any{pixel}},
+		}
+	}
+	regions := []any{row(targetText, targetY, targetText == focusedText)}
+	if targetText != focusedText {
+		regions = append(regions, row(focusedText, focusedY, true))
+	}
+	value, _ := json.Marshal(map[string]any{"schemaVersion": 1, "regions": regions})
+	return value
+}
+
 func loadEliteSelectAndLockDestinationPackage(t *testing.T) *Package {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "select-and-lock-destination"))
@@ -72,29 +111,35 @@ func loadEliteSelectAndLockDestinationPackage(t *testing.T) *Package {
 	return pkg
 }
 
-func TestEliteSelectAndLockDestinationOwnsPanelAndAcceptsExistingNamedLock(t *testing.T) {
+func TestEliteSelectAndLockDestinationMovesHighlightBeforeSelectingTarget(t *testing.T) {
 	caller := &selectAndLockDestinationCaller{
-		contacts: []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED", "ABSENT", "ABSENT"},
-		regions:  []json.RawMessage{navigationTargetRow("< NAV BEACON >"), navigationTargetRow("< NAV BEACON >")},
+		contacts: []string{"ABSENT", "ABSENT", "NAVIGATION", "NAVIGATION", "ABSENT", "ABSENT"},
+		regions: []json.RawMessage{
+			navigationRows("MOONGLOW CITY", 460, "< NAV BEACON >", 520), navigationRows("MOONGLOW CITY", 460, "< NAV BEACON >", 520),
+			navigationRows("MOONGLOW CITY", 460, "MOONGLOW CITY", 460), navigationRows("MOONGLOW CITY", 460, "MOONGLOW CITY", 460),
+			navigationRows("< MOONGLOW CITY >", 460, "< MOONGLOW CITY >", 460), navigationRows("< MOONGLOW CITY >", 460, "< MOONGLOW CITY >", 460),
+		},
+		buttons: []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details: []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
 	}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "NAV BEACON"}, caller, &fixtureReporter{},
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "MOONGLOW CITY"}, caller, &fixtureReporter{},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"FOCUS_LEFT_PANEL", "PREVIOUS_PANEL", "PREVIOUS_PANEL", "FOCUS_LEFT_PANEL"}
+	wantControls := []string{"FOCUS_LEFT_PANEL", "UP", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
 	if !equalStrings(caller.controls, wantControls) {
 		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
 	}
-	if !contains(string(output), `"result":"EXISTING"`) || !contains(string(output), `"restoredView":true`) || !contains(string(output), `"targetLocked":true`) {
+	if !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"navigationCount":1`) || !contains(string(output), `"rowSelectSent":true`) || !contains(string(output), `"lockSelectSent":true`) || !contains(string(output), `"restoredView":true`) {
 		t.Fatalf("output=%s", output)
 	}
 }
 
 func TestEliteSelectAndLockDestinationFailsWithoutNamedVisibleTarget(t *testing.T) {
 	caller := &selectAndLockDestinationCaller{
-		contacts: []string{"SELECTED", "SELECTED"},
+		contacts: []string{"NAVIGATION", "NAVIGATION"},
 		regions: []json.RawMessage{
 			navigationTargetRow("LHS 6050"), navigationTargetRow("LHS 6050"),
 			navigationTargetRow("LHS 6050"), navigationTargetRow("LHS 6050"),
@@ -110,6 +155,30 @@ func TestEliteSelectAndLockDestinationFailsWithoutNamedVisibleTarget(t *testing.
 		if control == "SELECT" {
 			t.Fatalf("missing target triggered SELECT: controls=%v", caller.controls)
 		}
+	}
+}
+
+func TestEliteSelectAndLockDestinationUsesObservedTabStatesToReachNavigation(t *testing.T) {
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{
+			"CONTACTS", "CONTACTS",
+			"SYSTEM", "SYSTEM",
+			"NAVIGATION", "NAVIGATION",
+		},
+		regions: []json.RawMessage{navigationRows("< NAV BEACON >", 480, "< NAV BEACON >", 480), navigationRows("< NAV BEACON >", 480, "< NAV BEACON >", 480)},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "NAV BEACON"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"NEXT_PANEL", "NEXT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) {
+		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
+	}
+	if !contains(string(output), `"result":"EXISTING"`) || !contains(string(output), `"restoredView":false`) {
+		t.Fatalf("output=%s", output)
 	}
 }
 

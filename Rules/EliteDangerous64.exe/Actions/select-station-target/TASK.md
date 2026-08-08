@@ -12,10 +12,13 @@ target lock.
 
 When the named row is visible, the Action may move focus one settled `UP` or
 `DOWN` step at a time according to current row geometry. It sends `SELECT`
-exactly once only after two consecutive observations prove that the named row
-is focused, then requires two consecutive angle-bracketed observations. If the
-row is outside the current visible list, OCR is ambiguous, or focus cannot be
-proved, the Action fails explicitly instead of scanning or selecting another
+only after two consecutive observations prove that the named row is focused,
+then waits for two consecutive angle-bracketed observations. If four
+post-input observations remain on the same confirmed focused row, the game did
+not accept the first input; the Action emits that evidence and permits exactly
+one second `SELECT`. Any ambiguous transition or a second rejected input fails
+explicitly. If the row is outside the current visible list, OCR is ambiguous,
+or focus cannot be proved, it fails instead of scanning or selecting another
 contact blindly.
 
 The Action closes the left panel on success or failure only when it opened the

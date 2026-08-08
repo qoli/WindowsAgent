@@ -1,6 +1,8 @@
 UI_SETTLE_MS = 1000
 OBSERVATION_SETTLE_MS = 250
 STABLE_ATTEMPTS = 4
+POST_SELECT_ATTEMPTS = 4
+MAX_SELECT_ATTEMPTS = 2
 MAX_PANEL_CYCLES = 3
 MAX_NAVIGATION = 8
 MIN_DETECTION_CONFIDENCE = 0.45
@@ -209,13 +211,48 @@ def observe_target_stable(station_name, phase, panel_cycles, navigation_count, o
             task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
     fail("Station target did not produce two consecutive known observations")
 
+def verify_target_lock(station_name, panel_cycles, navigation_count, opened_panel):
+    observation_count = 0
+    final = None
+    for select_attempt in range(MAX_SELECT_ATTEMPTS):
+        previous_locked = None
+        focused_count = 0
+        for verify_attempt in range(POST_SELECT_ATTEMPTS):
+            observation = observe_target(station_name)
+            observation_count += 1
+            final = observation
+            emit_update("VERIFYING_LOCK", station_name, observation["state"], observation, None, panel_cycles, navigation_count, opened_panel)
+            key = observation["state"] + ":" + str(observation["text"])
+            if observation["state"] == "LOCKED":
+                focused_count = 0
+                if key == previous_locked:
+                    return {"observation": observation, "count": observation_count, "selectAttemptCount": select_attempt + 1}
+                previous_locked = key
+            else:
+                previous_locked = None
+                if observation["state"] == "FOCUSED":
+                    focused_count += 1
+                else:
+                    focused_count = 0
+            if verify_attempt + 1 < POST_SELECT_ATTEMPTS:
+                task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
+        if select_attempt + 1 >= MAX_SELECT_ATTEMPTS:
+            break
+        if final["state"] != "FOCUSED" or focused_count < 2:
+            fail("Station target transition remained ambiguous after SELECT: " + str(final))
+        stream.activity(message="Station target SELECT was not accepted; retrying once", level="warning")
+        emit_update("SELECTING_TARGET", station_name, final["state"], final, "SELECT", panel_cycles, navigation_count, opened_panel)
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
+        task.sleep(milliseconds=UI_SETTLE_MS)
+    fail("two bounded SELECT attempts were not followed by two angle-bracketed Station target observations: " + str(final))
+
 def observe_contacts_stable():
     previous = None
     count = 0
     for attempt in range(STABLE_ATTEMPTS):
         observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
         count += 1
-        state = observation["contactsTab"]["state"]
+        state = observation["activeTab"]["state"]
         if state != "UNKNOWN" and state == previous:
             return {"observation": observation, "count": count}
         previous = None if state == "UNKNOWN" else state
@@ -230,7 +267,7 @@ def restore_owned_panel(station_name, state, observation, panel_cycles, navigati
     action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
     task.sleep(milliseconds=UI_SETTLE_MS)
     stable = observe_contacts_stable()
-    if stable["observation"]["contactsTab"]["state"] != "ABSENT":
+    if stable["observation"]["activeTab"]["state"] != "ABSENT":
         fail("left panel remained visible after restoring the owned view")
     action.clear_on_failure()
     return True
@@ -242,11 +279,12 @@ def main(ctx):
     navigation_count = 0
     observation_count = 0
     select_sent = False
+    select_attempt_count = 0
 
     contacts_stable = observe_contacts_stable()
     observation_count += contacts_stable["count"]
     contacts = contacts_stable["observation"]
-    state = contacts["contactsTab"]["state"]
+    state = contacts["activeTab"]["state"]
     emit_update("OPENING_CONTACTS", station_name, None, contacts, None, panel_cycles, navigation_count, opened_panel)
     if state == "ABSENT":
         action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
@@ -257,11 +295,11 @@ def main(ctx):
         contacts_stable = observe_contacts_stable()
         observation_count += contacts_stable["count"]
         contacts = contacts_stable["observation"]
-        state = contacts["contactsTab"]["state"]
+        state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("left panel remained absent after FOCUS_LEFT_PANEL")
     for _ in range(MAX_PANEL_CYCLES):
-        if state == "SELECTED":
+        if state == "CONTACTS":
             break
         action.call(id="elite-dangerous/ui-control", inputs={"control": "NEXT_PANEL"})
         panel_cycles += 1
@@ -270,10 +308,10 @@ def main(ctx):
         contacts_stable = observe_contacts_stable()
         observation_count += contacts_stable["count"]
         contacts = contacts_stable["observation"]
-        state = contacts["contactsTab"]["state"]
+        state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("Contacts scan region became absent after NEXT_PANEL")
-    if state != "SELECTED":
+    if state != "CONTACTS":
         fail("CONTACTS was not reached within three NEXT_PANEL inputs")
 
     final_observation = None
@@ -291,11 +329,10 @@ def main(ctx):
             action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
             select_sent = True
             task.sleep(milliseconds=UI_SETTLE_MS)
-            verified = observe_target_stable(station_name, "VERIFYING_LOCK", panel_cycles, navigation_count, opened_panel)
+            verified = verify_target_lock(station_name, panel_cycles, navigation_count, opened_panel)
             observation_count += verified["count"]
+            select_attempt_count = verified["selectAttemptCount"]
             final_observation = verified["observation"]
-            if final_observation["state"] != "LOCKED":
-                fail("SELECT was not followed by two consecutive angle-bracketed Station target observations")
             result = "ACQUIRED"
             break
         if target["state"] != "VISIBLE" or target["direction"] == None:
@@ -321,6 +358,7 @@ def main(ctx):
         "stationName": station_name,
         "targetLocked": True,
         "selectSent": select_sent,
+        "selectAttemptCount": select_attempt_count,
         "openedPanel": opened_panel,
         "restoredView": restored_view,
         "panelCycleCount": panel_cycles,

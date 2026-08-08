@@ -90,9 +90,13 @@ func TestValidateManifestAcceptsScreenOnlyPermission(t *testing.T) {
 		t.Fatal("manifest accepted a game-specific screen operation")
 	}
 	manifest.Permissions.Screen.Operations = []string{"readRegion"}
-	manifest.Permissions.Screen.MaxCalls = 2
+	manifest.Permissions.Screen.MaxCalls = 4
+	if err := validateManifest(manifest); err != nil {
+		t.Fatalf("manifest rejected bounded multiple screen captures: %v", err)
+	}
+	manifest.Permissions.Screen.MaxCalls = 17
 	if err := validateManifest(manifest); err == nil {
-		t.Fatal("manifest accepted multiple non-atomic screen captures")
+		t.Fatal("manifest accepted more than 16 screen captures")
 	}
 }
 

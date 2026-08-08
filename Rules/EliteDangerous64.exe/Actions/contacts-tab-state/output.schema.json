@@ -2,26 +2,56 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "contactsTab"],
+  "required": ["schemaVersion", "profile", "coordinateSpace", "samples", "activeTab"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 3},
     "profile": {"type": "object"},
     "coordinateSpace": {"type": "object"},
-    "region": {"type": "object"},
-    "physicalRegion": {"type": "object"},
-    "contactsTab": {
+    "samples": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "selected", "highlightRatio", "selectedMinimum", "notSelectedMinimum", "notSelectedMaximum", "absentMaximum", "reason"],
+      "required": ["SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS"],
       "properties": {
-        "state": {"enum": ["SELECTED", "NOT_SELECTED", "ABSENT", "UNKNOWN"]},
-        "selected": {"type": ["boolean", "null"]},
-        "highlightRatio": {"type": "number", "minimum": 0, "maximum": 1},
-        "selectedMinimum": {"const": 0.42},
-        "notSelectedMinimum": {"const": 0.08},
-        "notSelectedMaximum": {"const": 0.3},
-        "absentMaximum": {"const": 0.01},
+        "SYSTEM": {"$ref": "#/$defs/sample"},
+        "NAVIGATION": {"$ref": "#/$defs/sample"},
+        "TRANSACTIONS": {"$ref": "#/$defs/sample"},
+        "CONTACTS": {"$ref": "#/$defs/sample"}
+      }
+    },
+    "activeTab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "highlightRatios", "selectedMinimum", "inactiveMaximum", "absentMaximum", "reason"],
+      "properties": {
+        "state": {"enum": ["SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS", "ABSENT", "UNKNOWN"]},
+        "highlightRatios": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS"],
+          "properties": {
+            "SYSTEM": {"type": "number", "minimum": 0, "maximum": 1},
+            "NAVIGATION": {"type": "number", "minimum": 0, "maximum": 1},
+            "TRANSACTIONS": {"type": "number", "minimum": 0, "maximum": 1},
+            "CONTACTS": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        },
+        "selectedMinimum": {"const": 0.75},
+        "inactiveMaximum": {"const": 0.25},
+        "absentMaximum": {"const": 0.125},
         "reason": {"type": "string", "maxLength": 64}
+      }
+    }
+  },
+  "$defs": {
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["referenceRegion", "physicalRegion", "capturedAt", "highlightRatio"],
+      "properties": {
+        "referenceRegion": {"type": "object"},
+        "physicalRegion": {"type": "object"},
+        "capturedAt": {"type": "string", "minLength": 1},
+        "highlightRatio": {"type": "number", "minimum": 0, "maximum": 1}
       }
     }
   }

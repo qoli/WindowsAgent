@@ -14,7 +14,7 @@
         "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
         "targetState": {"type": ["string", "null"], "enum": ["LOCKED", "FOCUSED", "VISIBLE", "LOCK", "UNLOCK", "UNKNOWN", null]},
         "observation": {"type": ["object", "null"]},
-        "command": {"type": ["string", "null"], "enum": ["FOCUS_LEFT_PANEL", "NEXT_PANEL", "PREVIOUS_PANEL", "UP", "DOWN", "SELECT", null]},
+        "command": {"type": ["string", "null"], "enum": ["FOCUS_LEFT_PANEL", "NEXT_PANEL", "UP", "DOWN", "SELECT", null]},
         "panelCycleCount": {"type": "integer", "minimum": 0, "maximum": 3},
         "navigationCount": {"type": "integer", "minimum": 0, "maximum": 8},
         "openedPanel": {"type": "boolean"}

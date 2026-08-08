@@ -90,7 +90,7 @@ func (c *dockAtStationCaller) Call(_ context.Context, id string, inputs map[stri
 		}
 		state := c.contactsStates[c.contactsIndex]
 		c.contactsIndex++
-		return json.Marshal(map[string]any{"contactsTab": map[string]any{"state": state}})
+		return json.Marshal(map[string]any{"activeTab": map[string]any{"state": state}})
 	case "elite-dangerous/request-docking-range":
 		c.rangeCalls++
 		state := c.rangeState
@@ -175,15 +175,9 @@ func (c *contactsPanelCaller) Call(_ context.Context, id string, inputs map[stri
 	}
 	state := c.states[c.index]
 	c.index++
-	var selected any
-	if state == "SELECTED" {
-		selected = true
-	} else if state == "NOT_SELECTED" {
-		selected = false
-	}
 	return json.Marshal(map[string]any{
-		"schemaVersion": 1,
-		"contactsTab":   map[string]any{"state": state, "selected": selected},
+		"schemaVersion": 2,
+		"activeTab":     map[string]any{"state": state},
 	})
 }
 
@@ -195,13 +189,7 @@ func (c *stationTargetCaller) Call(_ context.Context, id string, inputs map[stri
 		}
 		state := c.contactsStates[c.contactsIndex]
 		c.contactsIndex++
-		var selected any
-		if state == "SELECTED" {
-			selected = true
-		} else if state == "NOT_SELECTED" {
-			selected = false
-		}
-		return json.Marshal(map[string]any{"contactsTab": map[string]any{"state": state, "selected": selected}})
+		return json.Marshal(map[string]any{"activeTab": map[string]any{"state": state}})
 	case "elite-dangerous/station-contact-text-regions":
 		if len(inputs) != 0 || c.regionIndex >= len(c.regions) {
 			return nil, errors.New("unexpected Station target OCR observation")
@@ -486,7 +474,7 @@ func TestEliteSelectContactsPanelIsIdempotentWhenAlreadySelected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caller := &contactsPanelCaller{states: []string{"SELECTED", "SELECTED"}}
+	caller := &contactsPanelCaller{states: []string{"CONTACTS", "CONTACTS"}}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
 		context.Background(), pkg, map[string]any{}, caller, reporter,
@@ -508,9 +496,9 @@ func TestEliteSelectContactsPanelOpensAndCyclesWithVerification(t *testing.T) {
 	}
 	caller := &contactsPanelCaller{states: []string{
 		"ABSENT", "ABSENT",
-		"NOT_SELECTED", "NOT_SELECTED",
-		"NOT_SELECTED", "NOT_SELECTED",
-		"SELECTED", "SELECTED",
+		"NAVIGATION", "NAVIGATION",
+		"TRANSACTIONS", "TRANSACTIONS",
+		"CONTACTS", "CONTACTS",
 	}}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
@@ -540,10 +528,10 @@ func TestEliteSelectContactsPanelUsesThreeStepFourTabBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := &contactsPanelCaller{states: []string{
-		"NOT_SELECTED", "NOT_SELECTED",
-		"NOT_SELECTED", "NOT_SELECTED",
-		"NOT_SELECTED", "NOT_SELECTED",
-		"SELECTED", "SELECTED",
+		"SYSTEM", "SYSTEM",
+		"NAVIGATION", "NAVIGATION",
+		"TRANSACTIONS", "TRANSACTIONS",
+		"CONTACTS", "CONTACTS",
 	}}
 	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
 		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
@@ -565,10 +553,10 @@ func TestEliteSelectContactsPanelStopsOnUnknownOrExhaustedCycle(t *testing.T) {
 	}{
 		{"unknown", []string{"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"}, "did not produce two consecutive known observations"},
 		{"exhausted", []string{
-			"NOT_SELECTED", "NOT_SELECTED",
-			"NOT_SELECTED", "NOT_SELECTED",
-			"NOT_SELECTED", "NOT_SELECTED",
-			"NOT_SELECTED", "NOT_SELECTED",
+			"SYSTEM", "SYSTEM",
+			"SYSTEM", "SYSTEM",
+			"SYSTEM", "SYSTEM",
+			"SYSTEM", "SYSTEM",
 		}, "CONTACTS was not reached within three NEXT_PANEL inputs"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -637,7 +625,7 @@ func TestEliteSelectStationTargetReturnsExistingWithoutSelect(t *testing.T) {
 	}
 	locked := stationTargetRegions(t, "< MOONGLOW CITY >", 350, true, nil)
 	caller := &stationTargetCaller{
-		contactsStates: []string{"SELECTED", "SELECTED"},
+		contactsStates: []string{"CONTACTS", "CONTACTS"},
 		regions:        []json.RawMessage{locked, locked},
 	}
 	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
@@ -662,7 +650,7 @@ func TestEliteSelectStationTargetMovesByObservedGeometryThenSelectsOnce(t *testi
 	focused := stationTargetRegions(t, "MOONGLOW CITY", 400, true, nil)
 	locked := stationTargetRegions(t, "< MOONGLOW CITY >", 400, true, nil)
 	caller := &stationTargetCaller{
-		contactsStates: []string{"SELECTED", "SELECTED"},
+		contactsStates: []string{"CONTACTS", "CONTACTS"},
 		regions:        []json.RawMessage{visible, visible, focused, focused, locked, locked},
 	}
 	reporter := &fixtureReporter{}
@@ -682,8 +670,74 @@ func TestEliteSelectStationTargetMovesByObservedGeometryThenSelectsOnce(t *testi
 		}
 	}
 	if !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"navigationCount":1`) ||
-		!contains(string(output), `"selectSent":true`) {
+		!contains(string(output), `"selectSent":true`) || !contains(string(output), `"selectAttemptCount":1`) {
 		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteSelectStationTargetRetriesOnceWhenFocusedRowDoesNotTransition(t *testing.T) {
+	pkg, err := Load(selectStationTargetPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	focused := stationTargetRegions(t, "MOONGLOW CITY", 400, true, nil)
+	locked := stationTargetRegions(t, "< MOONGLOW CITY >", 400, true, nil)
+	caller := &stationTargetCaller{
+		contactsStates: []string{"CONTACTS", "CONTACTS"},
+		regions: []json.RawMessage{
+			focused, focused,
+			focused, focused, focused, focused,
+			locked, locked,
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{"stationName": "MOONGLOW CITY"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"SELECT", "SELECT"}
+	if !equalStrings(caller.controls, wantControls) {
+		t.Fatalf("output=%s controls=%v", output, caller.controls)
+	}
+	if !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"selectAttemptCount":2`) {
+		t.Fatalf("output=%s", output)
+	}
+	retryActivity := false
+	for index, eventType := range reporter.types {
+		if eventType == ActivityEventType && contains(string(reporter.payloads[index]), "retrying once") {
+			retryActivity = true
+		}
+	}
+	if !retryActivity {
+		t.Fatalf("retry activity missing: types=%v payloads=%s", reporter.types, reporter.payloads)
+	}
+}
+
+func TestEliteSelectStationTargetFailsAfterTwoRejectedSelects(t *testing.T) {
+	pkg, err := Load(selectStationTargetPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	focused := stationTargetRegions(t, "MOONGLOW CITY", 400, true, nil)
+	regions := make([]json.RawMessage, 10)
+	for index := range regions {
+		regions[index] = focused
+	}
+	caller := &stationTargetCaller{
+		contactsStates: []string{"CONTACTS", "CONTACTS"},
+		regions:        regions,
+	}
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{"stationName": "MOONGLOW CITY"}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "two bounded SELECT attempts") {
+		t.Fatalf("error=%v", err)
+	}
+	wantControls := []string{"SELECT", "SELECT"}
+	if !equalStrings(caller.controls, wantControls) {
+		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
 	}
 }
 
@@ -694,7 +748,7 @@ func TestEliteSelectStationTargetFailsWithoutNamedTargetAndNeverSelects(t *testi
 	}
 	unrelated := stationTargetRegions(t, "INTERNAL SECURITY SERVICE", 350, true, nil)
 	caller := &stationTargetCaller{
-		contactsStates: []string{"SELECTED", "SELECTED"},
+		contactsStates: []string{"CONTACTS", "CONTACTS"},
 		regions:        []json.RawMessage{unrelated, unrelated, unrelated, unrelated},
 	}
 	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
@@ -711,7 +765,7 @@ func TestEliteDockAtStationCompletesAtVisualConfirmationHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	caller := &dockAtStationCaller{
-		contactsStates: []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED", "ABSENT", "ABSENT"},
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
 		requestStates:  []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
 		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
 		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
@@ -743,13 +797,40 @@ func TestEliteDockAtStationCompletesAtVisualConfirmationHandoff(t *testing.T) {
 	}
 }
 
+func TestEliteDockAtStationWaitsThroughTransientPanelUnknowns(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{
+			"ABSENT", "ABSENT",
+			"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "CONTACTS", "CONTACTS",
+			"ABSENT", "ABSENT",
+		},
+		requestStates: []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
+		flightStates:  []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
+		gearStates:    []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
+		rangeState:    "ALLOWED",
+	}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) || caller.contactsIndex != 10 {
+		t.Fatalf("output=%s contactsIndex=%d", output, caller.contactsIndex)
+	}
+}
+
 func TestEliteDockAtStationRecordsOneFailedObservationWithoutAdvancingGates(t *testing.T) {
 	pkg, err := Load(dockAtStationPackageRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	caller := &dockAtStationCaller{
-		contactsStates:       []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED", "ABSENT", "ABSENT"},
+		contactsStates:       []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
 		requestStates:        []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
 		flightPromptFailures: 1,
 		flightStates:         []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
@@ -786,7 +867,7 @@ func TestEliteDockAtStationRejectsOCRDistanceOutlierBeforeTrendAdmission(t *test
 		t.Fatal(err)
 	}
 	caller := &dockAtStationCaller{
-		contactsStates: []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED", "ABSENT", "ABSENT"},
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
 		requestStates:  []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
 		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
 		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
@@ -827,7 +908,7 @@ func TestEliteDockAtStationNeverResendsSelectWithoutCancelDocking(t *testing.T) 
 		requestStates = append(requestStates, "FOCUSED")
 	}
 	caller := &dockAtStationCaller{
-		contactsStates: []string{"ABSENT", "ABSENT", "SELECTED", "SELECTED"},
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS"},
 		requestStates:  requestStates,
 		rangeState:     "ALLOWED",
 	}

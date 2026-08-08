@@ -1,6 +1,14 @@
-# Elite Dangerous Contacts tab state
+# Elite Dangerous left-panel tab state
 
-Scan only the reviewed fixed `CONTACTS` tab fill region in 1080p reference
-coordinates. The current-frame highlight ratio classifies `SELECTED`,
-`NOT_SELECTED`, `ABSENT`, or `UNKNOWN`. This Action does not OCR labels, infer
-another active tab, reuse an older frame, or send input.
+Read four fixed `4x4` reference-coordinate samples and identify the active tab in
+the four-state panel cycle: `SYSTEM`, `NAVIGATION`, `TRANSACTIONS`, or
+`CONTACTS`. `SYSTEM` is the icon-only overview tab immediately left of
+`NAVIGATION`.
+
+The Action uses one calibrated square inside the filled orange highlight of
+each tab. The three text-tab squares sit immediately beside their labels so
+small header drift retains the same semantic anchor; SYSTEM remains inside its
+icon tile. Exactly one square must meet the selected threshold while all other
+squares remain below the inactive threshold. A missing header returns
+`ABSENT`; conflicting or insufficient evidence returns `UNKNOWN`. It does not
+OCR tab labels and does not infer state from a previous invocation.

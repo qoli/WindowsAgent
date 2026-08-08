@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/qoli/WindowsAgent/internal/observationapi"
@@ -77,5 +78,38 @@ func TestSessionEnforcesScreenCallAndPixelLimits(t *testing.T) {
 	var typed *observationapi.Error
 	if !errors.As(err, &typed) || typed.Kind != "LIMIT_EXCEEDED" {
 		t.Fatalf("second screen call error = %#v", err)
+	}
+}
+
+func TestSessionAllowsDeclaredMultipleScreenCallsAndEnforcesCumulativePixels(t *testing.T) {
+	session, err := NewSession("job-screen-multiple", scriptpackage.Permissions{
+		Screen: &scriptpackage.ScreenPermissions{
+			Operations: []string{"readRegion"}, MaxCalls: 4, MaxPixels: 12,
+		},
+	}, screenCountingBackend{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index <= 3; index++ {
+		call := observationapi.Call{
+			JobID: "job-screen-multiple", ObserverCallID: fmt.Sprintf("screen-%d", index),
+			Namespace: observationapi.NamespaceScreen, Operation: "readRegion", Arguments: json.RawMessage(`{}`),
+		}
+		result, err := session.Call(context.Background(), call)
+		if err != nil {
+			t.Fatalf("screen call %d: %v", index, err)
+		}
+		if result.Accounting.ScreenPixelsRead != uint64(index*4) {
+			t.Fatalf("screen call %d cumulative pixels = %d", index, result.Accounting.ScreenPixelsRead)
+		}
+	}
+	call := observationapi.Call{
+		JobID: "job-screen-multiple", ObserverCallID: "screen-4",
+		Namespace: observationapi.NamespaceScreen, Operation: "readRegion", Arguments: json.RawMessage(`{}`),
+	}
+	_, err = session.Call(context.Background(), call)
+	var typed *observationapi.Error
+	if !errors.As(err, &typed) || typed.Kind != "LIMIT_EXCEEDED" {
+		t.Fatalf("fourth screen call error = %#v", err)
 	}
 }

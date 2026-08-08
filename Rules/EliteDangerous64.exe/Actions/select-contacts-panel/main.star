@@ -16,7 +16,7 @@ def emit_update(phase, observation, cycle_count, opened_panel, command=None):
     )
 
 def state_key(observation):
-    return observation["contactsTab"]["state"]
+    return observation["activeTab"]["state"]
 
 def observe_stable(phase, cycle_count, opened_panel):
     previous_key = None
@@ -25,7 +25,7 @@ def observe_stable(phase, cycle_count, opened_panel):
         observation = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
         observation_count += 1
         emit_update(phase, observation, cycle_count, opened_panel)
-        contacts = observation["contactsTab"]
+        contacts = observation["activeTab"]
         key = state_key(observation)
         if contacts["state"] != "UNKNOWN" and key == previous_key:
             return {"observation": observation, "count": observation_count}
@@ -45,7 +45,7 @@ def main(ctx):
     stable = observe_stable("OBSERVING_INITIAL_STATE", cycle_count, opened_panel)
     observation = stable["observation"]
     observation_count += stable["count"]
-    contacts = observation["contactsTab"]
+    contacts = observation["activeTab"]
 
     if contacts["state"] == "ABSENT":
         stream.activity(message="Opening left panel", level="info")
@@ -56,7 +56,7 @@ def main(ctx):
         stable = observe_stable("OPENING_LEFT_PANEL", cycle_count, opened_panel)
         observation = stable["observation"]
         observation_count += stable["count"]
-        contacts = observation["contactsTab"]
+        contacts = observation["activeTab"]
         if contacts["state"] == "ABSENT":
             fail("Contacts scan region was still absent after FOCUS_LEFT_PANEL")
 
@@ -64,7 +64,7 @@ def main(ctx):
         fail("Contacts tab state is UNKNOWN")
 
     for _ in range(MAX_CYCLES):
-        if contacts["state"] == "SELECTED":
+        if contacts["state"] == "CONTACTS":
             break
         stream.activity(message="Cycling to next panel", level="info")
         emit_update("CYCLING_PANEL", observation, cycle_count, opened_panel, command="NEXT_PANEL")
@@ -74,11 +74,11 @@ def main(ctx):
         stable = observe_stable("VERIFYING_CONTACTS", cycle_count, opened_panel)
         observation = stable["observation"]
         observation_count += stable["count"]
-        contacts = observation["contactsTab"]
+        contacts = observation["activeTab"]
         if contacts["state"] == "ABSENT":
             fail("Contacts scan region became absent after NEXT_PANEL")
 
-    if contacts["state"] != "SELECTED":
+    if contacts["state"] != "CONTACTS":
         fail("CONTACTS was not reached within three NEXT_PANEL inputs")
 
     stream.activity(message="Contacts panel selected", level="info")

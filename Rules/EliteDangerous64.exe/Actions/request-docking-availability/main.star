@@ -1,6 +1,6 @@
 def main(ctx):
     contacts = action.call(id="elite-dangerous/contacts-tab-state", inputs={})
-    if contacts["contactsTab"]["state"] != "SELECTED":
+    if contacts["activeTab"]["state"] not in ["CONTACTS", "UNKNOWN"]:
         return action.call(
             id="elite-dangerous/request-docking-availability-classifier",
             inputs={"contacts": contacts, "regions": None},
