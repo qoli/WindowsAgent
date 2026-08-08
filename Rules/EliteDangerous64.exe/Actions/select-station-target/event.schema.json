@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.select-station-target.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "stationName", "targetState", "observation", "command", "panelCycleCount", "navigationCount", "openedPanel"],
+      "properties": {
+        "phase": {"enum": ["OPENING_CONTACTS", "LOCATING_TARGET", "MOVING_FOCUS", "SELECTING_TARGET", "VERIFYING_LOCK", "RESTORING_VIEW", "COMPLETED"]},
+        "stationName": {"type": "string"},
+        "targetState": {"type": ["string", "null"], "enum": ["LOCKED", "FOCUSED", "VISIBLE", "UNKNOWN", null]},
+        "observation": {"type": ["object", "null"]},
+        "command": {"type": ["string", "null"], "enum": ["FOCUS_LEFT_PANEL", "NEXT_PANEL", "UP", "DOWN", "SELECT", null]},
+        "panelCycleCount": {"type": "integer", "minimum": 0, "maximum": 3},
+        "navigationCount": {"type": "integer", "minimum": 0, "maximum": 8},
+        "openedPanel": {"type": "boolean"}
+      }
+    }
+  }
+}

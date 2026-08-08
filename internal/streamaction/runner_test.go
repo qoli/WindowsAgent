@@ -56,6 +56,14 @@ type contactsPanelCaller struct {
 	controls []string
 }
 
+type stationTargetCaller struct {
+	contactsStates []string
+	contactsIndex  int
+	regions        []json.RawMessage
+	regionIndex    int
+	controls       []string
+}
+
 type dockAtStationCaller struct {
 	contactsStates       []string
 	requestStates        []string
@@ -179,9 +187,49 @@ func (c *contactsPanelCaller) Call(_ context.Context, id string, inputs map[stri
 	})
 }
 
+func (c *stationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	switch id {
+	case "elite-dangerous/contacts-tab-state":
+		if len(inputs) != 0 || c.contactsIndex >= len(c.contactsStates) {
+			return nil, errors.New("unexpected Station target Contacts observation")
+		}
+		state := c.contactsStates[c.contactsIndex]
+		c.contactsIndex++
+		var selected any
+		if state == "SELECTED" {
+			selected = true
+		} else if state == "NOT_SELECTED" {
+			selected = false
+		}
+		return json.Marshal(map[string]any{"contactsTab": map[string]any{"state": state, "selected": selected}})
+	case "elite-dangerous/station-contact-text-regions":
+		if len(inputs) != 0 || c.regionIndex >= len(c.regions) {
+			return nil, errors.New("unexpected Station target OCR observation")
+		}
+		result := c.regions[c.regionIndex]
+		c.regionIndex++
+		return result, nil
+	case "elite-dangerous/ui-control":
+		control, _ := inputs["control"].(string)
+		c.controls = append(c.controls, control)
+		return json.RawMessage(`{"schemaVersion":1}`), nil
+	default:
+		return nil, errors.New("unexpected select-station-target child Action: " + id)
+	}
+}
+
 func selectContactsPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "select-contacts-panel"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func selectStationTargetPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "select-station-target"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,6 +584,124 @@ func TestEliteSelectContactsPanelStopsOnUnknownOrExhaustedCycle(t *testing.T) {
 				t.Fatalf("error=%v controls=%v", err, caller.controls)
 			}
 		})
+	}
+}
+
+func stationTargetRegions(t *testing.T, targetText string, targetY float64, targetFocused bool, focusedOtherY *float64) json.RawMessage {
+	t.Helper()
+	region := func(text string, y float64, focused bool) map[string]any {
+		pixel := uint32(0x1B0C08)
+		if focused {
+			pixel = uint32(0x501405)
+		}
+		pixels := make([]any, 100*30)
+		for index := range pixels {
+			pixels[index] = pixel
+		}
+		return map[string]any{
+			"points": []any{
+				map[string]any{"x": 20.0, "y": 20.0}, map[string]any{"x": 180.0, "y": 20.0},
+				map[string]any{"x": 180.0, "y": 40.0}, map[string]any{"x": 20.0, "y": 40.0},
+			},
+			"referencePoints": []any{
+				map[string]any{"x": 300.0, "y": y - 10}, map[string]any{"x": 500.0, "y": y - 10},
+				map[string]any{"x": 500.0, "y": y + 10}, map[string]any{"x": 300.0, "y": y + 10},
+			},
+			"detectionConfidence":   0.90,
+			"text":                  text,
+			"recognitionConfidence": 0.98,
+			"leftContext": map[string]any{
+				"x": int64(0), "y": int64(0), "w": int64(100), "h": int64(30), "pixels": pixels,
+				"referenceRegion": map[string]any{"x": 180.0, "y": y - 15, "w": 100.0, "h": 30.0},
+			},
+		}
+	}
+	regions := []any{region(targetText, targetY, targetFocused)}
+	if focusedOtherY != nil {
+		regions = append(regions, region("CASPIAN EXPLORER", *focusedOtherY, true))
+	}
+	result, err := json.Marshal(map[string]any{
+		"schemaVersion": int64(1), "regions": regions,
+		"evidence": map[string]any{}, "models": map[string]any{}, "timing": map[string]any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestEliteSelectStationTargetReturnsExistingWithoutSelect(t *testing.T) {
+	pkg, err := Load(selectStationTargetPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := stationTargetRegions(t, "< MOONGLOW CITY >", 350, true, nil)
+	caller := &stationTargetCaller{
+		contactsStates: []string{"SELECTED", "SELECTED"},
+		regions:        []json.RawMessage{locked, locked},
+	}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{"stationName": "MoonGlow City"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.controls) != 0 || !contains(string(output), `"result":"EXISTING"`) ||
+		!contains(string(output), `"selectSent":false`) || !contains(string(output), `"targetLocked":true`) {
+		t.Fatalf("output=%s controls=%v", output, caller.controls)
+	}
+}
+
+func TestEliteSelectStationTargetMovesByObservedGeometryThenSelectsOnce(t *testing.T) {
+	pkg, err := Load(selectStationTargetPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	focusedOtherY := 350.0
+	visible := stationTargetRegions(t, "MOONGLOW CITY", 400, false, &focusedOtherY)
+	focused := stationTargetRegions(t, "MOONGLOW CITY", 400, true, nil)
+	locked := stationTargetRegions(t, "< MOONGLOW CITY >", 400, true, nil)
+	caller := &stationTargetCaller{
+		contactsStates: []string{"SELECTED", "SELECTED"},
+		regions:        []json.RawMessage{visible, visible, focused, focused, locked, locked},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{"stationName": "MOONGLOW CITY"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"DOWN", "SELECT"}
+	if len(caller.controls) != len(wantControls) {
+		t.Fatalf("output=%s controls=%v", output, caller.controls)
+	}
+	for index := range wantControls {
+		if caller.controls[index] != wantControls[index] {
+			t.Fatalf("output=%s controls=%v", output, caller.controls)
+		}
+	}
+	if !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"navigationCount":1`) ||
+		!contains(string(output), `"selectSent":true`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteSelectStationTargetFailsWithoutNamedTargetAndNeverSelects(t *testing.T) {
+	pkg, err := Load(selectStationTargetPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unrelated := stationTargetRegions(t, "INTERNAL SECURITY SERVICE", 350, true, nil)
+	caller := &stationTargetCaller{
+		contactsStates: []string{"SELECTED", "SELECTED"},
+		regions:        []json.RawMessage{unrelated, unrelated, unrelated, unrelated},
+	}
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{"stationName": "MOONGLOW CITY"}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "two consecutive known observations") || len(caller.controls) != 0 {
+		t.Fatalf("error=%v controls=%v", err, caller.controls)
 	}
 }
 

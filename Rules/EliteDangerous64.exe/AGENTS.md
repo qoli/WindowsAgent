@@ -123,6 +123,18 @@ contact, focusing `REQUEST DOCKING`, or requesting docking. Follow its returned
 watch URL; unknown evidence or failure to reach Contacts within three cycles
 terminates the Action.
 
+`elite-dangerous/select-station-target` is a separate interruptible linear
+Streaming Action. It is not a child phase of `dock-at-station`. The caller must
+provide the exact Station name. In CONTACTS, a filled row proves keyboard focus
+only; angle brackets around the recognized row text, for example
+`< MOONGLOW CITY >`, are the direct Station target-lock evidence. The Action
+sends `SELECT` at most once and only after two current OCR observations prove
+the named visible row is focused. It then requires two current angle-bracketed
+observations before reporting `ACQUIRED`; an already bracketed row reports
+`EXISTING` without input. A missing visible target, ambiguous OCR, or unknown
+focus fails explicitly and never falls back to the first CONTACTS row. The
+Action restores the forward view only when it opened the left panel itself.
+
 `elite-dangerous/dock-at-station` is the complete interruptible linear docking
 workflow. It owns view normalization, the watched `request-docking-range`
 admission Gate, CONTACTS navigation, Request Docking focus and one-shot

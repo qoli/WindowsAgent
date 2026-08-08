@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous Station contact text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 140, "y": 155, "w": 560, "h": 260},
+  "sampling": "reference",
+  "maxPixels": 145600,
+  "leftContextWidth": 128,
+  "verticalPadding": 8
+}
