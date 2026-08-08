@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Elite Dangerous bounded ship attitude control",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md",
+  "bindingSource": {"type": "frontier-active-preset-v1"},
+  "gesture": {"type": "press", "holdMs": 40},
+  "selector": {"inputField": "control"},
+  "bindings": {
+    "PITCH_UP": {"control": "PitchUpButton"},
+    "PITCH_DOWN": {"control": "PitchDownButton"},
+    "YAW_LEFT": {"control": "YawLeftButton"},
+    "YAW_RIGHT": {"control": "YawRightButton"},
+    "ROLL_LEFT": {"control": "RollLeftButton"},
+    "ROLL_RIGHT": {"control": "RollRightButton"}
+  },
+  "files": ["TASK.md", "input.schema.json", "output.schema.json"]
+}

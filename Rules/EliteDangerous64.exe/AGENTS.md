@@ -15,7 +15,30 @@ before using a game-specific capability.
 fixed compass region in the 1920x1080 reference coordinate space and its HUD
 color interpretation. The game-neutral Observer maps that region through a
 centered 16:9 viewport and returns reference-density pixels. A changed
-foreground process or invalid compass evidence fails explicitly.
+foreground process or invalid compass evidence fails explicitly. Its target
+evidence also classifies the reviewed cyan topology as `SOLID`/front,
+`HOLLOW`/rear, or evidence-preserving `UNKNOWN`. Preprocessing builds a
+brightness-tolerant cyan response mask and removes isolated pixels without
+closing the hollow center. Marker bounds establish a topology center: a filled
+three-by-three center means front, while an empty center inside a sufficiently
+large ring means rear. Candidate/retained counts, the five-by-five core, and
+marker bounds remain visible diagnostic evidence; total cyan count alone never
+decides the hemisphere.
+
+`elite-dangerous/ship-attitude-control` is the finite binding-resolved flight
+primitive. It injects exactly one 40 ms `PITCH_UP`, `PITCH_DOWN`, `YAW_LEFT`,
+`YAW_RIGHT`, `ROLL_LEFT`, or `ROLL_RIGHT` press from the active Frontier preset.
+It proves key injection only, not attitude movement.
+
+`elite-dangerous/align-station-target` is an interruptible linear Streaming
+Action over the selected target. It first commands 0% throttle, drives a hollow
+rear marker away from center until it becomes solid, then drives the solid
+marker toward center with one pitch/yaw pulse and one fresh Compass observation
+at a time. Three consecutive solid samples in the four-pixel center zone are
+required for completion. Its structured update events are the durable control
+timeline; explicit activity events supply the Action OSD. It does not establish
+Station target lock, approach the Station, request docking, or participate in
+the docking-computer workflow.
 
 `elite-dangerous/flight-prompt-text` is a second finite Action. It captures the
 reviewed central prompt as a 400x40 reference-density RGB line and sends it to

@@ -12,7 +12,7 @@
     "target"
   ],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 4},
     "profile": {
       "type": "object",
       "additionalProperties": false,
@@ -71,7 +71,13 @@
       "additionalProperties": false,
       "required": [
         "detected",
+        "candidateCyanPixelCount",
         "cyanPixelCount",
+        "coreCyanPixelCount",
+        "centerCyanPixelCount",
+        "markerBounds",
+        "presentation",
+        "hemisphere",
         "referenceX",
         "referenceY",
         "offsetX",
@@ -82,7 +88,25 @@
       ],
       "properties": {
         "detected": {"type": "boolean"},
+        "candidateCyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 9216},
         "cyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 9216},
+        "coreCyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 25},
+        "centerCyanPixelCount": {"type": "integer", "minimum": 0, "maximum": 9},
+        "markerBounds": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["x", "y", "w", "h", "centerX", "centerY"],
+          "properties": {
+            "x": {"type": "integer", "minimum": 682, "maximum": 777},
+            "y": {"type": "integer", "minimum": 771, "maximum": 866},
+            "w": {"type": "integer", "minimum": 1, "maximum": 96},
+            "h": {"type": "integer", "minimum": 1, "maximum": 96},
+            "centerX": {"type": "integer", "minimum": 682, "maximum": 777},
+            "centerY": {"type": "integer", "minimum": 771, "maximum": 866}
+          }
+        },
+        "presentation": {"enum": ["SOLID", "HOLLOW", "UNKNOWN"]},
+        "hemisphere": {"enum": ["FRONT", "REAR", "UNKNOWN"]},
         "referenceX": {"type": ["integer", "null"], "minimum": 682, "maximum": 777},
         "referenceY": {"type": ["integer", "null"], "minimum": 771, "maximum": 866},
         "offsetX": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},

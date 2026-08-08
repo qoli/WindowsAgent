@@ -7,6 +7,15 @@ reference-coordinate offset from the fixed compass center. The result also
 returns its Euclidean distance in reference pixels, its clockwise screen angle
 from straight up, and whether it is inside the fixed circular four-pixel
 center zone.
+Preprocessing converts each pixel to a cyan chroma response that tolerates a
+darker hollow outline, then removes isolated response pixels without applying
+a closing operation that could fill the hole. The retained marker bounds
+establish a topology center independently from the brightness-weighted
+centroid used for position. A filled three-by-three center classifies a
+`SOLID` front marker. A sufficiently large marker with an empty three-by-three
+center classifies a `HOLLOW` rear marker. Partial or ambiguous shapes remain
+`UNKNOWN`. Candidate and retained pixel counts, the five-by-five core, and the
+marker bounds are returned as diagnostic evidence.
 
 This package is deliberately game-specific. Core maps the reference rectangle
 through the centered 16:9 viewport and returns an image with the requested

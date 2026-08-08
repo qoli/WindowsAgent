@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "selection", "control", "key", "activePreset", "bindingFile", "bindingSource", "backend", "scanCode", "extended", "holdMs"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "selection": {"enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "ROLL_LEFT", "ROLL_RIGHT"]},
+    "control": {"enum": ["PitchUpButton", "PitchDownButton", "YawLeftButton", "YawRightButton", "RollLeftButton", "RollRightButton"]},
+    "key": {"type": "string", "minLength": 1, "maxLength": 64},
+    "activePreset": {"type": "string", "minLength": 1, "maxLength": 128},
+    "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260},
+    "bindingSource": {"const": "frontier-active-preset-v1"},
+    "backend": {"const": "sendinput-scancode"},
+    "scanCode": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "extended": {"type": "boolean"},
+    "holdMs": {"const": 40}
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.align-station-target.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "commandCount", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandResult", "reason"],
+      "properties": {
+        "phase": {"enum": ["STOPPING", "OBSERVING", "TURNING_TO_FRONT", "COARSE_ALIGN", "FINE_ALIGN", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR"]},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 400},
+        "commandCount": {"type": "integer", "minimum": 0, "maximum": 240},
+        "targetDetected": {"type": ["boolean", "null"]},
+        "targetPresentation": {"type": ["string", "null"], "enum": ["SOLID", "HOLLOW", "UNKNOWN", null]},
+        "targetHemisphere": {"type": ["string", "null"], "enum": ["FRONT", "REAR", "UNKNOWN", null]},
+        "offsetX": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
+        "offsetY": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
+        "centerDistancePixels": {"type": ["number", "null"], "minimum": 0, "maximum": 68},
+        "centerZoneInside": {"type": ["boolean", "null"]},
+        "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
+        "command": {"type": ["string", "null"], "enum": ["SET_THROTTLE_0", "PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
+        "commandResult": {"type": ["object", "null"]},
+        "reason": {"type": ["string", "null"], "maxLength": 256}
+      }
+    }
+  }
+}
