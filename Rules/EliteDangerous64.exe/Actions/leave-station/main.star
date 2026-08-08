@@ -183,6 +183,7 @@ def main(ctx):
     if ctx.inputs["stationConfirmed"] != True:
         fail("stationConfirmed must be true")
 
+    stream.activity(message="Waiting for Auto Launch", level="info")
     sample = 0
     unknown = unknown_observation("NONE")
     gate = gate_state()
@@ -220,6 +221,7 @@ def main(ctx):
             unknown_mass_lock_count = 0
         if observation["flightStatus"] == "AUTO_LAUNCH" or observation["flightStatus"] == "WAITING_IN_QUEUE":
             auto_launch_seen = True
+            stream.activity(message="Auto Launch detected", level="info")
             gate = gate_state(auto_launch_seen=True, samples_since_auto_launch_seen=0, decision="AUTO_LAUNCH_VISIBLE")
             emit_update("AWAITING_AUTO_LAUNCH", sample, observation, gate)
             break
@@ -352,8 +354,10 @@ def main(ctx):
     if not handover_confirmed:
         fail("Auto Launch visual handover was not confirmed before the sample limit")
 
+    stream.activity(message="Auto Launch handover confirmed", level="info")
     action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     throttle_100 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
+    stream.activity(message="Throttle set to 100%", level="info")
     emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100, throttle_command=throttle_100)
 
     mass_lock_off_count = 0
@@ -398,7 +402,9 @@ def main(ctx):
         )
         emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100)
         if mass_lock_off_count >= MASS_LOCK_OFF_STABLE:
+            stream.activity(message="Mass Lock released", level="info")
             throttle_0 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+            stream.activity(message="Throttle set to 0%", level="info")
             action.clear_on_failure()
             gate = gate_state(
                 auto_launch_seen=True,
@@ -441,6 +447,12 @@ def main(ctx):
                 )
                 if weak_zero:
                     zero_speed_confirmations += 1
+                    if zero_speed_confirmations == 1:
+                        stream.activity(message="Zero speed confirmed 1/3", level="info")
+                    elif zero_speed_confirmations == 2:
+                        stream.activity(message="Zero speed confirmed 2/3", level="info")
+                    elif zero_speed_confirmations == 3:
+                        stream.activity(message="Zero speed confirmed 3/3", level="info")
                 else:
                     zero_speed_confirmations = 0
 
@@ -463,6 +475,7 @@ def main(ctx):
                 phase = "COMPLETED" if stop_decision == "ZERO_SPEED_CONFIRMED" else "VERIFYING_STOP"
                 emit_update(phase, sample, observation, gate, commanded_throttle=0)
                 if stop_decision == "ZERO_SPEED_CONFIRMED":
+                    stream.activity(message="Departure completed", level="info")
                     return {
                         "schemaVersion": 3,
                         "task": "LEAVE_STATION",

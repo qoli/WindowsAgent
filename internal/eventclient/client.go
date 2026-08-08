@@ -26,6 +26,12 @@ type Client struct {
 	http    *http.Client
 }
 
+type replayResponse struct {
+	Events       []eventstream.Event `json:"events"`
+	NextCursor   uint64              `json:"nextCursor"`
+	LastSequence uint64              `json:"lastSequence"`
+}
+
 func (c *Client) Health(ctx context.Context) error {
 	if c == nil || ctx == nil {
 		return errors.New("event client and context are required")
@@ -114,6 +120,73 @@ func (c *Client) Append(ctx context.Context, request eventstream.AppendRequest) 
 		return eventstream.Event{}, fmt.Errorf("decode event append response: %w", err)
 	}
 	return event, nil
+}
+
+func (c *Client) LastSequence(ctx context.Context) (uint64, error) {
+	if c == nil || ctx == nil {
+		return 0, errors.New("event client and context are required")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/events?after=0&limit=1", nil)
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return 0, fmt.Errorf("read event sequence: %w", err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, eventstream.MaxEventBytes+1))
+	if err != nil {
+		return 0, fmt.Errorf("read event sequence response: %w", err)
+	}
+	if len(data) > eventstream.MaxEventBytes {
+		return 0, errors.New("event sequence response exceeds bound")
+	}
+	if response.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("event sequence returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var replay replayResponse
+	if err := decodeStrict(data, &replay); err != nil {
+		return 0, fmt.Errorf("decode event sequence response: %w", err)
+	}
+	return replay.LastSequence, nil
+}
+
+func (c *Client) Replay(ctx context.Context, after uint64, limit int) ([]eventstream.Event, uint64, uint64, error) {
+	if c == nil || ctx == nil {
+		return nil, 0, 0, errors.New("event client and context are required")
+	}
+	if limit < 1 || limit > eventstream.MaxReplayLimit {
+		return nil, 0, 0, fmt.Errorf("event replay limit must be between 1 and %d", eventstream.MaxReplayLimit)
+	}
+	endpoint := c.baseURL + "/v1/events?after=" + strconv.FormatUint(after, 10) + "&limit=" + strconv.Itoa(limit)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("replay events: %w", err)
+	}
+	defer response.Body.Close()
+	maxResponseBytes := int64(eventstream.MaxEventBytes)*int64(limit) + 1
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("read event replay response: %w", err)
+	}
+	if int64(len(data)) >= maxResponseBytes {
+		return nil, 0, 0, errors.New("event replay response exceeds bound")
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, 0, 0, fmt.Errorf("event replay returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var replay replayResponse
+	if err := decodeStrict(data, &replay); err != nil {
+		return nil, 0, 0, fmt.Errorf("decode event replay response: %w", err)
+	}
+	return replay.Events, replay.NextCursor, replay.LastSequence, nil
 }
 
 func (c *Client) Stream(ctx context.Context, after uint64, visit func(eventstream.Event) error) error {

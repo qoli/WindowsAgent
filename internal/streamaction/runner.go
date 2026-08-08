@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
@@ -30,6 +31,11 @@ type Runner struct {
 }
 
 const maxFailureActions = 8
+
+const (
+	ActivityEventType = "action.activity"
+	maxActivityRunes  = 160
+)
 
 type deferredAction struct {
 	id     string
@@ -129,7 +135,8 @@ func (h *host) predeclared() starlark.StringDict {
 		"clear_on_failure": starlark.NewBuiltin("action.clear_on_failure", h.clearOnFailure),
 	})
 	streamModule := starlarkstruct.FromStringDict(starlark.String("stream"), starlark.StringDict{
-		"emit": starlark.NewBuiltin("stream.emit", h.emit),
+		"emit":     starlark.NewBuiltin("stream.emit", h.emit),
+		"activity": starlark.NewBuiltin("stream.activity", h.activity),
 	})
 	taskModule := starlarkstruct.FromStringDict(starlark.String("task"), starlark.StringDict{
 		"sleep": starlark.NewBuiltin("task.sleep", h.sleep),
@@ -271,6 +278,34 @@ func (h *host) emit(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple
 	event, err := h.reporter.Emit(h.ctx, eventType, encoded)
 	if err != nil {
 		return nil, fmt.Errorf("commit streaming Action event: %w", err)
+	}
+	return starlark.MakeUint64(event.Sequence), nil
+}
+
+func (h *host) activity(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	var message, level string
+	if err := starlark.UnpackArgs("stream.activity", args, kwargs, "message", &message, "level", &level); err != nil {
+		return nil, err
+	}
+	if message == "" || strings.TrimSpace(message) != message || strings.ContainsAny(message, "\r\n\t") || !utf8.ValidString(message) {
+		return nil, errors.New("stream.activity message must be one canonical non-empty line")
+	}
+	if utf8.RuneCountInString(message) > maxActivityRunes {
+		return nil, fmt.Errorf("stream.activity message exceeds %d characters", maxActivityRunes)
+	}
+	if level != "info" && level != "warning" && level != "error" {
+		return nil, errors.New("stream.activity level must equal info, warning, or error")
+	}
+	encoded, err := json.Marshal(map[string]string{"message": message, "level": level})
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(encoded)) > h.pkg.Manifest.Limits.MaxEventBytes {
+		return nil, fmt.Errorf("streaming Action activity payload is %d bytes, limit is %d", len(encoded), h.pkg.Manifest.Limits.MaxEventBytes)
+	}
+	event, err := h.reporter.Emit(h.ctx, ActivityEventType, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("commit streaming Action activity: %w", err)
 	}
 	return starlark.MakeUint64(event.Sequence), nil
 }

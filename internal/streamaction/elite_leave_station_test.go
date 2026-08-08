@@ -189,11 +189,25 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 }
 
 type leaveStationReporter struct {
-	phases   []string
-	payloads []map[string]any
+	phases     []string
+	payloads   []map[string]any
+	activities []string
+	events     uint64
 }
 
 func (r *leaveStationReporter) Emit(_ context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
+	r.events++
+	if eventType == ActivityEventType {
+		var activity struct {
+			Message string `json:"message"`
+			Level   string `json:"level"`
+		}
+		if err := json.Unmarshal(payload, &activity); err != nil {
+			return eventstream.Event{}, err
+		}
+		r.activities = append(r.activities, activity.Message)
+		return eventstream.Event{Sequence: r.events}, nil
+	}
 	if eventType != "action.leave-station.update" {
 		return eventstream.Event{}, errors.New("unexpected event type")
 	}
@@ -203,7 +217,7 @@ func (r *leaveStationReporter) Emit(_ context.Context, eventType string, payload
 	}
 	r.phases = append(r.phases, value["phase"].(string))
 	r.payloads = append(r.payloads, value)
-	return eventstream.Event{Sequence: uint64(len(r.phases))}, nil
+	return eventstream.Event{Sequence: r.events}, nil
 }
 
 func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T) {

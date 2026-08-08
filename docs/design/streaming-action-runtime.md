@@ -63,12 +63,14 @@ has only three orchestration primitives:
 ```text
 action.call(id=..., inputs=...)
 stream.emit(type=..., payload=...)
+stream.activity(message=..., level=...)
 task.sleep(milliseconds=...)
 ```
 
 A child call must resolve inside the same owning Rule and must declare
 `completion: return`. Event payloads and terminal output must pass the package
-schemas. Cancellation interrupts sleep and Starlark execution. Missing or
+schemas. `stream.activity` emits a Host-validated, one-line display activity;
+it does not bypass or replace the Action's domain event schema. Cancellation interrupts sleep and Starlark execution. Missing or
 contradictory declarations, cross-Rule calls, streaming children, invalid
 events, and invalid terminal output fail explicitly; no runtime or provider
 fallback is attempted.

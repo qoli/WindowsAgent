@@ -38,6 +38,7 @@ def observe_stable(phase, cycle_count, opened_panel):
     fail("Contacts tab state did not produce two consecutive known observations")
 
 def main(ctx):
+    stream.activity(message="Inspecting Contacts panel", level="info")
     opened_panel = False
     cycle_count = 0
     observation_count = 0
@@ -47,6 +48,7 @@ def main(ctx):
     contacts = observation["contactsTab"]
 
     if contacts["state"] == "ABSENT":
+        stream.activity(message="Opening left panel", level="info")
         emit_update("OPENING_LEFT_PANEL", observation, cycle_count, opened_panel, command="FOCUS_LEFT_PANEL")
         action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
         opened_panel = True
@@ -64,6 +66,7 @@ def main(ctx):
     for _ in range(MAX_CYCLES):
         if contacts["state"] == "SELECTED":
             break
+        stream.activity(message="Cycling to next panel", level="info")
         emit_update("CYCLING_PANEL", observation, cycle_count, opened_panel, command="NEXT_PANEL")
         action.call(id="elite-dangerous/ui-control", inputs={"control": "NEXT_PANEL"})
         cycle_count += 1
@@ -78,6 +81,7 @@ def main(ctx):
     if contacts["state"] != "SELECTED":
         fail("CONTACTS was not reached within three NEXT_PANEL inputs")
 
+    stream.activity(message="Contacts panel selected", level="info")
     emit_update("CONTACTS_SELECTED", observation, cycle_count, opened_panel)
     return {
         "schemaVersion": 1,

@@ -173,7 +173,8 @@ cp -R Rules .build/
 
 `windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
 The build script also emits `windows-capture-agent-console.exe` for interactive
-terminal diagnostics and verifies both PE subsystem values before returning.
+terminal diagnostics and `windows-action-osd.exe` for the display-only Action
+overlay. It verifies every persistent executable uses the GUI subsystem.
 
 ## Run
 
@@ -199,6 +200,19 @@ Available options:
 
 The process must not run as a traditional Session 0 Windows service because WGC
 requires access to the interactive desktop.
+
+Install the optional Action OSD after the loopback event stream is healthy:
+
+```powershell
+.\scripts\install-windows-action-osd.ps1 `
+  -ExecutablePath .\.build\windows-action-osd.exe
+```
+
+The independent interactive-user task stays hidden until a Streaming Action
+starts. While the Action is running it shows `LIVE`, the canonical Action ID,
+elapsed time, and the latest three explicit `stream.activity` records. Terminal
+states disappear automatically. The OSD is excluded from screen capture by
+default; `-AllowCapture` is intended only for visual acceptance evidence.
 
 Run the partially landed event-stream service independently on loopback:
 

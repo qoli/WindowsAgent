@@ -226,6 +226,45 @@ def main(ctx):
 	}
 }
 
+func TestRunnerEmitsHostValidatedDisplayActivity(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    sequence = stream.activity(message="Throttle set to 100%", level="info")
+    return {"done": True, "sequence": sequence}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fixtureReporter{}
+	if _, err := (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, &fixtureCaller{}, reporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(reporter.types) != 1 || reporter.types[0] != ActivityEventType || string(reporter.payloads[0]) != `{"level":"info","message":"Throttle set to 100%"}` {
+		t.Fatalf("events=%v payloads=%s", reporter.types, reporter.payloads)
+	}
+}
+
+func TestRunnerRejectsMalformedDisplayActivityWithoutEventFallback(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    stream.activity(message="line one\nline two", level="info")
+    return {"done": True, "sequence": 1}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fixtureReporter{}
+	_, err = (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, &fixtureCaller{}, reporter)
+	if err == nil || !contains(err.Error(), "one canonical non-empty line") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(reporter.types) != 0 {
+		t.Fatalf("malformed activity emitted events=%v", reporter.types)
+	}
+}
+
 func TestRunnerTryCallReturnsExplicitChildFailure(t *testing.T) {
 	root := writeFixturePackage(t, `
 def main(ctx):
