@@ -1,4 +1,5 @@
-MIN_OCR_CONFIDENCE = 0.55
+MIN_DETECTION_CONFIDENCE = 0.70
+MIN_RECOGNITION_CONFIDENCE = 0.75
 THRESHOLD_METERS = 7500.0
 
 UNIT_MULTIPLIERS = {
@@ -79,13 +80,29 @@ def distance_candidates(text):
 
 def main(ctx):
     raw = ctx.inputs
-    candidates = distance_candidates(raw["text"])
+    candidates = []
+    low_confidence_candidates = 0
+    raw_texts = []
+    for index in range(len(raw["regions"])):
+        region = raw["regions"][index]
+        raw_texts.append(region["text"])
+        parsed = distance_candidates(region["text"])
+        for candidate in parsed:
+            if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
+                low_confidence_candidates += 1
+            else:
+                candidate["regionIndex"] = index
+                candidate["detectionConfidence"] = region["detectionConfidence"]
+                candidate["recognitionConfidence"] = region["recognitionConfidence"]
+                candidates.append(candidate)
+
     state = "UNKNOWN"
     allowed = None
     selected = None
-    reason = "DISTANCE_TEXT_MISSING"
-    if raw["confidence"] < MIN_OCR_CONFIDENCE:
-        reason = "OCR_CONFIDENCE_LOW"
+    if len(raw["regions"]) == 0:
+        reason = "DISTANCE_REGIONS_MISSING"
+    elif len(candidates) == 0 and low_confidence_candidates > 0:
+        reason = "DISTANCE_CONFIDENCE_LOW"
     elif len(candidates) == 0:
         reason = "DISTANCE_TEXT_INVALID"
     elif len(candidates) > 1:
@@ -122,11 +139,16 @@ def main(ctx):
             "comparison": "LT",
             "evidence": {
                 "reason": reason,
-                "rawText": raw["text"],
-                "ocrConfidence": raw["confidence"],
-                "minimumOcrConfidence": MIN_OCR_CONFIDENCE,
+                "rawTexts": raw_texts,
+                "regionCount": len(raw["regions"]),
                 "candidateCount": len(candidates),
+                "lowConfidenceCandidateCount": low_confidence_candidates,
+                "selectedRegionIndex": None if selected == None else selected["regionIndex"],
+                "detectionConfidence": None if selected == None else selected["detectionConfidence"],
+                "recognitionConfidence": None if selected == None else selected["recognitionConfidence"],
+                "minimumDetectionConfidence": MIN_DETECTION_CONFIDENCE,
+                "minimumRecognitionConfidence": MIN_RECOGNITION_CONFIDENCE,
             },
         },
-        "evidence": {"model": raw["model"], "timing": raw["timing"]},
+        "evidence": {"models": raw["models"], "timing": raw["timing"]},
     }

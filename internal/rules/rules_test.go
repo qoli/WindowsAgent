@@ -196,6 +196,17 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if shipSpeed.Runtime != CompositeActionRuntimeV1 || !reflect.DeepEqual(shipSpeed.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
 		t.Fatalf("ship-speed action = %+v", shipSpeed)
 	}
+	distanceRegions, err := store.ResolveAction("elite-dangerous/request-docking-distance-regions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if distanceRegions.Runtime != PpOcrTextRegionsActionRuntimeV1 || distanceRegions.RuntimeProfile != "ocr/text-regions" ||
+		distanceRegions.Execution.Completion != CompletionReturn || len(distanceRegions.RegistrableAs) != 0 {
+		t.Fatalf("request-docking-distance-regions action = %+v", distanceRegions)
+	}
+	if _, err := store.ResolveAction("elite-dangerous/request-docking-distance-text"); err == nil {
+		t.Fatal("retired fixed request-docking-distance-text action still resolves")
+	}
 }
 
 func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {

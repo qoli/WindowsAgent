@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous target distance text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 0, "y": 730, "w": 768, "h": 240},
+  "sampling": "reference",
+  "maxPixels": 184320,
+  "leftContextWidth": 1,
+  "verticalPadding": 0
+}

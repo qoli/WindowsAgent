@@ -90,10 +90,10 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
-    "elite-dangerous/request-docking-distance-text": {
-      "path": "Actions/request-docking-distance-text",
-      "runtime": "ppocr-w480-text-v1",
-      "runtimeProfile": "ocr/w480",
+    "elite-dangerous/request-docking-distance-regions": {
+      "path": "Actions/request-docking-distance-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
@@ -169,6 +169,12 @@
     },
     "elite-dangerous/lock-destination": {
       "path": "Actions/lock-destination",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
+    "elite-dangerous/select-and-lock-destination": {
+      "path": "Actions/select-and-lock-destination",
       "runtime": "windows-streaming-action-v1",
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []

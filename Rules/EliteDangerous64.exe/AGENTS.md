@@ -93,15 +93,18 @@ not activate a registration. Likewise, `ocr/w480` and `ocr/text-regions`
 residency only keep model initialization alive while this Rule owns the
 foreground; neither invokes an OCR Action nor produces an event.
 
-`elite-dangerous/request-docking-range` is a finite composite Gate Action. It
-captures the fixed lower-left Target distance at reference density through the
-internal `request-docking-distance-text` OCR Action, then calls the pure
-`request-docking-range-classifier`. It returns `ALLOWED` only when exactly one
-current displayed distance is recognized with sufficient confidence and is
-strictly below `7500m`; `7.50km` is `DENIED`. Missing, malformed, low-confidence,
-or ambiguous evidence is `UNKNOWN`, never a prior-frame or inferred value. Run
-it in the settled forward cockpit view before opening the Target panel. The
-Action is not registrable and never performs the docking request itself.
+`elite-dangerous/request-docking-range` is a finite composite Gate Action. Its
+internal `request-docking-distance-regions` Action scans the reviewed horizontal
+lower-left HUD band at reference density with the Rule-resident PP-OCR text
+regions worker, then the pure `request-docking-range-classifier` selects exactly
+one current distance region. It returns `ALLOWED` only when detection and
+recognition confidence pass their declared thresholds and the displayed value
+is strictly below `7500m`; `7.50km` is `DENIED`. Missing, malformed,
+low-confidence, or ambiguous evidence is `UNKNOWN`, never a prior-frame or
+inferred value. This path does not use ScreenParser, repair malformed units, or
+fall back to the retired fixed distance ROI. Run it in the settled forward
+cockpit view before opening the Target panel. The Action is not registrable and
+never performs the docking request itself.
 
 `elite-dangerous/request-docking-availability` is a finite composite visual
 Gate for the currently selected Contacts target. Its raw text-regions Action
@@ -177,6 +180,17 @@ without pressing it; `LOCK DESTINATION` sends `SELECT` once and requires two
 angle-bracketed OCR observations of the supplied `targetName` from the
 Navigation-list-specific w480 ROI before reporting `ACQUIRED`. It does not scan
 the list, choose a destination, or close a panel it did not open.
+
+`elite-dangerous/select-and-lock-destination` is the complete name-driven
+Navigation workflow. Given an exact currently visible `targetName`, it opens
+the left panel when needed, anchors on the observed CONTACTS tab, moves to
+NAVIGATION, locates and focuses the named OCR row, opens its detail card,
+activates only a confirmed focused `LOCK DESTINATION`, verifies two
+angle-bracketed named-row observations, and restores the forward view when it
+owned the panel. Use this Action instead of asking the higher model to perform
+the panel and row-selection prelude. Missing, off-screen, ambiguous, or
+unfocused evidence fails explicitly; it never scrolls blindly or chooses a
+different target.
 
 `elite-dangerous/dock-at-station` is the complete interruptible linear docking
 workflow. It owns view normalization, the watched `request-docking-range`

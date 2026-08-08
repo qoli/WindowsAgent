@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "result", "targetName", "targetLocked", "rowSelectSent", "lockSelectSent", "openedPanel", "restoredView", "panelCycleCount", "navigationCount", "observationCount", "finalObservation"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "SELECT_AND_LOCK_DESTINATION"},
+    "completed": {"const": true},
+    "result": {"enum": ["EXISTING", "ACQUIRED"]},
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "targetLocked": {"const": true},
+    "rowSelectSent": {"type": "boolean"},
+    "lockSelectSent": {"type": "boolean"},
+    "openedPanel": {"type": "boolean"},
+    "restoredView": {"type": "boolean"},
+    "panelCycleCount": {"type": "integer", "minimum": 0, "maximum": 3},
+    "navigationCount": {"type": "integer", "minimum": 0, "maximum": 8},
+    "observationCount": {"type": "integer", "minimum": 2, "maximum": 96},
+    "finalObservation": {"type": "object"}
+  }
+}

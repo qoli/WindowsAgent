@@ -182,6 +182,17 @@ recognition confidence `0.954942`, `0.989826`, and `0.998809`. Model load was
 recognitions. This is one device-specific validation sample, not a throughput
 guarantee.
 
+On 2026-08-09, the docking-distance optimization replayed 99 Auto Dock frames
+through one resident text-regions worker. The initial 1536x864 native lower-left
+crop produced a median pipeline time of `429.08 ms` and detected a distance in
+98 frames after diagnostic normalization. The accepted reference-density
+horizontal band is `x=0,y=730,w=768,h=240`: it reduces the detector input from
+approximately 1280x736 to 1280x416 and produced a median pipeline time of
+`291.69 ms`, a 32 percent reduction. Strict, unrepaired distance text was
+present in 95 frames; one frame contained no visible HUD and three malformed or
+unitless results remain explicit `UNKNOWN` evidence for the temporal range
+Gate. ScreenParser is not part of this path.
+
 ## Deferred
 
 - add explicit registration execution for multi-frame confirmation and event

@@ -661,22 +661,36 @@ func runShipSpeedClassifier(t *testing.T, input map[string]any) map[string]any {
 	return result
 }
 
-func requestDockingRangeClassifierInput(text string, confidence float64) map[string]any {
+func requestDockingDistanceRegion(text string, detection, recognition float64) map[string]any {
+	points := []any{
+		map[string]any{"x": 10.0, "y": 10.0}, map[string]any{"x": 90.0, "y": 10.0},
+		map[string]any{"x": 90.0, "y": 30.0}, map[string]any{"x": 10.0, "y": 30.0},
+	}
 	return map[string]any{
-		"schemaVersion": int64(1), "text": text, "confidence": confidence,
-		"decoding": map[string]any{"characterConstraint": "none"},
+		"points": points, "referencePoints": points,
+		"detectionConfidence": detection, "text": text, "recognitionConfidence": recognition,
+		"leftContext": map[string]any{
+			"x": int64(0), "y": int64(10), "w": int64(0), "h": int64(20), "pixels": []any{},
+			"referenceRegion": map[string]any{"x": 10.0, "y": 10.0, "w": 0.0, "h": 20.0},
+		},
+	}
+}
+
+func requestDockingRangeClassifierInput(regions []any) map[string]any {
+	return map[string]any{
+		"schemaVersion": int64(1), "regions": regions,
 		"evidence": map[string]any{
 			"capturedAt":      "2026-08-08T00:00:00Z",
 			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
 			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
-			"referenceRegion": map[string]any{"x": int64(380), "y": int64(780), "w": int64(200), "h": int64(60)},
-			"physicalRegion":  map[string]any{"left": int64(760), "top": int64(1560), "width": int64(400), "height": int64(120)},
+			"referenceRegion": map[string]any{"x": int64(0), "y": int64(730), "w": int64(768), "h": int64(240)},
+			"physicalRegion":  map[string]any{"left": int64(0), "top": int64(1460), "width": int64(1536), "height": int64(480)},
 		},
-		"model": map[string]any{}, "timing": map[string]any{},
+		"models": map[string]any{}, "timing": map[string]any{},
 	}
 }
 
-func runRequestDockingRangeClassifier(t *testing.T, text string, confidence float64) map[string]any {
+func runRequestDockingRangeClassifier(t *testing.T, regions []any) map[string]any {
 	t.Helper()
 	pkg, err := scriptpackage.Load(requestDockingRangePackageRoot(t), "elite-dangerous/request-docking-range-classifier")
 	if err != nil {
@@ -686,7 +700,7 @@ func runRequestDockingRangeClassifier(t *testing.T, text string, confidence floa
 	if err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := runner.Run(context.Background(), pkg, requestDockingRangeClassifierInput(text, confidence))
+	encoded, err := runner.Run(context.Background(), pkg, requestDockingRangeClassifierInput(regions))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -751,7 +765,11 @@ func TestEliteRequestDockingRangeClassifierAllowsReviewedDistancesBelowGate(t *t
 		{"CORIOLIS STARPORT 698m", 698},
 	} {
 		t.Run(test.text, func(t *testing.T) {
-			rangeResult := runRequestDockingRangeClassifier(t, test.text, 0.91)
+			regions := []any{
+				requestDockingDistanceRegion("CORIOLIS STARPORT", 0.84, 0.99),
+				requestDockingDistanceRegion(test.text, 0.82, 0.91),
+			}
+			rangeResult := runRequestDockingRangeClassifier(t, regions)
 			if rangeResult["state"] != "ALLOWED" || rangeResult["allowed"] != true ||
 				rangeResult["distanceMeters"] != test.wantMeters ||
 				rangeResult["evidence"].(map[string]any)["reason"] != "DISPLAY_DISTANCE_BELOW_THRESHOLD" {
@@ -768,7 +786,7 @@ func TestEliteRequestDockingRangeClassifierDeniesThresholdAndLongerUnits(t *test
 		"LP 470-30 4.21Ly",
 	} {
 		t.Run(text, func(t *testing.T) {
-			rangeResult := runRequestDockingRangeClassifier(t, text, 0.88)
+			rangeResult := runRequestDockingRangeClassifier(t, []any{requestDockingDistanceRegion(text, 0.83, 0.88)})
 			if rangeResult["state"] != "DENIED" || rangeResult["allowed"] != false ||
 				rangeResult["evidence"].(map[string]any)["reason"] != "DISPLAY_DISTANCE_AT_OR_ABOVE_THRESHOLD" {
 				t.Fatalf("requestDockingRange = %#v", rangeResult)
@@ -778,7 +796,7 @@ func TestEliteRequestDockingRangeClassifierDeniesThresholdAndLongerUnits(t *test
 }
 
 func TestEliteRequestDockingRangeClassifierDoesNotMergeSeparatedNumbers(t *testing.T) {
-	rangeResult := runRequestDockingRangeClassifier(t, "LP 470-30 4.21Ly", 0.88)
+	rangeResult := runRequestDockingRangeClassifier(t, []any{requestDockingDistanceRegion("LP 470-30 4.21Ly", 0.81, 0.88)})
 	if rangeResult["displayText"] != "4.21LY" || rangeResult["distanceValue"] != float64(4.21) ||
 		rangeResult["unit"] != "LY" {
 		t.Fatalf("requestDockingRange = %#v", rangeResult)
@@ -788,18 +806,21 @@ func TestEliteRequestDockingRangeClassifierDoesNotMergeSeparatedNumbers(t *testi
 func TestEliteRequestDockingRangeClassifierPreservesUnknownEvidence(t *testing.T) {
 	for _, test := range []struct {
 		name       string
-		text       string
-		confidence float64
+		regions    []any
 		wantReason string
 	}{
-		{"missing", "CORIOLIS STARPORT", 0.90, "DISTANCE_TEXT_INVALID"},
-		{"low confidence", "CORIOLIS STARPORT 6.25km", 0.54, "OCR_CONFIDENCE_LOW"},
-		{"malformed", "CORIOLIS STARPORT S.18km", 0.90, "DISTANCE_TEXT_INVALID"},
-		{"ambiguous", "5.18km 698m", 0.90, "DISTANCE_TEXT_AMBIGUOUS"},
-		{"unknown unit", "CORIOLIS STARPORT 6.25parsec", 0.90, "DISTANCE_TEXT_INVALID"},
+		{"missing regions", []any{}, "DISTANCE_REGIONS_MISSING"},
+		{"missing distance", []any{requestDockingDistanceRegion("CORIOLIS STARPORT", 0.82, 0.99)}, "DISTANCE_TEXT_INVALID"},
+		{"low detection confidence", []any{requestDockingDistanceRegion("6.25km", 0.69, 0.99)}, "DISTANCE_CONFIDENCE_LOW"},
+		{"low recognition confidence", []any{requestDockingDistanceRegion("6.25km", 0.82, 0.74)}, "DISTANCE_CONFIDENCE_LOW"},
+		{"malformed", []any{requestDockingDistanceRegion("S.18km", 0.82, 0.90)}, "DISTANCE_TEXT_INVALID"},
+		{"malformed repeated unit", []any{requestDockingDistanceRegion("4.77kkm", 0.82, 0.99)}, "DISTANCE_TEXT_INVALID"},
+		{"ambiguous same region", []any{requestDockingDistanceRegion("5.18km 698m", 0.82, 0.90)}, "DISTANCE_TEXT_AMBIGUOUS"},
+		{"ambiguous separate regions", []any{requestDockingDistanceRegion("5.18km", 0.82, 0.90), requestDockingDistanceRegion("698m", 0.83, 0.91)}, "DISTANCE_TEXT_AMBIGUOUS"},
+		{"unknown unit", []any{requestDockingDistanceRegion("6.25parsec", 0.82, 0.90)}, "DISTANCE_TEXT_INVALID"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			rangeResult := runRequestDockingRangeClassifier(t, test.text, test.confidence)
+			rangeResult := runRequestDockingRangeClassifier(t, test.regions)
 			if rangeResult["state"] != "UNKNOWN" || rangeResult["allowed"] != nil ||
 				rangeResult["distanceMeters"] != nil ||
 				rangeResult["evidence"].(map[string]any)["reason"] != test.wantReason {
