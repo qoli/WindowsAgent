@@ -53,6 +53,38 @@ func TestControllerResolvesCurrentKeyboardBindingAndPressesIt(t *testing.T) {
 	}
 }
 
+func TestControllerUsesValidatedDynamicHoldOverride(t *testing.T) {
+	pkg := writeInputPackage(t, Selector{InputField: "percent"}, map[string]Binding{
+		"0": {Control: "SetSpeedZero"},
+	})
+	pkg.Manifest.Gesture = Gesture{
+		Type: "press", HoldMS: 40, HoldMSInputField: "holdMs", MinHoldMS: 40, MaxHoldMS: 1000,
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <SetSpeedZero><Primary Device="Keyboard" Key="Key_X"/></SetSpeedZero>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Run(context.Background(), pkg, map[string]any{"percent": int64(0), "holdMs": int64(250)}, "EliteDangerous64.exe"); err == nil {
+		// The fixture package schema intentionally rejects undeclared holdMs.
+		t.Fatal("dynamic hold unexpectedly bypassed input schema")
+	}
+	if len(driver.requests) != 0 {
+		t.Fatalf("unexpected requests=%v", driver.requests)
+	}
+	if got, err := resolveHoldMS(pkg.Manifest.Gesture, map[string]any{"holdMs": int64(250)}); err != nil || got != 250 {
+		t.Fatalf("resolveHoldMS=%d,%v", got, err)
+	}
+	for _, value := range []any{int64(39), int64(1001), 40.5, "250"} {
+		if _, err := resolveHoldMS(pkg.Manifest.Gesture, map[string]any{"holdMs": value}); err == nil {
+			t.Fatalf("resolveHoldMS(%#v) unexpectedly succeeded", value)
+		}
+	}
+}
+
 func TestEliteSetThrottleResolvesMinus100Binding(t *testing.T) {
 	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "set-throttle"))
 	if err != nil {
@@ -145,6 +177,33 @@ func TestEliteUIControlResolvesDedicatedPanelCycleControls(t *testing.T) {
 				t.Fatalf("requests=%v output=%s", driver.requests, output)
 			}
 		})
+	}
+}
+
+func TestEliteShipAttitudeControlResolvesFrontierArrowAndDynamicHold(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-control"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <PitchUpButton><Primary Device="Keyboard" Key="Key_UpArrow"/></PitchUpButton>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := controller.Run(context.Background(), pkg, map[string]any{"control": "PITCH_UP", "holdMs": int64(250)}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_UpArrow" || driver.requests[0].Hold != 250*time.Millisecond ||
+		!strings.Contains(string(output), `"selection":"PITCH_UP"`) || !strings.Contains(string(output), `"holdMs":250`) {
+		t.Fatalf("requests=%v output=%s", driver.requests, output)
 	}
 }
 

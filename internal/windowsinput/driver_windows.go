@@ -52,6 +52,9 @@ func (WindowsDriver) Press(ctx context.Context, request PressRequest) (Evidence,
 	if err != nil {
 		return Evidence{}, fmt.Errorf("map key %s to scan code: %w", request.Key, err)
 	}
+	if RequiresExtendedScanCode(request.Key) {
+		extended = true
+	}
 	flags := uint32(keyEventScanCode)
 	if extended {
 		flags |= keyEventExtendedKey

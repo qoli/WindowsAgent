@@ -55,6 +55,10 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	if !ok {
 		return nil, fmt.Errorf("input Action selector resolved undeclared binding %q", selection)
 	}
+	holdMS, err := resolveHoldMS(pkg.Manifest.Gesture, inputs)
+	if err != nil {
+		return nil, err
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -84,7 +88,7 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 		return nil, errors.New("foreground process changed before input injection")
 	}
 	evidence, err := c.driver.Press(ctx, windowsinput.PressRequest{
-		Key: resolved.key, Hold: time.Duration(pkg.Manifest.Gesture.HoldMS) * time.Millisecond,
+		Key: resolved.key, Hold: time.Duration(holdMS) * time.Millisecond,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("press input Action key %s: %w", resolved.key, err)
@@ -106,6 +110,40 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 		return nil, fmt.Errorf("validate input Action output: %w", err)
 	}
 	return json.Marshal(result)
+}
+
+func resolveHoldMS(gesture Gesture, inputs map[string]any) (uint32, error) {
+	if gesture.HoldMSInputField == "" {
+		return gesture.HoldMS, nil
+	}
+	value, ok := inputs[gesture.HoldMSInputField]
+	if !ok {
+		return gesture.HoldMS, nil
+	}
+	var hold int64
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || math.Trunc(typed) != typed {
+			return 0, fmt.Errorf("input Action hold field %q must be an integer", gesture.HoldMSInputField)
+		}
+		hold = int64(typed)
+	case int:
+		hold = int64(typed)
+	case int64:
+		hold = typed
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("input Action hold field %q must be an integer", gesture.HoldMSInputField)
+		}
+		hold = parsed
+	default:
+		return 0, fmt.Errorf("input Action hold field %q must be an integer", gesture.HoldMSInputField)
+	}
+	if hold < int64(gesture.MinHoldMS) || hold > int64(gesture.MaxHoldMS) {
+		return 0, fmt.Errorf("input Action hold field %q must be from %d through %d", gesture.HoldMSInputField, gesture.MinHoldMS, gesture.MaxHoldMS)
+	}
+	return uint32(hold), nil
 }
 
 func selectBinding(selector Selector, inputs map[string]any) (string, error) {

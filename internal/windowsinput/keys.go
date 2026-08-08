@@ -39,9 +39,13 @@ func VirtualKey(key string) (uint16, error) {
 		"Key_End":          0x23,
 		"Key_Home":         0x24,
 		"Key_Left":         0x25,
+		"Key_LeftArrow":    0x25,
 		"Key_Up":           0x26,
+		"Key_UpArrow":      0x26,
 		"Key_Right":        0x27,
+		"Key_RightArrow":   0x27,
 		"Key_Down":         0x28,
+		"Key_DownArrow":    0x28,
 		"Key_Insert":       0x2D,
 		"Key_Delete":       0x2E,
 	}
@@ -49,4 +53,16 @@ func VirtualKey(key string) (uint16, error) {
 		return virtualKey, nil
 	}
 	return 0, fmt.Errorf("unsupported Windows input key %q", key)
+}
+
+func RequiresExtendedScanCode(key string) bool {
+	switch key {
+	case "Key_PageUp", "Key_PageDown", "Key_End", "Key_Home",
+		"Key_Left", "Key_LeftArrow", "Key_Up", "Key_UpArrow",
+		"Key_Right", "Key_RightArrow", "Key_Down", "Key_DownArrow",
+		"Key_Insert", "Key_Delete", "Key_RightControl", "Key_RightAlt":
+		return true
+	default:
+		return false
+	}
 }

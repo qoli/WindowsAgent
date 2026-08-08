@@ -20,7 +20,10 @@ of two binding sources:
   Frontier preset.
 
 Both sources use the same `windowsinput` driver. The manifest also declares a
-single `press` gesture and a hold time from 1 to 1000 milliseconds.
+single `press` gesture and a default hold time from 1 to 1000 milliseconds. A
+package may expose one schema-validated integer input as an explicit hold-time
+override within manifest-declared minimum and maximum bounds; physical keys
+remain non-callable input.
 Literal-key packages do not require Frontier configuration; a missing Frontier
 root fails only a package that explicitly selects the Frontier binding source.
 
@@ -47,6 +50,9 @@ provider, virtual-key injection path, or window-message path.
 Canonical keys currently include `Key_A` through `Key_Z`, `Key_0` through
 `Key_9`, `Key_F1` through `Key_F24`, navigation keys, Space, Enter, Escape,
 Tab, Backspace, Insert/Delete, and explicit left/right Shift, Control, and Alt.
+Frontier's `Key_LeftArrow`, `Key_UpArrow`, `Key_RightArrow`, and
+`Key_DownArrow` names resolve to the same directional Windows virtual keys as
+the canonical navigation names.
 
 The HTTP Action surface currently shares the agent's unauthenticated network
 trust boundary. This is an explicit deployment limitation, not an
@@ -64,6 +70,8 @@ diagnostic-only filename.
   `RIGHT`, `SELECT`, or `BACK`; it does not autonomously navigate a menu.
 - `elite-dangerous/set-throttle`: exact logical 0% or 100% throttle commands
   using the player's active binding preset.
+- `elite-dangerous/ship-attitude-control`: one pitch, yaw, or roll pulse using
+  the player's active binding preset and an optional bounded hold override.
 
 ## Deferred
 

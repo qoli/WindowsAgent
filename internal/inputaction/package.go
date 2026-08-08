@@ -46,8 +46,11 @@ type BindingSource struct {
 }
 
 type Gesture struct {
-	Type   string `json:"type"`
-	HoldMS uint32 `json:"holdMs"`
+	Type             string `json:"type"`
+	HoldMS           uint32 `json:"holdMs"`
+	HoldMSInputField string `json:"holdMsInputField,omitempty"`
+	MinHoldMS        uint32 `json:"minHoldMs,omitempty"`
+	MaxHoldMS        uint32 `json:"maxHoldMs,omitempty"`
 }
 
 type Selector struct {
@@ -157,6 +160,21 @@ func validateManifest(manifest Manifest) error {
 	}
 	if manifest.Gesture.Type != "press" || manifest.Gesture.HoldMS == 0 || manifest.Gesture.HoldMS > 1000 {
 		return errors.New("input Action gesture must declare press with holdMs between 1 and 1000")
+	}
+	if manifest.Gesture.HoldMSInputField == "" {
+		if manifest.Gesture.MinHoldMS != 0 || manifest.Gesture.MaxHoldMS != 0 {
+			return errors.New("input Action gesture hold bounds require holdMsInputField")
+		}
+	} else {
+		if strings.TrimSpace(manifest.Gesture.HoldMSInputField) != manifest.Gesture.HoldMSInputField {
+			return errors.New("input Action gesture holdMsInputField must be canonical")
+		}
+		if manifest.Gesture.MinHoldMS == 0 || manifest.Gesture.MaxHoldMS < manifest.Gesture.MinHoldMS || manifest.Gesture.MaxHoldMS > 1000 {
+			return errors.New("input Action dynamic hold bounds must be from 1 through 1000")
+		}
+		if manifest.Gesture.HoldMS < manifest.Gesture.MinHoldMS || manifest.Gesture.HoldMS > manifest.Gesture.MaxHoldMS {
+			return errors.New("input Action default holdMs must be within dynamic hold bounds")
+		}
 	}
 	if constant {
 		if _, ok := manifest.Bindings[manifest.Selector.Constant]; !ok {
