@@ -383,57 +383,89 @@ func (c *Capturer) withCapturedFrame(ctx context.Context, includeCursor bool, pr
 		defer release(context3D)
 		defer release(winRTDevice)
 
-		item, size, err := createMonitorItem(target.desc.Monitor)
-		if err != nil {
-			return struct{}{}, capture.Failure("desktop_unavailable", "failed to create a capture item for the primary monitor", err)
-		}
-		defer release(item)
-		if size.Width <= 0 || size.Height <= 0 {
-			return struct{}{}, capture.Failure("desktop_unavailable", "primary monitor capture size is invalid", nil)
-		}
-
-		framePool, err := createFreeThreadedFramePool(winRTDevice, int32(pixelFormat), size)
-		if err != nil {
-			return struct{}{}, capture.Failure("capture_session_failed", "failed to create the WGC frame pool", err)
-		}
-		defer closeAndRelease(framePool)
-
-		session, err := createCaptureSession(framePool, item)
-		if err != nil {
-			return struct{}{}, capture.Failure("capture_session_failed", "failed to create the WGC capture session", err)
-		}
-		defer closeAndRelease(session)
-		if err := setCursorCapture(session, includeCursor); err != nil {
-			return struct{}{}, capture.Failure("capture_session_failed", "failed to configure cursor capture", err)
-		}
-		if err := callHRESULT(session, 6); err != nil {
-			return struct{}{}, capture.Failure("capture_session_failed", "failed to start WGC capture", err)
-		}
-
-		frame, err := waitForFrame(ctx, framePool)
-		if err != nil {
-			return struct{}{}, err
-		}
-		defer closeAndRelease(frame)
-
-		foregroundInfo, err := foreground.Snapshot()
-		if err != nil {
-			return struct{}{}, capture.Failure(
-				"foreground_process_unavailable",
-				"failed to identify the foreground process at capture time",
-				err,
-			)
-		}
-
-		err = process(capturedFrame{
-			frame: frame, device: device, context3D: context3D,
-			pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
-			display: target.desc, monitor: monitor, foreground: foregroundInfo,
-			width: int(size.Width), height: int(size.Height),
-		})
+		err = retryTransientWGCCapture(
+			ctx,
+			wgcCaptureAttempts,
+			wgcRetryDelay,
+			func() error {
+				return captureFrameAttempt(
+					ctx, target.desc, monitor, device, context3D, winRTDevice,
+					pixelFormat, pixelFormatName, includeCursor, process,
+				)
+			},
+			func(attempt int, err error) {
+				c.logger.WarnContext(
+					ctx,
+					"retrying transient WGC capture failure",
+					"attempt", attempt,
+					"max_attempts", wgcCaptureAttempts,
+					"error", err,
+				)
+			},
+		)
 		return struct{}{}, err
 	})
 	return err
+}
+
+func captureFrameAttempt(
+	ctx context.Context,
+	display outputDesc1,
+	monitor capture.Monitor,
+	device, context3D, winRTDevice unsafe.Pointer,
+	pixelFormat uint32,
+	pixelFormatName string,
+	includeCursor bool,
+	process func(capturedFrame) error,
+) error {
+	item, size, err := createMonitorItem(display.Monitor)
+	if err != nil {
+		return capture.Failure("desktop_unavailable", "failed to create a capture item for the primary monitor", err)
+	}
+	defer release(item)
+	if size.Width <= 0 || size.Height <= 0 {
+		return capture.Failure("desktop_unavailable", "primary monitor capture size is invalid", nil)
+	}
+
+	framePool, err := createFreeThreadedFramePool(winRTDevice, int32(pixelFormat), size)
+	if err != nil {
+		return capture.Failure("capture_session_failed", "failed to create the WGC frame pool", err)
+	}
+	defer closeAndRelease(framePool)
+
+	session, err := createCaptureSession(framePool, item)
+	if err != nil {
+		return capture.Failure("capture_session_failed", "failed to create the WGC capture session", err)
+	}
+	defer closeAndRelease(session)
+	if err := setCursorCapture(session, includeCursor); err != nil {
+		return capture.Failure("capture_session_failed", "failed to configure cursor capture", err)
+	}
+	if err := callHRESULT(session, 6); err != nil {
+		return capture.Failure("capture_session_failed", "failed to start WGC capture", err)
+	}
+
+	frame, err := waitForFrame(ctx, framePool)
+	if err != nil {
+		return err
+	}
+	defer closeAndRelease(frame)
+
+	foregroundInfo, err := foreground.Snapshot()
+	if err != nil {
+		return capture.Failure(
+			"foreground_process_unavailable",
+			"failed to identify the foreground process at capture time",
+			err,
+		)
+	}
+
+	return process(capturedFrame{
+		frame: frame, device: device, context3D: context3D,
+		pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
+		display: display, monitor: monitor, foreground: foregroundInfo,
+		width: int(size.Width), height: int(size.Height),
+	})
 }
 
 func onWinRTThread[T any](ctx context.Context, operation func() (T, error)) (T, error) {

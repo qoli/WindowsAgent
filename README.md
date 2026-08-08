@@ -31,7 +31,9 @@ The screenshot capability is available today:
   recorded with each capture
 - capture-time foreground rule resolution with a navigable Codex `AGENTS.md`
 - SHA-256 verified artifacts and bounded retention
-- strict JSON errors with no GDI or hidden capture fallback
+- strict JSON errors with no GDI or hidden provider fallback; one capture may
+  rebuild its WGC item/session up to three times for explicitly classified
+  transient WGC failures before returning the preserved capture error
 - optional hidden startup through an interactive-user Scheduled Task
 
 The generic Starlark launcher and finite Script capabilities are available
