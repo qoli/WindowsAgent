@@ -70,6 +70,10 @@ def choose_rear_command(target):
     return ["PITCH_UP", REAR_HOLD_MS]
 
 def main(ctx):
+    mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
+    tracking_samples = int(ctx.inputs["trackingSamples"]) if "trackingSamples" in ctx.inputs else 120
+    sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
+
     stream.activity(message="Stopping ship before compass alignment", level="info")
     throttle_result = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("STOPPING", 0, 0, empty_target(), 0, command="SET_THROTTLE_0", command_result=throttle_result)
@@ -77,13 +81,15 @@ def main(ctx):
     sample = 0
     command_count = 0
     stable_confirmations = 0
+    center_contact_count = 0
+    max_consecutive_center = 0
     previous_phase = None
     final_observation = None
     commanded_target = None
     no_movement_count = 0
     away_trend_count = 0
 
-    for _ in range(MAX_SAMPLES):
+    for _ in range(sample_limit):
         attempt = action.try_call(id="elite-dangerous/compass", inputs={})
         sample += 1
         if not attempt["ok"]:
@@ -122,7 +128,7 @@ def main(ctx):
         if no_movement_count >= NO_MOVEMENT_LIMIT:
             emit_update("OBSERVING", sample, command_count, target, 0, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control produced no measurable Compass movement")
-        if away_trend_count >= AWAY_TREND_LIMIT:
+        if away_trend_count >= AWAY_TREND_LIMIT and mode == "ALIGN":
             emit_update("OBSERVING", sample, command_count, target, 0, reason="ATTITUDE_CONTROL_MOVING_AWAY", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control moved the front Compass target away from center")
 
@@ -133,6 +139,9 @@ def main(ctx):
             command_spec = choose_rear_command(target)
         elif target["centerZone"]["inside"]:
             stable_confirmations += 1
+            center_contact_count += 1
+            if stable_confirmations > max_consecutive_center:
+                max_consecutive_center = stable_confirmations
             phase = "VERIFYING_CENTER"
         else:
             stable_confirmations = 0
@@ -153,17 +162,37 @@ def main(ctx):
                 stream.activity(message="Verifying stable compass center", level="info")
             previous_phase = phase
 
-        if stable_confirmations >= STABLE_CENTER_CONFIRMATIONS:
+        if mode == "ALIGN" and stable_confirmations >= STABLE_CENTER_CONFIRMATIONS:
             emit_update("COMPLETED", sample, command_count, target, stable_confirmations, reason="SOLID_TARGET_STABLY_CENTERED")
             stream.activity(message="Station target aligned", level="info")
             return {
                 "schemaVersion": 1,
                 "task": "ALIGN_STATION_TARGET",
+                "mode": mode,
                 "completed": True,
                 "finalPhase": "COMPLETED",
                 "sampleCount": sample,
                 "commandCount": command_count,
                 "stableConfirmations": stable_confirmations,
+                "centerContactCount": center_contact_count,
+                "maxConsecutiveCenter": max_consecutive_center,
+                "finalObservation": final_observation,
+            }
+
+        if mode == "TRACK" and sample >= tracking_samples:
+            emit_update("TRACKING_WINDOW_COMPLETED", sample, command_count, target, stable_confirmations, reason="BOUNDED_TRACKING_WINDOW_COMPLETED", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            stream.activity(message="Moving-target tracking window completed", level="info")
+            return {
+                "schemaVersion": 1,
+                "task": "ALIGN_STATION_TARGET",
+                "mode": mode,
+                "completed": True,
+                "finalPhase": "TRACKING_WINDOW_COMPLETED",
+                "sampleCount": sample,
+                "commandCount": command_count,
+                "stableConfirmations": stable_confirmations,
+                "centerContactCount": center_contact_count,
+                "maxConsecutiveCenter": max_consecutive_center,
                 "finalObservation": final_observation,
             }
 

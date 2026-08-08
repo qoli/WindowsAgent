@@ -2,5 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "properties": {}
+  "properties": {
+    "mode": {"enum": ["ALIGN", "TRACK"], "default": "ALIGN"},
+    "trackingSamples": {"type": "integer", "minimum": 10, "maximum": 240, "default": 120}
+  }
 }

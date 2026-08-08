@@ -2,15 +2,18 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "task", "completed", "finalPhase", "sampleCount", "commandCount", "stableConfirmations", "finalObservation"],
+  "required": ["schemaVersion", "task", "mode", "completed", "finalPhase", "sampleCount", "commandCount", "stableConfirmations", "centerContactCount", "maxConsecutiveCenter", "finalObservation"],
   "properties": {
     "schemaVersion": {"const": 1},
     "task": {"const": "ALIGN_STATION_TARGET"},
+    "mode": {"enum": ["ALIGN", "TRACK"]},
     "completed": {"const": true},
-    "finalPhase": {"const": "COMPLETED"},
+    "finalPhase": {"enum": ["COMPLETED", "TRACKING_WINDOW_COMPLETED"]},
     "sampleCount": {"type": "integer", "minimum": 3, "maximum": 400},
     "commandCount": {"type": "integer", "minimum": 0, "maximum": 240},
-    "stableConfirmations": {"const": 3},
+    "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 240},
+    "centerContactCount": {"type": "integer", "minimum": 0, "maximum": 240},
+    "maxConsecutiveCenter": {"type": "integer", "minimum": 0, "maximum": 240},
     "finalObservation": {"type": "object"}
   }
 }

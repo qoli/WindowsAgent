@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous Navigation list text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 440, "y": 420, "w": 480, "h": 360},
+  "sampling": "reference",
+  "maxPixels": 172800,
+  "leftContextWidth": 96,
+  "verticalPadding": 8
+}

@@ -16,6 +16,15 @@ lateral correction and pitch/yaw handle fine correction. Rear, coarse, and
 fine phases use explicit 800, 800, and 400 ms holds respectively. Completion
 requires three consecutive solid samples inside the four-pixel center zone.
 
+The optional `TRACK` mode is for moving targets such as a Nav Beacon. It does
+not complete merely because the marker touches or remains briefly inside the
+center zone. Instead it continues correcting for a bounded `trackingSamples`
+window (120 samples by default), reports every ordinary observation and
+command through the same stream, and returns center-contact plus maximum
+consecutive-center counts. A front-marker moving-away trend remains observable
+but is not a failure in this mode because target motion can create it. The
+no-movement and child-Action failure Gates remain active.
+
 Each post-command observation reports marker displacement, center-distance
 delta, consecutive no-movement count, and a front-marker moving-away trend.
 Four exactly stationary observations or five consecutive front observations

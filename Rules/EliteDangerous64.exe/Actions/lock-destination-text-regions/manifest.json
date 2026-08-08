@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous Lock Destination text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 440, "y": 670, "w": 340, "h": 100},
+  "sampling": "reference",
+  "maxPixels": 34000,
+  "leftContextWidth": 32,
+  "verticalPadding": 8
+}

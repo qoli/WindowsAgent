@@ -147,6 +147,32 @@
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     },
+    "elite-dangerous/lock-destination-text-regions": {
+      "path": "Actions/lock-destination-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/navigation-list-text-regions": {
+      "path": "Actions/navigation-list-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/lock-destination-button-state": {
+      "path": "Actions/lock-destination-button-state",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/lock-destination": {
+      "path": "Actions/lock-destination",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
     "elite-dangerous/ui-control": {
       "path": "Actions/ui-control",
       "runtime": "windows-key-action-v1",

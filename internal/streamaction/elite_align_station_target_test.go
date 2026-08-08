@@ -93,7 +93,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"commandCount":3,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
+	if string(output) != `{"centerContactCount":3,"commandCount":3,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
@@ -108,6 +108,33 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 		}
+	}
+}
+
+func TestEliteAlignStationTargetTracksMovingTargetPastTransientCenter(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 4, 0, 4, true),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 8, 0, 8, false),
+		alignObservation("SOLID", 7, 0, 7, false),
+		alignObservation("SOLID", 4, 0, 4, true),
+		alignObservation("SOLID", 5, 0, 5, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 6, 0, 6, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"mode":"TRACK"`) || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) || !contains(string(output), `"sampleCount":10`) || !contains(string(output), `"centerContactCount":6`) || !contains(string(output), `"maxConsecutiveCenter":3`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.controls) != 3 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 

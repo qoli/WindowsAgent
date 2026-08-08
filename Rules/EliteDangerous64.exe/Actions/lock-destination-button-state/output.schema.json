@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "button"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "profile": {"type": "object"},
+    "coordinateSpace": {"type": "object"},
+    "region": {"type": "object"},
+    "physicalRegion": {"type": "object"},
+    "button": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "focused", "highlightRatio", "focusedMinimum", "absentMaximum", "reason"],
+      "properties": {
+        "state": {"enum": ["FOCUSED", "ABSENT", "UNKNOWN"]},
+        "focused": {"type": ["boolean", "null"]},
+        "highlightRatio": {"type": "number", "minimum": 0, "maximum": 1},
+        "focusedMinimum": {"const": 0.6},
+        "absentMaximum": {"const": 0.12},
+        "reason": {"type": "string", "maxLength": 64}
+      }
+    }
+  }
+}

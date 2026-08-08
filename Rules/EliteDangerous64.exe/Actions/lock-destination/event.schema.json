@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.lock-destination.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "targetName", "labelState", "buttonState", "selectSent", "observation", "command", "reason"],
+      "properties": {
+        "phase": {"enum": ["VERIFYING_DETAIL", "SELECTING", "VERIFYING_LOCK", "COMPLETED"]},
+        "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+        "labelState": {"type": ["string", "null"], "enum": ["LOCK", "UNLOCK", "LOCKED", "UNKNOWN", null]},
+        "buttonState": {"type": ["string", "null"], "enum": ["FOCUSED", "ABSENT", "UNKNOWN", null]},
+        "selectSent": {"type": "boolean"},
+        "observation": {"type": "object"},
+        "command": {"type": ["string", "null"], "enum": ["SELECT", null]},
+        "reason": {"type": ["string", "null"], "maxLength": 128}
+      }
+    }
+  }
+}

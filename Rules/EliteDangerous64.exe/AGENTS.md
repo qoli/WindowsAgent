@@ -167,6 +167,17 @@ observations before reporting `ACQUIRED`; an already bracketed row reports
 focus fails explicitly and never falls back to the first CONTACTS row. The
 Action restores the forward view only when it opened the left panel itself.
 
+`elite-dangerous/lock-destination` is a separate interruptible linear
+Streaming Action for an already-open Navigation detail card. The higher agent
+must choose and open the intended Navigation row first. The Action combines a
+fixed reference-density primary-button fill scan with dedicated OCR of `LOCK
+DESTINATION` versus `UNLOCK DESTINATION`. It requires two consecutive focused
+known observations before input. `UNLOCK DESTINATION` reports `EXISTING`
+without pressing it; `LOCK DESTINATION` sends `SELECT` once and requires two
+angle-bracketed OCR observations of the supplied `targetName` from the
+Navigation-list-specific w480 ROI before reporting `ACQUIRED`. It does not scan
+the list, choose a destination, or close a panel it did not open.
+
 `elite-dangerous/dock-at-station` is the complete interruptible linear docking
 workflow. It owns view normalization, the watched `request-docking-range`
 admission Gate, CONTACTS navigation, Request Docking focus and one-shot

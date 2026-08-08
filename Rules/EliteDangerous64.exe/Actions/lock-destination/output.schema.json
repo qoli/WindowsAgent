@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "result", "targetName", "targetLocked", "selectSent", "finalObservation"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "LOCK_DESTINATION"},
+    "completed": {"const": true},
+    "result": {"enum": ["EXISTING", "ACQUIRED"]},
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "targetLocked": {"const": true},
+    "selectSent": {"type": "boolean"},
+    "finalObservation": {"type": "object"}
+  }
+}

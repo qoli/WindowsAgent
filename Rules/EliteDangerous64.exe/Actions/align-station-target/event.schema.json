@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["phase", "sample", "commandCount", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandHoldMs", "commandResult", "observedMovementPixels", "noMovementCount", "distanceDeltaPixels", "awayTrendCount", "reason"],
       "properties": {
-        "phase": {"enum": ["STOPPING", "OBSERVING", "TURNING_TO_FRONT", "COARSE_ALIGN", "FINE_ALIGN", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR"]},
+        "phase": {"enum": ["STOPPING", "OBSERVING", "TURNING_TO_FRONT", "COARSE_ALIGN", "FINE_ALIGN", "VERIFYING_CENTER", "COMPLETED", "TRACKING_WINDOW_COMPLETED", "OBSERVATION_ERROR"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 240},
         "commandCount": {"type": "integer", "minimum": 0, "maximum": 120},
         "targetDetected": {"type": ["boolean", "null"]},
@@ -20,7 +20,7 @@
         "offsetY": {"type": ["integer", "null"], "minimum": -48, "maximum": 47},
         "centerDistancePixels": {"type": ["number", "null"], "minimum": 0, "maximum": 68},
         "centerZoneInside": {"type": ["boolean", "null"]},
-        "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
+        "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 240},
         "command": {"type": ["string", "null"], "enum": ["SET_THROTTLE_0", "PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "ROLL_LEFT", "ROLL_RIGHT", null]},
         "commandHoldMs": {"type": ["integer", "null"], "minimum": 40, "maximum": 1000},
         "commandResult": {"type": ["object", "null"]},
