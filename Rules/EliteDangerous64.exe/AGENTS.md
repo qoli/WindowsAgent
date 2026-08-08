@@ -26,19 +26,28 @@ marker bounds remain visible diagnostic evidence; total cyan count alone never
 decides the hemisphere.
 
 `elite-dangerous/ship-attitude-control` is the finite binding-resolved flight
-primitive. It injects exactly one 40 ms `PITCH_UP`, `PITCH_DOWN`, `YAW_LEFT`,
+primitive. It injects exactly one `PITCH_UP`, `PITCH_DOWN`, `YAW_LEFT`,
 `YAW_RIGHT`, `ROLL_LEFT`, or `ROLL_RIGHT` press from the active Frontier preset.
-It proves key injection only, not attitude movement.
+The caller may explicitly request a 40 through 1000 ms hold; omission uses the
+declared 40 ms default. Frontier's `Key_*Arrow` names map to the same extended
+Windows scan codes as their canonical directional-key counterparts. Successful
+output proves key injection only, not attitude movement.
 
 `elite-dangerous/align-station-target` is an interruptible linear Streaming
 Action over the selected target. It first commands 0% throttle, drives a hollow
 rear marker away from center until it becomes solid, then drives the solid
-marker toward center with one pitch/yaw pulse and one fresh Compass observation
-at a time. Three consecutive solid samples in the four-pixel center zone are
-required for completion. Its structured update events are the durable control
-timeline; explicit activity events supply the Action OSD. It does not establish
-Station target lock, approach the Station, request docking, or participate in
-the docking-computer workflow.
+marker toward center. The rear phase locks coarse pitch-up until the marker is
+solid instead of reversing around the rear projection's antipode. The front
+phase may use roll for coarse lateral correction, then pitch or yaw for direct
+correction. Every pulse is followed by a fresh Compass observation. Events
+expose requested hold duration, observed marker movement, distance delta,
+moving-away trend, and consecutive no-movement count. Four stationary samples
+or five consecutive front samples moving away fail explicitly. Three
+consecutive solid samples in the four-pixel center zone are required for
+completion. Its structured update events are the durable control timeline;
+explicit activity events supply the Action OSD. It does not establish Station
+target lock, approach the Station, request docking, or participate in the
+docking-computer workflow.
 
 `elite-dangerous/flight-prompt-text` is a second finite Action. It captures the
 reviewed central prompt as a 400x40 reference-density RGB line and sends it to

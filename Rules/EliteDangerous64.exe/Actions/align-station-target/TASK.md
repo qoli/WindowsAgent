@@ -7,11 +7,20 @@ docking computer. The caller must establish the intended Station target lock
 before starting this Action.
 
 The Action first commands 0% throttle, then repeatedly reads
-`elite-dangerous/compass` and issues one bounded pitch or yaw press through
-`elite-dangerous/ship-attitude-control`. A hollow marker is treated as a rear
-hemisphere target and is driven away from the compass center until it crosses
-to a solid front marker. A solid marker is driven toward the center. Completion
+`elite-dangerous/compass` and issues one bounded roll, pitch, or fine yaw press
+through `elite-dangerous/ship-attitude-control`. While the marker is hollow,
+the Action locks a coarse pitch-up turn until it reaches the front hemisphere;
+it deliberately does not reverse from the hollow marker's offset sign as that
+projection crosses the compass antipode. Once solid, roll handles coarse
+lateral correction and pitch/yaw handle fine correction. Rear, coarse, and
+fine phases use explicit 800, 800, and 400 ms holds respectively. Completion
 requires three consecutive solid samples inside the four-pixel center zone.
+
+Each post-command observation reports marker displacement, center-distance
+delta, consecutive no-movement count, and a front-marker moving-away trend.
+Four exactly stationary observations or five consecutive front observations
+moving at least one reference pixel farther from center fail explicitly rather
+than trusting one delayed frame or exhausting the full command budget.
 
 Every observation and command is emitted as
 `action.align-station-target.update`. Explicit `stream.activity` records expose

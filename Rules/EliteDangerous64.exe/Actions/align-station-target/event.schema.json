@@ -8,11 +8,11 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "commandCount", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandResult", "reason"],
+      "required": ["phase", "sample", "commandCount", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandHoldMs", "commandResult", "observedMovementPixels", "noMovementCount", "distanceDeltaPixels", "awayTrendCount", "reason"],
       "properties": {
         "phase": {"enum": ["STOPPING", "OBSERVING", "TURNING_TO_FRONT", "COARSE_ALIGN", "FINE_ALIGN", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR"]},
-        "sample": {"type": "integer", "minimum": 0, "maximum": 400},
-        "commandCount": {"type": "integer", "minimum": 0, "maximum": 240},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 240},
+        "commandCount": {"type": "integer", "minimum": 0, "maximum": 120},
         "targetDetected": {"type": ["boolean", "null"]},
         "targetPresentation": {"type": ["string", "null"], "enum": ["SOLID", "HOLLOW", "UNKNOWN", null]},
         "targetHemisphere": {"type": ["string", "null"], "enum": ["FRONT", "REAR", "UNKNOWN", null]},
@@ -21,8 +21,13 @@
         "centerDistancePixels": {"type": ["number", "null"], "minimum": 0, "maximum": 68},
         "centerZoneInside": {"type": ["boolean", "null"]},
         "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
-        "command": {"type": ["string", "null"], "enum": ["SET_THROTTLE_0", "PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
+        "command": {"type": ["string", "null"], "enum": ["SET_THROTTLE_0", "PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "ROLL_LEFT", "ROLL_RIGHT", null]},
+        "commandHoldMs": {"type": ["integer", "null"], "minimum": 40, "maximum": 1000},
         "commandResult": {"type": ["object", "null"]},
+        "observedMovementPixels": {"type": ["number", "null"], "minimum": 0, "maximum": 96},
+        "noMovementCount": {"type": "integer", "minimum": 0, "maximum": 4},
+        "distanceDeltaPixels": {"type": ["number", "null"], "minimum": -68, "maximum": 68},
+        "awayTrendCount": {"type": "integer", "minimum": 0, "maximum": 5},
         "reason": {"type": ["string", "null"], "maxLength": 256}
       }
     }

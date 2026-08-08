@@ -13,6 +13,7 @@ type alignStationTargetCaller struct {
 	index        int
 	throttles    []int
 	controls     []string
+	holds        []int
 }
 
 func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -37,7 +38,12 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 			return nil, errors.New("attitude control is not a string")
 		}
 		c.controls = append(c.controls, control)
-		return json.Marshal(map[string]any{"schemaVersion": 1, "selection": control, "control": control})
+		hold, ok := inputs["holdMs"].(int64)
+		if !ok {
+			return nil, errors.New("attitude holdMs is not an integer")
+		}
+		c.holds = append(c.holds, int(hold))
+		return json.Marshal(map[string]any{"schemaVersion": 1, "selection": control, "control": control, "holdMs": hold})
 	default:
 		return nil, errors.New("unexpected align-station-target child Action: " + id)
 	}
@@ -93,13 +99,14 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
-	wantControls := []string{"YAW_RIGHT", "YAW_RIGHT", "YAW_RIGHT"}
+	wantControls := []string{"PITCH_UP", "PITCH_UP", "YAW_RIGHT"}
+	wantHolds := []int{800, 800, 400}
 	if len(caller.controls) != len(wantControls) {
 		t.Fatalf("controls=%v", caller.controls)
 	}
 	for index := range wantControls {
-		if caller.controls[index] != wantControls[index] {
-			t.Fatalf("controls=%v", caller.controls)
+		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
+			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 		}
 	}
 }
@@ -118,11 +125,92 @@ func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"YAW_LEFT", "PITCH_DOWN"}
+	wantControls := []string{"ROLL_LEFT", "PITCH_DOWN"}
+	wantHolds := []int{800, 400}
 	for index := range wantControls {
-		if caller.controls[index] != wantControls[index] {
-			t.Fatalf("controls=%v", caller.controls)
+		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
+			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 		}
+	}
+}
+
+func TestEliteAlignStationTargetKeepsRearTurnDirectionAcrossCenter(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", -2, -9, 9.22, false),
+		alignObservation("HOLLOW", -1, -3, 3.162, true),
+		alignObservation("HOLLOW", -2, -6, 6.325, false),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"PITCH_UP", "PITCH_UP", "PITCH_UP"}
+	for index := range wantControls {
+		if caller.controls[index] != wantControls[index] || caller.holds[index] != 800 {
+			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+		}
+	}
+}
+
+func TestEliteAlignStationTargetPitchesUpForFrontMarkerAboveCenter(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -2, -25, 25.08, false),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_UP" || caller.holds[0] != 800 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", 0, 0, 0, true),
+		alignObservation("HOLLOW", 0, 0, 0, true),
+		alignObservation("HOLLOW", 0, 0, 0, true),
+		alignObservation("HOLLOW", 0, 0, 0, true),
+		alignObservation("HOLLOW", 0, 0, 0, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "no measurable Compass movement") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 4 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetFailsAfterSustainedFrontMovingAwayTrend(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -10, 10, false),
+		alignObservation("SOLID", 0, -11, 11, false),
+		alignObservation("SOLID", 0, -12, 12, false),
+		alignObservation("SOLID", 0, -13, 13, false),
+		alignObservation("SOLID", 0, -14, 14, false),
+		alignObservation("SOLID", 0, -15, 15, false),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "moved the front Compass target away") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 5 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 
