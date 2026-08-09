@@ -99,7 +99,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
-	wantControls := []string{"PITCH_UP", "PITCH_UP", "YAW_RIGHT"}
+	wantControls := []string{"YAW_LEFT", "YAW_LEFT", "YAW_RIGHT"}
 	wantHolds := []int{800, 800, 250}
 	if len(caller.controls) != len(wantControls) {
 		t.Fatalf("controls=%v", caller.controls)
@@ -172,8 +172,8 @@ func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"ROLL_LEFT", "PITCH_DOWN"}
-	wantHolds := []int{300, 250}
+	wantControls := []string{"YAW_LEFT", "PITCH_DOWN"}
+	wantHolds := []int{800, 250}
 	for index := range wantControls {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
@@ -196,7 +196,7 @@ func TestEliteAlignStationTargetKeepsRearTurnDirectionAcrossCenter(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"PITCH_UP", "PITCH_UP", "PITCH_UP"}
+	wantControls := []string{"YAW_LEFT", "YAW_LEFT", "YAW_LEFT"}
 	for index := range wantControls {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != 800 {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
@@ -250,6 +250,25 @@ func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
 	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "no measurable Compass movement") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 4 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetTrackFailsWhenRearMarkerStallsInsideFineBand(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", -15, -4, 15.524, false),
+		alignObservation("HOLLOW", -15, -4, 15.524, false),
+		alignObservation("HOLLOW", -15, -4, 15.524, false),
+		alignObservation("HOLLOW", -15, -4, 15.524, false),
+		alignObservation("HOLLOW", -15, -4, 15.524, false),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
 	)
 	if err == nil || !contains(err.Error(), "no measurable Compass movement") {
 		t.Fatalf("error=%v", err)

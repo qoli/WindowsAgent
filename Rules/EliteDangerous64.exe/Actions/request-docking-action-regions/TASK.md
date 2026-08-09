@@ -7,4 +7,7 @@ before recognition, so cockpit-view movement does not require a fixed
 action-row crop.
 
 This raw Action does not decide whether Request Docking exists or is focused.
-It returns current boxes, text, confidence, and adjacent pixels as evidence.
+It returns current boxes, text, confidence, and a bounded 32-reference-pixel
+left context as evidence. The context width preserves the action-row fill while
+keeping the classifier request below the Script payload limit even when many
+Contacts rows are detected.

@@ -27,6 +27,7 @@ type leaveStationCaller struct {
 	temporalLowSpeedAlternates  bool
 	temporalLowSpeedRawMismatch bool
 	stopEvidenceNever           bool
+	departureSpeedAlwaysLow     bool
 	wgcFailuresAfterThrottle100 int
 	throttleZeroCommanded       bool
 	flightPromptCalls           int
@@ -109,6 +110,16 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "0",
 					"rawConfidence": 0.49, "constrainedText": "0",
 					"constrainedConfidence": 0.49, "rawConstraintMargin": 0.0,
+				},
+			}})
+		}
+		if c.departureSpeedAlwaysLow && len(c.throttles) > 0 && c.throttles[len(c.throttles)-1] == 100 {
+			return json.Marshal(map[string]any{"speed": map[string]any{
+				"state": "KNOWN", "displayValue": 9,
+				"evidence": map[string]any{
+					"reason": "VISUAL_SPEED_CONFIRMED", "rawText": "9",
+					"rawConfidence": 0.80, "constrainedText": "9",
+					"constrainedConfidence": 0.80, "rawConstraintMargin": 0.0,
 				},
 			}})
 		}
@@ -320,6 +331,20 @@ func TestEliteLeaveStationWorkflowSendsThrottleZeroWhenSixthWGCErrorFailsDepartu
 		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
 	)
 	if err == nil || !strings.Contains(err.Error(), "WGC observation error limit exceeded after five skipped errors") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("failure compensation throttle controls=%v", caller.throttles)
+	}
+}
+
+func TestEliteLeaveStationWorkflowSendsThrottleZeroWhenDepartureMakesNoSpeedProgress(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{massOffAt: 2000, departureSpeedAlwaysLow: true}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "Throttle 100 produced no confirmed departure speed progress") {
 		t.Fatalf("error=%v", err)
 	}
 	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {

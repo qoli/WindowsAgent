@@ -10,5 +10,8 @@ each tab. The three text-tab squares sit immediately beside their labels so
 small header drift retains the same semantic anchor; SYSTEM remains inside its
 icon tile. Exactly one square must meet the selected threshold while all other
 squares remain below the inactive threshold. A missing header returns
-`ABSENT`; conflicting or insufficient evidence returns `UNKNOWN`. It does not
-OCR tab labels and does not infer state from a previous invocation.
+`ABSENT` when every square contains at most four highlighted pixels out of 16;
+this tolerates the calibrated cockpit-background noise observed while docked.
+Any unselected square above that bound, or conflicting selected squares,
+returns `UNKNOWN`. It does not OCR tab labels and does not infer state from a
+previous invocation.

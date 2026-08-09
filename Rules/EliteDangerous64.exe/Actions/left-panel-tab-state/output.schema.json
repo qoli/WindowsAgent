@@ -37,7 +37,7 @@
         },
         "selectedMinimum": {"const": 0.75},
         "inactiveMaximum": {"const": 0.25},
-        "absentMaximum": {"const": 0.125},
+        "absentMaximum": {"const": 0.25},
         "reason": {"type": "string", "maxLength": 64}
       }
     }

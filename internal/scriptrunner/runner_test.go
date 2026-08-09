@@ -873,6 +873,8 @@ func TestEliteLeftPanelTabStateClassifiesAllFourTabsAbsentAndAmbiguous(t *testin
 		{name: "transactions", wantState: "TRANSACTIONS", fills: map[string]int{"TRANSACTIONS": 16}},
 		{name: "contacts", wantState: "CONTACTS", fills: map[string]int{"CONTACTS": 16}},
 		{name: "absent", wantState: "ABSENT"},
+		{name: "absent with calibrated cockpit noise", wantState: "ABSENT", fills: map[string]int{"CONTACTS": 4}},
+		{name: "above absent noise bound", wantState: "UNKNOWN", fills: map[string]int{"CONTACTS": 5}},
 		{name: "insufficient highlight", wantState: "UNKNOWN", fills: map[string]int{"NAVIGATION": 8}},
 		{name: "multiple selected", wantState: "UNKNOWN", fills: map[string]int{"NAVIGATION": 16, "TRANSACTIONS": 16}},
 	} {

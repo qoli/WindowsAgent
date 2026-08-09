@@ -128,6 +128,12 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
+    "elite-dangerous/close-left-panel": {
+      "path": "Actions/close-left-panel",
+      "runtime": "windows-composite-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/select-contacts-panel": {
       "path": "Actions/select-contacts-panel",
       "runtime": "windows-streaming-action-v1",

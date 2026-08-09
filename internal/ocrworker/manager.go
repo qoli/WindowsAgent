@@ -114,9 +114,9 @@ func (m *Manager) Recognize(ctx context.Context, ruleID, profileID string, reque
 	}
 	result, err := client.Recognize(ctx, request)
 	if err != nil {
-		m.failed[profileID] = err
 		delete(m.recognitionClients, profileID)
 		_ = client.Close()
+		m.logger.Warn("ocr_worker_retired_after_call_failure", "rule_id", ruleID, "profile_id", profileID, "error", err)
 		return Result{}, err
 	}
 	return result, nil
@@ -153,9 +153,9 @@ func (m *Manager) DetectTextRegions(ctx context.Context, ruleID, profileID strin
 	}
 	result, err := client.DetectRecognize(ctx, request)
 	if err != nil {
-		m.failed[profileID] = err
 		delete(m.textRegionClients, profileID)
 		_ = client.Close()
+		m.logger.Warn("ocr_text_regions_worker_retired_after_call_failure", "rule_id", ruleID, "profile_id", profileID, "error", err)
 		return TextRegionsResult{}, err
 	}
 	return result, nil

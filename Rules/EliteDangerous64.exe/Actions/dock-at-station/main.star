@@ -289,12 +289,14 @@ def main(ctx):
     emit_update("RANGE_ADMITTED", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, reason="TREND_CONFIRMED_WITH_TWO_ALLOWED_SAMPLES", range_wait_samples=range_wait_samples, range_trend_state="ADMITTED", range_trend_samples=range_trend_samples, accepted_distance_meters=distance_meters, range_outlier_count=range_outlier_count)
 
     stream.activity(message="Opening Contacts panel", level="info")
+    action.on_failure(id="elite-dangerous/close-left-panel", inputs={})
     open_contacts(sample, range_state, distance_meters)
     target = locate_and_focus_request(sample, range_state, distance_meters)
     contact_index = target["contactIndex"]
     request_and_verify(sample, contact_index, range_state, distance_meters, target["alreadyActive"])
     stream.activity(message="Docking request confirmed", level="info")
     close_panel(sample, contact_index, range_state, distance_meters)
+    action.clear_on_failure()
 
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     stream.activity(message="Throttle set to 0%", level="info")

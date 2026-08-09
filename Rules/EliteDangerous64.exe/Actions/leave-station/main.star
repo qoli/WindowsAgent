@@ -2,6 +2,8 @@ POLL_MS = 250
 AUTO_LAUNCH_START_LIMIT = 600
 AUTO_LAUNCH_HANDOVER_LIMIT = 720
 DEPARTURE_LIMIT = 600
+DEPARTURE_PROGRESS_LIMIT = 20
+DEPARTURE_PROGRESS_SPEED_MIN = 15
 UNKNOWN_MASS_LOCK_LIMIT = 20
 AUTO_LAUNCH_ABSENCE_STABLE = 5
 AUTO_LAUNCH_MOVEMENT_SPEED_MIN = 15
@@ -362,6 +364,8 @@ def main(ctx):
 
     mass_lock_off_count = 0
     unknown_mass_lock_count = 0
+    departure_progress_seen = False
+    departure_samples = 0
     for _ in range(DEPARTURE_LIMIT):
         attempt = observe()
         sample += 1
@@ -375,6 +379,11 @@ def main(ctx):
             task.sleep(milliseconds=POLL_MS)
             continue
         observation = attempt["output"]
+        departure_samples += 1
+        if observation["observedSpeedState"] == "KNOWN" and observation["observedSpeedDisplayValue"] >= DEPARTURE_PROGRESS_SPEED_MIN:
+            departure_progress_seen = True
+        if not departure_progress_seen and departure_samples >= DEPARTURE_PROGRESS_LIMIT:
+            fail("Throttle 100 produced no confirmed departure speed progress")
         mass_lock = observation["massLock"]
         if mass_lock == "UNKNOWN":
             unknown_mass_lock_count += 1

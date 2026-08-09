@@ -4,7 +4,6 @@ MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
 MEDIUM_DISTANCE_PIXELS = 40
 FINE_DISTANCE_PIXELS = 16
-ROLL_AXIS_TOLERANCE_PIXELS = 4
 REAR_HOLD_MS = 800
 COARSE_HOLD_MS = 800
 MEDIUM_HOLD_MS = 300
@@ -59,10 +58,9 @@ def choose_front_command(target):
         hold_ms = FINE_HOLD_MS
     elif distance <= MEDIUM_DISTANCE_PIXELS:
         hold_ms = MEDIUM_HOLD_MS
-    if distance > FINE_DISTANCE_PIXELS and abs(offset_x) > ROLL_AXIS_TOLERANCE_PIXELS:
-        return ["ROLL_RIGHT" if offset_x > 0 else "ROLL_LEFT", hold_ms]
     if abs(offset_x) >= abs(offset_y) and offset_x != 0:
-        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", hold_ms]
+        yaw_hold_ms = COARSE_HOLD_MS if distance > FINE_DISTANCE_PIXELS else hold_ms
+        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", yaw_hold_ms]
     if offset_y != 0:
         # Screen Y grows downward. Pitch up moves the front marker downward,
         # so a marker above center needs pitch up and one below needs pitch down.
@@ -74,7 +72,7 @@ def choose_rear_command(target):
     # compass center while the ship turns, so steering from the offset sign
     # reverses the command and oscillates around the antipode. Keep one strong
     # axis until the marker becomes solid; only then steer from screen offset.
-    return ["PITCH_UP", REAR_HOLD_MS]
+    return ["YAW_LEFT", REAR_HOLD_MS]
 
 def main(ctx):
     mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
@@ -132,7 +130,7 @@ def main(ctx):
         if target["presentation"] == "UNKNOWN":
             emit_update("OBSERVING", sample, command_count, target, 0, reason="TARGET_PRESENTATION_UNKNOWN")
             fail("Compass target hollow or solid presentation is ambiguous")
-        if no_movement_count >= NO_MOVEMENT_LIMIT and (mode == "ALIGN" or target["centerDistancePixels"] > FINE_DISTANCE_PIXELS):
+        if no_movement_count >= NO_MOVEMENT_LIMIT and (target["presentation"] == "HOLLOW" or mode == "ALIGN" or target["centerDistancePixels"] > FINE_DISTANCE_PIXELS):
             emit_update("OBSERVING", sample, command_count, target, 0, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control produced no measurable Compass movement")
         if away_trend_count >= AWAY_TREND_LIMIT and mode == "ALIGN":
