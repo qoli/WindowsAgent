@@ -1,4 +1,5 @@
 POLL_MS = 100
+ALIGN_POST_COMMAND_SETTLE_STEPS = 14
 MAX_COMMANDS = 120
 MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
@@ -23,7 +24,7 @@ def empty_target():
         "centerZone": {"inside": None},
     }
 
-def emit_update(phase, sample, command_count, target, stable_confirmations, command=None, command_result=None, reason=None, command_hold_ms=None, observed_movement_pixels=None, no_movement_count=0, distance_delta_pixels=None, away_trend_count=0):
+def emit_update(phase, sample, command_count, target, stable_confirmations, command=None, command_result=None, reason=None, information=None, command_hold_ms=None, observed_movement_pixels=None, no_movement_count=0, distance_delta_pixels=None, away_trend_count=0):
     stream.emit(
         type="action.align-station-target.update",
         payload={
@@ -46,6 +47,7 @@ def emit_update(phase, sample, command_count, target, stable_confirmations, comm
             "distanceDeltaPixels": distance_delta_pixels,
             "awayTrendCount": away_trend_count,
             "reason": reason,
+            "information": information,
         },
     )
 
@@ -59,8 +61,11 @@ def choose_front_command(target):
     elif distance <= MEDIUM_DISTANCE_PIXELS:
         hold_ms = MEDIUM_HOLD_MS
     if abs(offset_x) >= abs(offset_y) and offset_x != 0:
-        yaw_hold_ms = COARSE_HOLD_MS if distance > FINE_DISTANCE_PIXELS else hold_ms
-        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", yaw_hold_ms]
+        # Live static-target calibration showed that an 800 ms yaw press has a
+        # small (~3 reference-pixel) settled displacement. The apparent
+        # 15-30 px crossings were transient positions sampled while the ship
+        # was still arresting its rotation, not the settled control response.
+        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", COARSE_HOLD_MS]
     if offset_y != 0:
         # Screen Y grows downward. Pitch up moves the front marker downward,
         # so a marker above center needs pitch up and one below needs pitch down.
@@ -73,6 +78,12 @@ def choose_rear_command(target):
     # reverses the command and oscillates around the antipode. Keep one strong
     # axis until the marker becomes solid; only then steer from screen offset.
     return ["YAW_LEFT", REAR_HOLD_MS]
+
+def settle_after_align_command():
+    # task.sleep is intentionally bounded to 250 ms by the runtime. Keep the
+    # longer control-settle window interruptible by composing bounded sleeps.
+    for _ in range(ALIGN_POST_COMMAND_SETTLE_STEPS):
+        task.sleep(milliseconds=250)
 
 def main(ctx):
     mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
@@ -91,7 +102,9 @@ def main(ctx):
     previous_phase = None
     final_observation = None
     commanded_target = None
+    commanded_control = None
     no_movement_count = 0
+    pitch_no_movement_count = 0
     away_trend_count = 0
 
     for _ in range(sample_limit):
@@ -106,15 +119,24 @@ def main(ctx):
         final_observation = observation
         observed_movement = None
         distance_delta = None
-        if commanded_target != None and target["detected"]:
+        # A moving target's own motion makes successive Compass positions
+        # unsuitable as control-response evidence. TRACK therefore uses only
+        # the current error for its next command; delta-based diagnostics and
+        # failure Gates are restricted to ALIGN's stationary-target contract.
+        if mode == "ALIGN" and commanded_target != None and target["detected"]:
             observed_movement = max(
                 abs(target["offsetX"] - commanded_target["offsetX"]),
                 abs(target["offsetY"] - commanded_target["offsetY"]),
             )
             if observed_movement < MIN_OBSERVED_MOVEMENT_PIXELS:
                 no_movement_count += 1
+                if commanded_control in ["PITCH_UP", "PITCH_DOWN"]:
+                    pitch_no_movement_count += 1
+                else:
+                    pitch_no_movement_count = 0
             else:
                 no_movement_count = 0
+                pitch_no_movement_count = 0
             distance_delta = target["centerDistancePixels"] - commanded_target["centerDistancePixels"]
             if commanded_target["presentation"] == "SOLID" and target["presentation"] == "SOLID":
                 if distance_delta >= 1:
@@ -124,13 +146,22 @@ def main(ctx):
             else:
                 away_trend_count = 0
         commanded_target = None
+        commanded_control = None
         if not target["detected"]:
             emit_update("OBSERVING", sample, command_count, target, 0, reason="TARGET_NOT_DETECTED")
             fail("Compass target is not detected; establish the intended Station target lock first")
         if target["presentation"] == "UNKNOWN":
             emit_update("OBSERVING", sample, command_count, target, 0, reason="TARGET_PRESENTATION_UNKNOWN")
             fail("Compass target hollow or solid presentation is ambiguous")
-        if no_movement_count >= NO_MOVEMENT_LIMIT and (target["presentation"] == "HOLLOW" or mode == "ALIGN" or target["centerDistancePixels"] > FINE_DISTANCE_PIXELS):
+        if mode == "ALIGN" and no_movement_count >= NO_MOVEMENT_LIMIT:
+            if pitch_no_movement_count >= NO_MOVEMENT_LIMIT:
+                information = {
+                    "code": "ED_PITCH_INPUT_CONTEXT_NOT_READY",
+                    "message": "Elite Dangerous accepted binding-resolved Pitch injections but produced no Compass movement. This matches the reproduced ED startup state where Pitch remains inactive until the configured controller is powered on or reconnected.",
+                    "recommendedAction": "Power on or reconnect the configured controller, then retry without restarting Elite Dangerous. Do not use XInput enumeration as the Gate.",
+                }
+                emit_update("OBSERVING", sample, command_count, target, 0, reason="ED_PITCH_INPUT_CONTEXT_NOT_READY", information=information, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+                fail("ED_PITCH_INPUT_CONTEXT_NOT_READY: repeated Pitch input produced no Compass movement; power on or reconnect the configured controller, then retry without restarting Elite Dangerous")
             emit_update("OBSERVING", sample, command_count, target, 0, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control produced no measurable Compass movement")
         if away_trend_count >= AWAY_TREND_LIMIT and mode == "ALIGN":
@@ -154,13 +185,7 @@ def main(ctx):
                 phase = "COARSE_ALIGN"
             else:
                 phase = "FINE_ALIGN"
-            # TRACK holds a moving target that is already inside the fine band
-            # when additional pulses no longer produce measurable motion.
-            # ALIGN retains the strict Compass center-zone contract.
-            if mode == "TRACK" and target["centerDistancePixels"] <= FINE_DISTANCE_PIXELS and no_movement_count >= 2:
-                command_spec = None
-            else:
-                command_spec = choose_front_command(target)
+            command_spec = choose_front_command(target)
 
         if phase != previous_phase:
             if phase == "TURNING_TO_FRONT":
@@ -221,8 +246,17 @@ def main(ctx):
         command_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": command, "holdMs": hold_ms})
         command_count += 1
         commanded_target = target
+        commanded_control = command
         stream.activity(message=command + " for " + str(hold_ms) + " ms at " + str(target["centerDistancePixels"]) + " px", level="info")
         emit_update(phase, sample, command_count, target, stable_confirmations, command=command, command_result=command_result, command_hold_ms=hold_ms, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
-        task.sleep(milliseconds=POLL_MS)
+        # ALIGN compares stationary-target observations, so do not feed the
+        # post-input transient back into the controller. Live calibration on a
+        # locked Station target reached its settled Compass position after
+        # roughly 3.4 seconds. TRACK intentionally keeps its faster current-
+        # error loop because a moving target has no stationary settle point.
+        if mode == "ALIGN":
+            settle_after_align_command()
+        else:
+            task.sleep(milliseconds=POLL_MS)
 
     fail("Compass alignment exhausted the bounded sample limit")

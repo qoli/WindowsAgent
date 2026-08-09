@@ -100,7 +100,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
 	wantControls := []string{"YAW_LEFT", "YAW_LEFT", "YAW_RIGHT"}
-	wantHolds := []int{800, 800, 250}
+	wantHolds := []int{800, 800, 800}
 	if len(caller.controls) != len(wantControls) {
 		t.Fatalf("controls=%v", caller.controls)
 	}
@@ -138,7 +138,7 @@ func TestEliteAlignStationTargetTracksMovingTargetPastTransientCenter(t *testing
 	}
 }
 
-func TestEliteAlignStationTargetTrackHoldsMeasuredNearCenterStall(t *testing.T) {
+func TestEliteAlignStationTargetTrackKeepsCorrectingCurrentOffsetWithoutInferringStall(t *testing.T) {
 	observations := make([]json.RawMessage, 10)
 	for index := range observations {
 		observations[index] = alignObservation("SOLID", 0, -7, 7, false)
@@ -153,7 +153,7 @@ func TestEliteAlignStationTargetTrackHoldsMeasuredNearCenterStall(t *testing.T) 
 	if !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
 		t.Fatalf("output=%s", output)
 	}
-	if len(caller.controls) != 2 {
+	if len(caller.controls) != 9 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
@@ -240,6 +240,24 @@ func TestEliteAlignStationTargetUsesFinePulseAtReviewedFourteenPixels(t *testing
 	}
 }
 
+func TestEliteAlignStationTargetUsesSettledYawPulseInsideFineBand(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -14, 0, 14, false),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_LEFT" || caller.holds[0] != 800 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
 func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("HOLLOW", 0, 0, 0, true),
@@ -259,21 +277,51 @@ func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
 	}
 }
 
-func TestEliteAlignStationTargetTrackFailsWhenRearMarkerStallsInsideFineBand(t *testing.T) {
+func TestEliteAlignStationTargetReportsKnownEDPitchInitializationState(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
-		alignObservation("HOLLOW", -15, -4, 15.524, false),
-		alignObservation("HOLLOW", -15, -4, 15.524, false),
-		alignObservation("HOLLOW", -15, -4, 15.524, false),
-		alignObservation("HOLLOW", -15, -4, 15.524, false),
-		alignObservation("HOLLOW", -15, -4, 15.524, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -20, 20, false),
 	}}
+	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
 	)
-	if err == nil || !contains(err.Error(), "no measurable Compass movement") {
+	if err == nil || !contains(err.Error(), "ED_PITCH_INPUT_CONTEXT_NOT_READY") || !contains(err.Error(), "power on or reconnect") {
 		t.Fatalf("error=%v", err)
 	}
 	if len(caller.controls) != 4 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if len(reporter.payloads) == 0 {
+		t.Fatal("expected streamed diagnostic information")
+	}
+	lastPayload := string(reporter.payloads[len(reporter.payloads)-1])
+	if !contains(lastPayload, `"reason":"ED_PITCH_INPUT_CONTEXT_NOT_READY"`) ||
+		!contains(lastPayload, `"code":"ED_PITCH_INPUT_CONTEXT_NOT_READY"`) ||
+		!contains(lastPayload, `"recommendedAction":"Power on or reconnect`) {
+		t.Fatalf("last payload=%s", lastPayload)
+	}
+}
+
+func TestEliteAlignStationTargetTrackDoesNotInferNoProgressFromMovingTargetFrames(t *testing.T) {
+	observations := make([]json.RawMessage, 10)
+	for index := range observations {
+		observations[index] = alignObservation("HOLLOW", -15, -4, 15.524, false)
+	}
+	caller := &alignStationTargetCaller{observations: observations}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.controls) != 9 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }

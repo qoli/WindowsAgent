@@ -33,6 +33,17 @@ declared 40 ms default. Frontier's `Key_*Arrow` names map to the same extended
 Windows scan codes as their canonical directional-key counterparts. Successful
 output proves key injection only, not attitude movement.
 
+Elite Dangerous has a reproduced startup input-initialization failure: when the
+configured controller was off during a cold game start, binding-resolved
+`PITCH_UP` injections completed but produced no visual or Compass movement,
+while Yaw remained functional. Powering on the controller restored the same
+Pitch command immediately without restarting the game. XInput enumeration
+still did not expose that controller, so it is not a valid readiness Gate. When
+`align-station-target` reports `ED_PITCH_INPUT_CONTEXT_NOT_READY`, do not begin
+another binding, scan-code, or Compass investigation. Report the included
+`information` response, have the controller powered on or reconnected, and
+retry the Streaming Action without restarting Elite Dangerous.
+
 `elite-dangerous/align-station-target` is an interruptible linear Streaming
 Action over the selected target. It first commands 0% throttle, drives a hollow
 rear marker away from center until it becomes solid, then drives the solid

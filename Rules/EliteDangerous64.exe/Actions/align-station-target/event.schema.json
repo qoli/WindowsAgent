@@ -8,7 +8,7 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "commandCount", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandHoldMs", "commandResult", "observedMovementPixels", "noMovementCount", "distanceDeltaPixels", "awayTrendCount", "reason"],
+      "required": ["phase", "sample", "commandCount", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandHoldMs", "commandResult", "observedMovementPixels", "noMovementCount", "distanceDeltaPixels", "awayTrendCount", "reason", "information"],
       "properties": {
         "phase": {"enum": ["STOPPING", "OBSERVING", "TURNING_TO_FRONT", "COARSE_ALIGN", "FINE_ALIGN", "VERIFYING_CENTER", "COMPLETED", "TRACKING_WINDOW_COMPLETED", "OBSERVATION_ERROR"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 240},
@@ -28,7 +28,17 @@
         "noMovementCount": {"type": "integer", "minimum": 0, "maximum": 4},
         "distanceDeltaPixels": {"type": ["number", "null"], "minimum": -68, "maximum": 68},
         "awayTrendCount": {"type": "integer", "minimum": 0, "maximum": 5},
-        "reason": {"type": ["string", "null"], "maxLength": 256}
+        "reason": {"type": ["string", "null"], "maxLength": 256},
+        "information": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["code", "message", "recommendedAction"],
+          "properties": {
+            "code": {"const": "ED_PITCH_INPUT_CONTEXT_NOT_READY"},
+            "message": {"type": "string", "maxLength": 512},
+            "recommendedAction": {"type": "string", "maxLength": 512}
+          }
+        }
       }
     }
   }
