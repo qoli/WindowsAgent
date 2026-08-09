@@ -315,12 +315,12 @@ that workflow-local temporal count, and events identify which evidence mode
 confirmed the handover. Only then does it own
 the 100% throttle, Mass Lock OFF, and 0% throttle sequence. Sending 0% is not
 completion: the Action enters `VERIFYING_STOP` and requires three consecutive
-current frames where both OCR candidates are exactly `0`, constrained
-confidence is at least `0.45`, the raw-versus-constrained margin is at most
-`0.02`. This phase calls only the resident `ship-speed` OCR path; flight prompt
+current `STOPPED` frames backed by the dedicated slashed-zero pixel topology.
+A qualified multi-digit OCR observation conflicts with that topology instead
+of being overridden. This phase calls only the resident `ship-speed` path; flight prompt
 and ship status are explicitly unobserved after the already-confirmed Mass Lock
 OFF gate. The workflow-local temporal gate does not weaken the finite
-`ship-speed` classifier's `0.55` single-frame threshold. If zero is not visually
+`ship-speed` non-zero OCR classifier's `0.55` single-frame threshold. If zero is not visually
 confirmed within 60 samples, the workflow fails explicitly.
 Stream events distinguish `commandedThrottle` from the independently observed
 speed fields and report `COMPLETED`, `FAILED`, or `CANCELLED`.

@@ -615,13 +615,12 @@ The initial stream event is `AWAITING_AUTO_LAUNCH`. During that phase the
 supervising model captures the screen and invokes `elite-dangerous/ui-control`
 one logical key at a time. The Streaming Action does not guess a fixed Auto
 Launch key sequence. Once the prompt pipeline observes Auto Launch, the
-workflow requires observed movement, five samples without a classified Auto
-Launch prompt, Mass Lock ON, and two reliable speeds at or below 10. It then
+workflow requires a `MOVING` observation, five samples without a classified
+Auto Launch prompt, Mass Lock ON, and two `STOPPED` or `LOW_SPEED` observations. It then
 continues autonomously through the 100% command and Mass Lock OFF gates. After
 the 0% command it enters `VERIFYING_STOP`; three consecutive current frames
-must provide matching raw and constrained `0` candidates with the declared
-workflow confidence and margin bounds before `COMPLETED`. This final phase
-calls only the resident speed OCR path and marks flight prompt and Mass Lock as
+must be classified `STOPPED` by the dedicated slashed-zero pixel topology
+before `COMPLETED`. This final phase calls only the resident speed path and marks flight prompt and Mass Lock as
 unobserved instead of repeating their slower pipelines or retaining stale
 values. Stream fields named `observedSpeed*` are visual evidence;
 `commandedThrottle` is input-command state, and inability to confirm the stop

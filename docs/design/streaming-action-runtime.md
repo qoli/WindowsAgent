@@ -81,21 +81,17 @@ fallback is attempted.
 `AWAITING_AUTO_LAUNCH`. The higher model remains responsible for slow menu
 arrangement through one-key `elite-dangerous/ui-control` calls. The workflow
 then consumes finite `flight-status`, `ship-status`, and `ship-speed` evidence.
-After Auto Launch is seen, the workflow requires an observed movement peak,
-five samples without a classified Auto Launch prompt, Mass Lock ON, and either
-two strict low-speed samples or four consecutive matching workflow-qualified
-low-confidence `0` through `10` OCR samples before it may invoke
-binding-resolved 100% throttle. The temporal path requires matching raw and
-constrained text, confidence at least `0.40`, and margin at most `0.02`; it is
-reported explicitly rather than changing the finite speed classifier.
+After Auto Launch is seen, the workflow requires a `MOVING` observation, five
+samples without a classified Auto Launch prompt, Mass Lock ON, and two
+classified `STOPPED` or `LOW_SPEED` observations before it may invoke
+binding-resolved 100% throttle. `UNKNOWN` evidence never contributes to a Gate.
 Mass Lock OFF then gates the 0% command. The workflow enters `VERIFYING_STOP`
-instead of completing from input success: three consecutive frames must have
-matching raw and digit-constrained `0` candidates, constrained confidence at
-least `0.45`, and raw constraint margin at most `0.02`. The final loop invokes
-only resident `ship-speed` OCR. Flight prompt and Mass Lock fields use explicit
+instead of completing from input success: three consecutive frames must be
+classified `STOPPED`, each backed by the dedicated slashed-zero pixel topology.
+A qualified multi-digit OCR observation conflicts with that topology. The final
+loop invokes only resident `ship-speed`. Flight prompt and Mass Lock fields use explicit
 unobserved values in `SPEED_ONLY` events rather than repeating those pipelines
-or retaining stale observations. This temporal gate leaves the finite
-classifier's stricter single-frame threshold unchanged. Events distinguish
+or retaining stale observations. Events distinguish
 `commandedThrottle` from `observedSpeed*` and expose observation scope,
 stop-gate age, and confirmations; missing or contradictory evidence and sample
 limits fail explicitly, with no inferred state or alternate execution path.

@@ -8,7 +8,7 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "observationScope", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedReason", "observedSpeedRawText", "observedSpeedRawConfidence", "observedSpeedConstrainedText", "observedSpeedConstrainedConfidence", "observedSpeedRawConstraintMargin", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "temporalLowSpeedText", "temporalLowSpeedConfirmations", "handoverEvidence", "handoverCandidate", "gateDecision", "samplesSinceThrottleZero", "zeroSpeedConfirmations", "stopGateDecision", "commandedThrottle", "instruction", "throttleCommand", "observationErrorCount", "observationError"],
+      "required": ["phase", "sample", "observationScope", "flightStatus", "flightPromptText", "massLock", "observedSpeedState", "observedSpeedDisplayValue", "observedSpeedRawCandidate", "observedSpeedReason", "observedSpeedRawText", "observedSpeedRawConfidence", "observedSpeedConstrainedText", "observedSpeedConstrainedConfidence", "observedSpeedRawConstraintMargin", "autoLaunchSeen", "samplesSinceAutoLaunchSeen", "movementSeen", "maximumObservedSpeed", "lowSpeedConfirmations", "handoverEvidence", "handoverCandidate", "gateDecision", "samplesSinceThrottleZero", "zeroSpeedConfirmations", "stopGateDecision", "commandedThrottle", "instruction", "throttleCommand", "observationErrorCount", "observationError"],
       "properties": {
         "phase": {"enum": ["AWAITING_AUTO_LAUNCH", "AUTO_LAUNCH_ACTIVE", "HANDOVER_CANDIDATE", "DEPARTING", "VERIFYING_STOP", "OBSERVATION_ERROR", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
@@ -16,8 +16,9 @@
         "flightStatus": {"enum": ["SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "AUTO_DOCK", "UNKNOWN"]},
         "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"enum": ["ON", "OFF", "UNKNOWN"]},
-        "observedSpeedState": {"enum": ["KNOWN", "UNKNOWN"]},
+        "observedSpeedState": {"enum": ["STOPPED", "LOW_SPEED", "MOVING", "UNKNOWN"]},
         "observedSpeedDisplayValue": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
+        "observedSpeedRawCandidate": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
         "observedSpeedReason": {"type": ["string", "null"], "maxLength": 64},
         "observedSpeedRawText": {"type": ["string", "null"], "maxLength": 32},
         "observedSpeedRawConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
@@ -29,9 +30,7 @@
         "movementSeen": {"type": "boolean"},
         "maximumObservedSpeed": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
         "lowSpeedConfirmations": {"type": "integer", "minimum": 0, "maximum": 8},
-        "temporalLowSpeedText": {"type": ["string", "null"], "enum": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", null]},
-        "temporalLowSpeedConfirmations": {"type": "integer", "minimum": 0, "maximum": 4},
-        "handoverEvidence": {"enum": ["NONE", "STRICT_SINGLE_FRAME", "TEMPORAL_LOW_CONFIDENCE"]},
+        "handoverEvidence": {"enum": ["NONE", "CLASSIFIED_LOW_SPEED"]},
         "handoverCandidate": {"type": "boolean"},
         "gateDecision": {
           "enum": ["WAITING_FOR_AUTO_LAUNCH", "AUTO_LAUNCH_VISIBLE", "WAITING_FOR_MOVEMENT", "WAITING_FOR_AUTO_LAUNCH_ABSENCE", "WAITING_FOR_MASS_LOCK", "WAITING_FOR_LOW_SPEED_CONFIRMATION", "HANDOVER_CONFIRMED", "WAITING_FOR_MASS_LOCK_RELEASE", "MASS_LOCK_RELEASE_CONFIRMED"]
@@ -71,9 +70,13 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"payload": {"properties": {"observedSpeedState": {"const": "KNOWN"}}}}},
-      "then": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "integer"}}}}},
-      "else": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "null"}}}}}
+      "if": {"properties": {"payload": {"properties": {"observedSpeedState": {"enum": ["STOPPED", "MOVING"]}}}}},
+      "then": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "integer"}, "observedSpeedRawCandidate": {"type": "integer"}}}}},
+      "else": {
+        "if": {"properties": {"payload": {"properties": {"observedSpeedState": {"const": "LOW_SPEED"}}}}},
+        "then": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "null"}, "observedSpeedRawCandidate": {"type": "integer", "minimum": 1, "maximum": 9}}}}},
+        "else": {"properties": {"payload": {"properties": {"observedSpeedDisplayValue": {"type": "null"}, "observedSpeedRawCandidate": {"type": "null"}}}}}
+      }
     }
   ]
 }

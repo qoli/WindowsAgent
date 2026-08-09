@@ -21,11 +21,7 @@ type leaveStationCaller struct {
 	speedAlwaysUnknown          bool
 	promptGarbageAfterLaunch    bool
 	invalidUnknownSpeedValue    bool
-	temporalLowSpeedFrom        int
-	temporalLowSpeedConfidence  float64
-	temporalLowSpeedMargin      float64
-	temporalLowSpeedAlternates  bool
-	temporalLowSpeedRawMismatch bool
+	unknownLowSpeedFrom         int
 	stopEvidenceNever           bool
 	departureSpeedAlwaysLow     bool
 	wgcFailuresAfterThrottle100 int
@@ -96,7 +92,7 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		if c.throttleZeroCommanded {
 			if c.stopEvidenceNever {
 				return json.Marshal(map[string]any{"speed": map[string]any{
-					"state": "UNKNOWN", "displayValue": nil,
+					"state": "UNKNOWN", "displayValue": nil, "rawCandidate": nil,
 					"evidence": map[string]any{
 						"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "0",
 						"rawConfidence": 0.44, "constrainedText": "0",
@@ -105,50 +101,50 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 				}})
 			}
 			return json.Marshal(map[string]any{"speed": map[string]any{
-				"state": "UNKNOWN", "displayValue": nil,
+				"state": "STOPPED", "displayValue": 0, "rawCandidate": 0,
 				"evidence": map[string]any{
-					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "0",
-					"rawConfidence": 0.49, "constrainedText": "0",
-					"constrainedConfidence": 0.49, "rawConstraintMargin": 0.0,
+					"reason": "SLASHED_ZERO_GLYPH_CONFIRMED", "rawText": "0",
+					"rawConfidence": 0.80, "constrainedText": "0",
+					"constrainedConfidence": 0.80, "rawConstraintMargin": 0.0,
 				},
 			}})
 		}
 		if c.departureSpeedAlwaysLow && len(c.throttles) > 0 && c.throttles[len(c.throttles)-1] == 100 {
 			return json.Marshal(map[string]any{"speed": map[string]any{
-				"state": "KNOWN", "displayValue": 9,
+				"state": "LOW_SPEED", "displayValue": nil, "rawCandidate": 9,
 				"evidence": map[string]any{
-					"reason": "VISUAL_SPEED_CONFIRMED", "rawText": "9",
+					"reason": "LOW_SPEED_RANGE_CONFIRMED", "rawText": "9",
 					"rawConfidence": 0.80, "constrainedText": "9",
 					"constrainedConfidence": 0.80, "rawConstraintMargin": 0.0,
 				},
 			}})
 		}
-		if c.temporalLowSpeedFrom > 0 && c.cycle >= c.temporalLowSpeedFrom {
-			text := "7"
-			if c.temporalLowSpeedAlternates && c.cycle%2 == 0 {
-				text = "8"
-			}
-			rawText := text
-			if c.temporalLowSpeedRawMismatch {
-				rawText = "1"
-			}
+		if c.unknownLowSpeedFrom > 0 && c.cycle >= c.unknownLowSpeedFrom {
 			return json.Marshal(map[string]any{"speed": map[string]any{
-				"state": "UNKNOWN", "displayValue": nil,
+				"state": "UNKNOWN", "displayValue": nil, "rawCandidate": nil,
 				"evidence": map[string]any{
-					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": rawText,
-					"rawConfidence": c.temporalLowSpeedConfidence, "constrainedText": text,
-					"constrainedConfidence": c.temporalLowSpeedConfidence,
-					"rawConstraintMargin":   c.temporalLowSpeedMargin,
+					"reason": "CONSTRAINED_CONFIDENCE_LOW", "rawText": "7",
+					"rawConfidence": 0.45, "constrainedText": "7",
+					"constrainedConfidence": 0.45, "rawConstraintMargin": 0.0,
 				},
 			}})
 		}
 		state := "UNKNOWN"
-		var value any
+		var displayValue any
+		var rawCandidate any
 		if speed, ok := c.visibleSpeed(); !c.speedAlwaysUnknown && ok {
-			state = "KNOWN"
-			value = speed
+			rawCandidate = speed
+			if speed == 0 {
+				state = "STOPPED"
+				displayValue = 0
+			} else if speed <= 9 {
+				state = "LOW_SPEED"
+			} else {
+				state = "MOVING"
+				displayValue = speed
+			}
 		} else if c.invalidUnknownSpeedValue {
-			value = 99
+			displayValue = 99
 		}
 		rawText := any(nil)
 		constrainedText := any(nil)
@@ -156,15 +152,21 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		constrainedConfidence := 0.0
 		margin := 0.0
 		reason := "SPEED_BOX_NOT_FOUND"
-		if state == "KNOWN" {
-			rawText = strconv.Itoa(value.(int))
+		if state != "UNKNOWN" {
+			rawText = strconv.Itoa(rawCandidate.(int))
 			constrainedText = rawText
 			rawConfidence = 0.88
 			constrainedConfidence = 0.88
-			reason = "VISUAL_SPEED_CONFIRMED"
+			if state == "STOPPED" {
+				reason = "SLASHED_ZERO_GLYPH_CONFIRMED"
+			} else if state == "LOW_SPEED" {
+				reason = "LOW_SPEED_RANGE_CONFIRMED"
+			} else {
+				reason = "MOVING_SPEED_CONFIRMED"
+			}
 		}
 		return json.Marshal(map[string]any{"speed": map[string]any{
-			"state": state, "displayValue": value,
+			"state": state, "displayValue": displayValue, "rawCandidate": rawCandidate,
 			"evidence": map[string]any{
 				"reason": reason, "rawText": rawText,
 				"rawConfidence": rawConfidence, "constrainedText": constrainedText,
@@ -240,7 +242,7 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","finalStopState":"CONFIRMED","lastObservedSpeedConstrainedConfidence":0.49,"lastObservedSpeedConstrainedText":"0","lastObservedSpeedDisplayValue":null,"lastObservedSpeedRawConstraintMargin":0,"lastObservedSpeedRawText":"0","lastObservedSpeedState":"UNKNOWN","sampleCount":18,"schemaVersion":3,"task":"LEAVE_STATION","zeroSpeedConfirmations":3}` {
+	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","finalStopState":"CONFIRMED","lastObservedSpeedConstrainedConfidence":0.8,"lastObservedSpeedConstrainedText":"0","lastObservedSpeedDisplayValue":0,"lastObservedSpeedRawCandidate":0,"lastObservedSpeedRawConstraintMargin":0,"lastObservedSpeedRawText":"0","lastObservedSpeedState":"STOPPED","sampleCount":18,"schemaVersion":3,"task":"LEAVE_STATION","zeroSpeedConfirmations":3}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
@@ -269,13 +271,13 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 	if departing == nil {
 		t.Fatal("leave-station emitted no throttle-100 command payload")
 	}
-	if departing["commandedThrottle"] != float64(100) || departing["observedSpeedState"] != "KNOWN" ||
-		departing["observedSpeedDisplayValue"] != float64(7) || departing["gateDecision"] != "HANDOVER_CONFIRMED" {
+	if departing["commandedThrottle"] != float64(100) || departing["observedSpeedState"] != "LOW_SPEED" ||
+		departing["observedSpeedDisplayValue"] != nil || departing["observedSpeedRawCandidate"] != float64(7) || departing["gateDecision"] != "HANDOVER_CONFIRMED" {
 		t.Fatalf("first departing payload=%#v", departing)
 	}
 	completed := reporter.payloads[len(reporter.payloads)-1]
-	if completed["commandedThrottle"] != float64(0) || completed["observedSpeedState"] != "UNKNOWN" ||
-		completed["observedSpeedDisplayValue"] != nil || completed["gateDecision"] != "MASS_LOCK_RELEASE_CONFIRMED" ||
+	if completed["commandedThrottle"] != float64(0) || completed["observedSpeedState"] != "STOPPED" ||
+		completed["observedSpeedDisplayValue"] != float64(0) || completed["observedSpeedRawCandidate"] != float64(0) || completed["gateDecision"] != "MASS_LOCK_RELEASE_CONFIRMED" ||
 		completed["stopGateDecision"] != "ZERO_SPEED_CONFIRMED" || completed["zeroSpeedConfirmations"] != float64(3) ||
 		completed["observationScope"] != "SPEED_ONLY" || completed["massLock"] != "UNKNOWN" {
 		t.Fatalf("completed payload=%#v", completed)
@@ -380,63 +382,11 @@ func TestEliteLeaveStationWorkflowDoesNotTreatUnknownSpeedAsAutoLaunchHandover(t
 	}
 }
 
-func TestEliteLeaveStationWorkflowAcceptsRepeatedQualifiedTemporalLowSpeedEvidence(t *testing.T) {
+func TestEliteLeaveStationWorkflowDoesNotPromoteRepeatedUnknownLowSpeedEvidence(t *testing.T) {
 	pkg := loadEliteLeaveStationPackage(t)
 	caller := &leaveStationCaller{
-		temporalLowSpeedFrom:       9,
-		temporalLowSpeedConfidence: 0.45,
-	}
-	reporter := &leaveStationReporter{}
-	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, reporter,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
-		t.Fatalf("throttle controls=%v", caller.throttles)
-	}
-	var handover map[string]any
-	for _, payload := range reporter.payloads {
-		if payload["commandedThrottle"] == float64(100) && payload["throttleCommand"] != nil {
-			handover = payload
-			break
-		}
-	}
-	if handover == nil || handover["observedSpeedState"] != "UNKNOWN" ||
-		handover["observedSpeedConstrainedText"] != "7" ||
-		handover["temporalLowSpeedConfirmations"] != float64(4) ||
-		handover["handoverEvidence"] != "TEMPORAL_LOW_CONFIDENCE" ||
-		handover["gateDecision"] != "HANDOVER_CONFIRMED" {
-		t.Fatalf("temporal handover payload=%#v", handover)
-	}
-}
-
-func TestEliteLeaveStationWorkflowRejectsTemporalLowSpeedBelowWorkflowThreshold(t *testing.T) {
-	pkg := loadEliteLeaveStationPackage(t)
-	caller := &leaveStationCaller{
-		massOffAt:                  2000,
-		temporalLowSpeedFrom:       9,
-		temporalLowSpeedConfidence: 0.39,
-	}
-	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
-	)
-	if err == nil || !strings.Contains(err.Error(), "Auto Launch visual handover was not confirmed") {
-		t.Fatalf("error=%v", err)
-	}
-	if len(caller.throttles) != 0 {
-		t.Fatalf("unexpected throttle controls=%v", caller.throttles)
-	}
-}
-
-func TestEliteLeaveStationWorkflowRejectsChangingTemporalLowSpeedText(t *testing.T) {
-	pkg := loadEliteLeaveStationPackage(t)
-	caller := &leaveStationCaller{
-		massOffAt:                  2000,
-		temporalLowSpeedFrom:       9,
-		temporalLowSpeedConfidence: 0.45,
-		temporalLowSpeedAlternates: true,
+		massOffAt:           2000,
+		unknownLowSpeedFrom: 9,
 	}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
@@ -487,7 +437,7 @@ func TestEliteLeaveStationWorkflowFailsOnInconsistentSpeedEvidence(t *testing.T)
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, &leaveStationReporter{},
 	)
-	if err == nil || !strings.Contains(err.Error(), "ship-speed returned UNKNOWN with displayValue") {
+	if err == nil || !strings.Contains(err.Error(), "ship-speed returned UNKNOWN with a speed value") {
 		t.Fatalf("error=%v", err)
 	}
 	if len(caller.throttles) != 0 {
