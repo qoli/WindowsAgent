@@ -100,7 +100,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
 	wantControls := []string{"PITCH_UP", "PITCH_UP", "YAW_RIGHT"}
-	wantHolds := []int{800, 800, 400}
+	wantHolds := []int{800, 800, 250}
 	if len(caller.controls) != len(wantControls) {
 		t.Fatalf("controls=%v", caller.controls)
 	}
@@ -138,6 +138,26 @@ func TestEliteAlignStationTargetTracksMovingTargetPastTransientCenter(t *testing
 	}
 }
 
+func TestEliteAlignStationTargetTrackHoldsMeasuredNearCenterStall(t *testing.T) {
+	observations := make([]json.RawMessage, 10)
+	for index := range observations {
+		observations[index] = alignObservation("SOLID", 0, -7, 7, false)
+	}
+	caller := &alignStationTargetCaller{observations: observations}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.controls) != 2 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
 func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", -20, 4, 20.396, false),
@@ -153,7 +173,7 @@ func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantControls := []string{"ROLL_LEFT", "PITCH_DOWN"}
-	wantHolds := []int{800, 400}
+	wantHolds := []int{300, 250}
 	for index := range wantControls {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
@@ -197,7 +217,25 @@ func TestEliteAlignStationTargetPitchesUpForFrontMarkerAboveCenter(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_UP" || caller.holds[0] != 800 {
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_UP" || caller.holds[0] != 300 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetUsesFinePulseAtReviewedFourteenPixels(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -14, 14, false),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_UP" || caller.holds[0] != 250 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }

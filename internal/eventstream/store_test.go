@@ -61,6 +61,35 @@ func TestAppendReplayAndReopen(t *testing.T) {
 	if last != 2 {
 		t.Fatalf("last sequence = %d", last)
 	}
+	if len(reopened.offsets) != 2 || reopened.offsets[0] != 0 || reopened.offsets[1] <= reopened.offsets[0] {
+		t.Fatalf("reopened offsets = %v", reopened.offsets)
+	}
+}
+
+func TestReadAfterUsesIndexedRecordOffset(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for index := 0; index < 3; index++ {
+		store.random = strings.NewReader("0123456789abcdef")
+		request := testAppendRequest()
+		request.Type = []string{"test.first", "test.second", "test.third"}[index]
+		if _, err := store.Append(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(store.offsets) != 3 || store.offsets[0] != 0 || store.offsets[1] <= store.offsets[0] || store.offsets[2] <= store.offsets[1] {
+		t.Fatalf("offsets = %v", store.offsets)
+	}
+	events, err := store.ReadAfter(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Sequence != 2 || events[0].Type != "test.second" {
+		t.Fatalf("events = %+v", events)
+	}
 }
 
 func TestAppendRejectsInvalidPayloadWithoutWriting(t *testing.T) {

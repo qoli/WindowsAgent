@@ -12,9 +12,14 @@ through `elite-dangerous/ship-attitude-control`. While the marker is hollow,
 the Action locks a coarse pitch-up turn until it reaches the front hemisphere;
 it deliberately does not reverse from the hollow marker's offset sign as that
 projection crosses the compass antipode. Once solid, roll handles coarse
-lateral correction and pitch/yaw handle fine correction. Rear, coarse, and
-fine phases use explicit 800, 800, and 400 ms holds respectively. Completion
-requires three consecutive solid samples inside the four-pixel center zone.
+lateral correction and pitch/yaw handle fine correction. Rear markers retain
+the explicit 800 ms turn. Solid-marker correction is distance-scaled: over 40
+reference pixels uses 800 ms, 17 through 40 pixels uses 300 ms, and the final
+16 pixels uses 250 ms. These bands prevent the reviewed failure where an 800 ms
+pulse at 14 pixels crossed the center and produced a roughly 30-pixel
+oscillation. Live calibration also showed that 120 ms stalled outside the
+center Gate, while 250 ms moved a five-pixel offset into the strict four-pixel
+zone. Completion requires three consecutive solid samples inside that zone.
 
 The optional `TRACK` mode is for moving targets such as a Nav Beacon. It does
 not complete merely because the marker touches or remains briefly inside the
@@ -22,8 +27,12 @@ center zone. Instead it continues correcting for a bounded `trackingSamples`
 window (120 samples by default), reports every ordinary observation and
 command through the same stream, and returns center-contact plus maximum
 consecutive-center counts. A front-marker moving-away trend remains observable
-but is not a failure in this mode because target motion can create it. The
-no-movement and child-Action failure Gates remain active.
+but is not a failure in this mode because target motion can create it. If the
+marker is already inside the 16-pixel fine band and repeated fine pulses stop
+producing measurable movement, TRACK holds that near-center solution without
+more pulses and resumes correction if the marker drifts outside the band.
+ALIGN retains the strict four-pixel center Gate. Child-Action failures and
+no-movement outside the fine band remain active failures.
 
 Each post-command observation reports marker displacement, center-distance
 delta, consecutive no-movement count, and a front-marker moving-away trend.

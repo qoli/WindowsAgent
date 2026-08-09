@@ -9,6 +9,7 @@ MAX_CONTACTS = 16
 REQUEST_UNKNOWN_LIMIT = 4
 REQUEST_CONFIRM_LIMIT = 12
 REQUEST_CONFIRMATIONS = 2
+REQUEST_SUBMIT_LIMIT = 3
 AUTO_DOCK_START_LIMIT = 120
 AUTO_DOCK_START_CONFIRMATIONS = 2
 AUTO_DOCK_ACTIVE_LIMIT = 1800
@@ -212,21 +213,36 @@ def request_and_verify(sample, contact_index, range_state, distance_meters, alre
     if already_active:
         emit_update("VERIFYING_GRANTED", sample, contact_index, range_state, distance_meters, "DOCKING_ACTIVE", None, None, False, 0, 0, 0, reason="CANCEL_DOCKING_ALREADY_PRESENT")
         return
-    action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
-    emit_update("REQUESTING_DOCKING", sample, contact_index, range_state, distance_meters, "FOCUSED", None, None, False, 0, 0, 0, last_command="SELECT")
-    confirmations = 0
-    for attempt in range(REQUEST_CONFIRM_LIMIT):
-        task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
-        request = action.call(id="elite-dangerous/request-docking-availability", inputs={})
-        state = request["requestDocking"]["state"]
-        if state == "DOCKING_ACTIVE":
-            confirmations += 1
-        else:
-            confirmations = 0
-        emit_update("VERIFYING_GRANTED", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=request["decision"]["reason"])
-        if confirmations >= REQUEST_CONFIRMATIONS:
-            return
-    fail("SELECT was not followed by two consecutive CANCEL DOCKING observations")
+    state = "FOCUSED"
+    for submit_attempt in range(REQUEST_SUBMIT_LIMIT):
+        if state == "AVAILABLE":
+            action.call(id="elite-dangerous/ui-control", inputs={"control": "RIGHT"})
+            emit_update("FOCUSING_REQUEST", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, last_command="RIGHT", reason="REFRESHING_REQUEST_FOCUS")
+            task.sleep(milliseconds=UI_SETTLE_MS)
+            focused = observe_request_known()
+            state = focused["requestDocking"]["state"]
+            emit_update("FOCUSING_REQUEST", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=focused["decision"]["reason"])
+        if state != "FOCUSED":
+            fail("Request Docking submit retry could not prove focused state: " + state)
+
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
+        emit_update("REQUESTING_DOCKING", sample, contact_index, range_state, distance_meters, "FOCUSED", None, None, False, 0, 0, 0, last_command="SELECT", reason="SUBMIT_ATTEMPT_" + str(submit_attempt + 1))
+        confirmations = 0
+        state = "UNKNOWN"
+        for attempt in range(REQUEST_CONFIRM_LIMIT):
+            task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
+            request = action.call(id="elite-dangerous/request-docking-availability", inputs={})
+            state = request["requestDocking"]["state"]
+            if state == "DOCKING_ACTIVE":
+                confirmations += 1
+            else:
+                confirmations = 0
+            emit_update("VERIFYING_GRANTED", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=request["decision"]["reason"])
+            if confirmations >= REQUEST_CONFIRMATIONS:
+                return
+        if state not in ["AVAILABLE", "FOCUSED"]:
+            fail("Request Docking submit did not return to a retryable state: " + state)
+    fail("three focused SELECT attempts were not followed by two consecutive CANCEL DOCKING observations")
 
 def close_panel(sample, contact_index, range_state, distance_meters):
     action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})

@@ -83,6 +83,7 @@ type Store struct {
 	path         string
 	file         *os.File
 	lastSequence uint64
+	offsets      []int64
 	fatalErr     error
 	closed       bool
 	notify       chan struct{}
@@ -106,7 +107,11 @@ func Open(root string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open event journal: %w", err)
 	}
-	last, err := scanJournal(file, nil)
+	var offsets []int64
+	last, err := scanJournal(file, func(_ Event, offset int64) error {
+		offsets = append(offsets, offset)
+		return nil
+	})
 	if err != nil {
 		file.Close()
 		return nil, fmt.Errorf("validate event journal: %w", err)
@@ -116,6 +121,7 @@ func Open(root string) (*Store, error) {
 		path:         path,
 		file:         file,
 		lastSequence: last,
+		offsets:      offsets,
 		notify:       make(chan struct{}),
 		now:          time.Now,
 		random:       rand.Reader,
@@ -194,6 +200,10 @@ func (s *Store) Append(ctx context.Context, request AppendRequest) (Event, error
 		return Event{}, fmt.Errorf("event exceeds %d bytes", MaxEventBytes)
 	}
 	encoded = append(encoded, '\n')
+	offset, err := s.file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return Event{}, s.poison(fmt.Errorf("seek event journal end: %w", err))
+	}
 	if _, err := s.file.Write(encoded); err != nil {
 		return Event{}, s.poison(fmt.Errorf("append event record: %w", err))
 	}
@@ -201,6 +211,7 @@ func (s *Store) Append(ctx context.Context, request AppendRequest) (Event, error
 		return Event{}, s.poison(fmt.Errorf("sync event record: %w", err))
 	}
 	s.lastSequence = event.Sequence
+	s.offsets = append(s.offsets, offset)
 	close(s.notify)
 	s.notify = make(chan struct{})
 	return event, nil
@@ -256,18 +267,33 @@ func (s *Store) ReadAfter(ctx context.Context, after uint64, limit int) ([]Event
 	if after > s.lastSequence {
 		return nil, fmt.Errorf("%w: cursor=%d lastSequence=%d", ErrCursorAhead, after, s.lastSequence)
 	}
+	if after == s.lastSequence {
+		return []Event{}, nil
+	}
+	if after >= uint64(len(s.offsets)) {
+		return nil, fmt.Errorf("event journal index is missing sequence %d", after+1)
+	}
+	if _, err := s.file.Seek(s.offsets[after], io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek event sequence %d: %w", after+1, err)
+	}
 	events := make([]Event, 0, limit)
-	_, err := scanJournal(s.file, func(event Event) error {
+	reader := bufio.NewReaderSize(s.file, 64<<10)
+	for expected := after + 1; len(events) < limit; expected++ {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
-		if event.Sequence > after && len(events) < limit {
-			events = append(events, event)
+		line, err := reader.ReadBytes('\n')
+		if errors.Is(err, io.EOF) && len(line) == 0 {
+			break
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("replay event journal: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("read event sequence %d: %w", expected, err)
+		}
+		event, err := decodeJournalRecord(line, expected)
+		if err != nil {
+			return nil, fmt.Errorf("replay event journal: %w", err)
+		}
+		events = append(events, event)
 	}
 	return events, nil
 }
@@ -313,13 +339,15 @@ func (s *Store) poison(err error) error {
 	return err
 }
 
-func scanJournal(file *os.File, visit func(Event) error) (uint64, error) {
+func scanJournal(file *os.File, visit func(Event, int64) error) (uint64, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return 0, err
 	}
 	reader := bufio.NewReaderSize(file, 64<<10)
 	var last uint64
+	var offset int64
 	for recordNumber := uint64(1); ; recordNumber++ {
+		recordOffset := offset
 		line, err := reader.ReadBytes('\n')
 		if errors.Is(err, io.EOF) {
 			if len(line) != 0 {
@@ -330,39 +358,46 @@ func scanJournal(file *os.File, visit func(Event) error) (uint64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("read event record %d: %w", recordNumber, err)
 		}
-		if len(line) > MaxEventBytes {
-			return 0, fmt.Errorf("event record %d exceeds %d bytes", recordNumber, MaxEventBytes)
-		}
-		line = bytes.TrimSuffix(line, []byte{'\n'})
-		if len(line) == 0 {
-			return 0, fmt.Errorf("event record %d is empty", recordNumber)
-		}
-		var event Event
-		if err := decodeStrict(line, &event); err != nil {
-			return 0, fmt.Errorf("decode event record %d: %w", recordNumber, err)
-		}
-		if err := validateEvent(event); err != nil {
-			return 0, fmt.Errorf("validate event record %d: %w", recordNumber, err)
-		}
-		if event.Sequence != last+1 {
-			return 0, fmt.Errorf(
-				"event record %d sequence is %d, expected %d",
-				recordNumber,
-				event.Sequence,
-				last+1,
-			)
+		event, err := decodeJournalRecord(line, last+1)
+		if err != nil {
+			return 0, fmt.Errorf("event record %d: %w", recordNumber, err)
 		}
 		last = event.Sequence
 		if visit != nil {
-			if err := visit(event); err != nil {
+			if err := visit(event, recordOffset); err != nil {
 				return 0, err
 			}
 		}
+		offset += int64(len(line))
 	}
 	if _, err := file.Seek(0, io.SeekEnd); err != nil {
 		return 0, err
 	}
 	return last, nil
+}
+
+func decodeJournalRecord(line []byte, expectedSequence uint64) (Event, error) {
+	if len(line) > MaxEventBytes {
+		return Event{}, fmt.Errorf("event record exceeds %d bytes", MaxEventBytes)
+	}
+	if len(line) == 0 || line[len(line)-1] != '\n' {
+		return Event{}, errors.New("event record is not newline terminated")
+	}
+	line = bytes.TrimSuffix(line, []byte{'\n'})
+	if len(line) == 0 {
+		return Event{}, errors.New("event record is empty")
+	}
+	var event Event
+	if err := decodeStrict(line, &event); err != nil {
+		return Event{}, fmt.Errorf("decode event record: %w", err)
+	}
+	if err := validateEvent(event); err != nil {
+		return Event{}, fmt.Errorf("validate event record: %w", err)
+	}
+	if event.Sequence != expectedSequence {
+		return Event{}, fmt.Errorf("event sequence is %d, expected %d", event.Sequence, expectedSequence)
+	}
+	return event, nil
 }
 
 func validateAppendRequest(request AppendRequest) error {

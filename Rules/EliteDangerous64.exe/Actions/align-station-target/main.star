@@ -2,11 +2,13 @@ POLL_MS = 100
 MAX_COMMANDS = 120
 MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
-FINE_DISTANCE_PIXELS = 12
+MEDIUM_DISTANCE_PIXELS = 40
+FINE_DISTANCE_PIXELS = 16
 ROLL_AXIS_TOLERANCE_PIXELS = 4
 REAR_HOLD_MS = 800
 COARSE_HOLD_MS = 800
-FINE_HOLD_MS = 400
+MEDIUM_HOLD_MS = 300
+FINE_HOLD_MS = 250
 MIN_OBSERVED_MOVEMENT_PIXELS = 1
 NO_MOVEMENT_LIMIT = 4
 AWAY_TREND_LIMIT = 5
@@ -51,9 +53,14 @@ def emit_update(phase, sample, command_count, target, stable_confirmations, comm
 def choose_front_command(target):
     offset_x = target["offsetX"]
     offset_y = target["offsetY"]
-    if target["centerDistancePixels"] > FINE_DISTANCE_PIXELS and abs(offset_x) > ROLL_AXIS_TOLERANCE_PIXELS:
-        return ["ROLL_RIGHT" if offset_x > 0 else "ROLL_LEFT", COARSE_HOLD_MS]
-    hold_ms = FINE_HOLD_MS if target["centerDistancePixels"] <= FINE_DISTANCE_PIXELS else COARSE_HOLD_MS
+    distance = target["centerDistancePixels"]
+    hold_ms = COARSE_HOLD_MS
+    if distance <= FINE_DISTANCE_PIXELS:
+        hold_ms = FINE_HOLD_MS
+    elif distance <= MEDIUM_DISTANCE_PIXELS:
+        hold_ms = MEDIUM_HOLD_MS
+    if distance > FINE_DISTANCE_PIXELS and abs(offset_x) > ROLL_AXIS_TOLERANCE_PIXELS:
+        return ["ROLL_RIGHT" if offset_x > 0 else "ROLL_LEFT", hold_ms]
     if abs(offset_x) >= abs(offset_y) and offset_x != 0:
         return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", hold_ms]
     if offset_y != 0:
@@ -125,7 +132,7 @@ def main(ctx):
         if target["presentation"] == "UNKNOWN":
             emit_update("OBSERVING", sample, command_count, target, 0, reason="TARGET_PRESENTATION_UNKNOWN")
             fail("Compass target hollow or solid presentation is ambiguous")
-        if no_movement_count >= NO_MOVEMENT_LIMIT:
+        if no_movement_count >= NO_MOVEMENT_LIMIT and (mode == "ALIGN" or target["centerDistancePixels"] > FINE_DISTANCE_PIXELS):
             emit_update("OBSERVING", sample, command_count, target, 0, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control produced no measurable Compass movement")
         if away_trend_count >= AWAY_TREND_LIMIT and mode == "ALIGN":
@@ -145,11 +152,17 @@ def main(ctx):
             phase = "VERIFYING_CENTER"
         else:
             stable_confirmations = 0
-            if target["centerDistancePixels"] > FINE_DISTANCE_PIXELS:
+            if target["centerDistancePixels"] > MEDIUM_DISTANCE_PIXELS:
                 phase = "COARSE_ALIGN"
             else:
                 phase = "FINE_ALIGN"
-            command_spec = choose_front_command(target)
+            # TRACK holds a moving target that is already inside the fine band
+            # when additional pulses no longer produce measurable motion.
+            # ALIGN retains the strict Compass center-zone contract.
+            if mode == "TRACK" and target["centerDistancePixels"] <= FINE_DISTANCE_PIXELS and no_movement_count >= 2:
+                command_spec = None
+            else:
+                command_spec = choose_front_command(target)
 
         if phase != previous_phase:
             if phase == "TURNING_TO_FRONT":
@@ -197,7 +210,8 @@ def main(ctx):
             }
 
         if command_spec == None:
-            emit_update(phase, sample, command_count, target, stable_confirmations, reason="WAITING_FOR_STABLE_CENTER", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            wait_reason = "TRACKING_NEAR_CENTER" if mode == "TRACK" and target["centerDistancePixels"] <= FINE_DISTANCE_PIXELS else "WAITING_FOR_STABLE_CENTER"
+            emit_update(phase, sample, command_count, target, stable_confirmations, reason=wait_reason, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             task.sleep(milliseconds=POLL_MS)
             continue
         if command_count >= MAX_COMMANDS:

@@ -898,33 +898,40 @@ func TestEliteDockAtStationRejectsOCRDistanceOutlierBeforeTrendAdmission(t *test
 	}
 }
 
-func TestEliteDockAtStationNeverResendsSelectWithoutCancelDocking(t *testing.T) {
+func TestEliteDockAtStationRefocusesAndRetriesDroppedSelect(t *testing.T) {
 	pkg, err := Load(dockAtStationPackageRoot(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	requestStates := []string{"AVAILABLE", "FOCUSED"}
 	for index := 0; index < 12; index++ {
-		requestStates = append(requestStates, "FOCUSED")
+		requestStates = append(requestStates, "AVAILABLE")
 	}
+	requestStates = append(requestStates, "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE")
 	caller := &dockAtStationCaller{
-		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS"},
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
 		requestStates:  requestStates,
+		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
+		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
 		rangeState:     "ALLOWED",
 	}
-	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
 		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
 	)
-	if err == nil || !contains(err.Error(), "SELECT was not followed by two consecutive CANCEL DOCKING observations") {
-		t.Fatalf("error=%v", err)
+	if err != nil || !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
 	}
 	selects := 0
+	rights := 0
 	for _, control := range caller.controls {
 		if control == "SELECT" {
 			selects++
 		}
+		if control == "RIGHT" {
+			rights++
+		}
 	}
-	if selects != 1 {
+	if selects != 2 || rights != 2 {
 		t.Fatalf("controls=%v", caller.controls)
 	}
 }
