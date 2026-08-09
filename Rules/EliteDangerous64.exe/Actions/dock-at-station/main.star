@@ -22,6 +22,7 @@ RANGE_ALLOWED_CONFIRMATIONS = 2
 RANGE_OBSERVATION_ERROR_LIMIT = 5
 RANGE_TREND_MIN_SAMPLES = 3
 RANGE_MAX_STEP_METERS = 1000
+AUTO_DOCK_LIFECYCLE_STATUSES = ["WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "AUTO_DOCK"]
 
 def emit_update(phase, sample, contact_index, range_state, distance_meters, request_state, flight_status, landing_gear, auto_dock_seen, auto_dock_consecutive, auto_dock_missing, landing_gear_on_consecutive, last_command=None, reason=None, observation_error_count=0, observation_error=None, range_wait_samples=0, range_trend_state="NOT_STARTED", range_trend_samples=0, accepted_distance_meters=None, range_outlier_count=0):
     stream.emit(
@@ -323,7 +324,7 @@ def main(ctx):
             auto_dock_consecutive += 1
         else:
             auto_dock_consecutive = 0
-        if last_flight_status not in ["UNKNOWN", "SLOW_DOWN_FOR_AUTO_DOCK", "AUTO_DOCK"]:
+        if last_flight_status != "UNKNOWN" and last_flight_status not in AUTO_DOCK_LIFECYCLE_STATUSES:
             fail("unexpected known flight status while awaiting Auto Dock: " + last_flight_status)
         phase = "AUTO_DOCK_WAIT"
         if last_flight_status == "SLOW_DOWN_FOR_AUTO_DOCK":
@@ -354,7 +355,7 @@ def main(ctx):
         observation_errors = 0
         last_flight_status = observation["flightStatus"]
         last_landing_gear = observation["landingGear"]
-        if last_flight_status == "AUTO_DOCK":
+        if last_flight_status in AUTO_DOCK_LIFECYCLE_STATUSES:
             auto_dock_missing = 0
         elif last_flight_status == "UNKNOWN":
             auto_dock_missing += 1

@@ -824,6 +824,36 @@ func TestEliteDockAtStationWaitsThroughTransientPanelUnknowns(t *testing.T) {
 	}
 }
 
+func TestEliteDockAtStationAcceptsQueueAndSlowdownDuringDockingLifecycle(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
+		requestStates:  []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
+		flightStates: []string{
+			"WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK",
+			"WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "AUTO_DOCK",
+			"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN",
+		},
+		gearStates: []string{
+			"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON",
+		},
+		rangeState: "ALLOWED",
+	}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
+		!contains(string(output), `"autoDockSeen":true`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
 func TestEliteDockAtStationRecordsOneFailedObservationWithoutAdvancingGates(t *testing.T) {
 	pkg, err := Load(dockAtStationPackageRoot(t))
 	if err != nil {

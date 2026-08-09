@@ -19,7 +19,11 @@ specific retryable state the Action re-establishes Request Docking focus and
 retries, for at most three focused submissions. It never resubmits after
 `CANCEL DOCKING` is observed. The Action then closes the panel, commands
 throttle zero, and monitors `flight-status` plus Landing Gear while the game's
-Docking Computer flies the ship.
+Docking Computer flies the ship. `WAITING_IN_QUEUE`,
+`SLOW_DOWN_FOR_AUTO_DOCK`, and `AUTO_DOCK` are all valid docking-lifecycle
+states. Queue or slowdown prompts do not count as disappearance of game-side
+docking control; only `UNKNOWN` can advance the terminal prompt-absence Gate
+after `AUTO_DOCK` was confirmed.
 
 Completion requires that `AUTO_DOCK` was first observed twice, subsequently
 became absent for five consecutive samples, and Landing Gear was `ON` for two
