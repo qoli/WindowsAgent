@@ -17,7 +17,8 @@ def decimal_value(text):
     return value
 
 def main(ctx):
-    raw = ctx.inputs
+    raw = ctx.inputs["ocr"]
+    glyph = ctx.inputs["glyph"]
     decoding = raw["decoding"]
     constrained_text = decoding["constrainedText"]
     constrained_confidence = decoding["constrainedConfidence"]
@@ -25,22 +26,50 @@ def main(ctx):
 
     state = "UNKNOWN"
     display_value = None
+    raw_candidate = None
     reason = "DIGIT_TEXT_INVALID"
+    glyph_state = glyph["zeroGlyph"]["state"]
+    ocr_candidate = None
+    ocr_reason = None
     if decoding["characterConstraint"] != "digits":
-        reason = "DIGIT_CONSTRAINT_NOT_APPLIED"
+        ocr_reason = "DIGIT_CONSTRAINT_NOT_APPLIED"
     elif not is_digits(constrained_text):
-        reason = "DIGIT_TEXT_INVALID"
+        ocr_reason = "DIGIT_TEXT_INVALID"
     elif constrained_confidence < MIN_CONSTRAINED_CONFIDENCE:
-        reason = "CONSTRAINED_CONFIDENCE_LOW"
+        ocr_reason = "CONSTRAINED_CONFIDENCE_LOW"
     elif margin > MAX_RAW_CONSTRAINT_MARGIN:
-        reason = "RAW_CONSTRAINT_DISAGREEMENT_HIGH"
+        ocr_reason = "RAW_CONSTRAINT_DISAGREEMENT_HIGH"
     else:
-        state = "KNOWN"
-        display_value = decimal_value(constrained_text)
-        reason = "VISUAL_SPEED_CONFIRMED"
+        ocr_candidate = decimal_value(constrained_text)
+
+    if glyph_state not in ["ZERO", "NOT_ZERO", "UNKNOWN"]:
+        reason = "ZERO_GLYPH_STATE_INVALID"
+    elif ocr_candidate != None and ocr_candidate >= 10:
+        if glyph_state == "ZERO":
+            reason = "MOVING_OCR_ZERO_GLYPH_CONFLICT"
+        else:
+            state = "MOVING"
+            display_value = ocr_candidate
+            raw_candidate = ocr_candidate
+            reason = "MOVING_SPEED_CONFIRMED"
+    elif glyph_state == "ZERO":
+        state = "STOPPED"
+        display_value = 0
+        raw_candidate = 0
+        reason = "SLASHED_ZERO_GLYPH_CONFIRMED"
+    elif ocr_reason != None:
+        reason = ocr_reason
+    elif glyph_state == "UNKNOWN":
+        reason = "ZERO_GLYPH_EVIDENCE_UNKNOWN"
+    elif ocr_candidate == 0:
+        reason = "OCR_ZERO_GLYPH_CONFLICT"
+    else:
+        state = "LOW_SPEED"
+        raw_candidate = ocr_candidate
+        reason = "LOW_SPEED_RANGE_CONFIRMED"
 
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "profile": {
             "width": raw["evidence"]["frame"]["width"],
             "height": raw["evidence"]["frame"]["height"],
@@ -52,6 +81,7 @@ def main(ctx):
         "speed": {
             "state": state,
             "displayValue": display_value,
+            "rawCandidate": raw_candidate,
             "unit": None,
             "referencePoints": None,
             "evidence": {
@@ -65,5 +95,5 @@ def main(ctx):
                 "maximumRawConstraintMargin": MAX_RAW_CONSTRAINT_MARGIN,
             },
         },
-        "evidence": {"model": raw["model"], "timing": raw["timing"]},
+        "evidence": {"model": raw["model"], "timing": raw["timing"], "zeroGlyph": glyph["zeroGlyph"], "glyphProfile": glyph["profile"]},
     }

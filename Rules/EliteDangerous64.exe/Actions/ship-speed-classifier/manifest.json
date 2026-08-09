@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 1,
+  "version": 3,
   "title": "Classify Elite Dangerous visual ship speed evidence",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

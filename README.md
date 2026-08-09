@@ -53,9 +53,10 @@ today:
   `CARGO`, then independently reports the three same-frame indicators as
   `ON`, `OFF`, or evidence-preserving `UNKNOWN`
 - `elite-dangerous/ship-speed` reads the fixed visual HUD speed-number region
-  and returns a unitless `displayValue` only when box geometry, digit count,
-  and recognition confidence agree; covered or ambiguous values remain
-  `UNKNOWN` without consulting journal, status-file, or throttle-command state
+  and classifies qualified evidence as `STOPPED` (`0`), `LOW_SPEED` (`1-9`),
+  or `MOVING` (`>=10`). Only `MOVING` exposes its non-zero `displayValue`;
+  covered or ambiguous values remain `UNKNOWN` without consulting journal,
+  status-file, or throttle-command state
 - `elite-dangerous/flight-status` accepts the complete raw output of
   `elite-dangerous/flight-prompt-text`, combines OCR confidence with finite
   phrase similarity, and returns one reviewed flight state or `UNKNOWN`
@@ -588,9 +589,10 @@ curl.exe `
 ```
 
 Use `"actionId":"elite-dangerous/ship-speed"` on the same endpoint to read
-visual speed evidence. `speed.state: "KNOWN"` makes `speed.displayValue`
-available; `UNKNOWN` is a valid observation and must not be replaced with the
-last requested throttle setting.
+visual speed evidence. `MOVING` makes the concrete `speed.displayValue`
+available, while `LOW_SPEED` deliberately withholds the unreliable exact
+single digit and retains it only as `rawCandidate`. `UNKNOWN` is a valid
+observation and must not be replaced with the last requested throttle setting.
 
 A finite Action returns HTTP `200`, `state: COMPLETED`, and `output`. A
 streaming Action returns HTTP `202`, `state: RUNNING`, and a `watch` object.

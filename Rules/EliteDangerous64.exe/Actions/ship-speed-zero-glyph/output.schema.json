@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "zeroGlyph"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "profile": {"type": "object"},
+    "coordinateSpace": {"type": "object"},
+    "region": {"type": "object"},
+    "physicalRegion": {"type": "object"},
+    "zeroGlyph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "candidateCount", "orangePixelCount", "component", "thresholds"],
+      "properties": {
+        "state": {"enum": ["ZERO", "NOT_ZERO", "UNKNOWN"]},
+        "reason": {"type": "string"},
+        "candidateCount": {"type": "integer", "minimum": 0},
+        "orangePixelCount": {"type": "integer", "minimum": 0},
+        "component": {"type": ["object", "null"]},
+        "thresholds": {"type": "object"}
+      }
+    }
+  }
+}

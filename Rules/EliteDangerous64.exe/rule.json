@@ -51,6 +51,12 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
+    "elite-dangerous/ship-speed-zero-glyph": {
+      "path": "Actions/ship-speed-zero-glyph",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/ship-speed-text": {
       "path": "Actions/ship-speed-text",
       "runtime": "ppocr-w480-text-v1",

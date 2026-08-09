@@ -74,7 +74,7 @@ reference-density ROI:
   -> aspect-preserved 480x48 recognition input with right padding
   -> unrestricted and digit-only CTC candidates
   -> confidence and raw-versus-constrained margin checks
-  -> unitless KNOWN displayValue or UNKNOWN
+  -> STOPPED 0 / LOW_SPEED 1-9 / MOVING >=10 / UNKNOWN
 ```
 
 The recognition model and its complete character dictionary are unchanged.
@@ -82,7 +82,9 @@ Digit-constrained decoding restricts each CTC timestep to blank plus `0`–`9`,
 while retaining the unrestricted candidate as evidence. The classifier accepts
 one through four digits only when constrained confidence is at least `0.55`
 and `max(0, rawConfidence - constrainedConfidence)` is at most `0.12`.
-Otherwise it reports `UNKNOWN`; Player Journal, `Status.json`, and requested
+Qualified zero is `STOPPED`; `1-9` becomes `LOW_SPEED` without a public exact
+`displayValue`; values of at least `10` become `MOVING` with the concrete
+display value. Otherwise it reports `UNKNOWN`; Player Journal, `Status.json`, and requested
 throttle are not fallback sources. The detector-based speed Action remains a
 separate diagnostic and is not in the fixed-coordinate pipeline.
 

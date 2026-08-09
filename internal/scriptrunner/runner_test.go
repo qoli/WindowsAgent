@@ -174,6 +174,15 @@ func shipSpeedPackageRoot(t *testing.T) string {
 	return root
 }
 
+func shipSpeedZeroGlyphPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-speed-zero-glyph"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func flightStatusPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "flight-status"))
@@ -632,8 +641,8 @@ func TestEliteShipStatusClassifierDoesNotGuessMissingLabel(t *testing.T) {
 	}
 }
 
-func shipSpeedClassifierInput(rawText string, rawConfidence float64, constrainedText string, constrainedConfidence, margin float64) map[string]any {
-	return map[string]any{
+func shipSpeedClassifierInputWithGlyph(rawText string, rawConfidence float64, constrainedText string, constrainedConfidence, margin float64, glyphState string) map[string]any {
+	ocr := map[string]any{
 		"schemaVersion": int64(1), "text": constrainedText, "confidence": constrainedConfidence,
 		"decoding": map[string]any{
 			"characterConstraint": "digits", "rawText": rawText, "rawConfidence": rawConfidence,
@@ -649,6 +658,23 @@ func shipSpeedClassifierInput(rawText string, rawConfidence float64, constrained
 		},
 		"model": map[string]any{}, "timing": map[string]any{},
 	}
+	glyph := map[string]any{
+		"schemaVersion":   int64(1),
+		"profile":         map[string]any{"width": int64(3840), "height": int64(2160), "capturedAt": "2026-08-08T00:00:00Z"},
+		"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+		"region":          map[string]any{"x": int64(1100), "y": int64(815), "w": int64(65), "h": int64(50)},
+		"physicalRegion":  map[string]any{"left": int64(2200), "top": int64(1630), "width": int64(130), "height": int64(100)},
+		"zeroGlyph":       map[string]any{"state": glyphState, "reason": "FIXTURE", "candidateCount": int64(1), "orangePixelCount": int64(100), "component": map[string]any{}, "thresholds": map[string]any{}},
+	}
+	return map[string]any{"ocr": ocr, "glyph": glyph}
+}
+
+func shipSpeedClassifierInput(rawText string, rawConfidence float64, constrainedText string, constrainedConfidence, margin float64) map[string]any {
+	glyphState := "NOT_ZERO"
+	if constrainedText == "0" {
+		glyphState = "ZERO"
+	}
+	return shipSpeedClassifierInputWithGlyph(rawText, rawConfidence, constrainedText, constrainedConfidence, margin, glyphState)
 }
 
 func runShipSpeedClassifier(t *testing.T, input map[string]any) map[string]any {
@@ -725,8 +751,8 @@ func runRequestDockingRangeClassifier(t *testing.T, regions []any) map[string]an
 func TestEliteShipSpeedClassifierReturnsConfirmedDisplayValue(t *testing.T) {
 	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("136", 0.81, "136", 0.81, 0))
 	speed := result["speed"].(map[string]any)
-	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(136) || speed["unit"] != nil ||
-		speed["evidence"].(map[string]any)["reason"] != "VISUAL_SPEED_CONFIRMED" {
+	if speed["state"] != "MOVING" || speed["displayValue"] != float64(136) || speed["rawCandidate"] != float64(136) || speed["unit"] != nil ||
+		speed["evidence"].(map[string]any)["reason"] != "MOVING_SPEED_CONFIRMED" {
 		t.Fatalf("speed = %#v", speed)
 	}
 }
@@ -734,7 +760,7 @@ func TestEliteShipSpeedClassifierReturnsConfirmedDisplayValue(t *testing.T) {
 func TestEliteShipSpeedClassifierAcceptsDigitsIncludingEight(t *testing.T) {
 	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("288", 0.89, "288", 0.89, 0))
 	speed := result["speed"].(map[string]any)
-	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(288) {
+	if speed["state"] != "MOVING" || speed["displayValue"] != float64(288) || speed["rawCandidate"] != float64(288) {
 		t.Fatalf("speed = %#v", speed)
 	}
 }
@@ -742,7 +768,7 @@ func TestEliteShipSpeedClassifierAcceptsDigitsIncludingEight(t *testing.T) {
 func TestEliteShipSpeedClassifierDoesNotGuessMissingDigits(t *testing.T) {
 	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("", 0, "", 0, 0))
 	speed := result["speed"].(map[string]any)
-	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
+	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil || speed["rawCandidate"] != nil ||
 		speed["evidence"].(map[string]any)["reason"] != "DIGIT_TEXT_INVALID" {
 		t.Fatalf("speed = %#v", speed)
 	}
@@ -751,8 +777,43 @@ func TestEliteShipSpeedClassifierDoesNotGuessMissingDigits(t *testing.T) {
 func TestEliteShipSpeedClassifierAcceptsNearbyRawLetterAndDigitSeven(t *testing.T) {
 	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("V", 0.62, "7", 0.58, 0.04))
 	speed := result["speed"].(map[string]any)
-	if speed["state"] != "KNOWN" || speed["displayValue"] != float64(7) ||
+	if speed["state"] != "LOW_SPEED" || speed["displayValue"] != nil || speed["rawCandidate"] != float64(7) ||
 		speed["evidence"].(map[string]any)["rawText"] != "V" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierRecognizesSlashedZeroWhenOCRReadsSeven(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInputWithGlyph("H", 0.60, "7", 0.57, 0.03, "ZERO"))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "STOPPED" || speed["displayValue"] != float64(0) || speed["rawCandidate"] != float64(0) ||
+		speed["evidence"].(map[string]any)["reason"] != "SLASHED_ZERO_GLYPH_CONFIRMED" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierRecognizesSlashedZeroDespiteWeakOCR(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInputWithGlyph("0", 0.47, "0", 0.47, 0, "ZERO"))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "STOPPED" || speed["displayValue"] != float64(0) || speed["rawCandidate"] != float64(0) ||
+		speed["evidence"].(map[string]any)["reason"] != "SLASHED_ZERO_GLYPH_CONFIRMED" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierKeepsRealSevenLowSpeed(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInputWithGlyph("7", 0.90, "7", 0.90, 0, "NOT_ZERO"))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "LOW_SPEED" || speed["displayValue"] != nil || speed["rawCandidate"] != float64(7) {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierRejectsOCRZeroWithoutZeroTopology(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInputWithGlyph("0", 0.90, "0", 0.90, 0, "NOT_ZERO"))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil || speed["rawCandidate"] != nil ||
+		speed["evidence"].(map[string]any)["reason"] != "OCR_ZERO_GLYPH_CONFLICT" {
 		t.Fatalf("speed = %#v", speed)
 	}
 }
@@ -760,8 +821,38 @@ func TestEliteShipSpeedClassifierAcceptsNearbyRawLetterAndDigitSeven(t *testing.
 func TestEliteShipSpeedClassifierRejectsStrongRawLetterDisagreement(t *testing.T) {
 	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("V", 0.91, "7", 0.70, 0.21))
 	speed := result["speed"].(map[string]any)
-	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil ||
+	if speed["state"] != "UNKNOWN" || speed["displayValue"] != nil || speed["rawCandidate"] != nil ||
 		speed["evidence"].(map[string]any)["reason"] != "RAW_CONSTRAINT_DISAGREEMENT_HIGH" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierReturnsStoppedForQualifiedZero(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("0", 0.92, "0", 0.92, 0))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "STOPPED" || speed["displayValue"] != float64(0) || speed["rawCandidate"] != float64(0) ||
+		speed["evidence"].(map[string]any)["reason"] != "SLASHED_ZERO_GLYPH_CONFIRMED" {
+		t.Fatalf("speed = %#v", speed)
+	}
+}
+
+func TestEliteShipSpeedClassifierDoesNotExposeSingleDigitAsDisplayValue(t *testing.T) {
+	for _, digit := range []string{"1", "4", "9"} {
+		t.Run(digit, func(t *testing.T) {
+			result := runShipSpeedClassifier(t, shipSpeedClassifierInput(digit, 0.88, digit, 0.88, 0))
+			speed := result["speed"].(map[string]any)
+			if speed["state"] != "LOW_SPEED" || speed["displayValue"] != nil || speed["rawCandidate"] != float64(digit[0]-'0') ||
+				speed["evidence"].(map[string]any)["reason"] != "LOW_SPEED_RANGE_CONFIRMED" {
+				t.Fatalf("speed = %#v", speed)
+			}
+		})
+	}
+}
+
+func TestEliteShipSpeedClassifierTreatsTenAsMovingBoundary(t *testing.T) {
+	result := runShipSpeedClassifier(t, shipSpeedClassifierInput("10", 0.90, "10", 0.90, 0))
+	speed := result["speed"].(map[string]any)
+	if speed["state"] != "MOVING" || speed["displayValue"] != float64(10) || speed["rawCandidate"] != float64(10) {
 		t.Fatalf("speed = %#v", speed)
 	}
 }

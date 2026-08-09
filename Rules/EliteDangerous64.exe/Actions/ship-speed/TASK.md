@@ -1,9 +1,15 @@
 # Elite Dangerous visual ship speed
 
 This finite composite Action captures only the fixed speed-number area, runs
-the resident PP-OCR recognizer with a digit-only CTC constraint, and applies
-the conservative visual classifier to the same frame. It reports the visible HUD number as
-`speed.displayValue` only when `speed.state` is `KNOWN`.
+the resident PP-OCR recognizer with a digit-only CTC constraint, observes the
+slashed-zero pixel topology, and applies the conservative ensemble classifier.
+It returns `STOPPED` only when the zero topology is confirmed, `LOW_SPEED` for
+the deliberately imprecise `1-9`
+range, `MOVING` for values of at least `10`, and `UNKNOWN` for insufficient or
+conflicting evidence. Only `MOVING` exposes a non-zero `speed.displayValue`;
+`LOW_SPEED` retains its digit only as diagnostic `rawCandidate`. A workflow
+must require repeated `STOPPED` observations before treating the ship as
+stably stopped.
 
 The Action may be registered as a Monitor by a Rule consumer. Registration is
 opt-in; invoking or declaring the Action does not start a loop. A Monitor emits
