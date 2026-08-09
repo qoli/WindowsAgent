@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "title": "Query Elite Dangerous filesystem Cargo.json",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "files": [
+    "main.star",
+    "TASK.md",
+    "input.schema.json",
+    "output.schema.json"
+  ],
+  "permissions": {
+    "file": {
+      "roots": [
+        {
+          "id": "elite-dangerous-journal",
+          "resolver": {
+            "kind": "windows-known-folder",
+            "knownFolder": "SavedGames",
+            "relative": "Frontier Developments/Elite Dangerous"
+          }
+        }
+      ],
+      "operations": [
+        "readJson"
+      ],
+      "maxCalls": 1,
+      "maxBytesRead": 786432
+    }
+  },
+  "limits": {
+    "wallTimeMs": 3000,
+    "maxSteps": 50000,
+    "maxResultBytes": 917504,
+    "maxLogBytes": 16384
+  }
+}

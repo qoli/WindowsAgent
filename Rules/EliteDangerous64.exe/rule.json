@@ -203,6 +203,60 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/filesystem/status": {
+      "path": "Actions/filesystem-status",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/cargo": {
+      "path": "Actions/filesystem-cargo",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/ship-locker": {
+      "path": "Actions/filesystem-ship-locker",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/backpack": {
+      "path": "Actions/filesystem-backpack",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/nav-route": {
+      "path": "Actions/filesystem-nav-route",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/modules-info": {
+      "path": "Actions/filesystem-modules-info",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/market": {
+      "path": "Actions/filesystem-market",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/outfitting": {
+      "path": "Actions/filesystem-outfitting",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/shipyard": {
+      "path": "Actions/filesystem-shipyard",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
     "elite-dangerous/dock-at-station": {
       "path": "Actions/dock-at-station",
       "runtime": "windows-streaming-action-v1",

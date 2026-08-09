@@ -318,3 +318,36 @@ are emitted as `OBSERVATION_ERROR`; the sixth fails the workflow. Immediately
 before the 100% command, the workflow registers a runtime failure compensation
 that sends 0% if any later path fails. A successful explicit 0% command clears
 that compensation.
+
+## Filesystem information Actions
+
+The following finite Actions explicitly identify Elite Dangerous filesystem
+JSON as their sole information source:
+
+- `elite-dangerous/filesystem/status`
+- `elite-dangerous/filesystem/cargo`
+- `elite-dangerous/filesystem/ship-locker`
+- `elite-dangerous/filesystem/backpack`
+- `elite-dangerous/filesystem/nav-route`
+- `elite-dangerous/filesystem/modules-info`
+- `elite-dangerous/filesystem/market`
+- `elite-dangerous/filesystem/outfitting`
+- `elite-dangerous/filesystem/shipyard`
+
+Each Action performs one bounded query of its same-named Frontier JSON file
+under the current user's resolved Windows Saved Games known folder. The Action
+ID, not caller input, selects the filename. Results expose source timestamp,
+file modification time, observation time, age, update mode, and source-specific
+freshness. `ABSENT` means Frontier has not produced that optional file; it does
+not authorize another source. Invalid JSON, wrong event discriminators,
+reparse points, files changed during the read, oversized files, and an invalid
+Saved Games root fail explicitly.
+
+These Actions never consult Player Journal lines, screenshots, OCR, process
+memory, network APIs, or previous results. `CURRENT` means only that the
+selected filesystem snapshot satisfies its declared age window. It does not
+prove visual focus, ship movement, target geometry, docking completion, or any
+fact absent from that JSON schema. Event-driven inventory snapshots become
+`UNKNOWN`, rather than `STALE`, after their short current window because a
+single query cannot prove whether an unchanged older inventory is still
+semantically current.

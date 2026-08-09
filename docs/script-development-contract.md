@@ -135,7 +135,7 @@ The current allowed permission operations are:
 
 ```text
 memory: modules, regions, scan, resolveRip, readBatch, readStrided
-file:   list, stat, read, hash, openBlob
+file:   list, stat, read, readJson, hash, openBlob
 screen: readRegion
 ```
 
@@ -144,8 +144,9 @@ declared operations, exposed in snake case, for example `resolveRip` becomes
 `observer.memory.resolve_rip`.
 
 Permission targets and file-root names are logical bindings. File-root
-declarations use a supported portable resolver such as
-`windows-known-folder/LocalAppData` plus a canonical relative path. They must
+declarations use a supported portable resolver, currently
+`windows-known-folder/LocalAppData` or `windows-known-folder/SavedGames`, plus
+a canonical relative path. They must
 not encode a private machine identity or absolute path.
 
 Screen permissions require `maxCalls: 1` and positive `maxPixels` no greater
@@ -282,6 +283,10 @@ while preserving readable invariants and correct byte accounting.
 File access must remain below a package-declared logical root. Bounded
 `observer.file.list` may provide metadata for a deterministic package-owned
 selection policy; it never follows reparse points or returns file content.
+`observer.file.read_json` performs one bounded strict-JSON object read, rejects
+duplicate keys and files changed during the read, and returns file/source time
+evidence without exposing an absolute Host path. An absent final file is an
+explicit `exists: false` result; an absent declared root remains terminal.
 Use `observer.file.open_blob` when a native DLL needs selected file content:
 
 ```python

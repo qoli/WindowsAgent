@@ -20,6 +20,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/observer"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
+	"golang.org/x/sys/windows"
 )
 
 const launcherDeadline = 75 * time.Second
@@ -114,6 +115,7 @@ func run() error {
 		return err
 	}
 	deadline := time.Now().Add(launcherDeadline)
+	savedGames, savedGamesErr := windows.KnownFolderPath(windows.FOLDERID_SavedGames, windows.KF_FLAG_DEFAULT)
 	result, err := observationjob.Run(context.Background(), observationjob.Spec{
 		JobID:                  jobID,
 		Deadline:               deadline,
@@ -123,6 +125,8 @@ func run() error {
 		ObserverExecutable:     filepath.Join(installRoot, "windows-observer.exe"),
 		Process:                &process,
 		LocalAppData:           os.Getenv("LOCALAPPDATA"),
+		SavedGames:             savedGames,
+		SavedGamesError:        savedGamesErr,
 		Inputs:                 request.Inputs,
 	})
 	if err != nil {
@@ -133,6 +137,7 @@ func run() error {
 		"jobId":      jobID,
 		"capability": capability,
 		"ruleId":     script.RuleID,
+		"package":    result.Package,
 		"output":     result.Output,
 		"provenance": result.Provenance,
 	})

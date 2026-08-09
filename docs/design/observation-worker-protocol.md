@@ -30,11 +30,14 @@ Supported capability surface:
 - `memory.readStrided`
 - `file.list`
 - `file.stat`
+- `file.readJson`
 - `file.openBlob`
 - `screen.readRegion`
 
-The generic file backend also retains its explicitly declared read/hash
-implementation where permitted. The inventory package uses bounded `list`
+The generic file backend also retains its explicitly declared raw read/hash
+implementation where permitted. `readJson` performs one size-bounded,
+duplicate-key-rejecting object read and returns relative source identity plus
+file/source timing evidence. The inventory package uses bounded `list`
 followed by `openBlob`.
 
 `screen.readRegion` captures once without a cursor. The package supplies one

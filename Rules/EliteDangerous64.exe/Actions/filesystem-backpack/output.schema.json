@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "state",
+    "freshness",
+    "source",
+    "data"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "state": {
+      "enum": [
+        "AVAILABLE",
+        "ABSENT"
+      ]
+    },
+    "freshness": {
+      "enum": [
+        "CURRENT",
+        "STALE",
+        "UNKNOWN"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "capabilityId",
+        "file",
+        "event",
+        "updateMode",
+        "observedAt",
+        "sourceTimestamp",
+        "fileModifiedAt",
+        "sourceAgeMs",
+        "fileAgeMs",
+        "sizeBytes"
+      ],
+      "properties": {
+        "kind": {
+          "const": "elite-dangerous-filesystem"
+        },
+        "capabilityId": {
+          "const": "elite-dangerous/filesystem/backpack"
+        },
+        "file": {
+          "const": "Backpack.json"
+        },
+        "event": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "Backpack",
+            null
+          ]
+        },
+        "updateMode": {
+          "const": "EVENT_SNAPSHOT"
+        },
+        "observedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "sourceTimestamp": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "fileModifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "sourceAgeMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "fileAgeMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 786432
+        }
+      }
+    },
+    "data": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "maxProperties": 32
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "state": {
+          "const": "ABSENT"
+        },
+        "freshness": {
+          "const": "UNKNOWN"
+        },
+        "source": {
+          "properties": {
+            "event": {
+              "type": "null"
+            },
+            "sourceTimestamp": {
+              "type": "null"
+            },
+            "fileModifiedAt": {
+              "type": "null"
+            },
+            "sourceAgeMs": {
+              "type": "null"
+            },
+            "fileAgeMs": {
+              "type": "null"
+            },
+            "sizeBytes": {
+              "type": "null"
+            }
+          }
+        },
+        "data": {
+          "type": "null"
+        }
+      }
+    },
+    {
+      "properties": {
+        "state": {
+          "const": "AVAILABLE"
+        },
+        "source": {
+          "properties": {
+            "event": {
+              "type": "string"
+            },
+            "sourceTimestamp": {
+              "type": "string"
+            },
+            "fileModifiedAt": {
+              "type": "string"
+            },
+            "sourceAgeMs": {
+              "type": "integer"
+            },
+            "fileAgeMs": {
+              "type": "integer"
+            },
+            "sizeBytes": {
+              "type": "integer"
+            }
+          }
+        },
+        "data": {
+          "type": "object"
+        }
+      }
+    }
+  ]
+}

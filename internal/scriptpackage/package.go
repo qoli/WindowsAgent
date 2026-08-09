@@ -289,14 +289,14 @@ func validateManifest(manifest Manifest) error {
 			if root.Resolver.Kind != "windows-known-folder" {
 				return fmt.Errorf("unsupported file root resolver %q", root.Resolver.Kind)
 			}
-			if root.Resolver.KnownFolder != "LocalAppData" {
+			if root.Resolver.KnownFolder != "LocalAppData" && root.Resolver.KnownFolder != "SavedGames" {
 				return fmt.Errorf("unsupported Windows known folder %q", root.Resolver.KnownFolder)
 			}
 			if err := validateRelativeName(root.Resolver.Relative); err != nil {
 				return fmt.Errorf("file root %q resolver path: %w", root.ID, err)
 			}
 		}
-		if err := validateOperations("file", file.Operations, []string{"list", "stat", "read", "hash", "openBlob"}); err != nil {
+		if err := validateOperations("file", file.Operations, []string{"list", "stat", "read", "readJson", "hash", "openBlob"}); err != nil {
 			return err
 		}
 	}

@@ -1,11 +1,13 @@
 package observer
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,8 +15,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
+	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
 type FileBackend struct {
@@ -22,30 +26,44 @@ type FileBackend struct {
 	blobRoot string
 }
 
-func ResolveFileRoots(permission *scriptpackage.FilePermissions, localAppData string) (map[string]string, error) {
+func ResolveFileRoots(permission *scriptpackage.FilePermissions, knownFolders map[string]string, knownFolderErrors map[string]error) (map[string]string, error) {
 	if permission == nil {
 		return nil, nil
 	}
-	if localAppData == "" || !filepath.IsAbs(localAppData) {
-		return nil, errors.New("LOCALAPPDATA must be an absolute path for declared file roots")
-	}
 	roots := make(map[string]string, len(permission.Roots))
 	for _, declaration := range permission.Roots {
-		if declaration.Resolver.Kind != "windows-known-folder" ||
-			declaration.Resolver.KnownFolder != "LocalAppData" {
+		if declaration.Resolver.Kind != "windows-known-folder" {
 			return nil, fmt.Errorf(
 				"unsupported resolver for file root %q",
 				declaration.ID,
 			)
 		}
+		if resolveErr := knownFolderErrors[declaration.Resolver.KnownFolder]; resolveErr != nil {
+			return nil, fmt.Errorf(
+				"resolve Windows known folder %q: %w",
+				declaration.Resolver.KnownFolder,
+				resolveErr,
+			)
+		}
+		knownFolder := knownFolders[declaration.Resolver.KnownFolder]
+		if knownFolder == "" || !filepath.IsAbs(knownFolder) {
+			return nil, fmt.Errorf(
+				"Windows known folder %q must resolve to an absolute path",
+				declaration.Resolver.KnownFolder,
+			)
+		}
 		root := filepath.Join(
-			localAppData,
+			knownFolder,
 			filepath.FromSlash(declaration.Resolver.Relative),
 		)
-		within, err := filepath.Rel(localAppData, root)
+		within, err := filepath.Rel(knownFolder, root)
 		if err != nil || within == ".." ||
 			strings.HasPrefix(within, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("file root %q escapes LocalAppData", declaration.ID)
+			return nil, fmt.Errorf(
+				"file root %q escapes Windows known folder %q",
+				declaration.ID,
+				declaration.Resolver.KnownFolder,
+			)
 		}
 		roots[declaration.ID] = root
 	}
@@ -122,6 +140,8 @@ func (b *FileBackend) Call(ctx context.Context, namespace, operation string, arg
 			return BackendResult{}, err
 		}
 		return b.read(path, rootID, relative, arguments)
+	case "readJson":
+		return b.readJSON(rootID, relative, arguments)
 	case "hash":
 		path, err := b.resolveFile(rootID, relative)
 		if err != nil {
@@ -172,6 +192,15 @@ func (b *FileBackend) Estimate(namespace, operation string, arguments map[string
 			return 0, 0, err
 		}
 		return 0, uint64(length), nil
+	case "readJson":
+		if _, _, err := b.resolveOptionalFile(rootID, relative); err != nil {
+			return 0, 0, err
+		}
+		maxBytes, err := positiveInt64(arguments["maxBytes"], "maxBytes")
+		if err != nil {
+			return 0, 0, err
+		}
+		return 0, uint64(maxBytes), nil
 	case "hash", "openBlob":
 		path, err := b.resolveFile(rootID, relative)
 		if err != nil {
@@ -253,6 +282,55 @@ func (b *FileBackend) resolveFile(rootID, relative string) (string, error) {
 		return "", errors.New("file operation requires a regular file")
 	}
 	return resolved, nil
+}
+
+func (b *FileBackend) resolveOptionalFile(rootID, relative string) (string, bool, error) {
+	root, err := b.canonicalRoot(rootID)
+	if err != nil {
+		return "", false, err
+	}
+	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, `\`) ||
+		strings.Contains(relative, ":") || filepath.Clean(relative) != filepath.FromSlash(relative) {
+		return "", false, errors.New("path.relative must be a canonical slash-separated relative file path")
+	}
+	if relative == "." || relative == ".." || strings.HasPrefix(relative, "../") ||
+		strings.Contains(relative, "/../") {
+		return "", false, errors.New("path traversal is forbidden")
+	}
+	candidate := filepath.Join(root, filepath.FromSlash(relative))
+	parent := filepath.Dir(candidate)
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return "", false, err
+	}
+	if !strings.EqualFold(filepath.Clean(parent), filepath.Clean(resolvedParent)) {
+		return "", false, errors.New("file parent path contains a reparse point")
+	}
+	within, err := filepath.Rel(root, candidate)
+	if err != nil || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+		return "", false, errors.New("file path escapes authorized root")
+	}
+	info, err := os.Lstat(candidate)
+	if errors.Is(err, os.ErrNotExist) {
+		return candidate, false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", false, errors.New("file path contains a reparse point")
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", false, err
+	}
+	if !strings.EqualFold(filepath.Clean(candidate), filepath.Clean(resolved)) {
+		return "", false, errors.New("file path contains a reparse point")
+	}
+	if !info.Mode().IsRegular() {
+		return "", false, errors.New("file operation requires a regular file")
+	}
+	return resolved, true, nil
 }
 
 func (b *FileBackend) list(
@@ -476,6 +554,92 @@ func (b *FileBackend) read(path, rootID, relative string, arguments map[string]a
 		},
 		FileBytesRead: uint64(count),
 	}, nil
+}
+
+func (b *FileBackend) readJSON(rootID, relative string, arguments map[string]any) (BackendResult, error) {
+	maxBytes, err := positiveInt64(arguments["maxBytes"], "maxBytes")
+	if err != nil {
+		return BackendResult{}, err
+	}
+	path, exists, err := b.resolveOptionalFile(rootID, relative)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	observedAt := time.Now().UTC()
+	if !exists {
+		return BackendResult{Value: map[string]any{
+			"path":       map[string]any{"root": rootID, "relative": relative},
+			"exists":     false,
+			"observedAt": observedAt.Format(time.RFC3339Nano),
+		}}, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	defer file.Close()
+	before, err := file.Stat()
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if !before.Mode().IsRegular() {
+		return BackendResult{}, errors.New("JSON file must be regular")
+	}
+	if before.Size() > maxBytes {
+		return BackendResult{}, fmt.Errorf("JSON file size %d exceeds maxBytes %d", before.Size(), maxBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return BackendResult{}, fmt.Errorf("JSON file exceeds maxBytes %d during read", maxBytes)
+	}
+	after, err := file.Stat()
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return BackendResult{}, errors.New("JSON file changed during read")
+	}
+	if err := strictjson.Validate(raw); err != nil {
+		return BackendResult{}, fmt.Errorf("validate strict JSON: %w", err)
+	}
+	var data map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&data); err != nil {
+		return BackendResult{}, fmt.Errorf("decode JSON object: %w", err)
+	}
+	if data == nil {
+		return BackendResult{}, errors.New("JSON file top level must be an object")
+	}
+	observedAt = time.Now().UTC()
+	modifiedAt := after.ModTime().UTC()
+	value := map[string]any{
+		"path":                 map[string]any{"root": rootID, "relative": relative},
+		"exists":               true,
+		"observedAt":           observedAt.Format(time.RFC3339Nano),
+		"modifiedAt":           modifiedAt.Format(time.RFC3339Nano),
+		"modifiedAgeMs":        observedAt.Sub(modifiedAt).Milliseconds(),
+		"sizeBytes":            after.Size(),
+		"data":                 data,
+		"sourceTimestamp":      nil,
+		"sourceTimestampAgeMs": nil,
+	}
+	if timestamp, present := data["timestamp"]; present {
+		text, ok := timestamp.(string)
+		if !ok || text == "" {
+			return BackendResult{}, errors.New("JSON timestamp must be a non-empty string")
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, text)
+		if err != nil {
+			return BackendResult{}, fmt.Errorf("parse JSON timestamp: %w", err)
+		}
+		value["sourceTimestamp"] = text
+		value["sourceTimestampAgeMs"] = observedAt.Sub(parsed).Milliseconds()
+	}
+	return BackendResult{Value: value, FileBytesRead: uint64(len(raw))}, nil
 }
 
 func (b *FileBackend) hash(ctx context.Context, path, rootID, relative string, arguments map[string]any) (BackendResult, error) {

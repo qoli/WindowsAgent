@@ -34,6 +34,8 @@ type Spec struct {
 	ObserverExecutable     string
 	Process                *observer.ProcessIdentity
 	LocalAppData           string
+	SavedGames             string
+	SavedGamesError        error
 	Inputs                 map[string]any
 }
 
@@ -90,7 +92,12 @@ func Run(ctx context.Context, spec Spec) (_ Result, runErr error) {
 	if err := validateBindings(pkg, spec); err != nil {
 		return Result{}, &Error{Code: "JOB_INVALID", Stage: "validating-bindings", Cause: err}
 	}
-	fileRoots, err := observer.ResolveFileRoots(pkg.Manifest.Permissions.File, spec.LocalAppData)
+	fileRoots, err := observer.ResolveFileRoots(pkg.Manifest.Permissions.File, map[string]string{
+		"LocalAppData": spec.LocalAppData,
+		"SavedGames":   spec.SavedGames,
+	}, map[string]error{
+		"SavedGames": spec.SavedGamesError,
+	})
 	if err != nil {
 		return Result{}, &Error{Code: "JOB_INVALID", Stage: "resolving-file-roots", Cause: err}
 	}

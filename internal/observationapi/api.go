@@ -33,7 +33,7 @@ const (
 
 var operations = map[string][]string{
 	NamespaceMemory: {"modules", "regions", "scan", "resolveRip", "readBatch", "readStrided"},
-	NamespaceFile:   {"list", "stat", "read", "hash", "openBlob"},
+	NamespaceFile:   {"list", "stat", "read", "readJson", "hash", "openBlob"},
 	NamespaceScreen: {"readRegion"},
 }
 
