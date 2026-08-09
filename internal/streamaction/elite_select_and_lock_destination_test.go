@@ -164,6 +164,7 @@ func TestEliteSelectAndLockDestinationUsesObservedTabStatesToReachNavigation(t *
 			"CONTACTS", "CONTACTS",
 			"SYSTEM", "SYSTEM",
 			"NAVIGATION", "NAVIGATION",
+			"ABSENT", "ABSENT",
 		},
 		regions: []json.RawMessage{navigationRows("< NAV BEACON >", 480, "< NAV BEACON >", 480), navigationRows("< NAV BEACON >", 480, "< NAV BEACON >", 480)},
 	}
@@ -173,11 +174,11 @@ func TestEliteSelectAndLockDestinationUsesObservedTabStatesToReachNavigation(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"NEXT_PANEL", "NEXT_PANEL"}
+	wantControls := []string{"NEXT_PANEL", "NEXT_PANEL", "FOCUS_LEFT_PANEL"}
 	if !equalStrings(caller.controls, wantControls) {
 		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
 	}
-	if !contains(string(output), `"result":"EXISTING"`) || !contains(string(output), `"restoredView":false`) {
+	if !contains(string(output), `"result":"EXISTING"`) || !contains(string(output), `"openedPanel":false`) || !contains(string(output), `"restoredView":true`) {
 		t.Fatalf("output=%s", output)
 	}
 }

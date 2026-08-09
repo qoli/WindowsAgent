@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +52,7 @@ type fakeExecutor struct {
 	output  json.RawMessage
 	err     error
 	emit    bool
+	panic   any
 }
 
 func (f *fakeExecutor) RunAction(_ context.Context, invocation scriptlaunch.Invocation) (actionlaunch.Result, error) {
@@ -65,6 +68,9 @@ func (f *fakeExecutor) RunStreaming(ctx context.Context, invocation scriptlaunch
 			return actionlaunch.Result{}, err
 		}
 	}
+	if f.panic != nil {
+		panic(f.panic)
+	}
 	if f.release != nil {
 		select {
 		case <-f.release:
@@ -73,6 +79,36 @@ func (f *fakeExecutor) RunStreaming(ctx context.Context, invocation scriptlaunch
 		}
 	}
 	return actionlaunch.Result{ActionID: invocation.Capability, RuleID: "Game.exe", Runtime: "fixture-v1", Output: f.output}, f.err
+}
+
+func TestStreamingActionPanicFailsInvocationWithoutCrashingManager(t *testing.T) {
+	executor := &fakeExecutor{panic: "live Action fault"}
+	manager, _ := newTestManager(t, executor)
+	response, err := manager.Invoke(context.Background(), scriptlaunch.Invocation{Capability: "game/linear", Inputs: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := eventTypes(events); strings.Join(got, ",") != "action.started,action.failed" {
+		t.Fatalf("event types = %v", got)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || !strings.Contains(status.Error, "live Action fault") {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+
+	executor.panic = nil
+	executor.output = json.RawMessage(`{"done":true}`)
+	manager.random = strings.NewReader("fedcba9876543210")
+	next, err := manager.Invoke(context.Background(), scriptlaunch.Invocation{Capability: "game/linear", Inputs: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	collectUntilTerminal(t, manager, next.InvocationID, next.Watch.AfterCursor)
+	status, err = manager.Get(next.InvocationID)
+	if err != nil || status.State != StateCompleted {
+		t.Fatalf("manager did not survive panic: status = %+v, err = %v", status, err)
+	}
 }
 
 func TestFiniteActionReturnsTerminalOutputWithoutEventCallback(t *testing.T) {
@@ -214,7 +250,7 @@ func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstrea
 		return foreground.Info{
 			ObservedAt: time.Now().UTC(), ProcessID: 42, ExecutableName: "Game.exe", ExecutablePath: `C:\Games\Game.exe`,
 		}, nil
-	})
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

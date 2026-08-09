@@ -8,6 +8,12 @@ anchor alignment follows the broad-search pattern used by
 capture. The adjacent pixels captured in that frame determine whether the
 located action row is focused or merely visible.
 
+The focused-fill threshold is calibrated against reviewed settled 4K/HDR
+samples whose dynamic left-context bright ratios were `0.0892` and `0.0934`.
+Ratios below `0.08` do not prove focus; the measured bright and dark ratios
+remain in the output so live behavior can be audited without relying on the
+threshold alone.
+
 Missing or ambiguous `FACTION` evidence returns `UNKNOWN`; no fixed action-row
 coordinate is substituted. Weak or contradictory text and color evidence
 returns `UNKNOWN`. A settled

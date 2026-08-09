@@ -14,8 +14,12 @@ NAVIGATION; angle brackets in CONTACTS describe a different ship-target lock.
 For an unlocked row, highlight is only keyboard focus: the Action must move the
 highlight to the named row before `SELECT` may enter its destination detail.
 A confirmed focused `UNLOCK DESTINATION` detail also returns `EXISTING` without
-toggling the lock. When the Action opened the panel, it restores the forward
-view on success and registers the same close operation as failure compensation.
+toggling the lock. On every successful `EXISTING` or `ACQUIRED` path, the Action
+closes the left panel and requires two current `ABSENT` observations before it
+reports completion. `openedPanel` records whether this invocation originally
+opened the panel; it does not weaken the successful forward-view postcondition.
+When the Action opened the panel, it also registers the close operation as
+failure compensation.
 
 The Action scans only the currently visible Navigation list. A missing target,
 ambiguous OCR match, non-unique focused row, unknown detail label, unexpected

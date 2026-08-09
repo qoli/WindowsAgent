@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +79,7 @@ type Manager struct {
 	foreground func() (foreground.Info, error)
 	now        func() time.Time
 	random     io.Reader
+	logger     *slog.Logger
 
 	mu     sync.Mutex
 	runs   map[string]*run
@@ -101,13 +104,13 @@ type run struct {
 	afterCursor uint64
 }
 
-func NewManager(ruleStore *rules.Store, executor Executor, journal Journal, foregroundSnapshot func() (foreground.Info, error)) (*Manager, error) {
-	if ruleStore == nil || executor == nil || journal == nil || foregroundSnapshot == nil {
-		return nil, errors.New("Rule store, Action executor, event journal, and foreground resolver are required")
+func NewManager(ruleStore *rules.Store, executor Executor, journal Journal, foregroundSnapshot func() (foreground.Info, error), logger *slog.Logger) (*Manager, error) {
+	if ruleStore == nil || executor == nil || journal == nil || foregroundSnapshot == nil || logger == nil {
+		return nil, errors.New("Rule store, Action executor, event journal, foreground resolver, and logger are required")
 	}
 	return &Manager{
 		rules: ruleStore, executor: executor, journal: journal, foreground: foregroundSnapshot,
-		now: time.Now, random: rand.Reader, runs: map[string]*run{},
+		now: time.Now, random: rand.Reader, logger: logger, runs: map[string]*run{},
 	}, nil
 }
 
@@ -276,6 +279,7 @@ func (m *Manager) lookup(identity string) (*run, error) {
 
 func (r *run) execute() {
 	defer r.manager.wg.Done()
+	defer r.recoverPanic()
 	result, runErr := r.manager.executor.RunStreaming(r.ctx, r.invocation, r)
 	r.mu.Lock()
 	cancelled := r.ctx.Err() != nil
@@ -310,6 +314,31 @@ func (r *run) execute() {
 	if appendErr != nil {
 		r.state = StateFailed
 		r.errorText = "commit terminal Action event: " + appendErr.Error()
+	}
+	r.mu.Unlock()
+}
+
+func (r *run) recoverPanic() {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+	errorText := fmt.Sprintf("streaming Action panicked: %v", recovered)
+	r.manager.logger.Error("streaming_action_panicked",
+		"invocation_id", r.identity,
+		"action_id", r.action.ID,
+		"error", errorText,
+		"stack", string(debug.Stack()),
+	)
+	_, appendErr := r.appendEvent(context.Background(), "action.failed", map[string]any{
+		"state": StateFailed,
+		"error": errorText,
+	})
+	r.mu.Lock()
+	r.state = StateFailed
+	r.errorText = errorText
+	if appendErr != nil {
+		r.errorText += "; commit terminal Action event: " + appendErr.Error()
 	}
 	r.mu.Unlock()
 }

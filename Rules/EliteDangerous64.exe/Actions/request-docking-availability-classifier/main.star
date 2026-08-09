@@ -9,7 +9,10 @@ MIN_ACTION_VERTICAL_OFFSET = 4.0
 MAX_ACTION_VERTICAL_OFFSET = 170.0
 MIN_ACTION_HORIZONTAL_OFFSET = -96.0
 MAX_ACTION_HORIZONTAL_OFFSET = 320.0
-FOCUSED_BRIGHT_MINIMUM = 0.10
+# Two live 4K/HDR captures of the settled focused Request Docking row produced
+# bright ratios of 0.0892 and 0.0934. Keep the threshold below that reviewed
+# band while leaving a measurable gap above weak 0.07 evidence.
+FOCUSED_BRIGHT_MINIMUM = 0.08
 VISIBLE_DARK_MINIMUM = 0.08
 OUTPUT_SCALE = 10000.0
 

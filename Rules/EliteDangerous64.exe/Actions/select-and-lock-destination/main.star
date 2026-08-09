@@ -212,15 +212,13 @@ def observe_detail_stable(target_name, panel_cycles, navigation_count, opened_pa
             task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
     fail("Navigation detail did not produce two consecutive focused LOCK or UNLOCK observations")
 
-def restore_owned_panel(target_name, observation, panel_cycles, navigation_count, opened_panel):
-    if not opened_panel:
-        return False
+def close_panel(target_name, observation, panel_cycles, navigation_count, opened_panel):
     emit_update("RESTORING_VIEW", target_name, None, observation, "FOCUS_LEFT_PANEL", panel_cycles, navigation_count, opened_panel)
     action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
     task.sleep(milliseconds=UI_SETTLE_MS)
     stable = observe_contacts_stable()
     if stable["observation"]["activeTab"]["state"] != "ABSENT":
-        fail("left panel remained visible after restoring the owned view")
+        fail("left panel remained visible after restoring the forward view")
     action.clear_on_failure()
     return True
 
@@ -315,7 +313,7 @@ def main(ctx):
 
     if result == None:
         fail("named Navigation destination lock was not established")
-    restored_view = restore_owned_panel(target_name, final_observation, panel_cycles, navigation_count, opened_panel)
+    restored_view = close_panel(target_name, final_observation, panel_cycles, navigation_count, opened_panel)
     stream.activity(message="Navigation destination lock confirmed: " + target_name, level="info")
     emit_update("COMPLETED", target_name, "LOCKED", final_observation, None, panel_cycles, navigation_count, opened_panel)
     return {"schemaVersion": 1, "task": "SELECT_AND_LOCK_DESTINATION", "completed": True, "result": result, "targetName": target_name, "targetLocked": True, "rowSelectSent": row_select_sent, "lockSelectSent": lock_select_sent, "openedPanel": opened_panel, "restoredView": restored_view, "panelCycleCount": panel_cycles, "navigationCount": navigation_count, "observationCount": observation_count, "finalObservation": final_observation}

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 1,
+  "version": 2,
   "title": "Classify Elite Dangerous Request Docking availability",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

@@ -192,8 +192,10 @@ Navigation workflow. Given an exact currently visible `targetName`, it opens
 the left panel when needed, anchors on the observed CONTACTS tab, moves to
 NAVIGATION, locates and focuses the named OCR row, opens its detail card,
 activates only a confirmed focused `LOCK DESTINATION`, verifies two
-angle-bracketed named-row observations, and restores the forward view when it
-owned the panel. Use this Action instead of asking the higher model to perform
+angle-bracketed named-row observations, then always closes the left panel and
+requires two current `ABSENT` observations before completion. `openedPanel`
+only reports whether the panel was initially absent; an already-open panel is
+not left behind after success. Use this Action instead of asking the higher model to perform
 the panel and row-selection prelude. Missing, off-screen, ambiguous, or
 unfocused evidence fails explicitly; it never scrolls blindly or chooses a
 different target.

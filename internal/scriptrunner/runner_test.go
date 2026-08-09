@@ -984,6 +984,8 @@ func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels
 	}{
 		{name: "available", text: "REQUEST DOCKING", detection: .86, recognition: .99, dark: 625, want: "AVAILABLE"},
 		{name: "focused", text: "REQUEST DOCKIN", detection: .86, recognition: .91, bright: 750, want: "FOCUSED"},
+		{name: "reviewed 4k hdr focused ratio", text: "REQUEST DOCKING", detection: .86, recognition: .99, bright: 450, want: "FOCUSED"},
+		{name: "weak bright evidence remains unknown", text: "REQUEST DOCKING", detection: .86, recognition: .99, bright: 350, want: "UNKNOWN"},
 		{name: "anchored action absent", want: "UNAVAILABLE"},
 		{name: "already active", text: "CANCEL DOCKING", detection: .84, recognition: .95, dark: 625, want: "DOCKING_ACTIVE"},
 		{name: "unrelated text proves absent", text: "INTERNAL SECURITY", detection: .90, recognition: .94, want: "UNAVAILABLE"},

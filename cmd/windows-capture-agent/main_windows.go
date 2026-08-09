@@ -130,7 +130,7 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("require event journal service: %w", err)
 	}
-	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, eventJournal, foreground.Snapshot)
+	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, eventJournal, foreground.Snapshot, logger)
 	if err != nil {
 		return fmt.Errorf("initialize Action invocation manager: %w", err)
 	}
