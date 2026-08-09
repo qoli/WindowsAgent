@@ -20,6 +20,8 @@ jobs:
         with:
           dotnet-version: "8.0.x"
       - run: go test ./...
+      - name: Check Action dependencies
+        run: go run ./cmd/windows-action-check --rules-dir Rules
       - name: Test ScreenParser DirectML contract
         run: >-
           dotnet run
@@ -72,8 +74,16 @@ jobs:
           -ldflags "-H=windowsgui"
           -o .build/windows-event-stream.exe
           ./cmd/windows-event-stream
+      - name: Build Action dependency checker
+        run: >-
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          go build -trimpath
+          -o .build/windows-action-check.exe
+          ./cmd/windows-action-check
       - name: Verify event-stream PE subsystem
         run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-event-stream.exe --expect gui
+      - name: Verify Action dependency checker PE subsystem
+        run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-action-check.exe --expect console
       - name: Publish ScreenParser DirectML runtime
         run: >-
           python3 tools/screenparser-runtime/publish.py

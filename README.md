@@ -155,6 +155,7 @@ the target Windows machine.
 ```bash
 mkdir -p .build
 go test ./...
+go run ./cmd/windows-action-check --rules-dir Rules
 ./scripts/build-windows-capture-agent.sh
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath \
@@ -177,8 +178,33 @@ cp -R Rules .build/
 
 `windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
 The build script also emits `windows-capture-agent-console.exe` for interactive
-terminal diagnostics and `windows-action-osd.exe` for the display-only Action
-overlay. It verifies every persistent executable uses the GUI subsystem.
+terminal diagnostics, `windows-action-check.exe` for offline Rule validation,
+and `windows-action-osd.exe` for the display-only Action overlay. It verifies
+the expected PE subsystem for every emitted executable.
+
+### Offline Action dependency check
+
+`windows-action-check` is an independent development and release tool. The
+capture Agent does not invoke it, load its dependency graph, or validate Rule
+dependencies at startup.
+
+Run it against a Rule plugin directory before packaging or publishing:
+
+```bash
+go run ./cmd/windows-action-check --rules-dir Rules
+go run ./cmd/windows-action-check --rules-dir Rules --json
+```
+
+The checker loads Core-owned Action packages, compiles composite and streaming
+Starlark entrypoints, and extracts static `action.call`, `action.try_call`, and
+`action.on_failure` references. It rejects missing, cross-Rule, streaming-child,
+self, dynamic-ID, and cyclic dependencies. Human-readable failures include the
+source location and dependency chain. Indirect aliases of the `action` module
+or its call primitives are rejected so every runtime dependency remains
+statically visible. Exit code `0` means valid, `1` means the report contains
+validation issues, and `2` means the check could not run or its report could
+not be written. Runtime-specific packages owned outside Core are left to their
+own validators.
 
 ## Run
 
@@ -648,6 +674,7 @@ internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
 internal/actionrun/              finite and streaming invocation lifecycle
+internal/actioncheck/            offline Action package and dependency validation
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal

@@ -249,6 +249,11 @@ func (s *Store) Count() (int, error) {
 	return len(entries), err
 }
 
+// RuleIDs returns the canonical executable names owned by this Store.
+func (s *Store) RuleIDs() ([]string, error) {
+	return s.ruleDirectories()
+}
+
 func (s *Store) Resolve(executableName string) (Resolution, error) {
 	if s == nil {
 		return Resolution{}, errors.New("rule store is required")
