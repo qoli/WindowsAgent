@@ -19,6 +19,8 @@ param(
     [ValidateSet("debug", "info", "warn", "error")]
     [string]$LogLevel = "info",
     [bool]$WGCTrace = $true,
+    [ValidateSet("WatchdogManaged", "Standalone")]
+    [string]$StartupMode = "WatchdogManaged",
     [string]$TaskName = "gameGuide Windows Capture Agent",
     [string]$EventListen = "127.0.0.1:8788",
     [string]$EventTaskName = "gameGuide Windows Event Stream"
@@ -370,31 +372,42 @@ $eventArguments = @(
 ) -join " "
 
 $action = New-ScheduledTaskAction -Execute $installedExecutable -Argument $agentArguments
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -Hidden `
-    -ExecutionTimeLimit ([timespan]::Zero) `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 3 `
-    -RestartInterval ([timespan]::FromMinutes(1))
-$task = New-ScheduledTask `
-    -Action $action `
-    -Trigger $trigger `
-    -Principal $principal `
-    -Settings $settings `
-    -Description $taskDescription
+$settingsArguments = @{
+    AllowStartIfOnBatteries = $true
+    DontStopIfGoingOnBatteries = $true
+    StartWhenAvailable = $true
+    Hidden = $true
+    ExecutionTimeLimit = [timespan]::Zero
+    MultipleInstances = "IgnoreNew"
+}
+if ($StartupMode -eq "Standalone") {
+    $settingsArguments.RestartCount = 3
+    $settingsArguments.RestartInterval = [timespan]::FromMinutes(1)
+}
+$settings = New-ScheduledTaskSettingsSet @settingsArguments
+$taskArguments = @{
+    Action = $action
+    Principal = $principal
+    Settings = $settings
+    Description = $taskDescription
+}
+if ($StartupMode -eq "Standalone") {
+    $taskArguments.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
+}
+$task = New-ScheduledTask @taskArguments
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 $eventAction = New-ScheduledTaskAction -Execute $installedEventExecutable -Argument $eventArguments
-$eventTask = New-ScheduledTask `
-    -Action $eventAction `
-    -Trigger $trigger `
-    -Principal $principal `
-    -Settings $settings `
-    -Description $eventTaskDescription
+$eventTaskArguments = @{
+    Action = $eventAction
+    Principal = $principal
+    Settings = $settings
+    Description = $eventTaskDescription
+}
+if ($StartupMode -eq "Standalone") {
+    $eventTaskArguments.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
+}
+$eventTask = New-ScheduledTask @eventTaskArguments
 Register-ScheduledTask -TaskName $EventTaskName -InputObject $eventTask -Force | Out-Null
 Start-ScheduledTask -TaskName $EventTaskName
 
@@ -465,14 +478,19 @@ if ($process.SessionId -eq 0) {
 }
 
 [ordered]@{
+	startup_mode = $StartupMode
     task_name = $TaskName
     task_state = (Get-ScheduledTask -TaskName $TaskName).State.ToString()
+	task_trigger_count = @((Get-ScheduledTask -TaskName $TaskName).Triggers | Where-Object { $null -ne $_ }).Count
+	task_restart_count = [int](Get-ScheduledTask -TaskName $TaskName).Settings.RestartCount
     executable = $installedExecutable
     script_launcher = (Join-Path $binDir "windows-observation-job.exe")
     script_runner = (Join-Path $binDir "windows-observation-script-runner.exe")
     observer = (Join-Path $binDir "windows-observer.exe")
     event_task_name = $EventTaskName
     event_task_state = (Get-ScheduledTask -TaskName $EventTaskName).State.ToString()
+	event_task_trigger_count = @((Get-ScheduledTask -TaskName $EventTaskName).Triggers | Where-Object { $null -ne $_ }).Count
+	event_task_restart_count = [int](Get-ScheduledTask -TaskName $EventTaskName).Settings.RestartCount
     event_executable = $installedEventExecutable
     event_data_dir = $eventDataDir
     event_token_file = $eventTokenFile

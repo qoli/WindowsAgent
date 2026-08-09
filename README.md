@@ -179,8 +179,9 @@ cp -R Rules .build/
 `windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
 The build script also emits `windows-capture-agent-console.exe` for interactive
 terminal diagnostics, `windows-action-check.exe` for offline Rule validation,
-and `windows-action-osd.exe` for the display-only Action overlay. It verifies
-the expected PE subsystem for every emitted executable.
+`windows-action-osd.exe` for the display-only Action overlay, and the optional
+`windows-watchdog.exe`. It verifies the expected PE subsystem for every emitted
+executable.
 
 ### Offline Action dependency check
 
@@ -270,6 +271,23 @@ rejects an existing malformed token instead of replacing it. Append, replay,
 and NDJSON live-stream requests require the exact token; `/healthz` is the only
 unauthenticated route.
 
+Install the external watchdog after the module installers have created their
+watchdog-managed on-demand Tasks and after authoring an exact local target
+configuration:
+
+```powershell
+.\scripts\install-windows-watchdog.ps1 `
+  -ExecutablePath .\.build\windows-watchdog.exe `
+  -ConfigPath .\watchdog-config.json
+```
+
+The watchdog has [one-way coupling and no automatic self-recovery](docs/design/windows-watchdog.md).
+Monitored modules do not register with or depend on it. Its AtLogOn Scheduled
+Task has a zero restart count; if the watchdog crashes, other modules continue
+and the watchdog remains stopped for explicit operator diagnosis. It is the
+only default runtime AtLogOn entrypoint and bootstraps module Tasks in the
+dependency order declared by its own configuration.
+
 Follow the installed stream from macOS through an SSH tunnel without exposing
 the loopback-only event API on the Windows network interface:
 
@@ -318,7 +336,7 @@ loads only that alias through `native.load_library("save-decoder")`; it owns the
 crimson-rs export signatures, record layout, return codes, and JSON conversion.
 `load_library` is used because `load` is a reserved Starlark keyword.
 
-## Optional persistent startup
+## Persistent watchdog-managed startup
 
 From the repository root in PowerShell:
 
@@ -332,14 +350,30 @@ From the repository root in PowerShell:
 The installer copies the capture executable, generic Starlark launcher,
 Script Runner, Observer, event-stream executable, external Rule plugins, and
 any Rule-declared resident runtime bundle under the current user's
-`%LOCALAPPDATA%`. It registers separate
-interactive-token at-logon Scheduled Tasks for capture and event streaming,
-starts them, and verifies both `/healthz` endpoints. All five executables must
+`%LOCALAPPDATA%`. By default it registers separate interactive-token on-demand
+Scheduled Tasks for capture and event streaming with no triggers and zero
+restart count, starts them once for installation acceptance, and verifies both
+`/healthz` endpoints. The Watchdog becomes their only persistent AtLogOn
+launcher. All five executables must
 be present beside the selected capture build artifact before installation.
 The installer does not create an SCM service or modify Windows Firewall.
 It validates that both persistent executables use PE subsystem `Windows GUI`
 before stopping any existing task. A console build is rejected because Task
 Scheduler's `Hidden` setting cannot suppress its console window.
+
+For an explicit development environment without the Watchdog, request the
+standalone task policy rather than relying on an automatic compatibility path:
+
+```powershell
+.\scripts\install-windows-capture-agent.ps1 `
+  -ExecutablePath .\.build\windows-capture-agent.exe `
+  -RulesPath .\.build\Rules `
+  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
+  -StartupMode Standalone
+```
+
+The Action OSD installer follows the same explicit `WatchdogManaged` default
+and `Standalone` override.
 
 The persistent installation enables bounded crash diagnostics for the capture
 process. Structured WGC lifecycle records are written to `logs/agent.jsonl`;
@@ -662,6 +696,7 @@ cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
 cmd/windows-event-stream/        authenticated local event journal service
+cmd/windows-watchdog/            external one-way process observer and recovery
 cmd/windows-screen-scene-reducer/ retired raw-screen reducer reference
 docs/design/                     maintained design registry
 docs/protocol/                   runtime protocol usage
@@ -678,6 +713,7 @@ internal/actioncheck/            offline Action package and dependency validatio
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
+internal/watchdog/               target probes, bounded recovery, atomic status
 internal/scenereducer/            cursor, scene delta, and append recovery
 internal/foreground/             foreground process observation
 internal/httpapi/                current HTTP surface

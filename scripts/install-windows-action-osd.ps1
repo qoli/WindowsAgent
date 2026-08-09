@@ -8,6 +8,8 @@ param(
     [string]$EventListen = "127.0.0.1:8788",
     [string]$TaskName = "gameGuide Windows Action OSD",
     [timespan]$Timeout = ([timespan]::FromSeconds(20)),
+    [ValidateSet("WatchdogManaged", "Standalone")]
+    [string]$StartupMode = "WatchdogManaged",
     [switch]$AllowCapture
 )
 
@@ -120,23 +122,30 @@ if ($AllowCapture) {
 }
 $action = New-ScheduledTaskAction -Execute $installedExecutable -Argument ($arguments -join " ")
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -Hidden `
-    -ExecutionTimeLimit ([timespan]::Zero) `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 3 `
-    -RestartInterval ([timespan]::FromMinutes(1))
-$task = New-ScheduledTask `
-    -Action $action `
-    -Trigger $trigger `
-    -Principal $principal `
-    -Settings $settings `
-    -Description $taskDescription
+$settingsArguments = @{
+    AllowStartIfOnBatteries = $true
+    DontStopIfGoingOnBatteries = $true
+    StartWhenAvailable = $true
+    Hidden = $true
+    ExecutionTimeLimit = [timespan]::Zero
+    MultipleInstances = "IgnoreNew"
+}
+if ($StartupMode -eq "Standalone") {
+    $settingsArguments.RestartCount = 3
+    $settingsArguments.RestartInterval = [timespan]::FromMinutes(1)
+}
+$settings = New-ScheduledTaskSettingsSet @settingsArguments
+$taskArguments = @{
+    Action = $action
+    Principal = $principal
+    Settings = $settings
+    Description = $taskDescription
+}
+if ($StartupMode -eq "Standalone") {
+    $taskArguments.Trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
+}
+$task = New-ScheduledTask @taskArguments
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
@@ -159,8 +168,11 @@ if ($process.Path -ne $installedExecutable -or $process.SessionId -eq 0 -or -not
 }
 
 [ordered]@{
+	startup_mode = $StartupMode
     task_name = $TaskName
     task_state = (Get-ScheduledTask -TaskName $TaskName).State.ToString()
+	task_trigger_count = @((Get-ScheduledTask -TaskName $TaskName).Triggers | Where-Object { $null -ne $_ }).Count
+	task_restart_count = [int](Get-ScheduledTask -TaskName $TaskName).Settings.RestartCount
     executable = $installedExecutable
     sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedExecutable).Hash.ToLowerInvariant()
     process_id = $process.Id
