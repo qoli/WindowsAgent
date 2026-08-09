@@ -88,11 +88,13 @@ def settle_after_align_command():
 def main(ctx):
     mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
     tracking_samples = int(ctx.inputs["trackingSamples"]) if "trackingSamples" in ctx.inputs else 120
+    stop_before_align = ctx.inputs["stopBeforeAlign"] if "stopBeforeAlign" in ctx.inputs else True
     sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
 
-    stream.activity(message="Stopping ship before compass alignment", level="info")
-    throttle_result = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-    emit_update("STOPPING", 0, 0, empty_target(), 0, command="SET_THROTTLE_0", command_result=throttle_result)
+    if stop_before_align:
+        stream.activity(message="Stopping ship before compass alignment", level="info")
+        throttle_result = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+        emit_update("STOPPING", 0, 0, empty_target(), 0, command="SET_THROTTLE_0", command_result=throttle_result)
 
     sample = 0
     command_count = 0

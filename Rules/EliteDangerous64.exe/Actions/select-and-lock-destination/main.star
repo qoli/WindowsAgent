@@ -167,17 +167,42 @@ def observe_target_stable(target_name, phase, panel_cycles, navigation_count, op
             task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
     fail("named Navigation target did not produce two consecutive known observations")
 
+def observe_navigation_presence_stable(target_name, phase, panel_cycles, navigation_count, opened_panel):
+    previous = None
+    last = None
+    for attempt in range(STABLE_ATTEMPTS):
+        raw = action.call(id="elite-dangerous/navigation-list-text-regions", inputs={})
+        observation = inspect_target(raw, target_name)
+        last = observation
+        emit_update(phase, target_name, observation["state"], {"evidence": "NAVIGATION_TARGET_TEXT", "target": observation}, None, panel_cycles, navigation_count, opened_panel)
+        key = observation["state"] + ":" + str(observation["text"])
+        if observation["state"] != "UNKNOWN" and key == previous:
+            return {"confirmed": True, "observation": observation, "count": attempt + 1}
+        previous = None if observation["state"] == "UNKNOWN" else key
+        if attempt + 1 < STABLE_ATTEMPTS:
+            task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
+    return {"confirmed": False, "observation": last, "count": STABLE_ATTEMPTS}
+
 def observe_contacts_stable():
     previous = None
+    last = None
     for attempt in range(STABLE_ATTEMPTS):
         observation = action.call(id="elite-dangerous/left-panel-tab-state", inputs={})
+        last = observation
         state = observation["activeTab"]["state"]
         if state != "UNKNOWN" and state == previous:
             return {"observation": observation, "count": attempt + 1}
         previous = None if state == "UNKNOWN" else state
         if attempt + 1 < STABLE_ATTEMPTS:
             task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
-    fail("Contacts tab did not produce two consecutive known observations")
+    return {"observation": last, "count": STABLE_ATTEMPTS}
+
+def resolve_navigation_from_target(target_name, phase, panel_cycles, navigation_count, opened_panel):
+    presence = observe_navigation_presence_stable(target_name, phase, panel_cycles, navigation_count, opened_panel)
+    if presence["confirmed"]:
+        emit_update(phase, target_name, presence["observation"]["state"], {"evidence": "NAVIGATION_TARGET_TEXT_CONFIRMED", "target": presence["observation"]}, None, panel_cycles, navigation_count, opened_panel)
+        return {"state": "NAVIGATION", "count": presence["count"], "observation": presence["observation"]}
+    return {"state": "UNKNOWN", "count": presence["count"], "observation": presence["observation"]}
 
 def inspect_action_label(raw):
     best = None
@@ -238,6 +263,12 @@ def main(ctx):
     contacts = contacts_stable["observation"]
     state = contacts["activeTab"]["state"]
     emit_update("OPENING_PANEL", target_name, None, contacts, None, panel_cycles, navigation_count, opened_panel)
+    if state == "UNKNOWN":
+        semantic = resolve_navigation_from_target(target_name, "VERIFYING_NAVIGATION_SEMANTIC", panel_cycles, navigation_count, opened_panel)
+        observation_count += semantic["count"]
+        state = semantic["state"]
+        if state != "NAVIGATION":
+            fail("left panel presence was unknown and Navigation target text was not confirmed")
     if state == "ABSENT":
         action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
         opened_panel = True
@@ -250,6 +281,12 @@ def main(ctx):
         state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("left panel remained absent after FOCUS_LEFT_PANEL")
+        if state == "UNKNOWN":
+            semantic = resolve_navigation_from_target(target_name, "VERIFYING_NAVIGATION_SEMANTIC", panel_cycles, navigation_count, opened_panel)
+            observation_count += semantic["count"]
+            state = semantic["state"]
+            if state != "NAVIGATION":
+                fail("left panel tab highlight was unknown and Navigation target text was not confirmed")
     for _ in range(MAX_PANEL_CYCLES):
         if state == "NAVIGATION":
             break
@@ -263,6 +300,12 @@ def main(ctx):
         state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("Left panel header became absent while selecting NAVIGATION")
+        if state == "UNKNOWN":
+            semantic = resolve_navigation_from_target(target_name, "VERIFYING_NAVIGATION_SEMANTIC", panel_cycles, navigation_count, opened_panel)
+            observation_count += semantic["count"]
+            state = semantic["state"]
+            if state != "NAVIGATION":
+                fail("panel tab highlight was unknown and Navigation target text was not confirmed")
     if state != "NAVIGATION":
         fail("NAVIGATION was not reached within three NEXT_PANEL inputs")
 

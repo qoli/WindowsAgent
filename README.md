@@ -130,10 +130,21 @@ The Action runtime and registration refactor is partially landed:
 - `elite-dangerous/ui-control` performs exactly one model-selected logical UI
   movement or selection. It is intentionally a slow screenshot/one-key
   interaction surface for tasks such as arranging `AUTO LAUNCH`;
-- `elite-dangerous/set-throttle` resolves `SetSpeedMinus100`, `SetSpeedZero`, or `SetSpeed100` from
+- `elite-dangerous/set-throttle` resolves `SetSpeedMinus100`, `SetSpeedZero`, `SetSpeed75`, or `SetSpeed100` from
   the game's currently active `.binds` preset on every invocation, reports the
   resolved preset/file/key, rechecks the foreground game, and sends one
   scan-code key-down/key-up pair with backend and timing evidence;
+- `elite-dangerous/supercruise-control` resolves only the dedicated Frontier
+  `Supercruise` binding, and the linear
+  `elite-dangerous/supercruise-to-destination` workflow requires current
+  preflight, Compass, `SUPERCRUISE`, two-frame `SAFE_DISENGAGE_READY`, and
+  three-frame visual `STOPPED` evidence around its 75% approach and safe exit;
+- `elite-dangerous/supercruise-assist-to-destination` retains that manual
+  workflow as an alternative while adding a `DROP` lifecycle owned by the
+  in-game Assist computer: it enters Supercruise, visually selects the locked
+  target's non-orbit Assist action, requires two
+  `SUPERCRUISE_ASSIST_ACTIVE` frames, then sends no flight input while waiting
+  for the game's automatic drop and three-frame visual stop;
 - `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
   It immediately returns a durable watch URL, asks the supervising model to
   arrange Auto Launch, and requires empty prompt text plus positive `KNOWN`

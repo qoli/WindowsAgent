@@ -1,18 +1,15 @@
 {
   "schemaVersion": 1,
-  "version": 3,
-  "title": "Elite Dangerous set throttle",
+  "version": 1,
+  "title": "Elite Dangerous Supercruise control",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "taskDocument": "TASK.md",
   "bindingSource": {"type": "frontier-active-preset-v1"},
   "gesture": {"type": "press", "holdMs": 40},
-  "selector": {"inputField": "percent"},
+  "selector": {"inputField": "command"},
   "bindings": {
-    "-100": {"control": "SetSpeedMinus100"},
-    "0": {"control": "SetSpeedZero"},
-    "75": {"control": "SetSpeed75"},
-    "100": {"control": "SetSpeed100"}
+    "TOGGLE": {"control": "Supercruise"}
   },
   "files": ["TASK.md", "input.schema.json", "output.schema.json"]
 }

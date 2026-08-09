@@ -18,7 +18,12 @@ calibration set. One heavily corrupted FSD image, `RESHAGINGORT`, deliberately
 changes from `FSD_CHARGING` to `UNKNOWN` because its phrase similarity is only
 `0.4167`; the following clear `PRESS TO ABORT` image remains accepted. The
 later reviewed Auto Dock capture adds `SLOW DOWN FOR AUTO DOCK` as the finite
-`SLOW_DOWN_FOR_AUTO_DOCK` state. Missing, unrelated, ambiguous, or
+`SLOW_DOWN_FOR_AUTO_DOCK` state. The reviewed central Supercruise exit prompt
+is classified as `SAFE_DISENGAGE_READY`; a flight workflow must still require
+multi-frame confirmation before sending the FSD command. `SUPERCRUISE ASSIST
+ACTIVE` is a separate `SUPERCRUISE_ASSIST_ACTIVE` state rather than ordinary
+`SUPERCRUISE`, allowing an owning workflow to stop issuing attitude and
+throttle inputs after the game computer takes control. Missing, unrelated, ambiguous, or
 low-confidence content remains `UNKNOWN`; never choose a status merely because
 it is the closest catalog phrase.
 

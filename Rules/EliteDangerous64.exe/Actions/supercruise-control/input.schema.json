@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["percent"],
+  "required": ["command"],
   "properties": {
-    "percent": {"enum": [-100, 0, 75, 100]}
+    "command": {"const": "TOGGLE"}
   }
 }

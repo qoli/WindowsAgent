@@ -6,7 +6,7 @@ not select or identify a Station, approach it, request docking, or run the
 docking computer. The caller must establish the intended Station target lock
 before starting this Action.
 
-The Action first commands 0% throttle, then repeatedly reads
+By default the Action first commands 0% throttle, then repeatedly reads
 `elite-dangerous/compass` and issues one bounded yaw or pitch press
 through `elite-dangerous/ship-attitude-control`. While the marker is hollow,
 the Action locks a coarse yaw-left turn until it reaches the front hemisphere;
@@ -21,6 +21,11 @@ reference pixels of net movement. The previous fast feedback loop sampled that
 transient and issued an opposite command, producing the observed oscillation.
 Completion requires three consecutive solid samples inside the four-pixel
 zone.
+
+`stopBeforeAlign=false` is reserved for an owning flight workflow that already
+controls throttle, such as an active Supercruise approach. In that mode this
+Action keeps the same visual alignment and verification contract but does not
+mutate throttle on entry.
 
 The optional `TRACK` mode is for moving targets such as a Nav Beacon. It does
 not complete merely because the marker touches or remains briefly inside the

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.supercruise-to-destination.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "targetName", "flightStatus", "flightPromptText", "massLock", "landingGear", "cargoScoop", "targetDetected", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "targetCenterZoneInside", "safeDisengageConfirmations", "stoppedConfirmations", "commandedThrottle", "lastCommand", "reason"],
+      "properties": {
+        "phase": {"enum": ["PREFLIGHT", "ALIGNING", "CHARGING", "ALIGNING_FOR_ENTRY", "ENTERED", "APPROACHING", "SAFE_DISENGAGE_READY", "DISENGAGING", "VERIFYING_STOP", "COMPLETED"]},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 3000},
+        "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+        "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN"]},
+        "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
+        "massLock": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},
+        "landingGear": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},
+        "cargoScoop": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},
+        "targetDetected": {"type": ["boolean", "null"]},
+        "targetPresentation": {"type": ["string", "null"], "enum": ["SOLID", "HOLLOW", "UNKNOWN", null]},
+        "targetOffsetX": {"type": ["integer", "null"]},
+        "targetOffsetY": {"type": ["integer", "null"]},
+        "targetCenterDistancePixels": {"type": ["number", "null"], "minimum": 0},
+        "targetCenterZoneInside": {"type": ["boolean", "null"]},
+        "safeDisengageConfirmations": {"type": "integer", "minimum": 0, "maximum": 2},
+        "stoppedConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
+        "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 75, 100, null]},
+        "lastCommand": {"type": ["string", "null"], "maxLength": 64},
+        "reason": {"type": ["string", "null"], "maxLength": 160}
+      }
+    }
+  }
+}

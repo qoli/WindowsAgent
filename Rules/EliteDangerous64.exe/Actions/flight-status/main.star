@@ -4,6 +4,10 @@ MIN_TEXT_SIMILARITY = 0.60
 
 STATUS_RULES = [
     {
+        "state": "SUPERCRUISE_ASSIST_ACTIVE",
+        "aliases": ["SUPERCRUISE ASSIST ACTIVE"],
+    },
+    {
         "state": "SUPERCRUISE",
         "aliases": ["SUPERCRUISE"],
     },
@@ -26,6 +30,10 @@ STATUS_RULES = [
     {
         "state": "FSD_ALIGNMENT_REQUIRED",
         "aliases": ["ALIGN WITH TARGET DESTINATION"],
+    },
+    {
+        "state": "SAFE_DISENGAGE_READY",
+        "aliases": ["SAFE DISENGAGE READY"],
     },
     {
         "state": "AUTO_DOCK",

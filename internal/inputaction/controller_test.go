@@ -113,6 +113,62 @@ func TestEliteSetThrottleResolvesMinus100Binding(t *testing.T) {
 	}
 }
 
+func TestEliteSetThrottleResolves75Binding(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "set-throttle"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <SetSpeed75><Primary Device="Keyboard" Key="Key_F9"/><Secondary Device="{NoDevice}" Key=""/></SetSpeed75>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := controller.Run(context.Background(), pkg, map[string]any{"percent": int64(75)}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_F9" ||
+		!strings.Contains(string(output), `"selection":"75"`) ||
+		!strings.Contains(string(output), `"control":"SetSpeed75"`) {
+		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
+func TestEliteSupercruiseControlRequiresDedicatedBinding(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "supercruise-control"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <Supercruise><Primary Device="Keyboard" Key="Key_J"/><Secondary Device="{NoDevice}" Key=""/></Supercruise>
+  <HyperSuperCombination><Primary Device="Keyboard" Key="Key_K"/><Secondary Device="{NoDevice}" Key=""/></HyperSuperCombination>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := controller.Run(context.Background(), pkg, map[string]any{"command": "TOGGLE"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_J" ||
+		!strings.Contains(string(output), `"control":"Supercruise"`) || strings.Contains(string(output), "HyperSuperCombination") {
+		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
 func TestEliteUIControlResolvesFocusLeftPanel(t *testing.T) {
 	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ui-control"))
 	if err != nil {

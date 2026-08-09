@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["phase", "targetName", "targetState", "observation", "command", "panelCycleCount", "navigationCount", "openedPanel"],
       "properties": {
-        "phase": {"enum": ["OPENING_PANEL", "SELECTING_NAVIGATION", "LOCATING_TARGET", "MOVING_FOCUS", "OPENING_DETAIL", "VERIFYING_DETAIL", "SELECTING_LOCK", "VERIFYING_LOCK", "RESTORING_VIEW", "COMPLETED"]},
+        "phase": {"enum": ["OPENING_PANEL", "SELECTING_NAVIGATION", "VERIFYING_NAVIGATION_SEMANTIC", "LOCATING_TARGET", "MOVING_FOCUS", "OPENING_DETAIL", "VERIFYING_DETAIL", "SELECTING_LOCK", "VERIFYING_LOCK", "RESTORING_VIEW", "COMPLETED"]},
         "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
         "targetState": {"type": ["string", "null"], "enum": ["LOCKED", "FOCUSED", "VISIBLE", "LOCK", "UNLOCK", "UNKNOWN", null]},
         "observation": {"type": ["object", "null"]},

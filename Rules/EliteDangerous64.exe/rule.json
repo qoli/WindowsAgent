@@ -103,6 +103,17 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/supercruise-hud-state": {
+      "path": "Actions/supercruise-hud-state",
+      "runtime": "windows-composite-action-v1",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": [
+        "monitor",
+        "reaction"
+      ]
+    },
     "elite-dangerous/request-docking-range-classifier": {
       "path": "Actions/request-docking-range-classifier",
       "runtime": "windows-observation-v1",
@@ -122,6 +133,26 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/supercruise-target-text-regions": {
+      "path": "Actions/request-docking-action-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-target-position": {
+      "path": "Actions/supercruise-target-position",
+      "runtime": "windows-composite-action-v1",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": [
+        "monitor",
+        "reaction"
+      ]
+    },
     "elite-dangerous/request-docking-availability-classifier": {
       "path": "Actions/request-docking-availability-classifier",
       "runtime": "windows-observation-v1",
@@ -138,6 +169,14 @@
       "path": "Actions/close-left-panel",
       "runtime": "windows-composite-action-v1",
       "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/close-navigation-detail": {
+      "path": "Actions/close-navigation-detail",
+      "runtime": "windows-composite-action-v1",
+      "execution": {
+        "completion": "return"
+      },
       "registrableAs": []
     },
     "elite-dangerous/select-contacts-panel": {
@@ -207,6 +246,24 @@
       "path": "Actions/set-throttle",
       "runtime": "windows-key-action-v1",
       "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-control": {
+      "path": "Actions/supercruise-control",
+      "runtime": "windows-key-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-to-destination": {
+      "path": "Actions/supercruise-to-destination",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-assist-to-destination": {
+      "path": "Actions/supercruise-assist-to-destination",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     },
     "elite-dangerous/filesystem/status": {

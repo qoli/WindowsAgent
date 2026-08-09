@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 6,
-  "title": "Elite Dangerous align selected Station target",
+  "version": 1,
+  "title": "Read Elite Dangerous persistent Supercruise HUD state",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {"maxSteps": 3000000, "maxOutputBytes": 16384, "maxEventBytes": 16384, "maxSleepMs": 250}
+  "limits": {"maxSteps": 1000000, "maxOutputBytes": 32768, "maxEventBytes": 1024, "maxSleepMs": 1000}
 }

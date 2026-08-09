@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "targetName", "safeDisengageConfirmations", "stoppedConfirmations", "finalCommandedThrottle", "finalSpeed", "sampleCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "SUPERCRUISE_TO_DESTINATION"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "COMPLETED"},
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "safeDisengageConfirmations": {"const": 2},
+    "stoppedConfirmations": {"const": 3},
+    "finalCommandedThrottle": {"const": 0},
+    "finalSpeed": {
+      "type": "object",
+      "required": ["state", "displayValue", "rawCandidate"],
+      "properties": {
+        "state": {"const": "STOPPED"},
+        "displayValue": {"const": 0},
+        "rawCandidate": {"const": 0}
+      }
+    },
+    "sampleCount": {"type": "integer", "minimum": 1, "maximum": 3000}
+  }
+}

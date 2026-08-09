@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "targetName", "destinationMode", "assistActiveConfirmations", "assistMissingSamples", "stoppedConfirmations", "agentFlightInputAfterAssistActive", "finalSpeed", "sampleCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "SUPERCRUISE_ASSIST_TO_DESTINATION"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "COMPLETED"},
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "destinationMode": {"const": "DROP"},
+    "assistActiveConfirmations": {"type": "integer", "minimum": 2, "maximum": 240},
+    "assistMissingSamples": {"type": "integer", "minimum": 3, "maximum": 29},
+    "stoppedConfirmations": {"const": 3},
+    "agentFlightInputAfterAssistActive": {"const": false},
+    "finalSpeed": {
+      "type": "object",
+      "required": ["state", "displayValue", "rawCandidate"],
+      "properties": {
+        "state": {"const": "STOPPED"},
+        "displayValue": {"const": 0},
+        "rawCandidate": {"const": 0}
+      }
+    },
+    "sampleCount": {"type": "integer", "minimum": 1, "maximum": 3000}
+  }
+}

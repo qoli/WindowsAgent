@@ -5,8 +5,8 @@
   "required": ["schemaVersion", "selection", "control", "key", "activePreset", "bindingFile", "bindingSource", "backend", "scanCode", "extended", "holdMs"],
   "properties": {
     "schemaVersion": {"const": 1},
-    "selection": {"enum": ["-100", "0", "75", "100"]},
-    "control": {"enum": ["SetSpeedMinus100", "SetSpeedZero", "SetSpeed75", "SetSpeed100"]},
+    "selection": {"const": "TOGGLE"},
+    "control": {"const": "Supercruise"},
     "key": {"type": "string", "pattern": "^Key_[A-Za-z0-9]+$", "maxLength": 32},
     "activePreset": {"type": "string", "minLength": 1, "maxLength": 128},
     "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260},

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "supercruiseHud", "timing"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "supercruiseHud": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "matchedLabels", "requiredLabelCount", "evidence"],
+      "properties": {
+        "state": {"enum": ["ACTIVE", "INACTIVE"]},
+        "matchedLabels": {"type": "array", "uniqueItems": true, "items": {"enum": ["DISTANCE", "SPEED", "ALIGNMENT"]}},
+        "requiredLabelCount": {"const": 2},
+        "evidence": {"type": "object"}
+      }
+    },
+    "timing": {"type": "object"}
+  }
+}

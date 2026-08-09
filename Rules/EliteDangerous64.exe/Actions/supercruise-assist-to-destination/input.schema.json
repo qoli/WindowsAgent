@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targetName", "targetLocked", "autoThrottleConfirmed", "destinationMode"],
+  "properties": {
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "targetLocked": {"const": true},
+    "normalSpaceConfirmed": {"type": "boolean"},
+    "supercruiseConfirmed": {"type": "boolean"},
+    "assistRequestedConfirmed": {"type": "boolean"},
+    "autoThrottleConfirmed": {"const": true},
+    "destinationMode": {"const": "DROP"}
+  },
+  "oneOf": [
+    {
+      "required": ["normalSpaceConfirmed"],
+      "properties": {
+        "normalSpaceConfirmed": {"const": true},
+        "supercruiseConfirmed": {"const": false}
+      }
+    },
+    {
+      "required": ["supercruiseConfirmed"],
+      "properties": {
+        "normalSpaceConfirmed": {"const": false},
+        "supercruiseConfirmed": {"const": true}
+      }
+    }
+  ]
+}

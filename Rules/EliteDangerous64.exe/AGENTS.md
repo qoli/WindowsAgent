@@ -45,7 +45,7 @@ another binding, scan-code, or Compass investigation. Report the included
 retry the Streaming Action without restarting Elite Dangerous.
 
 `elite-dangerous/align-station-target` is an interruptible linear Streaming
-Action over the selected target. It first commands 0% throttle, drives a hollow
+Action over the selected target. By default it first commands 0% throttle, drives a hollow
 rear marker away from center until it becomes solid, then drives the solid
 marker toward center. The rear phase locks coarse pitch-up until the marker is
 solid instead of reversing around the rear projection's antipode. The front
@@ -56,7 +56,8 @@ moving-away trend, and consecutive no-movement count. Four stationary samples
 or five consecutive front samples moving away fail explicitly. Three
 consecutive solid samples in the four-pixel center zone are required for
 completion. Its structured update events are the durable control timeline;
-explicit activity events supply the Action OSD. It does not establish Station
+explicit activity events supply the Action OSD. An owning flight workflow may
+set `stopBeforeAlign=false` when it already controls throttle. It does not establish Station
 target lock, approach the Station, request docking, or participate in the
 docking-computer workflow.
 
@@ -70,7 +71,9 @@ accepts the complete raw OCR output and combines OCR confidence with reviewed
 phrase similarity. A candidate must also meet the explicit `0.60` phrase
 similarity floor; high-confidence unrelated OCR remains `UNKNOWN`. It returns `SUPERCRUISE`, `AUTO_LAUNCH`,
 `WAITING_IN_QUEUE`, `SLOW_DOWN_FOR_AUTO_DOCK`, `FSD_CHARGING`,
-`FSD_ALIGNMENT_REQUIRED`, `AUTO_DOCK`, or evidence-preserving `UNKNOWN`. It
+`FSD_ALIGNMENT_REQUIRED`, `SUPERCRUISE_ASSIST_ACTIVE`,
+`SAFE_DISENGAGE_READY`, `AUTO_DOCK`, or
+evidence-preserving `UNKNOWN`. It
 performs no capture or OCR and malformed raw input fails schema validation.
 Multi-frame confirmation, event emission, and follow-up execution remain
 registration concerns.
@@ -294,9 +297,54 @@ inputs could fall between frames, or no focus delta is visible, report focus as
 the relevant observation Action provides matching evidence. Input completion
 alone is not activation or workflow completion.
 
-`elite-dangerous/set-throttle` is deterministic. It accepts only `-100`, `0`, or `100`,
+`elite-dangerous/set-throttle` is deterministic. It accepts only `-100`, `0`, `75`, or `100`,
 resolves the corresponding logical throttle control from the active preset on
 each invocation, and reports the exact resolved key and injection evidence.
+
+`elite-dangerous/supercruise-control` is the dedicated finite FSD primitive. It
+resolves only Frontier's `Supercruise` control. It does not fall back to
+`HyperSuperCombination`, which could initiate a hyperspace jump when a route
+target is active. Missing or ambiguous Keyboard bindings fail explicitly.
+
+`elite-dangerous/supercruise-to-destination` is an interruptible linear
+Streaming Action from an already confirmed Navigation destination lock to a
+safe normal-space arrival. The caller must first complete
+`select-and-lock-destination`, then pass the same target name with
+`targetLocked=true` and `normalSpaceConfirmed=true`; nested Streaming Actions are deliberately not hidden
+inside the workflow. It visually requires Mass Lock, Landing Gear, and Cargo
+Scoop all OFF, stops and aligns the ship, enters Supercruise through the
+dedicated binding, and requires FSD charging followed by `SUPERCRUISE` OCR evidence. Its approach uses
+the configured 75% throttle binding while correcting a solid Compass marker
+outside 16 reference pixels. Two consecutive `SAFE_DISENGAGE_READY` frames are
+the only disengage Gate. After toggling FSD and commanding 0%, three consecutive
+slashed-zero-backed `ship-speed` `STOPPED` observations are required for
+completion. Once FSD movement may begin, every failure or cancellation has a
+registered 0% throttle compensation.
+
+`elite-dangerous/supercruise-assist-to-destination` is the separate game-
+computer workflow for `destinationMode=DROP`, initially targeting `NAV BEACON`.
+It requires the caller to have confirmed the destination lock, normal space,
+and the ship's `Auto Throttle` Assist setting. It first enters Supercruise
+manually, then commands minimum Supercruise throttle before opening the locked
+target's Navigation detail. Two OCR frames must identify the non-orbit
+`SUPERCRUISE ASSIST` action. The detail icon label is contextual, so the Action
+sends one `RIGHT` from BACK and treats two matching label frames as focus
+evidence before `SELECT`. Missing module/button/focus
+evidence fails without a manual-flight fallback. The workflow may align only
+after commanding the configured 75% blue-zone throttle and observing a
+persistent alignment requirement. Two `SUPERCRUISE_ASSIST_ACTIVE` frames then transfer ownership to the game.
+After that transfer it emits observations but sends no throttle, attitude, UI,
+or FSD input. Completion is the conjunction of three missing-Assist frames and
+three slashed-zero `STOPPED` frames. Thirty missing-Assist frames without the
+stop are `ASSIST_INTERRUPTED`. `SAFE_DISENGAGE_READY` remains observational;
+the Action never manually toggles FSD on arrival. `ASSIST AND ORBIT` is rejected
+until a separate orbit completion contract exists.
+
+After the dedicated Supercruise input and 100% throttle command, entry evidence
+is bounded to thirty OCR observations. Persistent `UNKNOWN` prompt evidence is
+not progress: the Action fails and its registered 0% throttle compensation
+runs instead of leaving the ship moving in normal space for the longer Assist
+activation window.
 
 `elite-dangerous/leave-station` is an interruptible linear Streaming Action.
 Invoke it with `{"stationConfirmed":true}` only after high-level visual

@@ -111,6 +111,23 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	}
 }
 
+func TestEliteAlignStationTargetCanPreserveOwningWorkflowThrottle(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"stopBeforeAlign": false}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.throttles) != 0 {
+		t.Fatalf("unexpected throttles=%v", caller.throttles)
+	}
+}
+
 func TestEliteAlignStationTargetTracksMovingTargetPastTransientCenter(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 4, 0, 4, true),

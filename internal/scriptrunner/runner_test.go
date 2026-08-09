@@ -309,6 +309,28 @@ func TestEliteFlightStatusPackageRecognizesSupercruise(t *testing.T) {
 	}
 }
 
+func TestEliteFlightStatusPackageSeparatesSupercruiseAssistActive(t *testing.T) {
+	for _, text := range []string{"SUPERCRUISE ASSIST ACTIVE", "SUPERCRUISEASSISTACTIVE", "SUPERCRUISE ASSIST ACT1VE"} {
+		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "SUPERCRUISE_ASSIST_ACTIVE" || status["known"] != true || decision["accepted"] != true {
+			t.Fatalf("text %q result = %#v", text, result)
+		}
+	}
+}
+
+func TestEliteFlightStatusPackageRecognizesSafeDisengageReady(t *testing.T) {
+	for _, text := range []string{"SAFE DISENGAGE READY", "SAFE DISENGAGEREADY", "SAFE DISENGAGE REAOY"} {
+		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "SAFE_DISENGAGE_READY" || status["known"] != true || decision["accepted"] != true {
+			t.Fatalf("text %q result = %#v", text, result)
+		}
+	}
+}
+
 func TestEliteFlightStatusPackageRecognizesSlowDownForAutoDock(t *testing.T) {
 	for _, text := range []string{
 		"SLOW DOWN FOR AUTO DOCK",
