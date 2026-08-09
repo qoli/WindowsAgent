@@ -38,9 +38,9 @@ const (
 	lwaAlpha             = 0x00000002
 	wmNCHitTest          = 0x0084
 	wmModelChanged       = win.WM_APP + 1
-	wmStreamFailed       = win.WM_APP + 2
 	wdExcludeFromCapture = 0x00000011
 	timerID              = 1
+	streamRetryDelay     = 2 * time.Second
 )
 
 var (
@@ -71,7 +71,6 @@ type overlayWindow struct {
 	dotHWND   win.HWND
 	model     *actionosd.Model
 	dotOn     bool
-	streamErr chan error
 	closeOnce sync.Once
 }
 
@@ -151,18 +150,42 @@ func run(cfg config, logger *slog.Logger) error {
 	streamContext, streamCancel := context.WithCancel(context.Background())
 	defer streamCancel()
 	go func() {
-		err := client.Stream(streamContext, after, func(event eventstream.Event) error {
-			if err := window.model.Apply(event); err != nil {
-				return err
+		retryCount := 0
+		for streamContext.Err() == nil {
+			err := client.Stream(streamContext, after, func(event eventstream.Event) error {
+				if err := window.model.Apply(event); err != nil {
+					return err
+				}
+				if retryCount > 0 {
+					logger.Info("action_osd_stream_reconnected",
+						"sequence", event.Sequence,
+						"retry_count", retryCount,
+					)
+				}
+				after = event.Sequence
+				retryCount = 0
+				if event.Stream == actionrun.StreamName {
+					win.PostMessage(window.hwnd, wmModelChanged, 0, 0)
+				}
+				return nil
+			})
+			if streamContext.Err() != nil {
+				return
 			}
-			if event.Stream == actionrun.StreamName {
-				win.PostMessage(window.hwnd, wmModelChanged, 0, 0)
+			retryCount++
+			logger.Warn("action_osd_stream_disconnected",
+				"error", err,
+				"after_cursor", after,
+				"retry_count", retryCount,
+				"retry_in_ms", streamRetryDelay.Milliseconds(),
+			)
+			timer := time.NewTimer(streamRetryDelay)
+			select {
+			case <-streamContext.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
 			}
-			return nil
-		})
-		if streamContext.Err() == nil {
-			window.streamErr <- err
-			win.PostMessage(window.hwnd, wmStreamFailed, 0, 0)
 		}
 	}()
 
@@ -170,13 +193,8 @@ func run(cfg config, logger *slog.Logger) error {
 	for {
 		status := win.GetMessage(&message, 0, 0, 0)
 		if status == 0 {
-			select {
-			case streamErr := <-window.streamErr:
-				return fmt.Errorf("consume event stream: %w", streamErr)
-			default:
-				logger.Info("action_osd_stopped")
-				return nil
-			}
+			logger.Info("action_osd_stopped")
+			return nil
 		}
 		if status == -1 {
 			return errorsFromLast("read window message")
@@ -282,7 +300,7 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 			return nil, errorsFromLast("exclude OSD pulse from capture")
 		}
 	}
-	window := &overlayWindow{hwnd: hwnd, dotHWND: dotHWND, model: model, dotOn: true, streamErr: make(chan error, 1)}
+	window := &overlayWindow{hwnd: hwnd, dotHWND: dotHWND, model: model, dotOn: true}
 	activeWindow = window
 	win.SetTimer(hwnd, timerID, 1000, 0)
 	return window, nil
@@ -320,9 +338,6 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 		if activeWindow != nil {
 			activeWindow.refresh()
 		}
-		return 0
-	case wmStreamFailed:
-		win.DestroyWindow(hwnd)
 		return 0
 	case wmNCHitTest:
 		return uintptr(^uint32(0))
