@@ -20,6 +20,7 @@
     <a href="#runtime" data-i18n="nav.runtime">Runtime</a>
     <a href="#design" data-i18n="nav.design">Design</a>
     <a href="#rules" data-i18n="nav.rules">Rules</a>
+    <a href="#metagame" data-i18n="nav.metagame">Meta-game</a>
     <a href="#quickstart" data-i18n="nav.quickstart">Quick Start</a>
   </nav>
   <div class="nav-actions">
@@ -153,6 +154,7 @@
   <p class="section-kicker" data-i18n="ds.kicker">Two-speed architecture</p>
   <h2 data-i18n="ds.title">Slow planning meets fast reflexes</h2>
   <p class="section-sub" data-i18n="ds.sub">The high-level model never sits in the fast path. It plans and supervises; streaming actions react in real time behind hard evidence gates. The event journal joins the two.</p>
+  <p class="ds-problem"><span class="ds-problem-num" data-i18n="ds.problem.num">~10s</span><span data-i18n="ds.problem.d">is one raw LLM screenshot-think-act turn. Games don't wait — so the fast path belongs to streaming actions, while the model plans and authors new actions.</span></p>
   <div class="dual">
     <div class="dual-col dual-slow">
       <h3 data-i18n="ds.slow.t">Slow · The Planner</h3>
@@ -217,8 +219,49 @@
   </div>
 </section>
 
+<!-- ============ META-GAME ============ -->
+<section id="metagame" class="section">
+  <p class="section-kicker" data-i18n="mg.kicker">The meta-game</p>
+  <h2 data-i18n="mg.title">Making a game agent-playable is itself a game</h2>
+  <p class="section-sub" data-i18n="mg.sub">Anyone can contribute a Rule for any game. Each new capability is a cleared level — judged by strict contracts, recorded in replays, and unlocked for every agent.</p>
+  <div class="pillar-grid">
+    <article class="pillar">
+      <h3><span class="pillar-tag">QUEST</span><span data-i18n="mg.q.t">A capability map per game</span></h3>
+      <ul>
+        <li data-i18n="mg.q.1">Level one: read a single HUD value with evidence</li>
+        <li data-i18n="mg.q.2">Mid game: compose classifiers and gate actions</li>
+        <li data-i18n="mg.q.3">Boss fight: a full streaming reflex workflow</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">REFEREE</span><span data-i18n="mg.r.t">Contracts are the scoring system</span></h3>
+      <ul>
+        <li data-i18n="mg.r.1">Strict schemas judge every contribution on every call</li>
+        <li data-i18n="mg.r.2">Black-box acceptance contracts decide what counts as cleared</li>
+        <li data-i18n="mg.r.3">Guessing never passes — UNKNOWN is honest, not a win</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">REPLAY</span><span data-i18n="mg.p.t">Every run is a record</span></h3>
+      <ul>
+        <li data-i18n="mg.p.1">The durable event journal captures the whole clear</li>
+        <li data-i18n="mg.p.2">Export, share, and compare your agent's runs</li>
+        <li data-i18n="mg.p.3">A four-minute station departure becomes a time to beat</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">OPEN</span><span data-i18n="mg.o.t">Any game can enter the map</span></h3>
+      <ul>
+        <li data-i18n="mg.o.1">A Rule is one plugin folder: guidance, actions, runtimes</li>
+        <li data-i18n="mg.o.2">Hot-swap plugins with no agent restart or rebuild</li>
+        <li data-i18n="mg.o.3">Your contribution becomes every agent's new ability</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
 <!-- ============ QUICK START ============ -->
-<section id="quickstart" class="section">
+<section id="quickstart" class="section section-alt">
   <p class="section-kicker" data-i18n="qs.kicker">Quick start</p>
   <h2 data-i18n="qs.title">From clone to first capture</h2>
   <div class="qs-grid">
