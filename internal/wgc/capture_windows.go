@@ -251,36 +251,81 @@ func (c *Capturer) Status(ctx context.Context) (capture.Status, error) {
 	})
 }
 
-func (c *Capturer) Capture(ctx context.Context, includeCursor bool) (capture.Result, error) {
+func (c *Capturer) Capture(ctx context.Context, request capture.Request) (capture.Result, error) {
+	profile, err := capture.ParseProfile(string(request.Profile))
+	if err != nil {
+		return capture.Result{}, err
+	}
+	request.Profile = profile
 	var result capture.Result
-	err := c.withCapturedFrame(ctx, "full", includeCursor, func(frame capturedFrame) error {
-		image, width, height, err := readFrame(frame.frame, frame.device, frame.context3D, frame.pixelFormat, frame.display)
-		if err != nil {
-			return err
+	err = c.withCapturedFrame(ctx, "full:"+string(profile), request.IncludeCursor, func(frame capturedFrame) error {
+		processedAt := time.Now()
+		frameImage, readWidth, readHeight, readErr := readFrame(frame.frame, frame.device, frame.context3D, frame.pixelFormat, frame.display)
+		if readErr != nil {
+			return readErr
 		}
-		if width != frame.width || height != frame.height {
+		if readWidth != frame.width || readHeight != frame.height {
 			return capture.Failure(
 				"capture_size_mismatch",
-				fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", width, height, frame.width, frame.height),
+				fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", readWidth, readHeight, frame.width, frame.height),
 				nil,
 			)
 		}
-
-		var encoded bytes.Buffer
-		if err := png.Encode(&encoded, image); err != nil {
-			return capture.Failure("capture_encode_failed", "failed to encode captured frame as PNG", err)
+		var content []byte
+		width, height := frame.width, frame.height
+		format, contentType, extension := "jpeg", "image/jpeg", ".jpg"
+		quality, chroma := 90, "444"
+		switch profile {
+		case capture.ProfileNativeJPEG, capture.Profile1080pJPEG:
+			if profile == capture.Profile1080pJPEG {
+				width, height = fitInside(frame.width, frame.height, 1920, 1080)
+			}
+			bgr, convertErr := pixels.NRGBAToBGR(frameImage, width, height)
+			if convertErr != nil {
+				return capture.Failure("capture_encode_failed", "failed to prepare the captured frame for JPEG encoding", convertErr)
+			}
+			var encodeErr error
+			content, encodeErr = encodeWICJPEG(bgr, width, height, quality)
+			if encodeErr != nil {
+				return capture.Failure("capture_encode_failed", "failed to encode captured frame as JPEG Q90 4:4:4", encodeErr)
+			}
+		case capture.ProfileNativePNG:
+			var encoded bytes.Buffer
+			encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+			if encodeErr := encoder.Encode(&encoded, frameImage); encodeErr != nil {
+				return capture.Failure("capture_encode_failed", "failed to encode captured frame as PNG", encodeErr)
+			}
+			content = encoded.Bytes()
+			format, contentType, extension = "png", "image/png", ".png"
+			quality, chroma = 0, ""
+		default:
+			return fmt.Errorf("unsupported capture profile %q", profile)
 		}
 		monitor := frame.monitor
-		monitor.Width = width
-		monitor.Height = height
+		monitor.Width = frame.width
+		monitor.Height = frame.height
 		result = capture.Result{
-			PNG: encoded.Bytes(), Width: width, Height: height,
-			IncludeCursor: includeCursor, Monitor: monitor, Foreground: frame.foreground,
+			Content: content, Profile: profile, Format: format, ContentType: contentType,
+			FileExtension: extension, Quality: quality, ChromaSubsampling: chroma,
+			Width: width, Height: height,
+			IncludeCursor: request.IncludeCursor, Monitor: monitor, Foreground: frame.foreground,
 			CapturePixelFormat: frame.pixelFormatName, ToneMapped: monitor.HDR,
 		}
+		c.logCaptureLifecycle(ctx, "wgc_capture_processed",
+			"profile", profile, "width", width, "height", height,
+			"bytes", len(content), "process_ms", time.Since(processedAt).Milliseconds(),
+		)
 		return nil
 	})
 	return result, err
+}
+
+func fitInside(width, height, maxWidth, maxHeight int) (int, int) {
+	if width <= maxWidth && height <= maxHeight {
+		return width, height
+	}
+	scale := math.Min(float64(maxWidth)/float64(width), float64(maxHeight)/float64(height))
+	return max(1, int(math.Round(float64(width)*scale))), max(1, int(math.Round(float64(height)*scale)))
 }
 
 func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequest) (capture.RegionResult, error) {
@@ -1030,7 +1075,7 @@ func openFrameTexture(frame unsafe.Pointer, pixelFormat uint32) (unsafe.Pointer,
 	return sourceTexture, sourceDesc, nil
 }
 
-func readFrame(frame, device, context3D unsafe.Pointer, pixelFormat uint32, desc outputDesc1) (image.Image, int, int, error) {
+func readFrame(frame, device, context3D unsafe.Pointer, pixelFormat uint32, desc outputDesc1) (*image.NRGBA, int, int, error) {
 	var surface unsafe.Pointer
 	if err := callHRESULTWith(frame, 6, uintptr(unsafe.Pointer(&surface))); err != nil {
 		return nil, 0, 0, capture.Failure("capture_frame_failed", "failed to access the WGC frame surface", err)

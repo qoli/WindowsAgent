@@ -7,7 +7,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
-	"image/png"
+	"image/jpeg"
 	"io"
 	"log/slog"
 	"net/http"
@@ -36,6 +36,7 @@ type fakeCapturer struct {
 	started     chan struct{}
 	release     chan struct{}
 	once        sync.Once
+	request     capture.Request
 }
 
 type fakeScriptExecutor struct {
@@ -90,7 +91,8 @@ func (f *fakeCapturer) Status(context.Context) (capture.Status, error) {
 	return f.status, f.statusError
 }
 
-func (f *fakeCapturer) Capture(ctx context.Context, includeCursor bool) (capture.Result, error) {
+func (f *fakeCapturer) Capture(ctx context.Context, request capture.Request) (capture.Result, error) {
+	f.request = request
 	if f.started != nil {
 		f.once.Do(func() { close(f.started) })
 	}
@@ -105,12 +107,13 @@ func (f *fakeCapturer) Capture(ctx context.Context, includeCursor bool) (capture
 		return capture.Result{}, f.captureErr
 	}
 	result := f.result
-	result.IncludeCursor = includeCursor
+	result.IncludeCursor = request.IncludeCursor
 	return result, nil
 }
 
 func TestCaptureAndDownload(t *testing.T) {
-	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	capturer := &fakeCapturer{status: testStatus(), result: testResult()}
+	server, _ := newTestServer(t, capturer)
 	request := httptest.NewRequest(http.MethodPost, "/v1/captures", bytes.NewBufferString(`{"include_cursor":false}`))
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -123,6 +126,12 @@ func TestCaptureAndDownload(t *testing.T) {
 	}
 	if metadata.IncludeCursor {
 		t.Fatal("include_cursor was not propagated")
+	}
+	if metadata.Profile != capture.ProfileNativeJPEG || metadata.Format != "jpeg" {
+		t.Fatalf("default profile metadata = %q/%q", metadata.Profile, metadata.Format)
+	}
+	if capturer.request.Profile != capture.ProfileNativeJPEG {
+		t.Fatalf("capture profile = %q, want default native-jpeg", capturer.request.Profile)
 	}
 	if metadata.Foreground.ExecutableName != "game.exe" || metadata.Foreground.ProcessID != 42 {
 		t.Fatalf("foreground process metadata = %+v", metadata.Foreground)
@@ -155,9 +164,41 @@ func TestCaptureAndDownload(t *testing.T) {
 	if contentResponse.Header().Get("ETag") != `"`+metadata.SHA256+`"` {
 		t.Fatal("missing or invalid ETag")
 	}
-	if !bytes.Equal(contentResponse.Body.Bytes(), testResult().PNG) {
+	if contentResponse.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("content type = %q", contentResponse.Header().Get("Content-Type"))
+	}
+	if !bytes.Equal(contentResponse.Body.Bytes(), testResult().Content) {
 		t.Fatal("downloaded content differs from capture")
 	}
+}
+
+func TestCapturePropagatesExplicitProfile(t *testing.T) {
+	capturer := &fakeCapturer{status: testStatus(), result: testResult()}
+	server, _ := newTestServer(t, capturer)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost, "/v1/captures",
+		bytes.NewBufferString(`{"include_cursor":true,"profile":"1080p-jpeg"}`),
+	))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if capturer.request.Profile != capture.Profile1080pJPEG {
+		t.Fatalf("capture profile = %q", capturer.request.Profile)
+	}
+}
+
+func TestCaptureRejectsUnknownProfile(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost, "/v1/captures",
+		bytes.NewBufferString(`{"include_cursor":true,"profile":"fastest"}`),
+	))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	assertErrorCode(t, response.Body.Bytes(), "invalid_request")
 }
 
 func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
@@ -751,17 +792,17 @@ func testResult() capture.Result {
 	var encoded bytes.Buffer
 	imageValue := image.NewNRGBA(image.Rect(0, 0, 1, 1))
 	imageValue.SetNRGBA(0, 0, color.NRGBA{R: 10, G: 20, B: 30, A: 255})
-	if err := png.Encode(&encoded, imageValue); err != nil {
+	if err := jpeg.Encode(&encoded, imageValue, &jpeg.Options{Quality: 90}); err != nil {
 		panic(err)
 	}
 	monitor := testStatus().Monitor
 	monitor.Width = 1
 	monitor.Height = 1
 	return capture.Result{
-		PNG:     encoded.Bytes(),
-		Width:   1,
-		Height:  1,
-		Monitor: monitor,
+		Content: encoded.Bytes(), Profile: capture.ProfileNativeJPEG,
+		Format: "jpeg", ContentType: "image/jpeg", FileExtension: ".jpg",
+		Quality: 90, ChromaSubsampling: "444",
+		Width: 1, Height: 1, Monitor: monitor,
 		Foreground: foreground.Info{
 			ObservedAt:     time.Date(2026, 7, 27, 1, 2, 3, 4, time.UTC),
 			ProcessID:      42,

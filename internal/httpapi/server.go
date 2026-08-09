@@ -63,7 +63,8 @@ type ErrorBody struct {
 }
 
 type captureRequest struct {
-	IncludeCursor *bool `json:"include_cursor"`
+	IncludeCursor *bool  `json:"include_cursor"`
+	Profile       string `json:"profile,omitempty"`
 }
 
 type statusResponse struct {
@@ -502,6 +503,11 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request, requestID
 		writeError(w, requestID, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	profile, err := capture.ParseProfile(request.Profile)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	select {
 	case s.gate <- struct{}{}:
 		defer func() { <-s.gate }()
@@ -512,16 +518,21 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request, requestID
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.timeout)
 	defer cancel()
-	result, err := s.capturer.Capture(ctx, *request.IncludeCursor)
+	captureStarted := time.Now()
+	result, err := s.capturer.Capture(ctx, capture.Request{
+		Profile: profile, IncludeCursor: *request.IncludeCursor,
+	})
 	if err != nil {
 		s.writeMappedError(w, requestID, err)
 		return
 	}
+	captureDuration := time.Since(captureStarted)
 	result.Rule, err = s.rules.Resolve(result.Foreground.ExecutableName)
 	if err != nil {
 		s.writeMappedError(w, requestID, err)
 		return
 	}
+	commitStarted := time.Now()
 	metadata, err := s.store.Commit(ctx, result)
 	if err != nil {
 		s.writeMappedError(w, requestID, err)
@@ -533,6 +544,12 @@ func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request, requestID
 		"width", metadata.Width,
 		"height", metadata.Height,
 		"bytes", metadata.Bytes,
+		"profile", metadata.Profile,
+		"format", metadata.Format,
+		"quality", metadata.Quality,
+		"chroma_subsampling", metadata.ChromaSubsampling,
+		"capture_duration_ms", captureDuration.Milliseconds(),
+		"commit_duration_ms", time.Since(commitStarted).Milliseconds(),
 		"hdr", metadata.Monitor.HDR,
 		"tone_mapped", metadata.ToneMapped,
 		"foreground_process_id", metadata.Foreground.ProcessID,
@@ -682,7 +699,7 @@ func (s *Server) serveContent(w http.ResponseWriter, r *http.Request, requestID,
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Type", metadata.ContentType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
 	w.Header().Set("ETag", etag)
 	if immutable {

@@ -43,7 +43,7 @@ func TestCommitLatestAndReadContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if readMetadata.SHA256 != metadata.SHA256 || !bytes.Equal(content, result.PNG) {
+	if readMetadata.SHA256 != metadata.SHA256 || !bytes.Equal(content, result.Content) {
 		t.Fatal("read artifact did not match committed artifact")
 	}
 }
@@ -149,7 +149,11 @@ func testResult(content string) capture.Result {
 		panic(err)
 	}
 	return capture.Result{
-		PNG:           encoded.Bytes(),
+		Content:       encoded.Bytes(),
+		Profile:       capture.ProfileNativePNG,
+		Format:        "png",
+		ContentType:   "image/png",
+		FileExtension: ".png",
 		Width:         1,
 		Height:        1,
 		IncludeCursor: true,

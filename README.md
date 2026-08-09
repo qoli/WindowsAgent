@@ -26,8 +26,9 @@ The screenshot capability is available today:
 
 - Windows 10 1903+ amd64
 - primary-monitor capture using WGC and Direct3D 11
-- SDR PNG output
-- HDR scRGB capture tone-mapped to an SDR PNG preview
+- native-resolution JPEG Q90 4:4:4 output by default
+- explicit `1080p-jpeg` and lossless `native-png` request profiles
+- HDR scRGB capture tone-mapped to an SDR image before encoding
 - cursor inclusion selected per request
 - foreground process ID, executable name/path, window title, and observation time
   recorded with each capture
@@ -558,11 +559,17 @@ curl.exe `
   http://127.0.0.1:8787/v1/captures
 ```
 
-Download the latest PNG:
+Omitting `profile` selects `native-jpeg`. The complete supported request
+profiles are `native-jpeg` (Q90, 4:4:4), `1080p-jpeg` (fit inside 1920x1080,
+Q90, 4:4:4), and `native-png` (lossless, PNG BestSpeed). Unknown profiles and
+encoding failures are returned explicitly; the agent does not change formats
+or fall back to PNG.
+
+Download the latest image using the extension reported by its metadata:
 
 ```powershell
 curl.exe `
-  -o capture.png `
+  -o capture.jpg `
   http://127.0.0.1:8787/v1/captures/latest/content
 ```
 
@@ -638,8 +645,10 @@ values. Stream fields named `observedSpeed*` are visual evidence;
 fails explicitly.
 
 Only one capture can run at a time. A concurrent request receives
-`409 capture_busy`. Each completed artifact contains `capture.png` and
-`metadata.json`. The response and metadata include a required `foreground`
+`409 capture_busy`. Each completed artifact contains `capture.jpg` or
+`capture.png` plus `metadata.json`. Metadata records `profile`, `format`,
+`content_type`, and, for JPEG, `quality` and `chroma_subsampling`. The response
+and metadata also include a required `foreground`
 object:
 
 ```json

@@ -3,11 +3,39 @@ package capture
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/rules"
 )
+
+type Profile string
+
+const (
+	ProfileNativeJPEG Profile = "native-jpeg"
+	Profile1080pJPEG  Profile = "1080p-jpeg"
+	ProfileNativePNG  Profile = "native-png"
+	DefaultProfile            = ProfileNativeJPEG
+)
+
+type Request struct {
+	Profile       Profile
+	IncludeCursor bool
+}
+
+func ParseProfile(value string) (Profile, error) {
+	if value == "" {
+		return DefaultProfile, nil
+	}
+	profile := Profile(value)
+	switch profile {
+	case ProfileNativeJPEG, Profile1080pJPEG, ProfileNativePNG:
+		return profile, nil
+	default:
+		return "", fmt.Errorf("unknown capture profile %q", value)
+	}
+}
 
 type Monitor struct {
 	DeviceName       string  `json:"device_name"`
@@ -24,7 +52,13 @@ type Status struct {
 }
 
 type Result struct {
-	PNG                []byte
+	Content            []byte
+	Profile            Profile
+	Format             string
+	ContentType        string
+	FileExtension      string
+	Quality            int
+	ChromaSubsampling  string
 	Width              int
 	Height             int
 	IncludeCursor      bool
@@ -37,7 +71,32 @@ type Result struct {
 
 type Capturer interface {
 	Status(context.Context) (Status, error)
-	Capture(context.Context, bool) (Result, error)
+	Capture(context.Context, Request) (Result, error)
+}
+
+func (r Result) ValidateEncoding() error {
+	if len(r.Content) == 0 {
+		return errors.New("capture content is empty")
+	}
+	switch r.Profile {
+	case ProfileNativeJPEG, Profile1080pJPEG:
+		if r.Format != "jpeg" || r.ContentType != "image/jpeg" || r.FileExtension != ".jpg" {
+			return errors.New("JPEG capture encoding metadata is inconsistent")
+		}
+		if r.Quality != 90 || r.ChromaSubsampling != "444" {
+			return errors.New("JPEG capture must use quality 90 and 4:4:4 chroma subsampling")
+		}
+	case ProfileNativePNG:
+		if r.Format != "png" || r.ContentType != "image/png" || r.FileExtension != ".png" {
+			return errors.New("PNG capture encoding metadata is inconsistent")
+		}
+		if r.Quality != 0 || r.ChromaSubsampling != "" {
+			return errors.New("PNG capture must not report lossy encoding settings")
+		}
+	default:
+		return fmt.Errorf("invalid capture result profile %q", r.Profile)
+	}
+	return nil
 }
 
 type Error struct {

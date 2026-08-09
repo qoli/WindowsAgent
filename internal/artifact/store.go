@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image/png"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,7 +26,6 @@ import (
 )
 
 const (
-	imageFilename    = "capture.png"
 	metadataFilename = "metadata.json"
 )
 
@@ -37,8 +38,11 @@ var (
 type Metadata struct {
 	ID                 string           `json:"id"`
 	CreatedAt          time.Time        `json:"created_at"`
+	Profile            capture.Profile  `json:"profile"`
 	Format             string           `json:"format"`
 	ContentType        string           `json:"content_type"`
+	Quality            int              `json:"quality,omitempty"`
+	ChromaSubsampling  string           `json:"chroma_subsampling,omitempty"`
 	Width              int              `json:"width"`
 	Height             int              `json:"height"`
 	Bytes              int64            `json:"bytes"`
@@ -124,10 +128,14 @@ func (s *Store) ReadContent(ctx context.Context, id string) (*Metadata, []byte, 
 	if err != nil {
 		return nil, nil, err
 	}
-	contentPath := filepath.Join(s.root, id, imageFilename)
+	contentName, err := contentFilename(metadata.Format)
+	if err != nil {
+		return nil, nil, corrupt(id, "resolve capture content filename", err)
+	}
+	contentPath := filepath.Join(s.root, id, contentName)
 	content, err := os.ReadFile(contentPath)
 	if err != nil {
-		return nil, nil, corrupt(id, "read capture.png", err)
+		return nil, nil, corrupt(id, "read capture content", err)
 	}
 	if int64(len(content)) != metadata.Bytes {
 		return nil, nil, corrupt(id, "content size does not match metadata", nil)
@@ -143,7 +151,7 @@ func (s *Store) Commit(ctx context.Context, result capture.Result) (*Metadata, e
 	if err := validateResult(result); err != nil {
 		return nil, err
 	}
-	current, err := s.scan(ctx)
+	current, err := s.scanIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -159,15 +167,18 @@ func (s *Store) Commit(ctx context.Context, result capture.Result) (*Metadata, e
 	}
 	defer os.RemoveAll(stagePath)
 
-	sum := sha256.Sum256(result.PNG)
+	sum := sha256.Sum256(result.Content)
 	metadata := Metadata{
 		ID:                 id,
 		CreatedAt:          createdAt,
-		Format:             "png",
-		ContentType:        "image/png",
+		Profile:            result.Profile,
+		Format:             result.Format,
+		ContentType:        result.ContentType,
+		Quality:            result.Quality,
+		ChromaSubsampling:  result.ChromaSubsampling,
 		Width:              result.Width,
 		Height:             result.Height,
-		Bytes:              int64(len(result.PNG)),
+		Bytes:              int64(len(result.Content)),
 		SHA256:             hex.EncodeToString(sum[:]),
 		IncludeCursor:      result.IncludeCursor,
 		Monitor:            result.Monitor,
@@ -178,7 +189,11 @@ func (s *Store) Commit(ctx context.Context, result capture.Result) (*Metadata, e
 		ContentURL:         "/v1/captures/" + id + "/content",
 	}
 
-	if err := writeSynced(filepath.Join(stagePath, imageFilename), result.PNG); err != nil {
+	contentName, err := contentFilename(result.Format)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeSynced(filepath.Join(stagePath, contentName), result.Content); err != nil {
 		return nil, fmt.Errorf("write staged capture: %w", err)
 	}
 	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
@@ -200,6 +215,36 @@ func (s *Store) Commit(ctx context.Context, result capture.Result) (*Metadata, e
 		return nil, fmt.Errorf("commit artifact directory: %w", err)
 	}
 	return &metadata, nil
+}
+
+// scanIndex validates the artifact directory and metadata needed for retention
+// without re-reading and hashing every retained image on each new capture.
+// Full payload validation remains on startup, Count, Latest, Get, and download.
+func (s *Store) scanIndex(ctx context.Context) ([]Metadata, error) {
+	entries, err := os.ReadDir(s.root)
+	if err != nil {
+		return nil, fmt.Errorf("read artifact root: %w", err)
+	}
+	items := make([]Metadata, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".staging-") {
+			return nil, corrupt(name, "staging directory exists from an incomplete transaction", nil)
+		}
+		if !entry.IsDir() || !idPattern.MatchString(name) {
+			return nil, corrupt(name, "unexpected entry in artifact root", nil)
+		}
+		metadata, err := s.readMetadataAndStat(name)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, metadata)
+	}
+	sortMetadata(items)
+	return items, nil
 }
 
 func (s *Store) scan(ctx context.Context) ([]Metadata, error) {
@@ -225,13 +270,17 @@ func (s *Store) scan(ctx context.Context) ([]Metadata, error) {
 		}
 		items = append(items, metadata)
 	}
+	sortMetadata(items)
+	return items, nil
+}
+
+func sortMetadata(items []Metadata) {
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
 			return items[i].ID < items[j].ID
 		}
 		return items[i].CreatedAt.Before(items[j].CreatedAt)
 	})
-	return items, nil
 }
 
 func (s *Store) readAndValidate(ctx context.Context, id string) (Metadata, error) {
@@ -250,6 +299,36 @@ func (s *Store) readAndValidate(ctx context.Context, id string) (Metadata, error
 		return Metadata{}, corrupt(id, "artifact path is not a directory", nil)
 	}
 
+	metadata, err := s.readMetadataAndStat(id)
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	contentName, _ := contentFilename(metadata.Format)
+	contentPath := filepath.Join(dir, contentName)
+	content, err := os.ReadFile(contentPath)
+	if err != nil {
+		return Metadata{}, corrupt(id, "read capture content", err)
+	}
+	sum := sha256.Sum256(content)
+	if hex.EncodeToString(sum[:]) != metadata.SHA256 {
+		return Metadata{}, corrupt(id, "capture content SHA-256 does not match metadata", nil)
+	}
+	config, decodedFormat, err := image.DecodeConfig(bytes.NewReader(content))
+	if err != nil {
+		return Metadata{}, corrupt(id, "capture content is invalid", err)
+	}
+	if decodedFormat != metadata.Format {
+		return Metadata{}, corrupt(id, "capture content format does not match metadata", nil)
+	}
+	if config.Width != metadata.Width || config.Height != metadata.Height {
+		return Metadata{}, corrupt(id, "capture content dimensions do not match metadata", nil)
+	}
+	return metadata, nil
+}
+
+func (s *Store) readMetadataAndStat(id string) (Metadata, error) {
+	dir := filepath.Join(s.root, id)
 	metadataBytes, err := os.ReadFile(filepath.Join(dir, metadataFilename))
 	if err != nil {
 		return Metadata{}, corrupt(id, "read metadata.json", err)
@@ -267,27 +346,17 @@ func (s *Store) readAndValidate(ctx context.Context, id string) (Metadata, error
 		return Metadata{}, corrupt(id, "invalid metadata", err)
 	}
 
-	imageInfo, err := os.Stat(filepath.Join(dir, imageFilename))
+	contentName, err := contentFilename(metadata.Format)
 	if err != nil {
-		return Metadata{}, corrupt(id, "stat capture.png", err)
+		return Metadata{}, corrupt(id, "resolve capture content filename", err)
+	}
+	contentPath := filepath.Join(dir, contentName)
+	imageInfo, err := os.Stat(contentPath)
+	if err != nil {
+		return Metadata{}, corrupt(id, "stat capture content", err)
 	}
 	if !imageInfo.Mode().IsRegular() || imageInfo.Size() != metadata.Bytes {
-		return Metadata{}, corrupt(id, "capture.png size or type does not match metadata", nil)
-	}
-	content, err := os.ReadFile(filepath.Join(dir, imageFilename))
-	if err != nil {
-		return Metadata{}, corrupt(id, "read capture.png", err)
-	}
-	sum := sha256.Sum256(content)
-	if hex.EncodeToString(sum[:]) != metadata.SHA256 {
-		return Metadata{}, corrupt(id, "capture.png SHA-256 does not match metadata", nil)
-	}
-	config, err := png.DecodeConfig(bytes.NewReader(content))
-	if err != nil {
-		return Metadata{}, corrupt(id, "capture.png is invalid", err)
-	}
-	if config.Width != metadata.Width || config.Height != metadata.Height {
-		return Metadata{}, corrupt(id, "capture.png dimensions do not match metadata", nil)
+		return Metadata{}, corrupt(id, "capture content size or type does not match metadata", nil)
 	}
 	return metadata, nil
 }
@@ -318,8 +387,8 @@ func (s *Store) remove(id string) error {
 }
 
 func validateResult(result capture.Result) error {
-	if len(result.PNG) == 0 {
-		return errors.New("capture PNG is empty")
+	if err := result.ValidateEncoding(); err != nil {
+		return err
 	}
 	if result.Width <= 0 || result.Height <= 0 {
 		return errors.New("capture dimensions must be positive")
@@ -336,13 +405,16 @@ func validateResult(result capture.Result) error {
 	if result.CapturePixelFormat == "" {
 		return errors.New("capture pixel format is required")
 	}
-	config, err := png.DecodeConfig(bytes.NewReader(result.PNG))
+	config, decodedFormat, err := image.DecodeConfig(bytes.NewReader(result.Content))
 	if err != nil {
-		return fmt.Errorf("capture payload is not a valid PNG: %w", err)
+		return fmt.Errorf("capture payload is not a valid %s: %w", result.Format, err)
+	}
+	if decodedFormat != result.Format {
+		return fmt.Errorf("capture payload format is %q but result metadata is %q", decodedFormat, result.Format)
 	}
 	if config.Width != result.Width || config.Height != result.Height {
 		return fmt.Errorf(
-			"capture PNG is %dx%d but result metadata is %dx%d",
+			"capture content is %dx%d but result metadata is %dx%d",
 			config.Width,
 			config.Height,
 			result.Width,
@@ -358,10 +430,8 @@ func validateMetadata(id string, metadata Metadata) error {
 		return fmt.Errorf("metadata ID %q does not match directory %q", metadata.ID, id)
 	case metadata.CreatedAt.IsZero():
 		return errors.New("created_at is required")
-	case metadata.Format != "png":
-		return fmt.Errorf("format must be png, got %q", metadata.Format)
-	case metadata.ContentType != "image/png":
-		return fmt.Errorf("content_type must be image/png, got %q", metadata.ContentType)
+	case metadata.Profile == "":
+		return errors.New("profile is required")
 	case metadata.Width <= 0 || metadata.Height <= 0:
 		return errors.New("width and height must be positive")
 	case metadata.Bytes <= 0:
@@ -385,6 +455,14 @@ func validateMetadata(id string, metadata Metadata) error {
 	if err := metadata.Rule.Validate(); err != nil {
 		return err
 	}
+	if err := (capture.Result{
+		Content: metadataPlaceholder,
+		Profile: metadata.Profile, Format: metadata.Format, ContentType: metadata.ContentType,
+		FileExtension: extensionForFormat(metadata.Format), Quality: metadata.Quality,
+		ChromaSubsampling: metadata.ChromaSubsampling,
+	}).ValidateEncoding(); err != nil {
+		return err
+	}
 	if _, err := hex.DecodeString(metadata.SHA256); err != nil {
 		return fmt.Errorf("sha256 is not hexadecimal: %w", err)
 	}
@@ -397,6 +475,30 @@ func validateMetadata(id string, metadata Metadata) error {
 		return errors.New("created_at does not match capture ID timestamp")
 	}
 	return nil
+}
+
+var metadataPlaceholder = []byte{1}
+
+func contentFilename(format string) (string, error) {
+	switch format {
+	case "jpeg":
+		return "capture.jpg", nil
+	case "png":
+		return "capture.png", nil
+	default:
+		return "", fmt.Errorf("unsupported capture format %q", format)
+	}
+}
+
+func extensionForFormat(format string) string {
+	switch format {
+	case "jpeg":
+		return ".jpg"
+	case "png":
+		return ".png"
+	default:
+		return ""
+	}
 }
 
 func writeSynced(path string, data []byte) error {
