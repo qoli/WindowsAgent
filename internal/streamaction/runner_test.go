@@ -1121,7 +1121,7 @@ func TestEliteDockAtStationStopsAfterExplicitDockingDenial(t *testing.T) {
 	}
 	caller := &dockAtStationCaller{
 		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS"},
-		requestStates:  []string{"AVAILABLE", "FOCUSED", "DENIED"},
+		requestStates:  []string{"AVAILABLE", "FOCUSED", "DENIED", "AVAILABLE", "AVAILABLE"},
 		rangeState:     "ALLOWED",
 	}
 	reporter := &fixtureReporter{}
@@ -1141,16 +1141,51 @@ func TestEliteDockAtStationStopsAfterExplicitDockingDenial(t *testing.T) {
 		t.Fatalf("controls=%v cleanupCalls=%d", caller.controls, caller.cleanupCalls)
 	}
 	foundDenialEvent := false
+	foundPendingEvent := false
 	for _, payload := range reporter.payloads {
+		if contains(string(payload), `"phase":"REQUEST_DENIAL_PENDING"`) &&
+			contains(string(payload), `"requestDocking":"DENIED"`) {
+			foundPendingEvent = true
+		}
 		if contains(string(payload), `"phase":"REQUEST_DENIED"`) &&
-			contains(string(payload), `"requestDocking":"DENIED"`) &&
-			contains(string(payload), `"reason":"FIXTURE_DENIED"`) {
+			contains(string(payload), `"requestDocking":"AVAILABLE"`) &&
+			contains(string(payload), `"reason":"DENIAL_NOTIFICATION_FOLLOWED_BY_REQUEST_DOCKING"`) {
 			foundDenialEvent = true
 			break
 		}
 	}
-	if !foundDenialEvent {
+	if !foundPendingEvent || !foundDenialEvent {
 		t.Fatalf("denial event not emitted: %s", reporter.payloads)
+	}
+}
+
+func TestEliteDockAtStationLetsCancelDockingOverridePendingDenial(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
+		requestStates:  []string{"AVAILABLE", "FOCUSED", "DENIED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
+		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
+		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
+		rangeState:     "ALLOWED",
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	foundPending := false
+	foundOverride := false
+	for _, payload := range reporter.payloads {
+		foundPending = foundPending || contains(string(payload), `"phase":"REQUEST_DENIAL_PENDING"`)
+		foundOverride = foundOverride || (contains(string(payload), `"phase":"REQUEST_DENIAL_OVERRIDDEN"`) && contains(string(payload), `"reason":"CANCEL_DOCKING_OVERRIDES_DENIAL_NOTIFICATION"`))
+	}
+	if !foundPending || !foundOverride {
+		t.Fatalf("denial reconciliation events missing: %s", reporter.payloads)
 	}
 }
 

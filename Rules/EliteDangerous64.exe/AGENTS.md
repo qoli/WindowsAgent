@@ -159,9 +159,13 @@ crop or a later capture. The pure classifier distinguishes
 `REQUEST DOCKING` from `CANCEL DOCKING` and reads the matched line's same-frame
 left context to tell a visible dark row from the bright fill that means keyboard
 focus is on the row. It returns `AVAILABLE`, `FOCUSED`, `UNAVAILABLE`,
-`DOCKING_ACTIVE`, or `UNKNOWN`. A selected target is never assumed to support
-docking. Only `FOCUSED`, together with the independent allowed range Gate,
-permits a later `SELECT`; the Action itself never navigates or injects input.
+`DOCKING_ACTIVE`, `DENIED`, or `UNKNOWN`. A same-frame anchored
+`CANCEL DOCKING` row overrides a conflicting denial notification because it is
+the persistent post-submit state. A denial without that stronger evidence is
+preserved for temporal reconciliation by the owning workflow. A selected
+target is never assumed to support docking. Only `FOCUSED`, together with the
+independent allowed range Gate, permits a later `SELECT`; the Action itself
+never navigates or injects input.
 
 `elite-dangerous/dock-at-station` is a linear Streaming Action. Its range Gate
 watches indefinitely and builds a temporal distance trend: two readings within
@@ -177,7 +181,9 @@ and verified docking request, monitoring uses explicit
 `action.try_call` results. A failed child observation is written as
 `OBSERVATION_ERROR`, does not advance the prompt-disappearance or Landing Gear
 Gates, and fails the workflow after three consecutive errors. It never changes
-capture or state providers.
+capture or state providers. A single denial notification is non-terminal:
+two later `CANCEL DOCKING` observations override it, while two returned Request
+Docking observations confirm rejection without resubmitting.
 
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
 supervising model chooses exactly one logical `FOCUS_LEFT_PANEL`, `NEXT_PANEL`,

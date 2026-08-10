@@ -262,21 +262,40 @@ def request_and_verify(sample, contact_index, range_state, distance_meters, alre
         action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
         emit_update("REQUESTING_DOCKING", sample, contact_index, range_state, distance_meters, "FOCUSED", None, None, False, 0, 0, 0, last_command="SELECT", reason="SUBMIT_ATTEMPT_" + str(submit_attempt + 1))
         confirmations = 0
+        denial_observed = False
+        request_return_confirmations = 0
         state = "UNKNOWN"
         for attempt in range(REQUEST_CONFIRM_LIMIT):
             task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
             request = action.call(id="elite-dangerous/request-docking-availability", inputs={})
             state = request["requestDocking"]["state"]
-            phase = "REQUEST_DENIED" if state == "DENIED" else "VERIFYING_GRANTED"
+            phase = "VERIFYING_GRANTED"
+            event_reason = request["decision"]["reason"]
+            if state == "DENIED":
+                denial_observed = True
+                request_return_confirmations = 0
+                phase = "REQUEST_DENIAL_PENDING"
             if state == "DOCKING_ACTIVE":
                 confirmations += 1
+                request_return_confirmations = 0
+                if denial_observed:
+                    phase = "REQUEST_DENIAL_OVERRIDDEN"
+                    event_reason = "CANCEL_DOCKING_OVERRIDES_DENIAL_NOTIFICATION"
             else:
                 confirmations = 0
-            emit_update(phase, sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=request["decision"]["reason"])
-            if state == "DENIED":
-                fail("DOCKING_REQUEST_DENIED: the game rejected the docking request")
+            if denial_observed and state in ["AVAILABLE", "FOCUSED"]:
+                request_return_confirmations += 1
+            elif state not in ["DENIED", "DOCKING_ACTIVE"]:
+                request_return_confirmations = 0
+            emit_update(phase, sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=event_reason)
             if confirmations >= REQUEST_CONFIRMATIONS:
                 return
+            if denial_observed and request_return_confirmations >= 2:
+                emit_update("REQUEST_DENIED", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason="DENIAL_NOTIFICATION_FOLLOWED_BY_REQUEST_DOCKING")
+                fail("DOCKING_REQUEST_DENIED: denial notification was followed by two Request Docking observations")
+        if denial_observed:
+            emit_update("REQUEST_DENIED", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason="DENIAL_NOTIFICATION_WITHOUT_CANCEL_DOCKING")
+            fail("DOCKING_REQUEST_DENIED: CANCEL DOCKING was not confirmed after the denial notification")
         if state not in ["AVAILABLE", "FOCUSED"]:
             fail("Request Docking submit did not return to a retryable state: " + state)
     fail("three focused SELECT attempts were not followed by two consecutive CANCEL DOCKING observations")

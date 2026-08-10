@@ -24,10 +24,14 @@ focus to the Station row while Request Docking remains available. In that
 specific retryable state the Action re-establishes Request Docking focus and
 retries, for at most three focused submissions. It never resubmits after
 `CANCEL DOCKING` is observed. A high-confidence
-`DOCKING REQUEST DENIED.` notification produces a `REQUEST_DENIED` event and
-fails immediately without another `SELECT`; the existing failure cleanup
-closes the left panel. The notification is reported as a generic game-side
-rejection and is never promoted into an inferred cause. The Action then closes the panel, commands
+`DOCKING REQUEST DENIED.` notification first produces a
+`REQUEST_DENIAL_PENDING` event and never causes another `SELECT`. Two current
+`CANCEL DOCKING` observations override that transient notification and continue
+the workflow. Two current Request Docking observations after the notification,
+or exhaustion without `CANCEL DOCKING`, produce the terminal `REQUEST_DENIED`
+event; failure cleanup closes the left panel. The notification is reported as
+a generic game-side rejection and is never promoted into an inferred cause.
+The Action then closes the panel, commands
 throttle zero, and monitors `flight-status` plus Landing Gear while the game's
 Docking Computer flies the ship. `WAITING_IN_QUEUE`,
 `SLOW_DOWN_FOR_AUTO_DOCK`, and `AUTO_DOCK` are all valid docking-lifecycle

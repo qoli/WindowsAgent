@@ -273,11 +273,18 @@ def main(ctx):
     anchor, anchor_accepted, anchor_margin = select_anchor(regions)
     denial = select_denial(regions)
     denial_accepted = denial != None and denial["region"]["detectionConfidence"] >= MIN_DETECTION_CONFIDENCE and denial["region"]["recognitionConfidence"] >= MIN_RECOGNITION_CONFIDENCE and denial["similarity"] >= MIN_DENIAL_SIMILARITY
+    denial_overridden = False
+    if denial_accepted and anchor_accepted:
+        conflict_best, conflict_runner_up = select_candidates(regions, anchor["bounds"])
+        conflict_runner_score = 0.0 if conflict_runner_up == None else conflict_runner_up["score"]
+        conflict_margin = 0.0 if conflict_best == None else conflict_best["score"] - conflict_runner_score
+        conflict_accepted = conflict_best != None and conflict_best["region"]["detectionConfidence"] >= MIN_DETECTION_CONFIDENCE and conflict_best["region"]["recognitionConfidence"] >= MIN_RECOGNITION_CONFIDENCE and conflict_best["similarity"] >= MIN_TEXT_SIMILARITY and conflict_margin >= MIN_TEXT_MARGIN
+        denial_overridden = conflict_accepted and conflict_best["label"] == "CANCEL"
     # The complete denial notification is a distinctive, terminal response to
     # SELECT. It is accepted anywhere inside this Action's already-bounded
     # Request Docking ROI, even if the short-lived frame does not also yield a
     # stable FACTION anchor or tab probe.
-    if denial_accepted:
+    if denial_accepted and not denial_overridden:
         return denied_result(contacts, raw, denial, anchor, anchor_accepted, anchor_margin)
     if not anchor_accepted:
         return evidence_unknown_result(contacts, raw, "CONTACTS_ACTION_ANCHOR_NOT_CONFIRMED", anchor, anchor_margin)
@@ -314,7 +321,7 @@ def main(ctx):
             state = "DOCKING_ACTIVE"
             available = False
             focused = visual["focused"]
-            reason = "CANCEL_DOCKING_CONFIRMED"
+            reason = "CANCEL_DOCKING_OVERRIDES_DENIAL_NOTIFICATION" if denial_overridden else "CANCEL_DOCKING_CONFIRMED"
         elif visual["state"] == "FOCUSED":
             state = "FOCUSED"
             available = True
@@ -371,6 +378,8 @@ def main(ctx):
             },
             "focusedBrightMinimum": FOCUSED_BRIGHT_MINIMUM,
             "visibleDarkMinimum": VISIBLE_DARK_MINIMUM,
+            "denialNotificationDetected": denial_accepted,
+            "denialNotificationOverridden": denial_overridden,
             "reason": reason,
         },
     }

@@ -1297,6 +1297,33 @@ func TestEliteRequestDockingAvailabilityReportsExplicitDenialNotification(t *tes
 	}
 }
 
+func TestEliteRequestDockingAvailabilityPrefersConfirmedCancelOverSameFrameDenial(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := requestDockingRegionsInputAt("CANCEL DOCKING", .91, .99, 0, 625, 0, 0, true)
+	appendRequestDockingTextRegion(input, "DOCKING REQUEST DENIED.", .845842, .999919, 995, 623)
+	runner, _ := New(&fixtureBroker{})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{
+		"contacts": map[string]any{"activeTab": map[string]any{"state": "CONTACTS"}},
+		"regions":  input,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"state":"DOCKING_ACTIVE"`,
+		`"denialNotificationDetected":true`,
+		`"denialNotificationOverridden":true`,
+		`"reason":"CANCEL_DOCKING_OVERRIDES_DENIAL_NOTIFICATION"`,
+	} {
+		if !strings.Contains(string(output), expected) {
+			t.Fatalf("missing %s in output=%s", expected, output)
+		}
+	}
+}
+
 func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 	pixels := make([]any, 96*96)
 	for index := range pixels {

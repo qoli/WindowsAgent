@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["phase", "sample", "contactIndex", "rangeState", "distanceMeters", "requestDocking", "flightStatus", "landingGear", "autoDockSeen", "autoDockConsecutive", "autoDockMissingSamples", "landingGearOnConsecutive", "lastCommand", "reason", "observationErrorCount", "observationError", "rangeWaitSamples", "rangeTrendState", "rangeTrendSamples", "acceptedDistanceMeters", "rangeOutlierCount"],
       "properties": {
-        "phase": {"enum": ["NORMALIZING_RANGE_VIEW", "RANGE_WAIT", "RANGE_OBSERVATION_ERROR", "SAFE_ADVANCE_STARTED", "SAFE_ADVANCE_COMPLETED", "RANGE_ADMITTED", "OPENING_CONTACTS", "LOCATING_REQUEST", "FOCUSING_REQUEST", "REQUESTING_DOCKING", "VERIFYING_GRANTED", "REQUEST_DENIED", "CLOSING_PANEL", "HANDING_OVER", "AUTO_DOCK_WAIT", "SLOWING_FOR_AUTO_DOCK", "AUTO_DOCK_ACTIVE", "FINAL_APPROACH", "OBSERVATION_ERROR", "VISUAL_CONFIRMATION_REQUIRED"]},
+        "phase": {"enum": ["NORMALIZING_RANGE_VIEW", "RANGE_WAIT", "RANGE_OBSERVATION_ERROR", "SAFE_ADVANCE_STARTED", "SAFE_ADVANCE_COMPLETED", "RANGE_ADMITTED", "OPENING_CONTACTS", "LOCATING_REQUEST", "FOCUSING_REQUEST", "REQUESTING_DOCKING", "VERIFYING_GRANTED", "REQUEST_DENIAL_PENDING", "REQUEST_DENIAL_OVERRIDDEN", "REQUEST_DENIED", "CLOSING_PANEL", "HANDING_OVER", "AUTO_DOCK_WAIT", "SLOWING_FOR_AUTO_DOCK", "AUTO_DOCK_ACTIVE", "FINAL_APPROACH", "OBSERVATION_ERROR", "VISUAL_CONFIRMATION_REQUIRED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 2000},
         "contactIndex": {"type": "integer", "minimum": 0, "maximum": 15},
         "rangeState": {"enum": ["ALLOWED", "DENIED", "UNKNOWN", null]},
