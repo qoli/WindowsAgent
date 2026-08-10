@@ -2,7 +2,7 @@
 
 ## Status
 
-**Landed.** Rule schema version 5, unified invocation, durable callbacks,
+**Landed.** Rule schema version 6, unified invocation, durable callbacks,
 natural linear completion, interruptible linear or loop execution, strict
 Starlark orchestration, and the HTTP start/watch/status/stop surface are
 implemented and tested. Elite Dangerous ships the first supervised linear
@@ -74,6 +74,11 @@ it does not bypass or replace the Action's domain event schema. Cancellation int
 contradictory declarations, cross-Rule calls, streaming children, invalid
 events, and invalid terminal output fail explicitly; no runtime or provider
 fallback is attempted.
+
+That child restriction belongs to the Starlark package runtime. The separate
+Host-owned [Ephemeral Action Sequence](ephemeral-action-sequence.md) may invoke
+a Rule-allowlisted linear, interruptible streaming Action and forwards its
+events with child provenance; it does not widen `action.call`.
 
 ## Shipped supervised workflow
 

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/actionrun"
+	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
@@ -47,20 +48,34 @@ type fakeScriptExecutor struct {
 }
 
 type fakeActionService struct {
-	invokeResult actionrun.Invocation
-	invokeErr    error
-	getResult    actionrun.Invocation
-	getErr       error
-	stopResult   actionrun.Invocation
-	stopErr      error
-	events       []eventstream.Event
-	invocation   scriptlaunch.Invocation
-	after        uint64
+	invokeResult   actionrun.Invocation
+	invokeErr      error
+	getResult      actionrun.Invocation
+	getErr         error
+	stopResult     actionrun.Invocation
+	stopErr        error
+	events         []eventstream.Event
+	invocation     scriptlaunch.Invocation
+	sequence       actionsequence.Request
+	sequenceResult actionrun.Invocation
+	sequenceErr    error
+	toolSchema     actionsequence.ToolSchema
+	toolSchemaErr  error
+	after          uint64
 }
 
 func (f *fakeActionService) Invoke(_ context.Context, invocation scriptlaunch.Invocation) (actionrun.Invocation, error) {
 	f.invocation = invocation
 	return f.invokeResult, f.invokeErr
+}
+
+func (f *fakeActionService) InvokeSequence(_ context.Context, request actionsequence.Request) (actionrun.Invocation, error) {
+	f.sequence = request
+	return f.sequenceResult, f.sequenceErr
+}
+
+func (f *fakeActionService) SequenceToolSchema(string) (actionsequence.ToolSchema, error) {
+	return f.toolSchema, f.toolSchemaErr
 }
 
 func (f *fakeActionService) Get(string) (actionrun.Invocation, error) {
@@ -205,7 +220,7 @@ func TestRuleDescriptionAndDocumentUpdateWithoutReload(t *testing.T) {
 	server, _, ruleRoot := newTestServerAndRuleRoot(t, &fakeCapturer{status: testStatus(), result: testResult()}, time.Second)
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":5,"description":"Updated live.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
+		[]byte(`{"schemaVersion":6,"description":"Updated live.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -274,7 +289,7 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	scriptRoot := filepath.Join(ruleRoot, "Actions", "status")
 	writeTestScriptPackage(t, scriptRoot)
 	descriptor := `{
-	  "schemaVersion": 5,
+	  "schemaVersion": 6,
 	  "description": "Read the live Rule before acting.",
 	  "runtimeProfiles": {},
 	  "actions": {
@@ -285,6 +300,7 @@ func TestRuleScriptsCatalogLoadsLivePackageContract(t *testing.T) {
 	      "registrableAs": ["monitor", "reaction"]
 	    }
 	  },
+	  "ephemeralActionSequence": {"allowedActions": []},
 	  "registrations": {}
 	}`
 	if err := os.WriteFile(filepath.Join(ruleRoot, rules.RuleFilename), []byte(descriptor), 0o600); err != nil {
@@ -337,13 +353,14 @@ func TestRuleActionAndRegistrationCatalogsReturnExplicitContracts(t *testing.T) 
 		}
 	}
 	descriptor := `{
-	  "schemaVersion": 5,
+	  "schemaVersion": 6,
 	  "description": "Read the live Rule before acting.",
 	  "runtimeProfiles": {},
 	  "actions": {
 	    "game/read": {"path":"Actions/read","runtime":"windows-observation-v1","execution":{"completion":"return"},"registrableAs":["monitor","reaction"]},
 	    "game/open": {"path":"Actions/open","runtime":"windows-action-v1","execution":{"completion":"return"},"registrableAs":["reaction"]}
 	  },
+	  "ephemeralActionSequence": {"allowedActions": []},
 	  "registrations": {
 	    "game/read-fast": {
 	      "type":"monitor",
@@ -510,6 +527,66 @@ func TestActionInvokeFiniteAndStreamingContracts(t *testing.T) {
 	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/v1/action-invocations/act_stream" {
 		t.Fatalf("stream status = %d, location = %q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
 	}
+}
+
+func TestActionSequenceToolAndInvokeContracts(t *testing.T) {
+	service := &fakeActionService{
+		toolSchema: actionsequence.ToolSchema{
+			Type: "function", Name: "run_action_sequence", Strict: true,
+			Parameters: map[string]any{"type": "object"},
+		},
+		sequenceResult: actionrun.Invocation{
+			InvocationID: "act_sequence", ActionID: actionsequence.ActionID, RuleID: "game.exe", Runtime: actionsequence.RuntimeID,
+			State:     actionrun.StateRunning,
+			Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true},
+			Watch:     &actionrun.WatchTarget{URL: "/v1/action-invocations/act_sequence/events?after=0", ContentType: "application/x-ndjson"},
+			Stop:      &actionrun.StopTarget{Method: http.MethodPost, URL: "/v1/action-invocations/act_sequence/stop"},
+		},
+	}
+	server, _ := newTestServerWithActionService(t, service)
+
+	schemaResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(schemaResponse, httptest.NewRequest(http.MethodGet, "/v3/rules/game.exe/action-sequence-tool", nil))
+	if schemaResponse.Code != http.StatusOK || !strings.Contains(schemaResponse.Body.String(), `"name":"run_action_sequence"`) {
+		t.Fatalf("schema status = %d, body = %s", schemaResponse.Code, schemaResponse.Body.String())
+	}
+
+	invokeResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(invokeResponse, httptest.NewRequest(
+		http.MethodPost, "/v1/action-sequences/invoke",
+		strings.NewReader(`{"ruleId":"game.exe","steps":[{"action":"game/read","inputs":{"enabled":true}}]}`),
+	))
+	if invokeResponse.Code != http.StatusAccepted || invokeResponse.Header().Get("Location") != "/v1/action-invocations/act_sequence" {
+		t.Fatalf("invoke status = %d, location = %q, body = %s", invokeResponse.Code, invokeResponse.Header().Get("Location"), invokeResponse.Body.String())
+	}
+	if service.sequence.RuleID != "game.exe" || len(service.sequence.Steps) != 1 || service.sequence.Steps[0].Action != "game/read" {
+		t.Fatalf("sequence = %+v", service.sequence)
+	}
+}
+
+func TestActionSequenceRequestRejectsUnknownShapeAndRuleConflict(t *testing.T) {
+	service := &fakeActionService{sequenceErr: actionrun.ErrRuleSequenceActive}
+	server, _ := newTestServerWithActionService(t, service)
+
+	invalid := httptest.NewRecorder()
+	server.Handler().ServeHTTP(invalid, httptest.NewRequest(
+		http.MethodPost, "/v1/action-sequences/invoke",
+		strings.NewReader(`{"ruleId":"game.exe","steps":[],"loop":true}`),
+	))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+	assertErrorCode(t, invalid.Body.Bytes(), "invalid_action_sequence_request")
+
+	conflict := httptest.NewRecorder()
+	server.Handler().ServeHTTP(conflict, httptest.NewRequest(
+		http.MethodPost, "/v1/action-sequences/invoke",
+		strings.NewReader(`{"ruleId":"game.exe","steps":[{"action":"game/read","inputs":{}}]}`),
+	))
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("conflict status = %d, body = %s", conflict.Code, conflict.Body.String())
+	}
+	assertErrorCode(t, conflict.Body.Bytes(), "rule_action_conflict")
 }
 
 func TestActionInvocationWatchStatusAndStop(t *testing.T) {
@@ -748,7 +825,7 @@ func newTestServerAndRuleRootWithServices(
 	}
 	if err := os.WriteFile(
 		filepath.Join(ruleRoot, rules.RuleFilename),
-		[]byte(`{"schemaVersion":5,"description":"Read the live Rule before acting.","runtimeProfiles":{},"actions":{},"registrations":{}}`),
+		[]byte(`{"schemaVersion":6,"description":"Read the live Rule before acting.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`),
 		0o600,
 	); err != nil {
 		t.Fatal(err)

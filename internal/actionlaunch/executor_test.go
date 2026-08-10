@@ -55,13 +55,14 @@ func TestStreamingActionCallsSameRuleFiniteChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeTestFile(t, filepath.Join(ruleRoot, rules.RuleFilename), `{
-  "schemaVersion":5,
+  "schemaVersion":6,
   "description":"Streaming fixture.",
   "runtimeProfiles":{},
   "actions":{
     "game/workflow":{"path":"Actions/workflow","runtime":"windows-streaming-action-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":true},"registrableAs":[]},
     "game/status":{"path":"Actions/status","runtime":"windows-observation-v1","execution":{"completion":"return"},"registrableAs":[]}
   },
+  "ephemeralActionSequence":{"allowedActions":[]},
   "registrations":{}
 }`)
 	writeTestFile(t, filepath.Join(ruleRoot, rules.AgentsFilename), "# Fixture\n")

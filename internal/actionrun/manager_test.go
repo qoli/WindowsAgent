@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/actionlaunch"
+	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/rules"
@@ -46,20 +47,51 @@ func (j storeJournal) Stream(ctx context.Context, after uint64, visit func(event
 }
 
 type fakeExecutor struct {
-	started chan struct{}
-	release chan struct{}
-	once    sync.Once
-	output  json.RawMessage
-	err     error
-	emit    bool
-	panic   any
+	started          chan struct{}
+	release          chan struct{}
+	once             sync.Once
+	output           json.RawMessage
+	err              error
+	emit             bool
+	panic            any
+	mu               sync.Mutex
+	calls            []string
+	validationErrors map[string]error
+}
+
+func (f *fakeExecutor) ValidateAction(invocation scriptlaunch.Invocation) (rules.Action, error) {
+	if err := f.validationErrors[invocation.Capability]; err != nil {
+		return rules.Action{}, err
+	}
+	switch invocation.Capability {
+	case "game/finite":
+		return rules.Action{ID: invocation.Capability, RuleID: "Game.exe", Runtime: rules.WindowsKeyActionRuntimeV1, Execution: rules.ActionExecution{Completion: rules.CompletionReturn}, SequenceEligible: true}, nil
+	case "game/linear":
+		return rules.Action{ID: invocation.Capability, RuleID: "Game.exe", Runtime: rules.StreamingActionRuntimeV1, Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true}, SequenceEligible: true}, nil
+	default:
+		return rules.Action{}, errors.New("unknown fixture Action")
+	}
+}
+
+func (f *fakeExecutor) Contract(actionID string) (actionlaunch.Contract, error) {
+	action, err := f.ValidateAction(scriptlaunch.Invocation{Capability: actionID, Inputs: map[string]any{}})
+	if err != nil {
+		return actionlaunch.Contract{}, err
+	}
+	return actionlaunch.Contract{Action: action, Title: actionID, InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`)}, nil
 }
 
 func (f *fakeExecutor) RunAction(_ context.Context, invocation scriptlaunch.Invocation) (actionlaunch.Result, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, invocation.Capability)
+	f.mu.Unlock()
 	return actionlaunch.Result{ActionID: invocation.Capability, RuleID: "Game.exe", Runtime: "fixture-v1", Output: json.RawMessage(`{"value":1}`)}, nil
 }
 
 func (f *fakeExecutor) RunStreaming(ctx context.Context, invocation scriptlaunch.Invocation, reporter streamaction.Reporter) (actionlaunch.Result, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, invocation.Capability)
+	f.mu.Unlock()
 	if f.started != nil {
 		f.once.Do(func() { close(f.started) })
 	}
@@ -79,6 +111,12 @@ func (f *fakeExecutor) RunStreaming(ctx context.Context, invocation scriptlaunch
 		}
 	}
 	return actionlaunch.Result{ActionID: invocation.Capability, RuleID: "Game.exe", Runtime: "fixture-v1", Output: f.output}, f.err
+}
+
+func (f *fakeExecutor) callSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
 }
 
 func TestStreamingActionPanicFailsInvocationWithoutCrashingManager(t *testing.T) {
@@ -210,6 +248,95 @@ func TestNonInterruptibleLinearActionOmitsStopAndRejectsCancellation(t *testing.
 	}
 }
 
+func TestActionSequencePreflightsEveryStepBeforeFirstEffect(t *testing.T) {
+	executor := &fakeExecutor{validationErrors: map[string]error{"game/linear": errors.New("invalid literal input")}}
+	manager, _ := newTestManager(t, executor)
+	_, err := manager.InvokeSequence(context.Background(), actionsequence.Request{
+		RuleID: "Game.exe",
+		Steps: []actionsequence.Step{
+			{Action: "game/finite", Inputs: map[string]any{}},
+			{Action: "game/linear", Inputs: map[string]any{"bad": true}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "step 2") {
+		t.Fatalf("preflight error = %v", err)
+	}
+	if calls := executor.callSnapshot(); len(calls) != 0 {
+		t.Fatalf("preflight caused effects: %v", calls)
+	}
+}
+
+func TestActionSequenceRunsFiniteStepsInOrderAndForwardsOutputs(t *testing.T) {
+	executor := &fakeExecutor{}
+	manager, _ := newTestManager(t, executor)
+	response, err := manager.InvokeSequence(context.Background(), actionsequence.Request{
+		RuleID: "Game.exe",
+		Steps: []actionsequence.Step{
+			{Action: "game/finite", Inputs: map[string]any{"order": 1}},
+			{Action: "game/finite", Inputs: map[string]any{"order": 2}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.sequence.step.started,action.sequence.child.output,action.sequence.step.completed,action.sequence.step.started,action.sequence.child.output,action.sequence.step.completed,action.completed" {
+		t.Fatalf("event types = %s", got)
+	}
+	if calls := strings.Join(executor.callSnapshot(), ","); calls != "game/finite,game/finite" {
+		t.Fatalf("calls = %s", calls)
+	}
+}
+
+func TestActionSequenceForwardsStreamingChildAndCanCancelIt(t *testing.T) {
+	executor := &fakeExecutor{started: make(chan struct{}), release: make(chan struct{}), emit: true}
+	manager, _ := newTestManager(t, executor)
+	response, err := manager.InvokeSequence(context.Background(), actionsequence.Request{
+		RuleID: "Game.exe", Steps: []actionsequence.Step{{Action: "game/linear", Inputs: map[string]any{}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-executor.started
+	if _, err := manager.Invoke(context.Background(), scriptlaunch.Invocation{Capability: "game/finite", Inputs: map[string]any{}}); !errors.Is(err, ErrRuleSequenceActive) {
+		t.Fatalf("external Action conflict error = %v", err)
+	}
+	if _, err := manager.Stop(response.InvocationID); err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); !strings.Contains(got, "action.sequence.child.event") || !strings.HasSuffix(got, "action.cancelled") {
+		t.Fatalf("event types = %s", got)
+	}
+	manager.wg.Wait()
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCancelled {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+	instance, err := manager.lookup(response.InvocationID)
+	if err != nil || instance.sequence != nil {
+		t.Fatalf("terminal sequence AST was retained: instance = %+v, err = %v", instance, err)
+	}
+	if _, err := manager.Invoke(context.Background(), scriptlaunch.Invocation{Capability: "game/finite", Inputs: map[string]any{}}); err != nil {
+		t.Fatalf("Rule lease was not released: %v", err)
+	}
+}
+
+func TestActionSequenceForwardsStreamingChildThroughNaturalCompletion(t *testing.T) {
+	executor := &fakeExecutor{emit: true, output: json.RawMessage(`{"done":true}`)}
+	manager, _ := newTestManager(t, executor)
+	response, err := manager.InvokeSequence(context.Background(), actionsequence.Request{
+		RuleID: "Game.exe", Steps: []actionsequence.Step{{Action: "game/linear", Inputs: map[string]any{}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.sequence.step.started,action.sequence.child.event,action.sequence.child.event,action.sequence.child.event,action.sequence.step.completed,action.completed" {
+		t.Fatalf("event types = %s", got)
+	}
+}
+
 func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstream.Store) {
 	t.Helper()
 	rulesRoot := t.TempDir()
@@ -220,15 +347,16 @@ func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstrea
 		}
 	}
 	descriptor := `{
-  "schemaVersion":5,
+  "schemaVersion":6,
   "description":"Fixture.",
   "runtimeProfiles":{},
   "actions":{
-    "game/finite":{"path":"Actions/finite","runtime":"fixture-v1","execution":{"completion":"return"},"registrableAs":[]},
-    "game/linear":{"path":"Actions/linear","runtime":"fixture-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":true},"registrableAs":[]},
+    "game/finite":{"path":"Actions/finite","runtime":"windows-key-action-v1","execution":{"completion":"return"},"registrableAs":[]},
+    "game/linear":{"path":"Actions/linear","runtime":"windows-streaming-action-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":true},"registrableAs":[]},
     "game/fixed-linear":{"path":"Actions/fixed-linear","runtime":"fixture-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":false},"registrableAs":[]},
     "game/loop":{"path":"Actions/loop","runtime":"fixture-v1","execution":{"completion":"stream","lifecycle":"loop","interruptible":true},"registrableAs":[]}
   },
+  "ephemeralActionSequence":{"allowedActions":["game/finite","game/linear"]},
   "registrations":{}
 }`
 	if err := os.WriteFile(filepath.Join(ruleRoot, rules.RuleFilename), []byte(descriptor), 0o600); err != nil {
@@ -254,7 +382,7 @@ func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstrea
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager.random = strings.NewReader("0123456789abcdef")
+	manager.random = strings.NewReader(strings.Repeat("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 10))
 	t.Cleanup(func() { manager.Close() })
 	return manager, store
 }

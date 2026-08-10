@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/actionrun"
+	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
@@ -28,6 +29,7 @@ import (
 const (
 	maxRequestBody       = 4 << 10
 	maxScriptRequestBody = scriptlaunch.MaxRequestBytes + 4<<10
+	maxSequenceBody      = 64 << 10
 	scriptRequestTimeout = 80 * time.Second
 )
 
@@ -47,6 +49,8 @@ type Server struct {
 
 type ActionService interface {
 	Invoke(context.Context, scriptlaunch.Invocation) (actionrun.Invocation, error)
+	InvokeSequence(context.Context, actionsequence.Request) (actionrun.Invocation, error)
+	SequenceToolSchema(string) (actionsequence.ToolSchema, error)
 	Get(string) (actionrun.Invocation, error)
 	Stop(string) (actionrun.Invocation, error)
 	Stream(context.Context, string, uint64, func(eventstream.Event) error) error
@@ -202,6 +206,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleScriptRun)
 	case r.URL.Path == "/v1/actions/invoke":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleActionInvoke)
+	case r.URL.Path == "/v1/action-sequences/invoke":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleActionSequenceInvoke)
 	case strings.HasPrefix(r.URL.Path, "/v1/action-invocations/"):
 		s.handleActionInvocationResource(recorder, r, requestID)
 	default:
@@ -242,7 +248,8 @@ func (s *Server) handleActionResource(w http.ResponseWriter, r *http.Request, re
 	}
 	remainder := strings.TrimPrefix(r.URL.Path, "/v3/rules/")
 	parts := strings.Split(remainder, "/")
-	if len(parts) != 2 || parts[0] == "" || (parts[1] != "actions" && parts[1] != "registrations") {
+	if len(parts) != 2 || parts[0] == "" ||
+		(parts[1] != "actions" && parts[1] != "registrations" && parts[1] != "action-sequence-tool") {
 		writeError(w, requestID, http.StatusNotFound, "route_not_found", "route not found")
 		return
 	}
@@ -258,6 +265,20 @@ func (s *Server) handleActionResource(w http.ResponseWriter, r *http.Request, re
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, actionCatalogResponse{RuleID: resolution.ID, Actions: actions})
+		return
+	}
+	if parts[1] == "action-sequence-tool" {
+		schema, err := s.actions.SequenceToolSchema(parts[0])
+		if errors.Is(err, fs.ErrNotExist) {
+			writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
+			return
+		}
+		if err != nil {
+			s.writeMappedError(w, requestID, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		writeJSON(w, http.StatusOK, schema)
 		return
 	}
 	registrations, resolution, err := s.rules.ReadRegistrations(parts[0])
@@ -362,6 +383,49 @@ func decodeActionInvocation(w http.ResponseWriter, r *http.Request) (scriptlaunc
 	return scriptlaunch.Invocation{Capability: request.ActionID, Inputs: request.Inputs}, nil
 }
 
+func (s *Server) handleActionSequenceInvoke(w http.ResponseWriter, r *http.Request, requestID string) {
+	request, err := decodeActionSequenceRequest(w, r)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_action_sequence_request", err.Error())
+		return
+	}
+	result, err := s.actions.InvokeSequence(r.Context(), request)
+	if err != nil {
+		s.writeActionError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/action-invocations/"+result.InvocationID)
+	s.logger.InfoContext(r.Context(), "action_sequence_invoked",
+		"request_id", requestID,
+		"invocation_id", result.InvocationID,
+		"rule_id", result.RuleID,
+		"step_count", len(request.Steps),
+	)
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func decodeActionSequenceRequest(w http.ResponseWriter, r *http.Request) (actionsequence.Request, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxSequenceBody)
+	defer r.Body.Close()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return actionsequence.Request{}, fmt.Errorf("read JSON body: %w", err)
+	}
+	if err := strictjson.Validate(data); err != nil {
+		return actionsequence.Request{}, fmt.Errorf("validate JSON body: %w", err)
+	}
+	var request actionsequence.Request
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return actionsequence.Request{}, fmt.Errorf("decode JSON body: %w", err)
+	}
+	if err := request.Validate(); err != nil {
+		return actionsequence.Request{}, err
+	}
+	return request, nil
+}
+
 func (s *Server) handleActionInvocationResource(w http.ResponseWriter, r *http.Request, requestID string) {
 	remainder := strings.TrimPrefix(r.URL.Path, "/v1/action-invocations/")
 	parts := strings.Split(remainder, "/")
@@ -447,6 +511,8 @@ func (s *Server) writeActionError(w http.ResponseWriter, requestID string, err e
 		writeError(w, requestID, http.StatusNotFound, "action_invocation_not_found", "Action invocation not found")
 	case errors.Is(err, actionrun.ErrNotInterruptible):
 		writeError(w, requestID, http.StatusConflict, "action_not_interruptible", err.Error())
+	case errors.Is(err, actionrun.ErrRuleSequenceActive), errors.Is(err, actionrun.ErrRuleActionActive):
+		writeError(w, requestID, http.StatusConflict, "rule_action_conflict", err.Error())
 	case errors.Is(err, context.DeadlineExceeded):
 		writeError(w, requestID, http.StatusGatewayTimeout, "action_timeout", "Action timed out")
 	case errors.Is(err, context.Canceled):

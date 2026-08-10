@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "description": "Elite Dangerous exposes finite observation and binding-resolved keyboard Actions plus supervised streaming flight workflows; registrations remain opt-in.",
   "runtimeProfiles": {
     "ocr/w480": {
@@ -344,6 +344,24 @@
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     }
+  },
+  "ephemeralActionSequence": {
+    "allowedActions": [
+      "elite-dangerous/align-station-target",
+      "elite-dangerous/close-left-panel",
+      "elite-dangerous/close-navigation-detail",
+      "elite-dangerous/dock-at-station",
+      "elite-dangerous/leave-station",
+      "elite-dangerous/lock-destination",
+      "elite-dangerous/select-and-lock-destination",
+      "elite-dangerous/select-contacts-panel",
+      "elite-dangerous/select-station-target",
+      "elite-dangerous/set-throttle",
+      "elite-dangerous/ship-attitude-control",
+      "elite-dangerous/supercruise-control",
+      "elite-dangerous/supercruise-to-destination",
+      "elite-dangerous/ui-control"
+    ]
   },
   "registrations": {}
 }

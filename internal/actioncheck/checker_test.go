@@ -211,8 +211,8 @@ func writeFixtureRule(t *testing.T, root, ruleID string, actions []fixtureAction
 		writeFixtureActionPackage(t, filepath.Join(ruleRoot, filepath.FromSlash(action.path)), action.script)
 	}
 	descriptor := map[string]any{
-		"schemaVersion": 5, "description": "Fixture.", "runtimeProfiles": map[string]any{},
-		"actions": declarations, "registrations": map[string]any{},
+		"schemaVersion": 6, "description": "Fixture.", "runtimeProfiles": map[string]any{},
+		"actions": declarations, "ephemeralActionSequence": map[string]any{"allowedActions": []string{}}, "registrations": map[string]any{},
 	}
 	encoded, err := json.Marshal(descriptor)
 	if err != nil {

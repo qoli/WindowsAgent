@@ -90,7 +90,7 @@ separate diagnostic and is not in the fixed-coordinate pipeline.
 
 ## Rule lifecycle
 
-Rule schema version 5 declares worker residency independently from Action and
+Rule schema version 6 declares worker residency independently from Action and
 registration declarations:
 
 ```json

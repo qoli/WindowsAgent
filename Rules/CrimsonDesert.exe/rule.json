@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "description": "The executing agent must read the live Action and registration catalogs before using this Rule.",
   "runtimeProfiles": {},
   "actions": {
@@ -9,6 +9,9 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     }
+  },
+  "ephemeralActionSequence": {
+    "allowedActions": []
   },
   "registrations": {}
 }

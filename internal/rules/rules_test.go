@@ -196,6 +196,13 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if shipSpeed.Runtime != CompositeActionRuntimeV1 || !reflect.DeepEqual(shipSpeed.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
 		t.Fatalf("ship-speed action = %+v", shipSpeed)
 	}
+	if shipSpeed.SequenceEligible {
+		t.Fatal("ship-speed unexpectedly allowed in ephemeral sequences")
+	}
+	setThrottle, err := store.ResolveAction("elite-dangerous/set-throttle")
+	if err != nil || !setThrottle.SequenceEligible {
+		t.Fatalf("set-throttle sequence eligibility = %+v, err = %v", setThrottle, err)
+	}
 	distanceRegions, err := store.ResolveAction("elite-dangerous/request-docking-distance-regions")
 	if err != nil {
 		t.Fatal(err)
@@ -223,21 +230,26 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
 	tests := []struct{ name, body, want string }{
 		{"old schema", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{}}`, "schemaVersion"},
-		{"missing actions", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"registrations":{}}`, "actions is required"},
-		{"missing registrations", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{}}`, "registrations is required"},
-		{"missing runtime profiles", `{"schemaVersion":5,"description":"Valid.","actions":{},"registrations":{}}`, "runtimeProfiles is required"},
-		{"unknown field", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{},"extra":true}`, "unknown field"},
-		{"action path", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Modules/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"registrations":{}}`, "below Actions/"},
-		{"missing registrable", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"}}},"registrations":{}}`, "registrableAs"},
-		{"missing execution", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"registrations":{}}`, "execution"},
-		{"return lifecycle", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return","lifecycle":"linear"},"registrableAs":[]}},"registrations":{}}`, "forbids lifecycle"},
-		{"stream lifecycle", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","interruptible":true},"registrableAs":[]}},"registrations":{}}`, "lifecycle"},
-		{"stream interruptible", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","lifecycle":"linear"},"registrableAs":[]}},"registrations":{}}`, "interruptible"},
-		{"unknown registration type", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["timer"]}},"registrations":{}}`, "unsupported registration type"},
-		{"unknown action", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
-		{"not declared", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
-		{"zero interval", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["monitor"]}},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
-		{"invalid regex", `{"schemaVersion":5,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["reaction"]}},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
+		{"missing actions", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "actions is required"},
+		{"missing registrations", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":[]}}`, "registrations is required"},
+		{"missing sequence declaration", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{}}`, "ephemeralActionSequence.allowedActions is required"},
+		{"missing runtime profiles", `{"schemaVersion":6,"description":"Valid.","actions":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "runtimeProfiles is required"},
+		{"unknown field", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{},"extra":true}`, "unknown field"},
+		{"sequence unknown action", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":["a"]},"registrations":{}}`, "unknown action"},
+		{"sequence duplicate", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"windows-key-action-v1","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":["a","a"]},"registrations":{}}`, "duplicate action"},
+		{"sequence unsupported runtime", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"private-runtime-v1","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":["a"]},"registrations":{}}`, "unsupported runtime"},
+		{"sequence loop child", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"windows-streaming-action-v1","execution":{"completion":"stream","lifecycle":"loop","interruptible":true},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":["a"]},"registrations":{}}`, "must be linear and interruptible"},
+		{"action path", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Modules/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "below Actions/"},
+		{"missing registrable", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"}}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "registrableAs"},
+		{"missing execution", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "execution"},
+		{"return lifecycle", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return","lifecycle":"linear"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "forbids lifecycle"},
+		{"stream lifecycle", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","interruptible":true},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "lifecycle"},
+		{"stream interruptible", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","lifecycle":"linear"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "interruptible"},
+		{"unknown registration type", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["timer"]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "unsupported registration type"},
+		{"unknown action", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
+		{"not declared", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
+		{"zero interval", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["monitor"]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},
+		{"invalid regex", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["reaction"]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"r":{"type":"reaction","action":"a","input":{},"reaction":{"stream":"s","eventType":"e","match":{"payload.x":"["}}}}}`, "regex is invalid"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -307,9 +319,9 @@ func writeRule(t *testing.T, root, id, description, agents string, actions map[s
 		t.Fatal(err)
 	}
 	descriptor := Descriptor{
-		SchemaVersion: 5, Description: description,
+		SchemaVersion: 6, Description: description,
 		RuntimeProfiles: map[string]RuntimeProfileDeclaration{},
-		Actions:         actions, Registrations: registrations,
+		Actions:         actions, EphemeralActionSequence: &EphemeralActionSequenceDeclaration{AllowedActions: []string{}}, Registrations: registrations,
 	}
 	encoded, err := json.MarshalIndent(descriptor, "", "  ")
 	if err != nil {

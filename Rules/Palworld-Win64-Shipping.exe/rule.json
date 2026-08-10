@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "description": "ScreenParser is a directly callable Action that may be explicitly registered as a Monitor or Reaction; no registration is active by default.",
   "runtimeProfiles": {},
   "actions": {
@@ -9,6 +9,9 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     }
+  },
+  "ephemeralActionSequence": {
+    "allowedActions": []
   },
   "registrations": {}
 }

@@ -85,7 +85,8 @@ request to the local launcher inside the signed-in Windows session.
 
 The Action runtime and registration refactor is partially landed:
 
-- Rule schema version 5 declares executable Actions, explicit return or stream
+- Rule schema version 6 declares executable Actions, an explicit ephemeral
+  sequence allowlist, explicit return or stream
   completion, optional resident runtime
   profiles, and separately registers selected Actions as timer-driven Monitors
   or event-driven Reactions;
@@ -95,6 +96,10 @@ The Action runtime and registration refactor is partially landed:
   return terminal output directly; streaming Actions first commit a durable
   start event and immediately return a callback URL, optional stop URL, and
   their declared linear or loop lifecycle;
+- `run_action_sequence` is generated per Rule as a strict JSON function schema.
+  It preflights and immediately runs one immutable sequence of 1–20 allowlisted
+  Actions in order, with no variables, branches, loops, nesting, or persisted
+  executable definition;
 - streaming Starlark exposes strict `action.call`, explicit `action.try_call`,
   and bounded failure compensation registration. `action.try_call` returns
   `{ok, output, error, errorCode}` so a workflow may
@@ -542,9 +547,11 @@ GET  /v1/rules/{rule-id}/AGENTS.md
 GET  /v1/rules/{rule-id}/scripts
 GET  /v3/rules/{rule-id}/actions
 GET  /v3/rules/{rule-id}/registrations
+GET  /v3/rules/{rule-id}/action-sequence-tool
 GET  /v4/rules/{rule-id}/runtimes
 POST /v1/scripts/run
 POST /v1/actions/invoke
+POST /v1/action-sequences/invoke
 GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
 POST /v1/action-invocations/{invocation-id}/stop
@@ -618,6 +625,13 @@ Follow its returned URL with `curl.exe -N`; the NDJSON connection replays the
 durable invocation events and closes when the Action completes, fails, or is
 cancelled. The `stop` object appears only when that Action explicitly declares
 itself interruptible.
+
+For a disposable multi-Action plan, first fetch the strict model tool schema
+from `/v3/rules/{rule-id}/action-sequence-tool`, then submit its arguments to
+`POST /v1/action-sequences/invoke`. The response is HTTP `202` and uses the
+same watch, status, and stop endpoints. All steps are validated before the
+first Action runs; child outputs and streaming events are forwarded with step,
+Action, and child-invocation provenance.
 
 Start the supervised Elite Dangerous departure only after the higher model has
 confirmed the ship is inside a station:
@@ -730,6 +744,7 @@ internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
 internal/config/                 process configuration
 internal/actionrun/              finite and streaming invocation lifecycle
+internal/actionsequence/         bounded ephemeral sequence and strict model schema
 internal/actioncheck/            offline Action package and dependency validation
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
@@ -743,7 +758,7 @@ internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
 internal/streamaction/            bounded streaming Starlark orchestration runtime
 internal/wgc/                    WGC and Direct3D 11 implementation
-Rules/<Executable.exe>/          distributable Rule v5 runtimes, Actions, registrations, and guidance
+Rules/<Executable.exe>/          distributable Rule v6 runtimes, Actions, registrations, and guidance
 runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
 runtimes/ppocr-directml/          resident PP-OCR text-line and text-regions workers
 tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter

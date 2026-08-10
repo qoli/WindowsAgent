@@ -2,7 +2,7 @@
 
 ## Status
 
-**Partially landed.** Rule schema version 5, strict runtime-profile and Action
+**Partially landed.** Rule schema version 6, strict runtime-profile and Action
 declarations, explicit execution semantics, Monitor and Reaction
 registrations, read-only catalogs, and direct invocation are implemented.
 Registration execution is deferred.
@@ -15,7 +15,7 @@ registration forms:
 
 ```json
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "description": "Read the live Rule before acting.",
   "runtimeProfiles": {},
   "actions": {
@@ -26,6 +26,7 @@ registration forms:
       "registrableAs": ["monitor", "reaction"]
     }
   },
+  "ephemeralActionSequence": {"allowedActions": []},
   "registrations": {}
 }
 ```

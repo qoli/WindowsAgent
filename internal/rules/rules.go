@@ -130,6 +130,10 @@ type ActionDeclaration struct {
 	RegistrableAs  []string                    `json:"registrableAs"`
 }
 
+type EphemeralActionSequenceDeclaration struct {
+	AllowedActions []string `json:"allowedActions"`
+}
+
 type ActionExecutionDeclaration struct {
 	Completion    string `json:"completion"`
 	Lifecycle     string `json:"lifecycle,omitempty"`
@@ -149,21 +153,23 @@ type RuntimeProfileDeclaration struct {
 }
 
 type Descriptor struct {
-	SchemaVersion   uint32                               `json:"schemaVersion"`
-	Description     string                               `json:"description"`
-	RuntimeProfiles map[string]RuntimeProfileDeclaration `json:"runtimeProfiles"`
-	Actions         map[string]ActionDeclaration         `json:"actions"`
-	Registrations   map[string]RegistrationDeclaration   `json:"registrations"`
+	SchemaVersion           uint32                               `json:"schemaVersion"`
+	Description             string                               `json:"description"`
+	RuntimeProfiles         map[string]RuntimeProfileDeclaration `json:"runtimeProfiles"`
+	Actions                 map[string]ActionDeclaration         `json:"actions"`
+	EphemeralActionSequence *EphemeralActionSequenceDeclaration  `json:"ephemeralActionSequence"`
+	Registrations           map[string]RegistrationDeclaration   `json:"registrations"`
 }
 
 type Action struct {
-	ID             string          `json:"id"`
-	RuleID         string          `json:"ruleId"`
-	Runtime        string          `json:"runtime"`
-	RuntimeProfile string          `json:"runtimeProfile,omitempty"`
-	Execution      ActionExecution `json:"execution"`
-	RegistrableAs  []string        `json:"registrableAs"`
-	Root           string          `json:"-"`
+	ID               string          `json:"id"`
+	RuleID           string          `json:"ruleId"`
+	Runtime          string          `json:"runtime"`
+	RuntimeProfile   string          `json:"runtimeProfile,omitempty"`
+	Execution        ActionExecution `json:"execution"`
+	RegistrableAs    []string        `json:"registrableAs"`
+	SequenceEligible bool            `json:"sequenceEligible"`
+	Root             string          `json:"-"`
 }
 
 type RuntimeProfile struct {
@@ -343,13 +349,14 @@ func (s *Store) ResolveAction(actionID string) (Action, error) {
 			return Action{}, fmt.Errorf("resolve rule %s action %s: %w", id, actionID, err)
 		}
 		matched = &Action{
-			ID:             actionID,
-			RuleID:         id,
-			Runtime:        declaration.Runtime,
-			RuntimeProfile: declaration.RuntimeProfile,
-			Execution:      resolvedActionExecution(declaration.Execution),
-			RegistrableAs:  append([]string(nil), declaration.RegistrableAs...),
-			Root:           root,
+			ID:               actionID,
+			RuleID:           id,
+			Runtime:          declaration.Runtime,
+			RuntimeProfile:   declaration.RuntimeProfile,
+			Execution:        resolvedActionExecution(declaration.Execution),
+			RegistrableAs:    append([]string(nil), declaration.RegistrableAs...),
+			SequenceEligible: slicesContains(descriptor.EphemeralActionSequence.AllowedActions, actionID),
+			Root:             root,
 		}
 	}
 	if matched == nil {
@@ -602,8 +609,8 @@ func (s *Store) resolveActionRoot(id, name string) (string, error) {
 }
 
 func validateDescriptor(descriptor Descriptor) error {
-	if descriptor.SchemaVersion != 5 {
-		return fmt.Errorf("schemaVersion must equal 5, got %d", descriptor.SchemaVersion)
+	if descriptor.SchemaVersion != 6 {
+		return fmt.Errorf("schemaVersion must equal 6, got %d", descriptor.SchemaVersion)
 	}
 	if strings.TrimSpace(descriptor.Description) == "" ||
 		strings.TrimSpace(descriptor.Description) != descriptor.Description {
@@ -614,6 +621,9 @@ func validateDescriptor(descriptor Descriptor) error {
 	}
 	if descriptor.Registrations == nil {
 		return errors.New("registrations is required")
+	}
+	if descriptor.EphemeralActionSequence == nil || descriptor.EphemeralActionSequence.AllowedActions == nil {
+		return errors.New("ephemeralActionSequence.allowedActions is required")
 	}
 	if descriptor.RuntimeProfiles == nil {
 		return errors.New("runtimeProfiles is required")
@@ -675,6 +685,27 @@ func validateDescriptor(descriptor Descriptor) error {
 			seen[registrationType] = struct{}{}
 		}
 	}
+	sequenceSeen := make(map[string]struct{}, len(descriptor.EphemeralActionSequence.AllowedActions))
+	for _, actionID := range descriptor.EphemeralActionSequence.AllowedActions {
+		if err := validateRegistryID(actionID, "ephemeral Action Sequence action"); err != nil {
+			return err
+		}
+		declaration, exists := descriptor.Actions[actionID]
+		if !exists {
+			return fmt.Errorf("ephemeralActionSequence references unknown action %q", actionID)
+		}
+		if _, duplicate := sequenceSeen[actionID]; duplicate {
+			return fmt.Errorf("ephemeralActionSequence contains duplicate action %q", actionID)
+		}
+		sequenceSeen[actionID] = struct{}{}
+		if !coreSequenceRuntime(declaration.Runtime) {
+			return fmt.Errorf("ephemeralActionSequence action %q uses unsupported runtime %q", actionID, declaration.Runtime)
+		}
+		if declaration.Execution.Completion == CompletionStream &&
+			(declaration.Execution.Lifecycle != LifecycleLinear || declaration.Execution.Interruptible == nil || !*declaration.Execution.Interruptible) {
+			return fmt.Errorf("ephemeralActionSequence streaming action %q must be linear and interruptible", actionID)
+		}
+	}
 	for id, registration := range descriptor.Registrations {
 		if err := validateRegistryID(id, "registration"); err != nil {
 			return err
@@ -694,6 +725,16 @@ func validateDescriptor(descriptor Descriptor) error {
 		}
 	}
 	return nil
+}
+
+func coreSequenceRuntime(runtime string) bool {
+	switch runtime {
+	case ObservationRuntimeV1, PpOcrActionRuntimeV1, PpOcrTextRegionsActionRuntimeV1,
+		CompositeActionRuntimeV1, StreamingActionRuntimeV1, WindowsKeyActionRuntimeV1:
+		return true
+	default:
+		return false
+	}
 }
 
 func validateActionExecution(execution *ActionExecutionDeclaration) error {
