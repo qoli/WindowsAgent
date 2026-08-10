@@ -10,6 +10,7 @@ param(
     [timespan]$Timeout = ([timespan]::FromSeconds(20)),
     [ValidateSet("WatchdogManaged", "Standalone")]
     [string]$StartupMode = "WatchdogManaged",
+    [uint64]$MinimumEventCursor = 0,
     [switch]$AllowCapture
 )
 
@@ -119,6 +120,9 @@ $arguments = @(
 )
 if ($AllowCapture) {
     $arguments += "--allow-capture"
+}
+if ($MinimumEventCursor -gt 0) {
+    $arguments += @("--minimum-event-cursor", $MinimumEventCursor.ToString([Globalization.CultureInfo]::InvariantCulture))
 }
 $action = New-ScheduledTaskAction -Execute $installedExecutable -Argument ($arguments -join " ")
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name

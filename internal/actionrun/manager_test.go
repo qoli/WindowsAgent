@@ -280,7 +280,7 @@ func TestActionSequenceRunsFiniteStepsInOrderAndForwardsOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
-	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.sequence.step.started,action.sequence.child.output,action.sequence.step.completed,action.sequence.step.started,action.sequence.child.output,action.sequence.step.completed,action.completed" {
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.sequence.started,action.sequence.step.started,action.sequence.child.output,action.sequence.step.completed,action.sequence.step.started,action.sequence.child.output,action.sequence.step.completed,action.completed" {
 		t.Fatalf("event types = %s", got)
 	}
 	if calls := strings.Join(executor.callSnapshot(), ","); calls != "game/finite,game/finite" {
@@ -332,8 +332,38 @@ func TestActionSequenceForwardsStreamingChildThroughNaturalCompletion(t *testing
 		t.Fatal(err)
 	}
 	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
-	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.sequence.step.started,action.sequence.child.event,action.sequence.child.event,action.sequence.child.event,action.sequence.step.completed,action.completed" {
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.sequence.started,action.sequence.step.started,action.sequence.child.event,action.sequence.child.output,action.sequence.step.completed,action.completed" {
 		t.Fatalf("event types = %s", got)
+	}
+	for _, event := range events {
+		if event.CorrelationID != response.InvocationID || event.Source.ModuleID != actionsequence.ActionID {
+			t.Fatalf("event escaped parent chain: %+v", event)
+		}
+	}
+	var started map[string]any
+	if err := json.Unmarshal(events[0].Payload, &started); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := started["stepCount"]; exists {
+		t.Fatalf("generic action.started contains Sequence-only metadata: %s", events[0].Payload)
+	}
+	var sequenceStarted actionsequence.StartedEvent
+	if err := json.Unmarshal(events[1].Payload, &sequenceStarted); err != nil || sequenceStarted.StepCount != 1 {
+		t.Fatalf("sequence started = %+v, err = %v", sequenceStarted, err)
+	}
+	var child actionsequence.ChildEvent
+	if err := json.Unmarshal(events[3].Payload, &child); err != nil {
+		t.Fatal(err)
+	}
+	if child.Type != "action.phase.changed" || child.ActionID != "game/linear" || child.ChildExecutionID == "" || string(child.Payload) != `{"phase":"WAITING"}` {
+		t.Fatalf("child event = %+v", child)
+	}
+	manager.wg.Wait()
+	manager.mu.Lock()
+	runCount := len(manager.runs)
+	manager.mu.Unlock()
+	if runCount != 1 {
+		t.Fatalf("Sequence created addressable child invocations: run count = %d", runCount)
 	}
 }
 

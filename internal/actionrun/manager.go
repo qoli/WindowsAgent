@@ -309,7 +309,7 @@ func (m *Manager) startSequence(request actionsequence.Request, identity string)
 	m.mu.Unlock()
 	started, err := instance.appendEvent(context.Background(), "action.started", map[string]any{
 		"state": StateRunning, "actionId": action.ID, "lifecycle": action.Execution.Lifecycle,
-		"interruptible": true, "stepCount": len(request.Steps),
+		"interruptible": true,
 	})
 	if err != nil {
 		cancel()
@@ -542,12 +542,13 @@ func (r *run) execute() {
 	r.mu.Unlock()
 }
 
-var errChildTerminal = errors.New("child Action reached a terminal event")
-
 func (r *run) executeSequence() (actionlaunch.Result, error) {
 	request := r.sequence
 	if request == nil {
 		return actionlaunch.Result{}, errors.New("Action Sequence request is required")
+	}
+	if err := r.emitSequenceEvent(r.ctx, actionsequence.EventStarted, actionsequence.StartedEvent{StepCount: len(request.Steps)}); err != nil {
+		return actionlaunch.Result{}, err
 	}
 	for index, step := range request.Steps {
 		if err := r.ctx.Err(); err != nil {
@@ -573,13 +574,13 @@ func (r *run) executeSequenceStep(index int, step actionsequence.Step) error {
 	if err != nil {
 		return fmt.Errorf("resolve preflighted Action Sequence step %d Action %q: %w", index+1, step.Action, err)
 	}
-	childID, err := newInvocationID(r.manager.random)
+	childExecutionID, err := newInvocationID(r.manager.random)
 	if err != nil {
-		return fmt.Errorf("create child invocation ID for Action Sequence step %d: %w", index+1, err)
+		return fmt.Errorf("create child execution ID for Action Sequence step %d: %w", index+1, err)
 	}
-	if err := r.emitSequenceEvent(r.ctx, "action.sequence.step.started", map[string]any{
-		"step": index + 1, "totalSteps": len(r.sequence.Steps), "actionId": action.ID,
-		"childInvocationId": childID, "completion": action.Execution.Completion,
+	if err := r.emitSequenceEvent(r.ctx, actionsequence.EventStepStarted, actionsequence.StepStartedEvent{
+		Step: index + 1, TotalSteps: len(r.sequence.Steps), ActionID: action.ID,
+		ChildExecutionID: childExecutionID, Completion: action.Execution.Completion,
 	}); err != nil {
 		return err
 	}
@@ -592,99 +593,78 @@ func (r *run) executeSequenceStep(index int, step actionsequence.Step) error {
 		if len(result.Output) == 0 || !json.Valid(result.Output) {
 			return fmt.Errorf("Action Sequence step %d child Action %s returned invalid output", index+1, action.ID)
 		}
-		if err := r.emitSequenceEvent(r.ctx, "action.sequence.child.output", map[string]any{
-			"step": index + 1, "actionId": action.ID, "childInvocationId": childID,
-			"output": json.RawMessage(result.Output),
+		if err := r.emitSequenceEvent(r.ctx, actionsequence.EventChildOutput, actionsequence.ChildOutputEvent{
+			Step: index + 1, ActionID: action.ID, ChildExecutionID: childExecutionID,
+			Output: json.RawMessage(result.Output),
 		}); err != nil {
 			return err
 		}
 	} else {
-		if err := r.executeStreamingSequenceStep(index, action, invocation, childID); err != nil {
+		if err := r.executeStreamingSequenceStep(index, action, invocation, childExecutionID); err != nil {
 			return err
 		}
 	}
 	if err := r.ctx.Err(); err != nil {
 		return err
 	}
-	return r.emitSequenceEvent(r.ctx, "action.sequence.step.completed", map[string]any{
-		"step": index + 1, "totalSteps": len(r.sequence.Steps), "actionId": action.ID, "childInvocationId": childID,
+	return r.emitSequenceEvent(r.ctx, actionsequence.EventStepCompleted, actionsequence.StepCompletedEvent{
+		Step: index + 1, TotalSteps: len(r.sequence.Steps), ActionID: action.ID, ChildExecutionID: childExecutionID,
 	})
 }
 
-func (r *run) executeStreamingSequenceStep(index int, action rules.Action, invocation scriptlaunch.Invocation, childID string) error {
-	response, err := r.manager.startStreaming(action, invocation, childID)
+func (r *run) executeStreamingSequenceStep(index int, action rules.Action, invocation scriptlaunch.Invocation, childExecutionID string) error {
+	reporter := sequenceChildReporter{
+		parent: r, step: index + 1, actionID: action.ID, childExecutionID: childExecutionID,
+	}
+	result, err := r.manager.executor.RunStreaming(r.ctx, invocation, reporter)
 	if err != nil {
-		return fmt.Errorf("start Action Sequence step %d streaming child %s: %w", index+1, action.ID, err)
+		if r.ctx.Err() != nil {
+			return r.ctx.Err()
+		}
+		return fmt.Errorf("Action Sequence step %d child Action %s failed: %w", index+1, action.ID, err)
 	}
-	after := response.Watch.AfterCursor
-	terminalType, terminalPayload, nextAfter, err := r.forwardChildEvents(r.ctx, index, action.ID, childID, after)
-	after = nextAfter
-	if errors.Is(err, context.Canceled) && r.ctx.Err() != nil {
-		_, stopErr := r.manager.Stop(childID)
-		if stopErr != nil {
-			return fmt.Errorf("cancel Action Sequence step %d child %s: %w", index+1, action.ID, stopErr)
-		}
-		if terminalType == "" {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			terminalType, terminalPayload, _, err = r.forwardChildEvents(cleanupCtx, index, action.ID, childID, after)
-			if err != nil && !errors.Is(err, errChildTerminal) {
-				return fmt.Errorf("wait for cancelled Action Sequence step %d child %s: %w", index+1, action.ID, err)
-			}
-		}
-		return r.ctx.Err()
+	if len(result.Output) == 0 || !json.Valid(result.Output) {
+		return fmt.Errorf("Action Sequence step %d child Action %s returned invalid output", index+1, action.ID)
 	}
-	if err != nil && !errors.Is(err, errChildTerminal) {
-		return fmt.Errorf("stream Action Sequence step %d child %s: %w", index+1, action.ID, err)
-	}
-	switch terminalType {
-	case "action.completed":
-		var completed struct {
-			Output json.RawMessage `json:"output"`
-		}
-		if err := json.Unmarshal(terminalPayload, &completed); err != nil || len(completed.Output) == 0 {
-			return fmt.Errorf("Action Sequence step %d child %s completed without valid output", index+1, action.ID)
-		}
-		return nil
-	case "action.failed":
-		var failed struct {
-			Error string `json:"error"`
-		}
-		if err := json.Unmarshal(terminalPayload, &failed); err != nil || failed.Error == "" {
-			return fmt.Errorf("Action Sequence step %d child %s failed without a valid error", index+1, action.ID)
-		}
-		return fmt.Errorf("Action Sequence step %d child Action %s failed: %s", index+1, action.ID, failed.Error)
-	case "action.cancelled":
-		return fmt.Errorf("Action Sequence step %d child Action %s was cancelled independently", index+1, action.ID)
-	default:
-		return fmt.Errorf("Action Sequence step %d child %s ended without a terminal event", index+1, action.ID)
-	}
-}
-
-func (r *run) forwardChildEvents(ctx context.Context, index int, actionID, childID string, after uint64) (string, json.RawMessage, uint64, error) {
-	var terminalType string
-	var terminalPayload json.RawMessage
-	latest := after
-	err := r.manager.Stream(ctx, childID, after, func(event eventstream.Event) error {
-		latest = event.Sequence
-		if err := r.emitSequenceEvent(ctx, "action.sequence.child.event", map[string]any{
-			"step": index + 1, "actionId": actionID, "childInvocationId": childID, "event": event,
-		}); err != nil {
-			return err
-		}
-		switch event.Type {
-		case "action.completed", "action.failed", "action.cancelled":
-			terminalType = event.Type
-			terminalPayload = append(json.RawMessage(nil), event.Payload...)
-			return errChildTerminal
-		default:
-			return nil
-		}
+	return r.emitSequenceEvent(r.ctx, actionsequence.EventChildOutput, actionsequence.ChildOutputEvent{
+		Step: index + 1, ActionID: action.ID, ChildExecutionID: childExecutionID,
+		Output: json.RawMessage(result.Output),
 	})
-	return terminalType, terminalPayload, latest, err
 }
 
-func (r *run) emitSequenceEvent(ctx context.Context, eventType string, payload map[string]any) error {
+type sequenceChildReporter struct {
+	parent           *run
+	step             int
+	actionID         string
+	childExecutionID string
+}
+
+func (r sequenceChildReporter) Emit(ctx context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
+	if r.parent == nil || r.step <= 0 || r.actionID == "" || r.childExecutionID == "" {
+		return eventstream.Event{}, errors.New("Action Sequence child reporter is incomplete")
+	}
+	if !strings.HasPrefix(eventType, "action.") || eventType == "action.started" || eventType == "action.completed" ||
+		eventType == "action.failed" || eventType == "action.cancelled" {
+		return eventstream.Event{}, errors.New("Action Sequence child event type must be a non-terminal action.* type")
+	}
+	if len(payload) == 0 || !json.Valid(payload) {
+		return eventstream.Event{}, errors.New("Action Sequence child event payload must be valid JSON")
+	}
+	wrapped, err := json.Marshal(actionsequence.ChildEvent{
+		Step: r.step, ActionID: r.actionID, ChildExecutionID: r.childExecutionID,
+		Type: eventType, Payload: json.RawMessage(payload),
+	})
+	if err != nil {
+		return eventstream.Event{}, fmt.Errorf("encode Action Sequence child event: %w", err)
+	}
+	event, err := r.parent.Emit(ctx, actionsequence.EventChildEvent, wrapped)
+	if err != nil {
+		return eventstream.Event{}, fmt.Errorf("commit Action Sequence child event: %w", err)
+	}
+	return event, nil
+}
+
+func (r *run) emitSequenceEvent(ctx context.Context, eventType string, payload any) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", eventType, err)

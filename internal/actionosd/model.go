@@ -14,7 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/qoli/WindowsAgent/internal/actionrun"
+	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
@@ -50,8 +52,17 @@ type Snapshot struct {
 }
 
 type Model struct {
-	mu      sync.RWMutex
-	current Snapshot
+	mu       sync.RWMutex
+	current  Snapshot
+	sequence *sequenceProjection
+}
+
+type sequenceProjection struct {
+	totalSteps       int
+	step             int
+	actionID         string
+	childExecutionID string
+	active           bool
 }
 
 func (m *Model) Apply(event eventstream.Event) error {
@@ -82,6 +93,95 @@ func (m *Model) Apply(event eventstream.Event) error {
 			Visible: true, Status: StatusLive, InvocationID: event.CorrelationID,
 			ActionID: payload.ActionID, StartedAt: event.ObservedAt,
 		}
+		m.sequence = nil
+	case actionsequence.EventStarted:
+		var payload actionsequence.StartedEvent
+		if err := decodeStrict(event.Payload, &payload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.Type, err)
+		}
+		if m.current.InvocationID != event.CorrelationID || m.current.ActionID != actionsequence.ActionID ||
+			event.Source.ModuleID != actionsequence.ActionID {
+			return errors.New("Action Sequence start does not match the current OSD invocation")
+		}
+		if payload.StepCount < 1 || payload.StepCount > actionsequence.MaxSteps {
+			return fmt.Errorf("Action Sequence stepCount must be from 1 through %d", actionsequence.MaxSteps)
+		}
+		if m.sequence != nil {
+			return errors.New("Action Sequence start is duplicated")
+		}
+		m.sequence = &sequenceProjection{totalSteps: payload.StepCount}
+	case actionsequence.EventStepStarted:
+		var payload actionsequence.StepStartedEvent
+		if err := decodeStrict(event.Payload, &payload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.Type, err)
+		}
+		if err := m.validateSequenceStep(event, payload.Step, payload.TotalSteps, payload.ActionID, payload.ChildExecutionID); err != nil {
+			return err
+		}
+		if m.sequence.active || payload.Step != m.sequence.step+1 {
+			return fmt.Errorf("Action Sequence step %d is out of order", payload.Step)
+		}
+		if payload.Completion != rules.CompletionReturn && payload.Completion != rules.CompletionStream {
+			return fmt.Errorf("Action Sequence step %d has invalid completion %q", payload.Step, payload.Completion)
+		}
+		m.sequence.step = payload.Step
+		m.sequence.actionID = payload.ActionID
+		m.sequence.childExecutionID = payload.ChildExecutionID
+		m.sequence.active = true
+		m.current.ActionID = payload.ActionID
+		m.current.Activities = nil
+		m.appendActivityLocked(event.ObservedAt, fmt.Sprintf("Step %d/%d", payload.Step, payload.TotalSteps), "info")
+	case actionsequence.EventChildEvent:
+		var payload actionsequence.ChildEvent
+		if err := decodeStrict(event.Payload, &payload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.Type, err)
+		}
+		if err := m.validateSequenceChild(event, payload.Step, payload.ActionID, payload.ChildExecutionID); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(payload.Type, "action.") || payload.Type == "action.started" || payload.Type == "action.completed" ||
+			payload.Type == "action.failed" || payload.Type == "action.cancelled" {
+			return errors.New("Action Sequence child event type must be a non-terminal action.* type")
+		}
+		if len(payload.Payload) == 0 || !json.Valid(payload.Payload) {
+			return errors.New("Action Sequence child event payload must be valid JSON")
+		}
+		if payload.Type == streamaction.ActivityEventType {
+			var activity struct {
+				Message string `json:"message"`
+				Level   string `json:"level"`
+			}
+			if err := decodeStrict(payload.Payload, &activity); err != nil {
+				return fmt.Errorf("decode wrapped action.activity payload: %w", err)
+			}
+			if err := validateActivity(activity.Message, activity.Level); err != nil {
+				return err
+			}
+			m.appendActivityLocked(event.ObservedAt, activity.Message, activity.Level)
+		}
+	case actionsequence.EventChildOutput:
+		var payload actionsequence.ChildOutputEvent
+		if err := decodeStrict(event.Payload, &payload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.Type, err)
+		}
+		if err := m.validateSequenceChild(event, payload.Step, payload.ActionID, payload.ChildExecutionID); err != nil {
+			return err
+		}
+		if len(payload.Output) == 0 || !json.Valid(payload.Output) {
+			return errors.New("Action Sequence child output must be valid JSON")
+		}
+	case actionsequence.EventStepCompleted:
+		var payload actionsequence.StepCompletedEvent
+		if err := decodeStrict(event.Payload, &payload); err != nil {
+			return fmt.Errorf("decode %s payload: %w", event.Type, err)
+		}
+		if err := m.validateSequenceStep(event, payload.Step, payload.TotalSteps, payload.ActionID, payload.ChildExecutionID); err != nil {
+			return err
+		}
+		if err := m.validateSequenceChild(event, payload.Step, payload.ActionID, payload.ChildExecutionID); err != nil {
+			return err
+		}
+		m.sequence.active = false
 	case streamaction.ActivityEventType:
 		var payload struct {
 			Message string `json:"message"`
@@ -106,17 +206,23 @@ func (m *Model) Apply(event eventstream.Event) error {
 			m.current.Activities[count-1] = Activity{ObservedAt: event.ObservedAt, Message: payload.Message, Level: payload.Level}
 			return nil
 		}
-		m.current.Activities = append(m.current.Activities, Activity{ObservedAt: event.ObservedAt, Message: payload.Message, Level: payload.Level})
-		if len(m.current.Activities) > maxActivities {
-			m.current.Activities = append([]Activity(nil), m.current.Activities[len(m.current.Activities)-maxActivities:]...)
-		}
+		m.appendActivityLocked(event.ObservedAt, payload.Message, payload.Level)
 	case "action.completed":
-		m.applyTerminal(event, StatusDone)
+		if m.applyTerminal(event, StatusDone) {
+			m.sequence = nil
+		}
 	case "action.cancelled":
-		m.applyTerminal(event, StatusStopped)
+		if m.applyTerminal(event, StatusStopped) {
+			m.sequence = nil
+		}
 	case "action.failed":
-		m.applyTerminal(event, StatusFailed)
+		if m.applyTerminal(event, StatusFailed) {
+			m.sequence = nil
+		}
 	default:
+		if strings.HasPrefix(event.Type, "action.sequence.") {
+			return fmt.Errorf("unsupported Action Sequence OSD event type %q", event.Type)
+		}
 		if strings.HasPrefix(event.Type, "action.") && m.current.InvocationID != event.CorrelationID {
 			m.current = Snapshot{
 				Visible: true, Status: StatusLive, InvocationID: event.CorrelationID,
@@ -127,13 +233,48 @@ func (m *Model) Apply(event eventstream.Event) error {
 	return nil
 }
 
-func (m *Model) applyTerminal(event eventstream.Event, status string) {
-	if m.current.InvocationID != event.CorrelationID {
+func (m *Model) validateSequenceStep(event eventstream.Event, step, totalSteps int, actionID, childExecutionID string) error {
+	if m.sequence == nil || m.current.InvocationID != event.CorrelationID || event.Source.ModuleID != actionsequence.ActionID {
+		return errors.New("Action Sequence event does not match the current OSD invocation")
+	}
+	if totalSteps != m.sequence.totalSteps || step < 1 || step > totalSteps {
+		return fmt.Errorf("Action Sequence step %d/%d does not match declared total %d", step, totalSteps, m.sequence.totalSteps)
+	}
+	if actionID == "" || strings.TrimSpace(actionID) != actionID || childExecutionID == "" || strings.TrimSpace(childExecutionID) != childExecutionID {
+		return errors.New("Action Sequence event requires canonical actionId and childExecutionId")
+	}
+	return nil
+}
+
+func (m *Model) validateSequenceChild(event eventstream.Event, step int, actionID, childExecutionID string) error {
+	if m.sequence == nil || !m.sequence.active || m.current.InvocationID != event.CorrelationID || event.Source.ModuleID != actionsequence.ActionID {
+		return errors.New("Action Sequence child event does not match an active OSD step")
+	}
+	if step != m.sequence.step || actionID != m.sequence.actionID || childExecutionID != m.sequence.childExecutionID {
+		return errors.New("Action Sequence child provenance does not match the active OSD step")
+	}
+	return nil
+}
+
+func (m *Model) appendActivityLocked(observedAt time.Time, message, level string) {
+	if count := len(m.current.Activities); count != 0 && m.current.Activities[count-1].Message == message {
+		m.current.Activities[count-1] = Activity{ObservedAt: observedAt, Message: message, Level: level}
 		return
+	}
+	m.current.Activities = append(m.current.Activities, Activity{ObservedAt: observedAt, Message: message, Level: level})
+	if len(m.current.Activities) > maxActivities {
+		m.current.Activities = append([]Activity(nil), m.current.Activities[len(m.current.Activities)-maxActivities:]...)
+	}
+}
+
+func (m *Model) applyTerminal(event eventstream.Event, status string) bool {
+	if m.current.InvocationID != event.CorrelationID {
+		return false
 	}
 	m.current.Status = status
 	m.current.Visible = true
 	m.current.TerminalAt = event.CommittedAt
+	return true
 }
 
 func (m *Model) Snapshot(now time.Time) Snapshot {

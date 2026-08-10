@@ -259,6 +259,11 @@ Install the optional Action OSD after the loopback event stream is healthy:
   -ExecutablePath .\.build\windows-action-osd.exe
 ```
 
+For an explicit event-contract migration, pass `-MinimumEventCursor` with the
+last durable cursor owned by the retired contract. The installed OSD skips only
+history at or before that boundary; later events remain subject to normal
+startup replay and strict validation.
+
 The independent interactive-user task stays hidden until a Streaming Action
 starts. While the Action is running its compact, background-free top-left
 viewfinder shows a blinking red dot, the short Action name, and at most the
@@ -630,8 +635,10 @@ For a disposable multi-Action plan, first fetch the strict model tool schema
 from `/v3/rules/{rule-id}/action-sequence-tool`, then submit its arguments to
 `POST /v1/action-sequences/invoke`. The response is HTTP `202` and uses the
 same watch, status, and stop endpoints. All steps are validated before the
-first Action runs; child outputs and streaming events are forwarded with step,
-Action, and child-invocation provenance.
+first Action runs; child outputs and streaming events are forwarded on one
+parent correlation chain with step, Action, and child-execution provenance.
+The Action OSD displays the active child Action, `Step n/total`, and wrapped
+child activity while keeping the Sequence as the only display session.
 
 Start the supervised Elite Dangerous departure only after the higher model has
 confirmed the ship is inside a station:

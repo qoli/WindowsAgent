@@ -60,10 +60,11 @@ var (
 )
 
 type config struct {
-	EventAPIURL    string
-	EventTokenFile string
-	LogFile        string
-	AllowCapture   bool
+	EventAPIURL        string
+	EventTokenFile     string
+	LogFile            string
+	AllowCapture       bool
+	MinimumEventCursor uint64
 }
 
 type overlayWindow struct {
@@ -117,9 +118,9 @@ func run(cfg config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("resolve current event cursor: %w", err)
 	}
-	after := uint64(0)
-	if last > eventstream.DefaultReplayLimit {
-		after = last - eventstream.DefaultReplayLimit
+	after, err := actionosd.StartupCursor(last, cfg.MinimumEventCursor, eventstream.DefaultReplayLimit)
+	if err != nil {
+		return err
 	}
 	model := &actionosd.Model{}
 	for after < last {
@@ -144,7 +145,8 @@ func run(cfg config, logger *slog.Logger) error {
 		return err
 	}
 	defer window.destroy()
-	logger.Info("action_osd_started", "event_api_url", cfg.EventAPIURL, "after_cursor", after, "capture_excluded", !cfg.AllowCapture)
+	logger.Info("action_osd_started", "event_api_url", cfg.EventAPIURL, "after_cursor", after,
+		"minimum_event_cursor", cfg.MinimumEventCursor, "capture_excluded", !cfg.AllowCapture)
 	window.refresh()
 
 	streamContext, streamCancel := context.WithCancel(context.Background())
@@ -216,6 +218,7 @@ func parseConfig(args []string, localAppData string) (config, error) {
 	flags.StringVar(&cfg.EventTokenFile, "event-token-file", filepath.Join(dataDir, "event-api.token"), "absolute event API token file")
 	flags.StringVar(&cfg.LogFile, "log-file", filepath.Join(dataDir, "logs", "action-osd.jsonl"), "absolute JSON log file")
 	flags.BoolVar(&cfg.AllowCapture, "allow-capture", false, "allow screen capture to include the OSD")
+	flags.Uint64Var(&cfg.MinimumEventCursor, "minimum-event-cursor", 0, "explicit lower bound for startup event reconstruction")
 	if err := flags.Parse(args); err != nil {
 		return config{}, fmt.Errorf("parse flags: %w", err)
 	}

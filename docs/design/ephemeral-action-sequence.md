@@ -3,9 +3,9 @@
 ## Status
 
 **Landed.** Rule schema version 6, model-facing strict JSON schema generation,
-complete preflight, sequential finite and streaming child execution, durable
-provenance events, Rule-scoped exclusion, and external cancellation are
-implemented and tested.
+complete preflight, sequential finite and inline streaming child execution, a
+single durable parent correlation chain, Rule-scoped exclusion, external
+cancellation, and Action OSD projection are implemented and tested.
 
 ## Purpose
 
@@ -61,22 +61,35 @@ Action invocation, or an already active streaming Action for that Rule causes
 an explicit conflict. Children execute strictly one at a time and the first
 failure stops the sequence.
 
+The sequence is the only public invocation. A streaming child runs inline on
+the parent context with a Sequence reporter; it does not create another
+addressable invocation or write a second lifecycle chain. Every record uses the
+parent session and correlation ID. A per-step `childExecutionId` provides
+provenance without implying an invocation API resource.
+
 The sequence uses the ordinary invocation watch/status/stop surface and emits:
 
+- `action.sequence.started` with the immutable step count;
 - `action.sequence.step.started`;
-- `action.sequence.child.output` for a finite child;
+- `action.sequence.child.output` for every completed child;
 - `action.sequence.child.event` wrapping each streaming child event with its
-  step, Action ID, child invocation ID, and original event;
+  step, Action ID, child execution ID, event type, and original payload;
 - `action.sequence.step.completed`.
 
 The parent then emits exactly one ordinary terminal event. Stopping the parent
-cancels the active streaming child and waits for its terminal event before the
-parent becomes `CANCELLED`.
+cancels the active streaming runner through the shared context and waits for it
+to return before the parent becomes `CANCELLED`. Child plugin code cannot emit
+Host lifecycle or terminal events.
 
 The submitted AST exists only in the live invocation while it runs and is
 cleared at terminal state. Durable operational events and original child
 outputs remain in `action.runs`; the executable sequence definition is never
 written there.
+
+The Action OSD treats the parent as one display session. A step-start event
+selects the current child Action and displays `Step n/total`; a wrapped
+`action.activity` supplies the child activity text. Only the parent terminal
+event controls the final OSD state.
 
 ## Deliberate limits
 

@@ -2,6 +2,7 @@
 package actionsequence
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +12,47 @@ const (
 	RuntimeID = "windows-ephemeral-action-sequence-v1"
 	ActionID  = "system/ephemeral-action-sequence"
 	MaxSteps  = 20
+
+	EventStarted       = "action.sequence.started"
+	EventStepStarted   = "action.sequence.step.started"
+	EventChildEvent    = "action.sequence.child.event"
+	EventChildOutput   = "action.sequence.child.output"
+	EventStepCompleted = "action.sequence.step.completed"
 )
+
+type StartedEvent struct {
+	StepCount int `json:"stepCount"`
+}
+
+type StepStartedEvent struct {
+	Step             int    `json:"step"`
+	TotalSteps       int    `json:"totalSteps"`
+	ActionID         string `json:"actionId"`
+	ChildExecutionID string `json:"childExecutionId"`
+	Completion       string `json:"completion"`
+}
+
+type ChildEvent struct {
+	Step             int             `json:"step"`
+	ActionID         string          `json:"actionId"`
+	ChildExecutionID string          `json:"childExecutionId"`
+	Type             string          `json:"type"`
+	Payload          json.RawMessage `json:"payload"`
+}
+
+type ChildOutputEvent struct {
+	Step             int             `json:"step"`
+	ActionID         string          `json:"actionId"`
+	ChildExecutionID string          `json:"childExecutionId"`
+	Output           json.RawMessage `json:"output"`
+}
+
+type StepCompletedEvent struct {
+	Step             int    `json:"step"`
+	TotalSteps       int    `json:"totalSteps"`
+	ActionID         string `json:"actionId"`
+	ChildExecutionID string `json:"childExecutionId"`
+}
 
 // Request is one immutable sequence submitted for immediate execution.
 type Request struct {
