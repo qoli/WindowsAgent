@@ -11,6 +11,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocraction"
 	"github.com/qoli/WindowsAgent/internal/ocrregionsaction"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
@@ -75,6 +76,12 @@ func (e *Executor) Contract(actionID string) (Contract, error) {
 		pkg, loadErr := inputaction.Load(action.Root)
 		if loadErr != nil {
 			return Contract{}, fmt.Errorf("load input Action %q: %w", action.ID, loadErr)
+		}
+		title, schemaBytes = pkg.Manifest.Title, pkg.InputSchema
+	case rules.WindowsPointerActionRuntimeV1:
+		pkg, loadErr := pointeraction.Load(action.Root)
+		if loadErr != nil {
+			return Contract{}, fmt.Errorf("load pointer Action %q: %w", action.ID, loadErr)
 		}
 		title, schemaBytes = pkg.Manifest.Title, pkg.InputSchema
 	case rules.CompositeActionRuntimeV1, rules.StreamingActionRuntimeV1:

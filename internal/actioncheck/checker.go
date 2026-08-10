@@ -11,6 +11,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocraction"
 	"github.com/qoli/WindowsAgent/internal/ocrregionsaction"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
@@ -197,6 +198,8 @@ func loadPackage(action rules.Action) (entrypoint string, script []byte, err err
 		_, err = ocrregionsaction.Load(action.Root)
 	case rules.WindowsKeyActionRuntimeV1:
 		_, err = inputaction.Load(action.Root)
+	case rules.WindowsPointerActionRuntimeV1:
+		_, err = pointeraction.Load(action.Root)
 	case rules.CompositeActionRuntimeV1, rules.StreamingActionRuntimeV1:
 		var pkg *streamaction.Package
 		pkg, err = streamaction.Load(action.Root)

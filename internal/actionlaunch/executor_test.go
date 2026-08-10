@@ -14,6 +14,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocrregionsaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
@@ -30,6 +31,12 @@ type fakeInputExecutor struct{}
 
 func (fakeInputExecutor) Run(context.Context, *inputaction.Package, map[string]any, string) (json.RawMessage, error) {
 	return json.RawMessage(`{"schemaVersion":1,"selection":"fixture","control":"Fixture","key":"Key_X"}`), nil
+}
+
+type fakePointerExecutor struct{}
+
+func (fakePointerExecutor) Run(context.Context, *pointeraction.Package, map[string]any, string) (json.RawMessage, error) {
+	return json.RawMessage(`{"schemaVersion":1}`), nil
 }
 
 func (f fakeRegionCapturer) CaptureRegion(context.Context, capture.RegionRequest) (capture.RegionResult, error) {
@@ -79,7 +86,7 @@ func TestStreamingActionSupervisesLinearStreamingChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executor, err := New(ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{}, func() (foreground.Info, error) {
+	executor, err := New(ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{}, fakePointerExecutor{}, func() (foreground.Info, error) {
 		return foreground.Info{ExecutableName: "game.exe"}, nil
 	})
 	if err != nil {
@@ -152,7 +159,7 @@ func TestStreamingActionCallsSameRuleFiniteChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor, err := New(
-		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{},
+		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{}, fakePointerExecutor{},
 		func() (foreground.Info, error) { return foreground.Info{ExecutableName: "game.exe"}, nil },
 	)
 	if err != nil {
@@ -258,7 +265,7 @@ func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 			Foreground:     foregroundInfo,
 		}},
 		recognizer,
-		fakeInputExecutor{},
+		fakeInputExecutor{}, fakePointerExecutor{},
 		func() (foreground.Info, error) { return foregroundInfo, nil },
 	)
 	if err != nil {
@@ -315,7 +322,7 @@ func TestDigitOCRActionCapturesFixedSpeedROIWithoutDetector(t *testing.T) {
 			PhysicalRegion: capture.PixelRegion{Left: 2200, Top: 1630, Width: 130, Height: 100},
 			Foreground:     foregroundInfo,
 		}},
-		recognizer, fakeInputExecutor{}, func() (foreground.Info, error) { return foregroundInfo, nil },
+		recognizer, fakeInputExecutor{}, fakePointerExecutor{}, func() (foreground.Info, error) { return foregroundInfo, nil },
 	)
 	if err != nil {
 		t.Fatal(err)

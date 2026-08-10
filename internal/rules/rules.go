@@ -37,6 +37,7 @@ const (
 	CompositeActionRuntimeV1        = "windows-composite-action-v1"
 	StreamingActionRuntimeV1        = "windows-streaming-action-v1"
 	WindowsKeyActionRuntimeV1       = "windows-key-action-v1"
+	WindowsPointerActionRuntimeV1   = "windows-pointer-action-v1"
 	PpOcrWorkerRuntimeV1            = "ppocr-onnx-dml-worker-v1"
 	PpOcrTextRegionsWorkerRuntimeV1 = "ppocr-onnx-dml-text-regions-worker-v1"
 	ResidencyRuleActive             = "while-rule-active"
@@ -730,7 +731,7 @@ func validateDescriptor(descriptor Descriptor) error {
 func coreSequenceRuntime(runtime string) bool {
 	switch runtime {
 	case ObservationRuntimeV1, PpOcrActionRuntimeV1, PpOcrTextRegionsActionRuntimeV1,
-		CompositeActionRuntimeV1, StreamingActionRuntimeV1, WindowsKeyActionRuntimeV1:
+		CompositeActionRuntimeV1, StreamingActionRuntimeV1, WindowsKeyActionRuntimeV1, WindowsPointerActionRuntimeV1:
 		return true
 	default:
 		return false

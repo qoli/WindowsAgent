@@ -269,6 +269,18 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/text-entry-key": {
+      "path": "Actions/text-entry-key",
+      "runtime": "windows-key-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/pointer-click": {
+      "path": "Actions/pointer-click",
+      "runtime": "windows-pointer-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/ship-attitude-control": {
       "path": "Actions/ship-attitude-control",
       "runtime": "windows-key-action-v1",

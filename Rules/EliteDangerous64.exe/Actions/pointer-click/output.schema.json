@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "coordinateSpace", "button", "backend", "x", "y", "holdMs", "screenX", "screenY", "screenWidth", "screenHeight", "viewportX", "viewportY", "viewportWidth", "viewportHeight"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "coordinateSpace": {"const": "reference-1920x1080-centered"},
+    "button": {"const": "LEFT"},
+    "backend": {"const": "sendinput-pointer"},
+    "x": {"type": "integer", "minimum": 0, "maximum": 1919},
+    "y": {"type": "integer", "minimum": 0, "maximum": 1079},
+    "holdMs": {"type": "integer", "minimum": 1, "maximum": 2000},
+    "screenX": {"type": "integer", "minimum": 0},
+    "screenY": {"type": "integer", "minimum": 0},
+    "screenWidth": {"type": "integer", "minimum": 1},
+    "screenHeight": {"type": "integer", "minimum": 1},
+    "viewportX": {"type": "integer", "minimum": 0},
+    "viewportY": {"type": "integer", "minimum": 0},
+    "viewportWidth": {"type": "integer", "minimum": 1},
+    "viewportHeight": {"type": "integer", "minimum": 1}
+  }
+}

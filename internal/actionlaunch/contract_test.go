@@ -35,7 +35,7 @@ func TestContractLoadsAndValidatesStreamingInputWithoutExecuting(t *testing.T) {
 		t.Fatal(err)
 	}
 	executor, err := New(
-		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{},
+		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{}, fakePointerExecutor{},
 		func() (foreground.Info, error) { return foreground.Info{ExecutableName: "game.exe"}, nil },
 	)
 	if err != nil {
@@ -66,7 +66,7 @@ func TestRepositoryEphemeralSequenceContractsBuildOneStrictToolSchema(t *testing
 		t.Fatal(err)
 	}
 	executor, err := New(
-		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{},
+		ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{}, fakePointerExecutor{},
 		func() (foreground.Info, error) { return foreground.Info{ExecutableName: "EliteDangerous64.exe"}, nil },
 	)
 	if err != nil {

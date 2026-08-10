@@ -20,3 +20,7 @@ func (WindowsDriver) KeyDown(context.Context, KeyRequest) (Evidence, error) {
 func (WindowsDriver) KeyUp(context.Context, KeyRequest) (Evidence, error) {
 	return Evidence{}, errors.New("Windows input injection is supported only on Windows")
 }
+
+func (WindowsDriver) ClickReference(context.Context, PointerClickRequest) (PointerEvidence, error) {
+	return PointerEvidence{}, errors.New("Windows pointer injection is supported only on Windows")
+}

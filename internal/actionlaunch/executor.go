@@ -20,6 +20,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/ocraction"
 	"github.com/qoli/WindowsAgent/internal/ocrregionsaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
@@ -32,10 +33,15 @@ type Executor struct {
 	ocr         ocrworker.Recognizer
 	foreground  func() (foreground.Info, error)
 	input       InputExecutor
+	pointer     PointerExecutor
 }
 
 type InputExecutor interface {
 	Run(context.Context, *inputaction.Package, map[string]any, string) (json.RawMessage, error)
+}
+
+type PointerExecutor interface {
+	Run(context.Context, *pointeraction.Package, map[string]any, string) (json.RawMessage, error)
 }
 
 type Result struct {
@@ -51,14 +57,15 @@ func New(
 	capturer capture.RegionCapturer,
 	ocr ocrworker.Recognizer,
 	input InputExecutor,
+	pointer PointerExecutor,
 	foregroundSnapshot func() (foreground.Info, error),
 ) (*Executor, error) {
-	if ruleStore == nil || observation == nil || capturer == nil || ocr == nil || input == nil || foregroundSnapshot == nil {
-		return nil, errors.New("Rule store, observation executor, region capturer, OCR recognizer, input executor, and foreground resolver are required")
+	if ruleStore == nil || observation == nil || capturer == nil || ocr == nil || input == nil || pointer == nil || foregroundSnapshot == nil {
+		return nil, errors.New("Rule store, observation executor, region capturer, OCR recognizer, input executor, pointer executor, and foreground resolver are required")
 	}
 	return &Executor{
 		rules: ruleStore, observation: observation, capturer: capturer, ocr: ocr,
-		foreground: foregroundSnapshot, input: input,
+		foreground: foregroundSnapshot, input: input, pointer: pointer,
 	}, nil
 }
 
@@ -108,6 +115,15 @@ func (e *Executor) RunAction(ctx context.Context, invocation scriptlaunch.Invoca
 			return Result{}, fmt.Errorf("load Windows key Action %q: %w", action.ID, err)
 		}
 		output, err = e.input.Run(ctx, pkg, invocation.Inputs, action.RuleID)
+		if err != nil {
+			return Result{}, err
+		}
+	case rules.WindowsPointerActionRuntimeV1:
+		pkg, err := pointeraction.Load(action.Root)
+		if err != nil {
+			return Result{}, fmt.Errorf("load Windows pointer Action %q: %w", action.ID, err)
+		}
+		output, err = e.pointer.Run(ctx, pkg, invocation.Inputs, action.RuleID)
 		if err != nil {
 			return Result{}, err
 		}

@@ -26,6 +26,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/httpapi"
 	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/wgc"
@@ -112,7 +113,11 @@ func run() (runErr error) {
 			logger.Error("input_controller_shutdown_failed", "error", err)
 		}
 	}()
-	actionExecutor, err := actionlaunch.New(ruleStore, observationExecutor, capturer, ocrManager, inputController, foreground.Snapshot)
+	pointerController, err := pointeraction.NewController(windowsinput.WindowsDriver{}, foreground.Snapshot)
+	if err != nil {
+		return fmt.Errorf("initialize pointer Action controller: %w", err)
+	}
+	actionExecutor, err := actionlaunch.New(ruleStore, observationExecutor, capturer, ocrManager, inputController, pointerController, foreground.Snapshot)
 	if err != nil {
 		return fmt.Errorf("initialize Action executor: %w", err)
 	}

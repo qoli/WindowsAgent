@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Elite Dangerous single text-entry key",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md",
+  "bindingSource": {"type": "literal-key-v1"},
+  "gesture": {"type": "press", "holdMs": 40},
+  "selector": {"inputField": "key"},
+  "bindings": {
+    "A": {"key": "Key_A"}, "B": {"key": "Key_B"}, "C": {"key": "Key_C"}, "D": {"key": "Key_D"},
+    "E": {"key": "Key_E"}, "F": {"key": "Key_F"}, "G": {"key": "Key_G"}, "H": {"key": "Key_H"},
+    "I": {"key": "Key_I"}, "J": {"key": "Key_J"}, "K": {"key": "Key_K"}, "L": {"key": "Key_L"},
+    "M": {"key": "Key_M"}, "N": {"key": "Key_N"}, "O": {"key": "Key_O"}, "P": {"key": "Key_P"},
+    "Q": {"key": "Key_Q"}, "R": {"key": "Key_R"}, "S": {"key": "Key_S"}, "T": {"key": "Key_T"},
+    "U": {"key": "Key_U"}, "V": {"key": "Key_V"}, "W": {"key": "Key_W"}, "X": {"key": "Key_X"},
+    "Y": {"key": "Key_Y"}, "Z": {"key": "Key_Z"},
+    "0": {"key": "Key_0"}, "1": {"key": "Key_1"}, "2": {"key": "Key_2"}, "3": {"key": "Key_3"},
+    "4": {"key": "Key_4"}, "5": {"key": "Key_5"}, "6": {"key": "Key_6"}, "7": {"key": "Key_7"},
+    "8": {"key": "Key_8"}, "9": {"key": "Key_9"},
+    "SPACE": {"key": "Key_Space"}, "BACKSPACE": {"key": "Key_Backspace"}, "ENTER": {"key": "Key_Enter"}
+  },
+  "files": ["TASK.md", "input.schema.json", "output.schema.json"]
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "selection", "key", "bindingSource", "backend", "scanCode", "extended", "holdMs"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "selection": {"enum": ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "SPACE", "BACKSPACE", "ENTER"]},
+    "key": {"type": "string", "pattern": "^Key_[A-Za-z0-9]+$", "maxLength": 32},
+    "bindingSource": {"const": "literal-key-v1"},
+    "backend": {"const": "sendinput-scancode"},
+    "scanCode": {"type": "integer", "minimum": 1, "maximum": 255},
+    "extended": {"type": "boolean"},
+    "holdMs": {"const": 40}
+  }
+}
