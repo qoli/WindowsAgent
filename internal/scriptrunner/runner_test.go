@@ -34,6 +34,11 @@ type compassBroker struct {
 	calls  []fixtureObserverCall
 }
 
+type wideOcclusionBroker struct {
+	strips map[int64][]any
+	calls  []fixtureObserverCall
+}
+
 type shipStatusBroker struct {
 	pixels []any
 	calls  []fixtureObserverCall
@@ -84,6 +89,29 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 	}, nil
 }
 
+func (b *wideOcclusionBroker) BlobPath(context.Context, map[string]any) (string, error) {
+	return "", errors.New("unexpected wide-occlusion blob path request")
+}
+
+func (b *wideOcclusionBroker) RecordNative(context.Context, NativeRecord) error {
+	return errors.New("unexpected wide-occlusion native record")
+}
+
+func (b *wideOcclusionBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	x := arguments["x"].(int64)
+	y := arguments["y"].(int64)
+	w := arguments["w"].(int64)
+	h := arguments["h"].(int64)
+	return map[string]any{
+		"sampling":        "reference",
+		"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+		"frame":           map[string]any{"width": int64(3840), "height": int64(2160), "capturedAt": "2026-08-10T12:00:00Z"},
+		"region":          map[string]any{"x": x, "y": y, "w": w, "h": h},
+		"image":           map[string]any{"width": w, "height": h, "encoding": "rgb24-packed", "pixels": b.strips[y]},
+	}, nil
+}
+
 func (b *leftPanelTabBroker) BlobPath(context.Context, map[string]any) (string, error) {
 	return "", errors.New("unexpected left-panel-tab blob path request")
 }
@@ -118,6 +146,15 @@ func (b *leftPanelTabBroker) Call(_ context.Context, namespace, operation string
 func compassPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "compass"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func hyperspaceTargetOcclusionPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "hyperspace-target-occlusion"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,6 +218,15 @@ func shipStatusPackageRoot(t *testing.T) string {
 func shipSpeedPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-speed-classifier"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func shipHeatPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-heat-classifier"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,6 +777,57 @@ func runShipSpeedClassifier(t *testing.T, input map[string]any) map[string]any {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func shipHeatClassifierInput(rawText string, rawConfidence float64, constrainedText string, constrainedConfidence, margin float64) map[string]any {
+	return map[string]any{
+		"schemaVersion": int64(1), "text": constrainedText, "confidence": constrainedConfidence,
+		"decoding": map[string]any{
+			"characterConstraint": "digits", "rawText": rawText, "rawConfidence": rawConfidence,
+			"constrainedText": constrainedText, "constrainedConfidence": constrainedConfidence,
+			"rawConstraintMargin": margin,
+		},
+		"evidence": map[string]any{
+			"capturedAt":      "2026-08-10T12:00:00Z",
+			"frame":           map[string]any{"width": int64(3840), "height": int64(2160)},
+			"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+			"referenceRegion": map[string]any{"x": int64(790), "y": int64(795), "w": int64(100), "h": int64(60)},
+			"physicalRegion":  map[string]any{"left": int64(1580), "top": int64(1590), "width": int64(200), "height": int64(120)},
+		},
+		"model": map[string]any{}, "timing": map[string]any{},
+	}
+}
+
+func runShipHeatClassifier(t *testing.T, input map[string]any) map[string]any {
+	t.Helper()
+	pkg, err := scriptpackage.Load(shipHeatPackageRoot(t), "elite-dangerous/ship-heat-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&fixtureBroker{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := runner.Run(context.Background(), pkg, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestEliteShipHeatClassifierRequiresConstrainedTwoOrThreeDigitReading(t *testing.T) {
+	known := runShipHeatClassifier(t, shipHeatClassifierInput("054", 0.91, "054", 0.94, 0.03))["heat"].(map[string]any)
+	if known["state"] != "KNOWN" || known["percent"] != float64(54) {
+		t.Fatalf("known heat=%#v", known)
+	}
+	unknown := runShipHeatClassifier(t, shipHeatClassifierInput("S4", 0.74, "54", 0.58, 0.16))["heat"].(map[string]any)
+	if unknown["state"] != "UNKNOWN" || unknown["percent"] != nil {
+		t.Fatalf("unknown heat=%#v", unknown)
+	}
 }
 
 func requestDockingDistanceRegion(text string, detection, recognition float64) map[string]any {
@@ -1384,6 +1481,82 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		math.Abs(target["centerDistancePixels"].(float64)-13.038) > 0.0001 ||
 		zone["shape"] != "circle" || zone["radiusPixels"] != float64(4) || zone["inside"] != false {
 		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *testing.T) {
+	pkg, err := scriptpackage.Load(hyperspaceTargetOcclusionPackageRoot(t), "elite-dangerous/hyperspace-target-occlusion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name        string
+		paint       func(map[int64][]any)
+		wantState   string
+		wantControl any
+	}{
+		{
+			name: "full stellar disc has no invented direction",
+			paint: func(strips map[int64][]any) {
+				for _, pixels := range strips {
+					for index := range pixels {
+						pixels[index] = uint32(0xFFF090)
+					}
+				}
+			},
+			wantState: "BLOCKING", wantControl: nil,
+		},
+		{
+			name: "lower stellar disc recommends pitch up",
+			paint: func(strips map[int64][]any) {
+				pixels := strips[780]
+				for index := range pixels {
+					pixels[index] = uint32(0xFFB020)
+				}
+			},
+			wantState: "BLOCKING", wantControl: "PITCH_UP",
+		},
+		{
+			name: "empty starfield is clear",
+			paint: func(map[int64][]any) {
+			},
+			wantState: "CLEAR", wantControl: nil,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			strips := map[int64][]any{}
+			for _, y := range []int64{300, 540, 780} {
+				strips[y] = make([]any, 1680*12)
+				for index := range strips[y] {
+					strips[y][index] = uint32(0)
+				}
+			}
+			test.paint(strips)
+			broker := &wideOcclusionBroker{strips: strips}
+			runner, err := New(broker)
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := runner.Run(context.Background(), pkg, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			occlusion := result["occlusion"].(map[string]any)
+			if occlusion["state"] != test.wantState || occlusion["recommendedControl"] != test.wantControl {
+				t.Fatalf("occlusion=%#v", occlusion)
+			}
+			if occlusion["sampledPixelCount"] != float64(60480) || len(occlusion["gridCoverageRatios"].([]any)) != 15 {
+				t.Fatalf("sampling evidence=%#v", occlusion)
+			}
+			wantArguments := map[string]any{"x": int64(120), "y": int64(300), "w": int64(1680), "h": int64(12), "sampling": "reference"}
+			if len(broker.calls) != 3 || !reflect.DeepEqual(broker.calls[0].arguments, wantArguments) {
+				t.Fatalf("calls=%#v", broker.calls)
+			}
+		})
 	}
 }
 

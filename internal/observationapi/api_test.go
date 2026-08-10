@@ -14,6 +14,12 @@ func TestFileDecodeIsNotAnObserverOperation(t *testing.T) {
 	}
 }
 
+func TestFileJSONLinesIsAnObserverOperation(t *testing.T) {
+	if !OperationAllowed(NamespaceFile, "readJsonLines") {
+		t.Fatal("readJsonLines must be an allowed bounded file observation")
+	}
+}
+
 func TestScreenSurfaceIsOnlyBoundedRegionRead(t *testing.T) {
 	if !OperationAllowed(NamespaceScreen, "readRegion") {
 		t.Fatal("generic screen.readRegion is unavailable")

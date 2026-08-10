@@ -142,6 +142,12 @@ func (b *FileBackend) Call(ctx context.Context, namespace, operation string, arg
 		return b.read(path, rootID, relative, arguments)
 	case "readJson":
 		return b.readJSON(rootID, relative, arguments)
+	case "readJsonLines":
+		path, err := b.resolveFile(rootID, relative)
+		if err != nil {
+			return BackendResult{}, err
+		}
+		return b.readJSONLines(path, rootID, relative, arguments)
 	case "hash":
 		path, err := b.resolveFile(rootID, relative)
 		if err != nil {
@@ -199,6 +205,22 @@ func (b *FileBackend) Estimate(namespace, operation string, arguments map[string
 		maxBytes, err := positiveInt64(arguments["maxBytes"], "maxBytes")
 		if err != nil {
 			return 0, 0, err
+		}
+		return 0, uint64(maxBytes), nil
+	case "readJsonLines":
+		if _, err := b.resolveFile(rootID, relative); err != nil {
+			return 0, 0, err
+		}
+		maxBytes, err := positiveInt64(arguments["maxBytes"], "maxBytes")
+		if err != nil {
+			return 0, 0, err
+		}
+		maxLines, err := positiveInt64(arguments["maxLines"], "maxLines")
+		if err != nil {
+			return 0, 0, err
+		}
+		if maxLines > 256 {
+			return 0, 0, errors.New("maxLines must not exceed 256")
 		}
 		return 0, uint64(maxBytes), nil
 	case "hash", "openBlob":
@@ -640,6 +662,90 @@ func (b *FileBackend) readJSON(rootID, relative string, arguments map[string]any
 		value["sourceTimestampAgeMs"] = observedAt.Sub(parsed).Milliseconds()
 	}
 	return BackendResult{Value: value, FileBytesRead: uint64(len(raw))}, nil
+}
+
+func (b *FileBackend) readJSONLines(path, rootID, relative string, arguments map[string]any) (BackendResult, error) {
+	maxBytes, err := positiveInt64(arguments["maxBytes"], "maxBytes")
+	if err != nil {
+		return BackendResult{}, err
+	}
+	maxLines, err := positiveInt64(arguments["maxLines"], "maxLines")
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if maxLines > 256 {
+		return BackendResult{}, errors.New("maxLines must not exceed 256")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return BackendResult{}, err
+	}
+	defer file.Close()
+	before, err := file.Stat()
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if !before.Mode().IsRegular() {
+		return BackendResult{}, errors.New("JSON Lines file must be regular")
+	}
+	start := before.Size() - maxBytes
+	if start < 0 {
+		start = 0
+	}
+	length := before.Size() - start
+	raw := make([]byte, length)
+	count, readErr := file.ReadAt(raw, start)
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return BackendResult{}, readErr
+	}
+	raw = raw[:count]
+	after, err := file.Stat()
+	if err != nil {
+		return BackendResult{}, err
+	}
+	if !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
+		return BackendResult{}, errors.New("JSON Lines file changed during read")
+	}
+	lines := bytes.Split(raw, []byte{'\n'})
+	if start > 0 && len(lines) > 0 {
+		lines = lines[1:]
+	}
+	completeLines := make([][]byte, 0, len(lines))
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) != 0 {
+			completeLines = append(completeLines, line)
+		}
+	}
+	objects := make([]map[string]any, 0, maxLines)
+	first := len(completeLines) - int(maxLines)
+	if first < 0 {
+		first = 0
+	}
+	for _, line := range completeLines[first:] {
+		if err := strictjson.Validate(line); err != nil {
+			return BackendResult{}, fmt.Errorf("validate strict JSON Lines record: %w", err)
+		}
+		var object map[string]any
+		decoder := json.NewDecoder(bytes.NewReader(line))
+		decoder.UseNumber()
+		if err := decoder.Decode(&object); err != nil {
+			return BackendResult{}, fmt.Errorf("decode JSON Lines record: %w", err)
+		}
+		if object == nil {
+			return BackendResult{}, errors.New("JSON Lines record must be an object")
+		}
+		objects = append(objects, object)
+	}
+	observedAt := time.Now().UTC()
+	return BackendResult{Value: map[string]any{
+		"path":       map[string]any{"root": rootID, "relative": relative},
+		"observedAt": observedAt.Format(time.RFC3339Nano),
+		"modifiedAt": after.ModTime().UTC().Format(time.RFC3339Nano),
+		"sizeBytes":  after.Size(),
+		"offset":     start,
+		"items":      objects,
+	}, FileBytesRead: uint64(len(raw))}, nil
 }
 
 func (b *FileBackend) hash(ctx context.Context, path, rootID, relative string, arguments map[string]any) (BackendResult, error) {

@@ -198,6 +198,34 @@ func TestFileBackendReadJSONReportsAbsentFile(t *testing.T) {
 	}
 }
 
+func TestFileBackendReadJSONLinesReturnsBoundedTailObjects(t *testing.T) {
+	root := t.TempDir()
+	content := []byte("{\"event\":\"One\",\"value\":1}\n{\"event\":\"Two\",\"value\":2}\n{\"event\":\"Three\",\"value\":3}\n")
+	path := filepath.Join(root, "Journal.log")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend, err := NewFileBackend(map[string]string{"elite": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := backend.Call(context.Background(), "file", "readJsonLines", map[string]any{
+		"path":     map[string]any{"root": "elite", "relative": "Journal.log"},
+		"maxBytes": int64(4096), "maxLines": int64(2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := result.Value.(map[string]any)
+	items := value["items"].([]map[string]any)
+	if len(items) != 2 || items[0]["event"] != "Two" || items[1]["event"] != "Three" {
+		t.Fatalf("items=%#v", items)
+	}
+	if result.FileBytesRead != uint64(len(content)) {
+		t.Fatalf("FileBytesRead=%d", result.FileBytesRead)
+	}
+}
+
 func TestFileBackendReadJSONRejectsMalformedDuplicateAndOversizedFiles(t *testing.T) {
 	root := t.TempDir()
 	backend, err := NewFileBackend(map[string]string{"elite": root})

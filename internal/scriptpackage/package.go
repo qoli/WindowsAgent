@@ -296,7 +296,7 @@ func validateManifest(manifest Manifest) error {
 				return fmt.Errorf("file root %q resolver path: %w", root.ID, err)
 			}
 		}
-		if err := validateOperations("file", file.Operations, []string{"list", "stat", "read", "readJson", "hash", "openBlob"}); err != nil {
+		if err := validateOperations("file", file.Operations, []string{"list", "stat", "read", "readJson", "readJsonLines", "hash", "openBlob"}); err != nil {
 			return err
 		}
 	}
