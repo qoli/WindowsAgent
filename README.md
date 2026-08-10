@@ -129,10 +129,12 @@ The Action runtime and registration refactor is partially landed:
   text-regions profile over a separate reference ROI. It is eligible for
   opt-in Monitor or Reaction registration, but no speed loop is active by
   default;
-- `windows-key-action-v1` is a game-neutral finite runtime for one serialized,
-  foreground-bound scan-code key press. A Rule package may declare literal
-  canonical keys directly or select a game-specific binding source; callers
-  still choose only schema-valid logical selections;
+- `windows-key-action-v1` is a game-neutral finite runtime for a serialized,
+  foreground-bound scan-code press or one leased non-blocking hold. Hold
+  packages expose explicit `START`, `RENEW`, and `STOP`; expiry, failure
+  compensation, and Agent shutdown release the exact resolved key. A Rule
+  package may declare literal canonical keys directly or select a game-specific
+  binding source; callers still choose only schema-valid logical selections;
 - `elite-dangerous/ui-control` performs exactly one model-selected logical UI
   movement or selection. It is intentionally a slow screenshot/one-key
   interaction surface for tasks such as arranging `AUTO LAUNCH`;

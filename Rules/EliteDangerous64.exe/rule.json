@@ -266,6 +266,12 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/hyperspace-control": {
+      "path": "Actions/hyperspace-control",
+      "runtime": "windows-key-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/supercruise-to-destination": {
       "path": "Actions/supercruise-to-destination",
       "runtime": "windows-streaming-action-v1",
@@ -352,6 +358,7 @@
       "elite-dangerous/close-navigation-detail",
       "elite-dangerous/dock-at-station",
       "elite-dangerous/leave-station",
+      "elite-dangerous/hyperspace-control",
       "elite-dangerous/lock-destination",
       "elite-dangerous/select-and-lock-destination",
       "elite-dangerous/select-contacts-panel",
@@ -359,6 +366,7 @@
       "elite-dangerous/set-throttle",
       "elite-dangerous/ship-attitude-control",
       "elite-dangerous/supercruise-control",
+      "elite-dangerous/supercruise-assist-to-destination",
       "elite-dangerous/supercruise-to-destination",
       "elite-dangerous/ui-control"
     ]

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Elite Dangerous hyperspace control",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md",
+  "bindingSource": {"type": "frontier-active-preset-v1"},
+  "gesture": {"type": "press", "holdMs": 40},
+  "selector": {"inputField": "command"},
+  "bindings": {
+    "JUMP": {"control": "HyperSuperCombination"}
+  },
+  "files": ["TASK.md", "input.schema.json", "output.schema.json"]
+}

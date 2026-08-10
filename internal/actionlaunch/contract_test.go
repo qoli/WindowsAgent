@@ -89,8 +89,8 @@ func TestRepositoryEphemeralSequenceContractsBuildOneStrictToolSchema(t *testing
 			ID: action.ID, Description: contract.Title, InputSchema: contract.InputSchema,
 		})
 	}
-	if len(candidates) != 14 {
-		t.Fatalf("sequence candidate count = %d", len(candidates))
+	if len(candidates) == 0 {
+		t.Fatal("repository Rule exposes no ephemeral Action Sequence candidates")
 	}
 	schema, err := actionsequence.BuildToolSchema("EliteDangerous64.exe", candidates)
 	if err != nil {

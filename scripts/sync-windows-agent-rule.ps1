@@ -41,14 +41,14 @@ try {
 } catch {
     throw "Rule plugin rule.json is invalid JSON: $($_.Exception.Message)"
 }
-$allowedDescriptorFields = @("schemaVersion", "description", "runtimeProfiles", "actions", "registrations")
+$allowedDescriptorFields = @("schemaVersion", "description", "runtimeProfiles", "actions", "ephemeralActionSequence", "registrations")
 foreach ($property in $descriptor.PSObject.Properties) {
     if ($allowedDescriptorFields -notcontains $property.Name) {
         throw "Rule plugin rule.json contains unknown field: $($property.Name)"
     }
 }
-if ($descriptor.schemaVersion -ne 5) {
-    throw "Rule plugin schemaVersion must equal 5"
+if ($descriptor.schemaVersion -ne 6) {
+    throw "Rule plugin schemaVersion must equal 6"
 }
 if ([String]::IsNullOrWhiteSpace([string]$descriptor.description) -or `
     ([string]$descriptor.description).Trim() -ne [string]$descriptor.description) {
@@ -56,6 +56,26 @@ if ([String]::IsNullOrWhiteSpace([string]$descriptor.description) -or `
 }
 if ($null -eq $descriptor.runtimeProfiles -or $null -eq $descriptor.actions -or $null -eq $descriptor.registrations) {
     throw "Rule plugin runtimeProfiles, actions, and registrations registries are required"
+}
+$sequence = $descriptor.ephemeralActionSequence
+if ($null -eq $sequence) {
+    throw "Rule plugin ephemeralActionSequence is required"
+}
+$sequenceFields = @($sequence.PSObject.Properties.Name)
+if ($sequenceFields.Count -ne 1 -or $sequenceFields -notcontains "allowedActions" -or $null -eq $sequence.allowedActions) {
+    throw "Rule plugin ephemeralActionSequence must contain only allowedActions"
+}
+$seenSequenceActions = @{}
+foreach ($actionID in @($sequence.allowedActions)) {
+    $canonicalActionID = [string]$actionID
+    if ([String]::IsNullOrWhiteSpace($canonicalActionID) -or $canonicalActionID.Trim() -ne $canonicalActionID -or `
+        $null -eq $descriptor.actions.PSObject.Properties[$canonicalActionID]) {
+        throw "Rule plugin ephemeralActionSequence references an invalid action: $canonicalActionID"
+    }
+    if ($seenSequenceActions.ContainsKey($canonicalActionID)) {
+        throw "Rule plugin ephemeralActionSequence repeats action: $canonicalActionID"
+    }
+    $seenSequenceActions[$canonicalActionID] = $true
 }
 foreach ($profileProperty in $descriptor.runtimeProfiles.PSObject.Properties) {
     $profile = $profileProperty.Value

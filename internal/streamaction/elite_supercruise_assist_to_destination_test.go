@@ -213,6 +213,55 @@ func TestEliteSupercruiseAssistToDestinationHandsFlightToGameComputer(t *testing
 	}
 }
 
+func TestEliteSupercruiseAssistWaitsForNavigationBracketsAfterPanelOpen(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.navigationRegions = []json.RawMessage{
+		textRegionRaw("HARRIS PORT", 400, true), textRegionRaw("HARRIS PORT", 400, true),
+		textRegionRaw("<HARRIS PORT", 400, true), textRegionRaw("<HARRIS PORT", 400, true),
+	}
+	inputs := supercruiseAssistInputs()
+	inputs["targetName"] = "HARRIS PORT"
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), inputs, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	joined := ""
+	for _, payload := range reporter.payloads {
+		joined += string(payload)
+	}
+	if !contains(joined, `"reason":"WAITING_FOR_NAVIGATION_LOCK_STABILIZATION_1_OF_3"`) {
+		t.Fatalf("warm-up evidence missing from events=%s", joined)
+	}
+}
+
+func TestEliteSupercruiseAssistUsesCompassWhenAssistRequiresAlignment(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = []string{
+		"FSD_CHARGING", "SUPERCRUISE",
+		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
+		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if caller.compassCalls < 4 {
+		t.Fatalf("Compass was not sampled during Assist alignment: calls=%d", caller.compassCalls)
+	}
+}
+
 func TestEliteSupercruiseAssistRejectsOrbitButtonWithoutSelectingIt(t *testing.T) {
 	caller := successfulSupercruiseAssistCaller()
 	caller.assistRegions = []json.RawMessage{

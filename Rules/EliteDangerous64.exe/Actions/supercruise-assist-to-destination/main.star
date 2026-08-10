@@ -3,6 +3,7 @@ POLL_MS = 500
 STABLE_ATTEMPTS = 4
 MAX_PANEL_CYCLES = 3
 MAX_NAVIGATION = 8
+NAVIGATION_LOCK_WARMUP_RETRIES = 3
 INITIAL_ALIGN_LIMIT = 120
 SUPERCRUISE_ENTRY_LIMIT = 30
 ASSIST_START_LIMIT = 240
@@ -184,7 +185,7 @@ def inspect_locked_target(raw, target_name):
             focused_rows.append({"centerY": box["centerY"], "text": region["text"]})
     if best == None or best["similarity"] < MIN_TEXT_SIMILARITY:
         return {"state": "UNKNOWN", "direction": None, "text": None if best == None else best["region"]["text"], "reason": "TARGET_TEXT_NOT_CONFIRMED"}
-    if "<" not in best["normalized"] or ">" not in best["normalized"]:
+    if "<" not in best["normalized"] and ">" not in best["normalized"]:
         return {"state": "UNLOCKED", "direction": None, "text": best["region"]["text"], "reason": "NAVIGATION_BRACKETS_ABSENT"}
     ratio = focus_fill_ratio(best["region"])
     if ratio != None and ratio >= FOCUSED_FILL_MINIMUM:
@@ -209,11 +210,24 @@ def observe_locked_target_stable(target_name, sample):
     fail("locked Navigation target did not produce two consecutive known observations")
 
 def focus_and_open_target(target_name, sample):
+    unlocked_warmup_count = 0
     for navigation_count in range(MAX_NAVIGATION + 1):
         observation = observe_locked_target_stable(target_name, sample)
         state = observation["state"]
         if state == "UNLOCKED":
-            fail("Navigation target is visible but not locked: " + target_name)
+            unlocked_warmup_count += 1
+            emit_update(
+                "LOCATING_TARGET",
+                sample,
+                target_name,
+                panel_tab="NAVIGATION",
+                reason="WAITING_FOR_NAVIGATION_LOCK_STABILIZATION_" + str(unlocked_warmup_count) + "_OF_" + str(NAVIGATION_LOCK_WARMUP_RETRIES),
+            )
+            if unlocked_warmup_count >= NAVIGATION_LOCK_WARMUP_RETRIES:
+                fail("Navigation target remained visible but not locked after panel warm-up: " + target_name)
+            task.sleep(milliseconds=UI_SETTLE_MS)
+            continue
+        unlocked_warmup_count = 0
         if state == "FOCUSED_LOCKED":
             action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
             emit_update("OPENING_DETAIL", sample, target_name, panel_tab="NAVIGATION", last_command="SELECT", reason="FOCUSED_LOCKED_TARGET")
@@ -342,27 +356,8 @@ def apply_alignment(target):
     return command[0] + ":" + str(command[1])
 
 def apply_supercruise_screen_alignment(target_name):
-    observation = action.call(id="elite-dangerous/supercruise-target-position", inputs={"targetName": target_name})["target"]
-    if observation["state"] != "DETECTED":
-        fail("selected target text was not detected in the Supercruise forward HUD")
-    offset_x = observation["offsetX"]
-    offset_y = observation["offsetY"]
-    if observation["centerDistancePixels"] <= APPROACH_CENTER_PIXELS:
-        return None
-    hold_ms = COARSE_HOLD_MS
-    if observation["centerDistancePixels"] <= APPROACH_CENTER_PIXELS * 2:
-        hold_ms = FINE_HOLD_MS
-    elif observation["centerDistancePixels"] <= COARSE_DISTANCE_PIXELS:
-        hold_ms = MEDIUM_HOLD_MS
-    control = None
-    if abs(offset_x) >= abs(offset_y) and offset_x != 0:
-        control = "YAW_RIGHT" if offset_x > 0 else "YAW_LEFT"
-    elif offset_y != 0:
-        control = "PITCH_DOWN" if offset_y > 0 else "PITCH_UP"
-    if control == None:
-        return None
-    action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": control, "holdMs": hold_ms})
-    return control + ":" + str(hold_ms)
+    target = observe_compass_target()
+    return {"target": target, "command": apply_alignment(target)}
 
 def align_initial(target_name):
     stable = 0
@@ -498,7 +493,9 @@ def main(ctx):
             assist_active_confirmations = 0
             alignment_required_samples += 1
             if alignment_required_samples > BLUE_ZONE_GRACE_SAMPLES:
-                command = apply_supercruise_screen_alignment(target_name)
+                alignment = apply_supercruise_screen_alignment(target_name)
+                target = alignment["target"]
+                command = alignment["command"]
                 phase = "ALIGNING_FOR_ENTRY"
         elif last_flight_status in ["SUPERCRUISE", "SAFE_DISENGAGE_READY", "UNKNOWN"]:
             assist_active_confirmations = 0
