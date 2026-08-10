@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.advance-toward-station.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "commandedThrottle", "observedStationDistanceMeters", "acceptedStationDistanceMeters", "stopAtStationDistanceMeters", "elapsedMs", "remainingMs", "stationDistanceTrend", "evidenceSource", "lastCommand", "reason"],
+      "properties": {
+        "phase": {"enum": ["PREFLIGHT", "ADVANCING", "STOPPING", "COMPLETED"]},
+        "sample": {"type": "integer", "minimum": 1},
+        "commandedThrottle": {"enum": [0, 75, 100, null]},
+        "observedStationDistanceMeters": {"type": ["number", "null"], "minimum": 0},
+        "acceptedStationDistanceMeters": {"type": ["number", "null"], "minimum": 0},
+        "stopAtStationDistanceMeters": {"type": "number", "minimum": 1000, "exclusiveMaximum": 7500},
+        "elapsedMs": {"type": "integer", "minimum": 0},
+        "remainingMs": {"type": "integer", "minimum": 0},
+        "stationDistanceTrend": {"enum": ["SEEKING_BASELINE", "BASELINE", "DECREASING", "STABLE", "INCREASING", "TARGET_CANDIDATE", "CONFIRMED", "UNKNOWN", "OUTLIER", "STOPPED", "TIMED_OUT"]},
+        "evidenceSource": {"const": "TARGET_LOCK_HUD_OCR"},
+        "lastCommand": {"type": ["string", "null"], "maxLength": 64},
+        "reason": {"type": ["string", "null"], "maxLength": 512}
+      }
+    }
+  }
+}

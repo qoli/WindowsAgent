@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["throttlePercent", "stopAtStationDistanceMeters", "maxDurationMs"],
+  "properties": {
+    "throttlePercent": {"enum": [75, 100]},
+    "stopAtStationDistanceMeters": {"type": "number", "minimum": 1000, "exclusiveMaximum": 7500},
+    "maxDurationMs": {"type": "integer", "minimum": 1000, "maximum": 30000}
+  }
+}

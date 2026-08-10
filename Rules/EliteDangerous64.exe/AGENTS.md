@@ -134,6 +134,19 @@ fall back to the retired fixed distance ROI. Run it in the settled forward
 cockpit view before opening the Target panel. The Action is not registrable and
 never performs the docking request itself.
 
+`elite-dangerous/advance-toward-station` is an interruptible linear Streaming
+Action for bridging the higher model's interaction cadence. It does not measure
+travelled distance or world geometry. It reads only the currently displayed
+Station target-lock HUD distance through `request-docking-range`. Before
+applying a binding-resolved 75% or 100% throttle preset, it requires two
+mutually continuous distance observations. The first displayed distance at or
+below `stopAtStationDistanceMeters` causes an immediate 0% command before one
+stopped confirmation sample. Missing evidence, a discontinuity larger than
+1000 metres, two trusted samples moving away, `maxDurationMs`, failure, or
+cancellation also invokes 0% compensation. Only `STATION_DISTANCE_REACHED` or
+an already-satisfied target completes successfully; use that success before
+sequencing `dock-at-station`.
+
 `elite-dangerous/request-docking-availability` is a finite composite visual
 Gate for the currently selected Contacts target. Its raw text-regions Action
 scans a broad detail-panel area; PP-OCR dynamically locates the stable
