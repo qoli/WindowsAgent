@@ -6,9 +6,23 @@ is separate from the retained manual `supercruise-to-destination` workflow.
 
 The caller must first complete `select-and-lock-destination`, visually confirm
 normal space, and confirm the ship's Supercruise Assist setting is `Auto
-Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, aligns
-the Compass, starts the dedicated Supercruise control, and temporarily commands
-100% only to enter Supercruise. FSD charging must precede visual entry.
+Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, then
+invokes `align-station-target` with its `SUPERCRUISE_ASSIST` control profile
+for Compass-based coarse alignment, then invokes `align-visible-target` for
+the OCR-derived forward-HUD centre Gate. Both children must complete while
+throttle remains at 0% before acceleration is permitted. Compass owns coarse
+holds, 80 ms fine pulses inside 40 reference pixels, and a bounded 1000 ms
+no-movement recovery pulse; visible-target alignment supplies the final
+screen-space proof. `supercruise-assist-to-destination` does not contain a
+third attitude-control loop.
+
+The runtime supervises this nested Streaming Action synchronously: its start,
+events, completion, and failure are wrapped in the parent stream with a child
+execution ID. Parent cancellation propagates through the shared context, and a
+child failure fails the parent without a manual alignment fallback. The child
+remains independently invokable. After alignment, the workflow starts the
+dedicated Supercruise control and temporarily commands 100% only to enter
+Supercruise. FSD charging must precede visual entry.
 
 Only after Supercruise entry does the Action command 0% minimum Supercruise
 throttle and reopen NAVIGATION. This avoids racing the version-dependent UI
@@ -20,8 +34,10 @@ one `RIGHT` from BACK and requires that label in two consecutive observations
 before `SELECT`. Missing or ambiguous text, focus, module, target
 lock, or panel state fails explicitly. After the panel closes, the Action may
 command 75% into the Supercruise blue zone. It gives the game three prompt
-observations to react before using the separate forward-HUD target-position
-alignment when alignment remains required. `SUPERCRUISE ASSIST ACTIVE` must be classified twice
+observations to react. If alignment remains required, it returns to 0%,
+completes the same supervised target-alignment child, and only then restores
+75%; attitude control never runs at blue-zone throttle. `SUPERCRUISE ASSIST
+ACTIVE` must be classified twice
 before the game computer owns flight.
 
 After ownership begins, the Action sends no throttle, attitude, UI, or FSD

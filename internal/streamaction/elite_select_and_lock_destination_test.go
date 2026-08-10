@@ -182,6 +182,38 @@ func TestEliteSelectAndLockDestinationAcceptsStableSingleBracketLockEvidence(t *
 	}
 }
 
+func TestEliteSelectAndLockDestinationRecoversWhenCompactHeaderLooksSelected(t *testing.T) {
+	emptyRegions := json.RawMessage(`{"schemaVersion":1,"regions":[]}`)
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{
+			"CONTACTS", "CONTACTS", // compact forward-view header false positive
+			"CONTACTS", "CONTACTS", // NEXT_PANEL was ignored without panel focus
+			"NAVIGATION", "NAVIGATION", // FOCUS_LEFT_PANEL opens Navigation
+			"CONTACTS", "CONTACTS", // compact header remains after panel closes
+		},
+		regions: []json.RawMessage{
+			navigationRows("SURAYEV HUB", 460, "SURAYEV HUB", 460), navigationRows("SURAYEV HUB", 460, "SURAYEV HUB", 460),
+			navigationRows("< SURAYEV HUB >", 460, "< SURAYEV HUB >", 460), navigationRows("< SURAYEV HUB >", 460, "< SURAYEV HUB >", 460),
+			emptyRegions, emptyRegions, emptyRegions, emptyRegions,
+		},
+		buttons: []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details: []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "SURAYEV HUB"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"NEXT_PANEL", "FOCUS_LEFT_PANEL", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) {
+		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
+	}
+	if !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"openedPanel":true`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
 func TestEliteSelectAndLockDestinationAcceptsUniqueExactNameBesideSimilarSystem(t *testing.T) {
 	rows := func(targetText string, focusedText string) json.RawMessage {
 		value := navigationRows(targetText, 460, focusedText, 460)

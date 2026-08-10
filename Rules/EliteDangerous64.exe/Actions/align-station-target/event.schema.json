@@ -8,7 +8,7 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "commandCount", "controlMode", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandHoldMs", "commandResult", "leaseId", "leaseState", "sampleStartedMs", "sampleDurationMs", "sampleIntervalMs", "observedMovementPixels", "noMovementCount", "distanceDeltaPixels", "awayTrendCount", "reason", "information"],
+      "required": ["phase", "sample", "commandCount", "controlMode", "targetDetected", "targetPresentation", "targetHemisphere", "offsetX", "offsetY", "centerDistancePixels", "centerZoneInside", "stableConfirmations", "command", "commandHoldMs", "commandResult", "leaseId", "leaseState", "sampleStartedMs", "sampleDurationMs", "sampleIntervalMs", "observedMovementPixels", "noMovementCount", "distanceDeltaPixels", "awayTrendCount", "reason", "information", "observationErrorCode", "observationError"],
       "properties": {
         "phase": {"enum": ["STOPPING", "OBSERVING", "TURNING_TO_FRONT", "COARSE_ALIGN", "FINE_ALIGN", "VERIFYING_CENTER", "COMPLETED", "TRACKING_WINDOW_COMPLETED", "OBSERVATION_ERROR"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 240},
@@ -35,6 +35,8 @@
         "distanceDeltaPixels": {"type": ["number", "null"], "minimum": -68, "maximum": 68},
         "awayTrendCount": {"type": "integer", "minimum": 0, "maximum": 5},
         "reason": {"type": ["string", "null"], "maxLength": 256},
+        "observationErrorCode": {"type": ["string", "null"], "maxLength": 96},
+        "observationError": {"type": ["string", "null"], "maxLength": 512},
         "information": {
           "type": ["object", "null"],
           "additionalProperties": false,

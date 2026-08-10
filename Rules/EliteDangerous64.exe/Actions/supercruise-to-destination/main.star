@@ -124,7 +124,7 @@ def main(ctx):
     stream.activity(message="Aligning selected destination", level="info")
     sample = align_initial(target_name)
 
-    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     fsd = action.call(id="elite-dangerous/supercruise-control", inputs={"command": "TOGGLE"})
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
     stream.activity(message="Entering Supercruise", level="info")

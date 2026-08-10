@@ -36,11 +36,91 @@ func (f fakeRegionCapturer) CaptureRegion(context.Context, capture.RegionRequest
 	return f.result, nil
 }
 
-type fakeStreamingReporter struct{ types []string }
+type fakeStreamingReporter struct {
+	types    []string
+	payloads []json.RawMessage
+}
 
-func (f *fakeStreamingReporter) Emit(_ context.Context, eventType string, _ json.RawMessage) (eventstream.Event, error) {
+func (f *fakeStreamingReporter) Emit(_ context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
 	f.types = append(f.types, eventType)
+	f.payloads = append(f.payloads, append(json.RawMessage(nil), payload...))
 	return eventstream.Event{Sequence: uint64(len(f.types))}, nil
+}
+
+func TestStreamingActionSupervisesLinearStreamingChild(t *testing.T) {
+	rulesRoot := t.TempDir()
+	ruleRoot := filepath.Join(rulesRoot, "game.exe")
+	parentRoot := filepath.Join(ruleRoot, "Actions", "parent")
+	childRoot := filepath.Join(ruleRoot, "Actions", "child")
+	if err := os.MkdirAll(parentRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(childRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(ruleRoot, rules.RuleFilename), `{
+  "schemaVersion":6,"description":"Nested streaming fixture.","runtimeProfiles":{},
+  "actions":{
+    "game/parent":{"path":"Actions/parent","runtime":"windows-streaming-action-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":true},"registrableAs":[]},
+    "game/child":{"path":"Actions/child","runtime":"windows-streaming-action-v1","execution":{"completion":"stream","lifecycle":"linear","interruptible":true},"registrableAs":[]}
+  },"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}
+}`)
+	writeTestFile(t, filepath.Join(ruleRoot, rules.AgentsFilename), "# Fixture\n")
+	writeStreamingFixturePackage(t, parentRoot, `def main(ctx):
+    child = action.call(id="game/child", inputs={"value": 7})
+    return {"value": child["value"]}
+`, `{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"integer"}}}`, `{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"const":7}}}`)
+	writeStreamingFixturePackage(t, childRoot, `def main(ctx):
+    stream.emit(type="action.child.progress", payload={"value": ctx.inputs["value"]})
+    return {"value": ctx.inputs["value"]}
+`, `{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"integer"}}}`, `{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"integer"}}}`)
+
+	ruleStore, err := rules.New(rulesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor, err := New(ruleStore, fakeObservationExecutor{}, fakeRegionCapturer{}, &fakeOCRRecognizer{}, fakeInputExecutor{}, func() (foreground.Info, error) {
+		return foreground.Info{ExecutableName: "game.exe"}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := &fakeStreamingReporter{}
+	result, err := executor.RunStreaming(context.Background(), scriptlaunch.Invocation{Capability: "game/parent", Inputs: map[string]any{"value": 1}}, reporter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(result.Output) != `{"value":7}` {
+		t.Fatalf("output=%s", result.Output)
+	}
+	want := []string{"action.child.started", "action.child.event", "action.child.completed"}
+	if len(reporter.types) != len(want) {
+		t.Fatalf("events=%v", reporter.types)
+	}
+	for index := range want {
+		if reporter.types[index] != want[index] {
+			t.Fatalf("events=%v", reporter.types)
+		}
+	}
+	var childEvent map[string]any
+	if err := json.Unmarshal(reporter.payloads[1], &childEvent); err != nil {
+		t.Fatal(err)
+	}
+	if childEvent["actionId"] != "game/child" || childEvent["type"] != "action.child.progress" || childEvent["childExecutionId"] == "" {
+		t.Fatalf("child event=%s", reporter.payloads[1])
+	}
+}
+
+func writeStreamingFixturePackage(t *testing.T, root, script, inputSchema, outputSchema string) {
+	t.Helper()
+	files := map[string]string{
+		"main.star": script, "TASK.md": "# Fixture\n", "input.schema.json": inputSchema, "output.schema.json": outputSchema,
+		"event.schema.json": `{"type":"object","additionalProperties":false,"required":["type","payload"],"properties":{"type":{"const":"action.child.progress"},"payload":{"type":"object"}}}`,
+		"manifest.json":     `{"schemaVersion":1,"version":1,"title":"Fixture","entrypoint":"main.star","taskDocument":"TASK.md","inputSchema":"input.schema.json","outputSchema":"output.schema.json","eventSchema":"event.schema.json","files":["main.star","TASK.md","input.schema.json","output.schema.json","event.schema.json"],"limits":{"maxSteps":10000,"maxOutputBytes":4096,"maxEventBytes":4096,"maxSleepMs":1000}}`,
+	}
+	for name, content := range files {
+		writeTestFile(t, filepath.Join(root, name), content)
+	}
 }
 
 func TestStreamingActionCallsSameRuleFiniteChild(t *testing.T) {

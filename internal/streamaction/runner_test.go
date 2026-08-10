@@ -6,11 +6,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
 
 type fixtureCaller struct{ calls int }
@@ -79,6 +81,7 @@ type dockAtStationCaller struct {
 	gearIndex            int
 	flightPromptFailures int
 	rangeCalls           int
+	advanceCalls         int
 	cleanupCalls         int
 	controls             []string
 }
@@ -131,6 +134,12 @@ func (c *dockAtStationCaller) Call(_ context.Context, id string, inputs map[stri
 			"requestDocking": map[string]any{"state": state},
 			"decision":       map[string]any{"reason": "FIXTURE_" + state},
 		})
+	case "elite-dangerous/advance-toward-station":
+		c.advanceCalls++
+		if inputs["throttlePercent"] != int64(75) || inputs["stopAtStationDistanceMeters"] != int64(7000) || inputs["maxDurationMs"] != int64(30000) {
+			return nil, errors.New("unexpected safe advance inputs")
+		}
+		return json.RawMessage(`{"completed":true,"finalPhase":"STATION_DISTANCE_REACHED","finalStationDistanceMeters":6890}`), nil
 	case "elite-dangerous/ui-control":
 		control, _ := inputs["control"].(string)
 		c.controls = append(c.controls, control)
@@ -397,6 +406,26 @@ def main(ctx):
 	}
 }
 
+func TestRunnerTryCallReturnsScriptLaunchErrorCode(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    attempt = action.try_call(id="game/status", inputs={})
+    if attempt["ok"] or attempt["errorCode"] != "JOB_DEADLINE_EXCEEDED":
+        fail("script launch failure code was not preserved")
+    return {"done": True, "sequence": 0}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := CallerFunc(func(context.Context, string, map[string]any) (json.RawMessage, error) {
+		return nil, &scriptlaunch.Error{Code: "JOB_DEADLINE_EXCEEDED", Stage: "executing-script", Cause: context.DeadlineExceeded}
+	})
+	if _, err := (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, caller, &fixtureReporter{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunnerExecutesRegisteredFailureActionAndClearsItOnSuccess(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -447,6 +476,57 @@ def main(ctx):
 				}
 			}
 		})
+	}
+}
+
+func TestRunnerRunsCriticalFailureActionsFirstWithIndependentTimeouts(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    action.on_failure(id="game/close-panel", inputs={})
+    action.on_failure(id="game/stop", inputs={}, critical=True, timeout_milliseconds=250)
+    action.on_failure(id="game/slow-stop", inputs={}, critical=True, timeout_milliseconds=100)
+    action.call(id="game/fail", inputs={})
+    return {"done": True, "sequence": 0}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	caller := CallerFunc(func(ctx context.Context, id string, _ map[string]any) (json.RawMessage, error) {
+		calls = append(calls, id)
+		switch id {
+		case "game/fail":
+			return nil, errors.New("primary failure")
+		case "game/slow-stop":
+			<-ctx.Done()
+			return nil, ctx.Err()
+		default:
+			return json.RawMessage(`{"ok":true}`), nil
+		}
+	})
+	_, err = (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, caller, &fixtureReporter{})
+	if err == nil || !contains(err.Error(), "game/slow-stop") || !contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := strings.Join(calls, ","); got != "game/fail,game/slow-stop,game/stop,game/close-panel" {
+		t.Fatalf("calls = %s", got)
+	}
+}
+
+func TestRunnerRejectsFailureActionTimeoutOutsideBound(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    action.on_failure(id="game/stop", inputs={}, critical=True, timeout_milliseconds=99)
+    return {"done": True, "sequence": 0}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (Runner{}).Run(context.Background(), pkg, map[string]any{"enabled": true}, &fixtureCaller{}, &fixtureReporter{})
+	if err == nil || !contains(err.Error(), "between 100 and 30000") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -809,7 +889,8 @@ func TestEliteDockAtStationCompletesAtVisualConfirmationHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	if caller.rangeCalls != 4 || !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
-		!contains(string(output), `"admittedDistanceMeters":5390`) || !contains(string(output), `"visualConfirmed":false`) {
+		!contains(string(output), `"admittedDistanceMeters":5390`) || !contains(string(output), `"visualConfirmed":false`) ||
+		!contains(string(output), `"safeAdvanceUsed":false`) || caller.advanceCalls != 0 {
 		t.Fatalf("output=%s rangeCalls=%d", output, caller.rangeCalls)
 	}
 	wantControls := []string{"FOCUS_LEFT_PANEL", "RIGHT", "SELECT", "FOCUS_LEFT_PANEL"}
@@ -824,6 +905,43 @@ func TestEliteDockAtStationCompletesAtVisualConfirmationHandoff(t *testing.T) {
 	if len(reporter.types) == 0 || reporter.types[len(reporter.types)-1] != "action.dock-at-station.update" ||
 		!contains(string(reporter.payloads[len(reporter.payloads)-1]), `"phase":"VISUAL_CONFIRMATION_REQUIRED"`) {
 		t.Fatalf("events=%v payloads=%s", reporter.types, reporter.payloads)
+	}
+}
+
+func TestEliteDockAtStationSafelyAdvancesOnlyAfterTrustedDeniedRange(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS", "ABSENT", "ABSENT"},
+		requestStates:  []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
+		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
+		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
+		rangeStates:    []string{"DENIED", "DENIED", "DENIED", "ALLOWED", "ALLOWED", "ALLOWED", "ALLOWED"},
+		rangeDistances: []float64{8920, 8920, 8910, 6890, 6890, 6890, 6890},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.advanceCalls != 1 || caller.rangeCalls != 7 ||
+		!contains(string(output), `"safeAdvanceUsed":true`) ||
+		!contains(string(output), `"safeAdvanceInitialDistanceMeters":8910`) ||
+		!contains(string(output), `"safeAdvanceFinalDistanceMeters":6890`) {
+		t.Fatalf("output=%s advanceCalls=%d rangeCalls=%d", output, caller.advanceCalls, caller.rangeCalls)
+	}
+	started := false
+	completed := false
+	for _, payload := range reporter.payloads {
+		started = started || contains(string(payload), `"phase":"SAFE_ADVANCE_STARTED"`)
+		completed = completed || contains(string(payload), `"phase":"SAFE_ADVANCE_COMPLETED"`)
+	}
+	if !started || !completed {
+		t.Fatalf("safe advance events missing: %s", reporter.payloads)
 	}
 }
 
@@ -931,8 +1049,8 @@ func TestEliteDockAtStationRejectsOCRDistanceOutlierBeforeTrendAdmission(t *test
 		requestStates:  []string{"AVAILABLE", "FOCUSED", "DOCKING_ACTIVE", "DOCKING_ACTIVE"},
 		flightStates:   []string{"AUTO_DOCK", "AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN"},
 		gearStates:     []string{"OFF", "OFF", "OFF", "OFF", "OFF", "OFF", "ON", "ON"},
-		rangeStates:    []string{"DENIED", "DENIED", "DENIED", "DENIED", "DENIED", "ALLOWED", "ALLOWED"},
-		rangeDistances: []float64{8840, 84000, 8720, 8500, 7500, 7400, 7300},
+		rangeStates:    []string{"DENIED", "DENIED", "DENIED", "DENIED", "ALLOWED", "ALLOWED"},
+		rangeDistances: []float64{8840, 84000, 8720, 7800, 7400, 7300},
 	}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
@@ -941,9 +1059,9 @@ func TestEliteDockAtStationRejectsOCRDistanceOutlierBeforeTrendAdmission(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if caller.rangeCalls != 7 || !contains(string(output), `"rangeWaitSamples":7`) ||
+	if caller.rangeCalls != 6 || caller.advanceCalls != 0 || !contains(string(output), `"rangeWaitSamples":6`) ||
 		!contains(string(output), `"admittedDistanceMeters":7300`) ||
-		!contains(string(output), `"rangeTrendSamples":5`) ||
+		!contains(string(output), `"rangeTrendSamples":4`) ||
 		!contains(string(output), `"rangeOutlierCount":2`) {
 		t.Fatalf("output=%s rangeCalls=%d", output, caller.rangeCalls)
 	}
@@ -953,7 +1071,7 @@ func TestEliteDockAtStationRejectsOCRDistanceOutlierBeforeTrendAdmission(t *test
 			waitEvents++
 		}
 	}
-	if waitEvents != 7 {
+	if waitEvents != 6 {
 		t.Fatalf("range wait events=%d payloads=%s", waitEvents, reporter.payloads)
 	}
 }

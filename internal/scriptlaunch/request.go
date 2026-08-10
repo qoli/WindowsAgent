@@ -24,6 +24,18 @@ type Invocation struct {
 	Inputs     map[string]any `json:"inputs"`
 }
 
+type Error struct {
+	Code  string
+	Stage string
+	Cause error
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("%s at %s: %v", e.Code, e.Stage, e.Cause)
+}
+
+func (e *Error) Unwrap() error { return e.Cause }
+
 type Executor interface {
 	Run(ctx context.Context, invocation Invocation) (json.RawMessage, error)
 }
@@ -77,8 +89,10 @@ func parseLauncherOutput(output []byte, runErr error) (json.RawMessage, error) {
 		return nil, fmt.Errorf("validate Script launcher output: %w", err)
 	}
 	var envelope struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
+		OK         bool   `json:"ok"`
+		Error      string `json:"error"`
+		ErrorCode  string `json:"errorCode"`
+		ErrorStage string `json:"errorStage"`
 	}
 	if err := json.Unmarshal(output, &envelope); err != nil {
 		return nil, fmt.Errorf("decode Script launcher output: %w", err)
@@ -87,7 +101,11 @@ func parseLauncherOutput(output []byte, runErr error) (json.RawMessage, error) {
 		if envelope.Error == "" {
 			return nil, fmt.Errorf("Script launcher failed without an error message: %w", runErr)
 		}
-		return nil, fmt.Errorf("Script launcher failed: %s: %w", envelope.Error, runErr)
+		cause := fmt.Errorf("Script launcher failed: %s: %w", envelope.Error, runErr)
+		if envelope.ErrorCode != "" && envelope.ErrorStage != "" {
+			return nil, &Error{Code: envelope.ErrorCode, Stage: envelope.ErrorStage, Cause: cause}
+		}
+		return nil, cause
 	}
 	if !envelope.OK {
 		return nil, errors.New("Script launcher returned ok=false with exit code zero")

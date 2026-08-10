@@ -5,6 +5,7 @@
   "properties": {
     "mode": {"enum": ["ALIGN", "TRACK"], "default": "ALIGN"},
     "trackingSamples": {"type": "integer", "minimum": 10, "maximum": 240, "default": 120},
-    "stopBeforeAlign": {"type": "boolean", "default": true}
+    "stopBeforeAlign": {"type": "boolean", "default": true},
+    "controlProfile": {"enum": ["NORMAL_SPACE", "SUPERCRUISE_ASSIST"], "default": "NORMAL_SPACE"}
   }
 }

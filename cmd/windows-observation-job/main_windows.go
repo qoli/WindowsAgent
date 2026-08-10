@@ -27,7 +27,13 @@ const launcherDeadline = 75 * time.Second
 
 func main() {
 	if err := run(); err != nil {
-		encoded, _ := json.Marshal(map[string]any{"ok": false, "error": err.Error()})
+		failure := map[string]any{"ok": false, "error": err.Error()}
+		var typed *observationjob.Error
+		if errors.As(err, &typed) {
+			failure["errorCode"] = typed.Code
+			failure["errorStage"] = typed.Stage
+		}
+		encoded, _ := json.Marshal(failure)
 		fmt.Fprintln(os.Stdout, string(encoded))
 		os.Exit(1)
 	}

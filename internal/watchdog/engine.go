@@ -53,6 +53,7 @@ type targetRuntime struct {
 	restartAttempts   []time.Time
 	nextObservationAt time.Time
 	bootstrapped      bool
+	circuitOpenLogged bool
 }
 
 func NewEngine(config Config, observer Observer, recoverer Recoverer, sink StatusSink, logger *slog.Logger) (*Engine, error) {
@@ -158,6 +159,7 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 		runtime.status.Detail = observation.Detail
 		runtime.status.ConsecutiveFailures = 0
 		runtime.bootstrapped = true
+		runtime.circuitOpenLogged = false
 		return nil
 	}
 	runtime.status.ConsecutiveFailures++
@@ -185,10 +187,14 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	if len(attempts) >= int(target.Recovery.MaxAttempts) {
 		runtime.status.State = StateCircuitOpen
 		runtime.status.Detail = "configured recovery attempt budget exhausted"
-		e.logger.Error("watchdog_recovery_budget_exhausted", "target_id", target.ID,
-			"attempts", len(attempts), "window_ms", target.Recovery.AttemptWindowMS)
+		if !runtime.circuitOpenLogged {
+			e.logger.Error("watchdog_recovery_budget_exhausted", "target_id", target.ID,
+				"attempts", len(attempts), "window_ms", target.Recovery.AttemptWindowMS)
+			runtime.circuitOpenLogged = true
+		}
 		return nil
 	}
+	runtime.circuitOpenLogged = false
 	if len(attempts) > 0 {
 		nextAttempt := attempts[len(attempts)-1].Add(time.Duration(target.Recovery.BackoffMS) * time.Millisecond)
 		if now.Before(nextAttempt) {

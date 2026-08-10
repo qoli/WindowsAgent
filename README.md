@@ -105,9 +105,14 @@ The Action runtime and registration refactor is partially landed:
   `{ok, output, error, errorCode}` so a workflow may
   emit and bound a failed observation sample without changing providers or
   silently converting an execution failure into domain `UNKNOWN`.
-  `action.on_failure` registers child Actions that run in reverse order only
-  when the streaming Action fails; `action.clear_on_failure` removes them after
-  the protected state has been restored;
+  `action.on_failure` registers child Actions that run only when the streaming
+  Action fails. Optional `critical=True` compensations run before ordinary
+  compensations, and every registration has its own bounded
+  `timeout_milliseconds` budget; reverse registration order is preserved within
+  each class. `action.clear_on_failure` removes them after the protected state
+  has been restored. On Agent startup, durable invocations missing a terminal
+  event are failed explicitly with `ABORTED_BY_AGENT_RESTART` and remain
+  queryable/watchable rather than being resumed against unknown game state;
 - Crimson Desert inventory remains a finite Action using the landed v1
   observation runtime;
 - `screenparser/ui-elements` is a Palworld-configured on-demand Action

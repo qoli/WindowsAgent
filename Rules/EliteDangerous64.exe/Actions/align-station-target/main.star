@@ -3,18 +3,26 @@ MAX_SLEEP_STEP_MS = 250
 MAX_COMMANDS = 120
 MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
+ALIGN_CENTER_RADIUS_PIXELS = 4.0
+SUPERCRUISE_CENTER_RADIUS_PIXELS = 4.0
+SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 1.0
 SUSTAINED_DISTANCE_PIXELS = 40
 FINE_DISTANCE_PIXELS = 16
 DIAGONAL_COMPONENT_MIN_PIXELS = 8
 COARSE_HOLD_MS = 800
 MEDIUM_HOLD_MS = 300
-FINE_HOLD_MS = 250
+FINE_HOLD_MS = 120
+SUPERCRUISE_FINE_DISTANCE_PIXELS = 40
+SUPERCRUISE_FINE_HOLD_MS = 80
+CENTER_ENTRY_BRAKE_MS = 100
 RECOVERY_HOLD_MS = 400
+SUPERCRUISE_RECOVERY_HOLD_MS = 1000
 MIN_OBSERVED_MOVEMENT_PIXELS = 1
 NO_MOVEMENT_LIMIT = 4
 AWAY_TREND_LIMIT = 5
 AMBIGUOUS_PRESENTATION_LIMIT = 5
 TRANSIENT_MISSING_LIMIT = 3
+MAX_COMPASS_DEADLINE_ERRORS = 5
 
 def empty_target():
     return {
@@ -27,7 +35,7 @@ def empty_target():
         "centerZone": {"inside": None},
     }
 
-def emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="NONE", command=None, command_result=None, reason=None, information=None, command_hold_ms=None, observed_movement_pixels=None, no_movement_count=0, distance_delta_pixels=None, away_trend_count=0, lease_id=None, lease_state=None, sample_started_ms=None, sample_duration_ms=None, sample_interval_ms=None):
+def emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="NONE", command=None, command_result=None, reason=None, information=None, command_hold_ms=None, observed_movement_pixels=None, no_movement_count=0, distance_delta_pixels=None, away_trend_count=0, lease_id=None, lease_state=None, sample_started_ms=None, sample_duration_ms=None, sample_interval_ms=None, observation_error_code=None, observation_error=None):
     stream.emit(
         type="action.align-station-target.update",
         payload={
@@ -57,6 +65,8 @@ def emit_update(phase, sample, command_count, target, stable_confirmations, cont
             "awayTrendCount": away_trend_count,
             "reason": reason,
             "information": information,
+            "observationErrorCode": observation_error_code,
+            "observationError": observation_error,
         },
     )
 
@@ -70,18 +80,25 @@ def choose_front_control(target):
         return "PITCH_DOWN" if offset_y > 0 else "PITCH_UP"
     return None
 
-def choose_pulse(target, no_movement_count):
+def is_alignment_centered(target, radius_pixels):
+    return (
+        target["detected"] and
+        target["presentation"] == "SOLID" and
+        target["centerDistancePixels"] <= radius_pixels
+    )
+
+def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, supercruise_profile):
     control = choose_front_control(target)
     if control == None:
         return None
     distance = target["centerDistancePixels"]
     hold_ms = COARSE_HOLD_MS
-    if distance <= FINE_DISTANCE_PIXELS:
-        hold_ms = FINE_HOLD_MS
+    if distance <= fine_distance_pixels:
+        hold_ms = fine_hold_ms
     elif distance <= SUSTAINED_DISTANCE_PIXELS:
         hold_ms = MEDIUM_HOLD_MS
     if no_movement_count >= 2:
-        hold_ms = RECOVERY_HOLD_MS
+        hold_ms = SUPERCRUISE_RECOVERY_HOLD_MS if supercruise_profile else RECOVERY_HOLD_MS
     return [control, hold_ms]
 
 def choose_sustained_control(target):
@@ -132,9 +149,9 @@ def stop_hold(control, lease_id):
 
 def register_hold_failure(control, lease_id):
     if is_vector_control(control):
-        action.on_failure(id="elite-dangerous/ship-attitude-vector-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id})
+        action.on_failure(id="elite-dangerous/ship-attitude-vector-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id}, critical=True, timeout_milliseconds=2000)
     else:
-        action.on_failure(id="elite-dangerous/ship-attitude-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id})
+        action.on_failure(id="elite-dangerous/ship-attitude-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id}, critical=True, timeout_milliseconds=2000)
 
 def wait_for_sample_cadence(sample_started_ms):
     remaining = SAMPLE_CADENCE_MS - (task.elapsed_milliseconds() - sample_started_ms)
@@ -156,6 +173,12 @@ def main(ctx):
     mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
     tracking_samples = int(ctx.inputs["trackingSamples"]) if "trackingSamples" in ctx.inputs else 120
     stop_before_align = ctx.inputs["stopBeforeAlign"] if "stopBeforeAlign" in ctx.inputs else True
+    control_profile = ctx.inputs["controlProfile"] if "controlProfile" in ctx.inputs else "NORMAL_SPACE"
+    supercruise_profile = control_profile == "SUPERCRUISE_ASSIST"
+    alignment_radius = SUPERCRUISE_CENTER_RADIUS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else ALIGN_CENTER_RADIUS_PIXELS
+    alignment_hysteresis = SUPERCRUISE_CENTER_HYSTERESIS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else 0.0
+    fine_distance = SUPERCRUISE_FINE_DISTANCE_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else FINE_DISTANCE_PIXELS
+    fine_hold = SUPERCRUISE_FINE_HOLD_MS if control_profile == "SUPERCRUISE_ASSIST" else FINE_HOLD_MS
     sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
 
     if stop_before_align:
@@ -181,6 +204,7 @@ def main(ctx):
     ambiguous_presentation_count = 0
     transient_missing_count = 0
     target_seen = False
+    compass_deadline_error_count = 0
 
     for _ in range(sample_limit):
         sample_started_ms = task.elapsed_milliseconds()
@@ -192,7 +216,16 @@ def main(ctx):
         sample += 1
         if not attempt["ok"]:
             release_lease(active_lease_id, active_lease_control, "OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
-            emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=attempt["error"])
+            error_text = attempt["error"]
+            bounded_error = error_text if len(error_text) <= 512 else error_text[:512]
+            if attempt["errorCode"] == "JOB_DEADLINE_EXCEEDED":
+                compass_deadline_error_count += 1
+                emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_DEADLINE_RETRY", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
+                if compass_deadline_error_count > MAX_COMPASS_DEADLINE_ERRORS:
+                    fail("Compass deadline error limit exceeded after five skipped errors: " + error_text)
+                wait_for_sample_cadence(sample_started_ms)
+                continue
+            emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_OBSERVATION_FAILED", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
             fail("Compass observation failed: " + attempt["error"])
 
         observation = attempt["output"]
@@ -281,9 +314,11 @@ def main(ctx):
             emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_MOVING_AWAY", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control moved the front Compass target away from center")
 
+        active_alignment_radius = alignment_radius + alignment_hysteresis if stable_confirmations > 0 else alignment_radius
+        alignment_centered = is_alignment_centered(target, active_alignment_radius)
         phase = "TURNING_TO_FRONT"
         if target["presentation"] == "SOLID":
-            if target["centerZone"]["inside"]:
+            if alignment_centered:
                 phase = "VERIFYING_CENTER"
             elif target["centerDistancePixels"] > SUSTAINED_DISTANCE_PIXELS:
                 phase = "COARSE_ALIGN"
@@ -313,13 +348,26 @@ def main(ctx):
                 stream.activity(message="Verifying stable compass center", level="info")
             previous_phase = phase
 
-        if target["presentation"] == "SOLID" and target["centerZone"]["inside"]:
+        if alignment_centered:
             stable_confirmations += 1
             center_contact_count += 1
             if stable_confirmations > max_consecutive_center:
                 max_consecutive_center = stable_confirmations
         else:
             stable_confirmations = 0
+
+        if mode == "ALIGN" and control_profile == "NORMAL_SPACE" and alignment_centered and commanded_target != None and commanded_control != None:
+            brake_control = opposite_control(commanded_control)
+            if brake_control != None:
+                if command_count >= MAX_COMMANDS:
+                    emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, reason="COMMAND_LIMIT_REACHED")
+                    fail("Compass alignment exhausted the bounded command limit")
+                brake_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": brake_control, "holdMs": CENTER_ENTRY_BRAKE_MS})
+                command_count += 1
+                stream.activity(message=brake_control + " center-entry brake for " + str(CENTER_ENTRY_BRAKE_MS) + " ms", level="info")
+                emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=CENTER_ENTRY_BRAKE_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="CENTER_ENTRY_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            commanded_target = None
+            commanded_control = None
 
         if mode == "ALIGN" and stable_confirmations >= STABLE_CENTER_CONFIRMATIONS:
             emit_update("COMPLETED", sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SOLID_TARGET_STABLY_CENTERED")
@@ -377,7 +425,7 @@ def main(ctx):
             wait_for_sample_cadence(sample_started_ms)
             continue
 
-        pulse = None if target["centerZone"]["inside"] else choose_pulse(target, no_movement_count)
+        pulse = None if (alignment_centered if mode == "ALIGN" else target["centerZone"]["inside"]) else choose_pulse(target, no_movement_count, fine_distance, fine_hold, supercruise_profile)
         if pulse == None:
             commanded_target = None
             commanded_control = None

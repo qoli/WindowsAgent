@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.align-visible-target.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "targetName", "sample", "commandCount", "targetState", "offsetX", "offsetY", "centerDistancePixels", "stableConfirmations", "command", "commandHoldMs", "reason", "observationErrorCode", "observationError"],
+      "properties": {
+        "phase": {"enum": ["STOPPING", "OBSERVING", "ALIGNING", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR"]},
+        "targetName": {"type": "string", "maxLength": 96},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 120},
+        "commandCount": {"type": "integer", "minimum": 0, "maximum": 80},
+        "targetState": {"type": ["string", "null"], "enum": ["DETECTED", "UNKNOWN", null]},
+        "offsetX": {"type": ["number", "null"]},
+        "offsetY": {"type": ["number", "null"]},
+        "centerDistancePixels": {"type": ["number", "null"], "minimum": 0},
+        "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 120},
+        "command": {"type": ["string", "null"], "enum": ["SET_THROTTLE_0", "PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
+        "commandHoldMs": {"type": ["integer", "null"], "minimum": 40, "maximum": 400},
+        "reason": {"type": ["string", "null"], "maxLength": 256},
+        "observationErrorCode": {"type": ["string", "null"], "maxLength": 96},
+        "observationError": {"type": ["string", "null"], "maxLength": 512}
+      }
+    }
+  }
+}

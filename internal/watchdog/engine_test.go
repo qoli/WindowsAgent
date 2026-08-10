@@ -1,6 +1,7 @@
 package watchdog
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -178,5 +179,30 @@ func TestEngineOpensCircuitAfterConfiguredAttemptBudget(t *testing.T) {
 	}
 	if recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateCircuitOpen {
 		t.Fatalf("recovery calls=%d state=%s", recoverer.calls, engine.targets["event-stream"].status.State)
+	}
+}
+
+func TestEngineLogsCircuitOpenOnlyOnceUntilStateChanges(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	config.Targets[0].FailureThreshold = 1
+	config.Targets[0].Recovery.MaxAttempts = 1
+	config.Targets[0].Recovery.StartupGraceMS = 1
+	observer := &fakeObserver{observation: Observation{Healthy: false, Detail: "down"}}
+	recoverer := &fakeRecoverer{err: errors.New("restart rejected")}
+	var logs bytes.Buffer
+	engine, _ := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewTextHandler(&logs, nil)))
+	clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	engine.clock = clock
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		clock.now = clock.now.Add(time.Second)
+		if err := engine.Cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Count(logs.String(), "watchdog_recovery_budget_exhausted"); got != 1 {
+		t.Fatalf("budget-exhausted log count = %d\n%s", got, logs.String())
 	}
 }

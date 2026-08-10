@@ -46,6 +46,22 @@ func TestCheckAcceptsStaticDependenciesInsideWhile(t *testing.T) {
 	}
 }
 
+func TestCheckAcceptsLinearInterruptibleStreamingChildFromStreamingParent(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureRule(t, root, "Game.exe", []fixtureAction{
+		{id: "game/parent", path: "Actions/parent", runtime: rules.StreamingActionRuntimeV1, completion: rules.CompletionStream, script: callScript(`"game/child"`)},
+		{id: "game/child", path: "Actions/child", runtime: rules.StreamingActionRuntimeV1, completion: rules.CompletionStream},
+	})
+
+	result, err := Check(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || len(result.Issues) != 0 || result.DependencyCount != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestCheckReportsDependencyFailures(t *testing.T) {
 	tests := []struct {
 		name         string

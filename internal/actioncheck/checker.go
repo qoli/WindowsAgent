@@ -162,9 +162,16 @@ func Check(rulesRoot string) (Result, error) {
 				fmt.Sprintf("referenced Action %q belongs to Rule %q", child.ID, child.RuleID)))
 			continue
 		}
-		if child.Execution.Completion != rules.CompletionReturn {
+		if child.Execution.Completion == rules.CompletionStream && (ref.caller.Execution.Completion != rules.CompletionStream ||
+			(ref.primitive != "action.call" && ref.primitive != "action.try_call") ||
+			child.Execution.Lifecycle != rules.LifecycleLinear ||
+			!child.Execution.Interruptible) {
 			result.Issues = append(result.Issues, issueForReference(ref, CodeStreamingChild,
-				fmt.Sprintf("referenced Action %q must declare return completion", child.ID)))
+				fmt.Sprintf("referenced streaming Action %q requires a streaming parent action.call/try_call and linear interruptible child", child.ID)))
+			continue
+		} else if child.Execution.Completion != rules.CompletionReturn && child.Execution.Completion != rules.CompletionStream {
+			result.Issues = append(result.Issues, issueForReference(ref, CodeStreamingChild,
+				fmt.Sprintf("referenced Action %q declares unsupported completion %q", child.ID, child.Execution.Completion)))
 			continue
 		}
 		if child.ID == ref.caller.ID {

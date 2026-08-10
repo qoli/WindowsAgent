@@ -1,6 +1,6 @@
 ---
 name: operate-windowsagent
-description: "Discover, invoke, observe, test, and troubleshoot the live WindowsAgent capabilities owned by the foreground executable's matched Rule. Use when Codex must capture the current Windows screen, read Rule guidance and Action catalogs, invoke finite or streaming Actions, compose a bounded ephemeral Action Sequence, follow invocation events, validate a real game or app outcome, or repair an Action exposed by live evidence. Do not use Monitor or Reaction as executable or verified capabilities; their scheduler and dispatcher remain unvalidated and outside this v1 skill."
+description: "Discover, invoke, observe, test, troubleshoot, and extend the live WindowsAgent capabilities owned by the foreground executable's matched Rule. Use when Codex must capture the current Windows screen, decide whether an interaction belongs in a new finite or streaming Action, identify an Action capability gap, read Rule guidance and Action catalogs, invoke Actions, compose a bounded ephemeral Action Sequence, follow invocation events, validate a real game or app outcome, or repair an Action exposed by live evidence. Do not use Monitor or Reaction as executable or verified capabilities; their scheduler and dispatcher remain unvalidated and outside this v1 skill."
 ---
 
 # Operate WindowsAgent
@@ -50,6 +50,58 @@ contract explicitly supersedes this skill version.
 The running catalog outranks a repository file because Rule packages may be
 hot-updated independently. After deployment or Rule synchronization, fetch a
 new capture and catalogs before claiming the capability is available.
+
+## Decide when an interaction must become an Action
+
+Before composing primitives or starting a multi-step task, decide which layer
+owns every intended game capability. Treat an interaction as an **Action gap**
+when no existing Action owns its complete, evidence-backed postcondition.
+
+Create or extend an Action when any of these conditions apply:
+
+- completion requires more than one observe-decide-operate cycle;
+- the result of an operation cannot be confirmed by that same bounded call;
+- correct response timing is shorter than the supervising model's interaction
+  cadence;
+- execution must wait for the game or application to finish an animation,
+  transition, movement, loading phase, or other asynchronous work;
+- execution must retain prior observations, trends, counters, control
+  ownership, or other state across calls;
+- the capability needs a timeout, retry, debounce, cancellation, cleanup, or
+  failure compensation contract;
+- a stable game-level capability would otherwise require the supervising model
+  to repeat or conditionally combine primitive inputs;
+- the capability should be reusable by another workflow, sequence, Monitor, or
+  Reaction; or
+- success depends on domain evidence rather than proof that an input was sent.
+
+Use this decisive test: if the supervising model must wake up in a later turn
+to ensure the current operation completes correctly, put that responsibility
+inside an Action.
+
+Choose the smallest suitable abstraction:
+
+- Use a finite Action for one bounded operation or observation whose terminal
+  output can express its complete postcondition.
+- Use a linear Streaming Action when the capability owns an asynchronous or
+  repeated observation-and-operation lifecycle with explicit terminal states.
+- Use an ephemeral Action Sequence only for a fixed, finite ordering of
+  already-complete Actions. Do not use a sequence to hide a missing capability,
+  stateful decision, or compensation contract.
+- Keep long-horizon intent, target choice, and composition of independent
+  capabilities with the supervising model.
+
+Do not create an Action merely to rename unrelated primitives or to encode a
+one-off sequence with no stable capability semantics. When the domain
+postcondition is not yet understood, collect evidence first instead of
+inventing a success condition.
+
+When an Action gap is found, do not improvise the missing capability by
+repeated primitive calls. If the task authorizes maintenance, implement the
+smallest Action at the Rule or generic runtime layer that owns the semantics,
+then test, deploy, refresh the live catalog, and use it. If the task is
+operation-only, stop at the gap and report the required Action contract without
+editing or deploying.
 
 ## Select the capability
 

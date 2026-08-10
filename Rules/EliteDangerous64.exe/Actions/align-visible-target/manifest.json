@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 7,
-  "title": "Elite Dangerous dock at station",
+  "version": 1,
+  "title": "Elite Dangerous precisely align a visible HUD target",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {"maxSteps": 1000000000000, "maxOutputBytes": 8192, "maxEventBytes": 4096, "maxSleepMs": 1000}
+  "limits": {"maxSteps": 1000000, "maxOutputBytes": 16384, "maxEventBytes": 8192, "maxSleepMs": 250}
 }

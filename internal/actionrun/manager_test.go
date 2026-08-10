@@ -30,6 +30,22 @@ func (j storeJournal) Append(ctx context.Context, request eventstream.AppendRequ
 	return j.store.Append(ctx, request)
 }
 
+func (j storeJournal) Replay(ctx context.Context, after uint64, limit int) ([]eventstream.Event, uint64, uint64, error) {
+	events, err := j.store.ReadAfter(ctx, after, limit)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	last, err := j.store.LastSequence()
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	next := after
+	if len(events) != 0 {
+		next = events[len(events)-1].Sequence
+	}
+	return events, next, last, nil
+}
+
 func (j storeJournal) Stream(ctx context.Context, after uint64, visit func(eventstream.Event) error) error {
 	cursor := after
 	for {
@@ -161,6 +177,60 @@ func TestFiniteActionReturnsTerminalOutputWithoutEventCallback(t *testing.T) {
 	last, err := store.LastSequence()
 	if err != nil || last != 0 {
 		t.Fatalf("event sequence = %d, err = %v", last, err)
+	}
+}
+
+func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
+	executor := &fakeExecutor{}
+	previous, store := newTestManager(t, executor)
+	if err := previous.Close(); err != nil {
+		t.Fatal(err)
+	}
+	started, err := store.Append(context.Background(), eventstream.AppendRequest{
+		SessionID: "act_interrupted", Stream: StreamName, Type: "action.started",
+		ObservedAt:    time.Now().UTC(),
+		Source:        eventstream.Source{ModuleID: "game/linear", InstanceID: "act_interrupted", Runtime: rules.StreamingActionRuntimeV1},
+		Foreground:    eventstream.Foreground{ExecutableName: "Game.exe", Revision: 1},
+		CorrelationID: "act_interrupted",
+		Payload:       json.RawMessage(`{"state":"RUNNING","actionId":"game/linear","lifecycle":"linear","interruptible":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(previous.rules, executor, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { manager.Close() })
+
+	status, err := manager.Get("act_interrupted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateFailed || !strings.Contains(status.Error, "process exited") || status.Stop != nil {
+		t.Fatalf("status = %+v", status)
+	}
+	events, err := store.ReadAfter(context.Background(), started.Sequence-1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.failed" {
+		t.Fatalf("event types = %s", got)
+	}
+	if !strings.Contains(string(events[1].Payload), `"errorCode":"ABORTED_BY_AGENT_RESTART"`) || events[1].CausationID != started.EventID {
+		t.Fatalf("terminal event = %+v", events[1])
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewManager(previous.rules, executor, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { restarted.Close() })
+	status, err = restarted.Get("act_interrupted")
+	if err != nil || status.State != StateFailed || !strings.Contains(status.Error, "process exited") {
+		t.Fatalf("status after second restart = %+v, err = %v", status, err)
 	}
 }
 

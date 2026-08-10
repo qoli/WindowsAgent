@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "targetName", "sampleCount", "commandCount", "stableConfirmations", "finalTarget"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "ALIGN_VISIBLE_TARGET"},
+    "completed": {"const": true},
+    "targetName": {"type": "string"},
+    "sampleCount": {"type": "integer", "minimum": 3, "maximum": 120},
+    "commandCount": {"type": "integer", "minimum": 0, "maximum": 80},
+    "stableConfirmations": {"type": "integer", "minimum": 3, "maximum": 120},
+    "finalTarget": {"type": "object"}
+  }
+}

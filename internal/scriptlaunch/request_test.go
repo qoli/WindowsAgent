@@ -102,3 +102,14 @@ func TestParseLauncherOutputRequiresErrorOnFailedExit(t *testing.T) {
 		t.Fatalf("parseLauncherOutput() error = %v", err)
 	}
 }
+
+func TestParseLauncherOutputPreservesStructuredFailure(t *testing.T) {
+	_, err := parseLauncherOutput(
+		[]byte(`{"ok":false,"error":"deadline","errorCode":"JOB_DEADLINE_EXCEEDED","errorStage":"executing-script"}`),
+		errors.New("exit status 1"),
+	)
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Code != "JOB_DEADLINE_EXCEEDED" || typed.Stage != "executing-script" {
+		t.Fatalf("error = %#v", err)
+	}
+}

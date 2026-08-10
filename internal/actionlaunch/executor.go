@@ -3,9 +3,11 @@ package actionlaunch
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"path/filepath"
 	"strings"
@@ -148,7 +150,7 @@ func (e *Executor) RunStreaming(ctx context.Context, invocation scriptlaunch.Inv
 	if err != nil {
 		return Result{}, fmt.Errorf("load streaming Action %q: %w", action.ID, err)
 	}
-	output, err := (streamaction.Runner{}).Run(ctx, pkg, invocation.Inputs, childCaller{executor: e, parent: action}, reporter)
+	output, err := (streamaction.Runner{}).Run(ctx, pkg, invocation.Inputs, childCaller{executor: e, parent: action, reporter: reporter}, reporter)
 	if err != nil {
 		return Result{}, err
 	}
@@ -158,6 +160,7 @@ func (e *Executor) RunStreaming(ctx context.Context, invocation scriptlaunch.Inv
 type childCaller struct {
 	executor *Executor
 	parent   rules.Action
+	reporter streamaction.Reporter
 }
 
 func (c childCaller) Call(ctx context.Context, actionID string, inputs map[string]any) (json.RawMessage, error) {
@@ -171,14 +174,87 @@ func (c childCaller) Call(ctx context.Context, actionID string, inputs map[strin
 	if !strings.EqualFold(child.RuleID, c.parent.RuleID) {
 		return nil, fmt.Errorf("child Action %q belongs to Rule %q, expected %q", child.ID, child.RuleID, c.parent.RuleID)
 	}
+	if child.Execution.Completion == rules.CompletionStream {
+		if c.parent.Execution.Completion != rules.CompletionStream || c.reporter == nil {
+			return nil, fmt.Errorf("streaming child Action %q requires a streaming parent reporter", child.ID)
+		}
+		if child.Execution.Lifecycle != rules.LifecycleLinear || !child.Execution.Interruptible {
+			return nil, fmt.Errorf("streaming child Action %q must be linear and interruptible", child.ID)
+		}
+		childExecutionID, err := newChildExecutionID(rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("create streaming child execution ID: %w", err)
+		}
+		reporter := nestedChildReporter{parent: c.reporter, actionID: child.ID, childExecutionID: childExecutionID}
+		if err := reporter.emit(ctx, "action.child.started", nil); err != nil {
+			return nil, err
+		}
+		result, err := c.executor.RunStreaming(ctx, scriptlaunch.Invocation{Capability: actionID, Inputs: inputs}, reporter)
+		if err != nil {
+			if emitErr := reporter.emit(context.WithoutCancel(ctx), "action.child.failed", map[string]any{"error": err.Error()}); emitErr != nil {
+				return nil, errors.Join(err, emitErr)
+			}
+			return nil, err
+		}
+		if err := reporter.emit(ctx, "action.child.completed", map[string]any{"output": json.RawMessage(result.Output)}); err != nil {
+			return nil, err
+		}
+		return append(json.RawMessage(nil), result.Output...), nil
+	}
 	if child.Execution.Completion != rules.CompletionReturn {
-		return nil, fmt.Errorf("child Action %q must declare return completion", child.ID)
+		return nil, fmt.Errorf("child Action %q declares unsupported completion %q", child.ID, child.Execution.Completion)
 	}
 	result, err := c.executor.RunAction(ctx, scriptlaunch.Invocation{Capability: actionID, Inputs: inputs})
 	if err != nil {
 		return nil, err
 	}
 	return append(json.RawMessage(nil), result.Output...), nil
+}
+
+type nestedChildReporter struct {
+	parent           streamaction.Reporter
+	actionID         string
+	childExecutionID string
+}
+
+func (r nestedChildReporter) Emit(ctx context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
+	var decoded any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return eventstream.Event{}, fmt.Errorf("decode streaming child event payload: %w", err)
+	}
+	return r.emitEvent(ctx, "action.child.event", map[string]any{"type": eventType, "payload": decoded})
+}
+
+func (r nestedChildReporter) emit(ctx context.Context, eventType string, payload map[string]any) error {
+	_, err := r.emitEvent(ctx, eventType, payload)
+	return err
+}
+
+func (r nestedChildReporter) emitEvent(ctx context.Context, eventType string, payload map[string]any) (eventstream.Event, error) {
+	if r.parent == nil || r.actionID == "" || r.childExecutionID == "" {
+		return eventstream.Event{}, errors.New("streaming child reporter is incomplete")
+	}
+	envelope := map[string]any{"actionId": r.actionID, "childExecutionId": r.childExecutionID}
+	for key, value := range payload {
+		envelope[key] = value
+	}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		return eventstream.Event{}, fmt.Errorf("encode streaming child event: %w", err)
+	}
+	event, err := r.parent.Emit(ctx, eventType, encoded)
+	if err != nil {
+		return eventstream.Event{}, fmt.Errorf("commit streaming child event: %w", err)
+	}
+	return event, nil
+}
+
+func newChildExecutionID(random io.Reader) (string, error) {
+	var data [16]byte
+	if _, err := io.ReadFull(random, data[:]); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("child_%x", data[:]), nil
 }
 
 type denyCompositeEvents struct{}

@@ -265,7 +265,9 @@ def close_panel(target_name, observation, panel_cycles, navigation_count, opened
     task.sleep(milliseconds=UI_SETTLE_MS)
     stable = observe_contacts_stable()
     if stable["observation"]["activeTab"]["state"] != "ABSENT":
-        fail("left panel remained visible after restoring the forward view")
+        semantic = resolve_navigation_from_target(target_name, "VERIFYING_NAVIGATION_SEMANTIC", panel_cycles, navigation_count, opened_panel)
+        if semantic["state"] == "NAVIGATION":
+            fail("left panel remained visible after restoring the forward view")
     action.clear_on_failure()
     return True
 
@@ -312,6 +314,7 @@ def main(ctx):
     for _ in range(MAX_PANEL_CYCLES):
         if state == "NAVIGATION":
             break
+        state_before_cycle = state
         action.call(id="elite-dangerous/ui-control", inputs={"control": "NEXT_PANEL"})
         panel_cycles += 1
         emit_update("OPENING_PANEL", target_name, None, contacts, "NEXT_PANEL", panel_cycles, navigation_count, opened_panel)
@@ -320,6 +323,22 @@ def main(ctx):
         observation_count += contacts_stable["count"]
         contacts = contacts_stable["observation"]
         state = contacts["activeTab"]["state"]
+        if state == state_before_cycle:
+            # The compact tab header remains visible in the forward cockpit
+            # view. A notification can therefore look exactly like a selected
+            # tab even though the left panel has no input focus. NEXT_PANEL is
+            # ignored in that state, so recover by explicitly focusing the
+            # panel and continue from the newly observed tab.
+            action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
+            if not opened_panel:
+                opened_panel = True
+                action.on_failure(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
+            emit_update("OPENING_PANEL", target_name, None, contacts, "FOCUS_LEFT_PANEL", panel_cycles, navigation_count, opened_panel)
+            task.sleep(milliseconds=UI_SETTLE_MS)
+            contacts_stable = observe_contacts_stable()
+            observation_count += contacts_stable["count"]
+            contacts = contacts_stable["observation"]
+            state = contacts["activeTab"]["state"]
         if state == "ABSENT":
             fail("Left panel header became absent while selecting NAVIGATION")
         if state == "UNKNOWN":

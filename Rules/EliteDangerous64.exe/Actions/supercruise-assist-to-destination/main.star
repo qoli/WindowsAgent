@@ -4,7 +4,6 @@ STABLE_ATTEMPTS = 4
 MAX_PANEL_CYCLES = 3
 MAX_NAVIGATION = 8
 NAVIGATION_LOCK_WARMUP_RETRIES = 3
-INITIAL_ALIGN_LIMIT = 120
 SUPERCRUISE_ENTRY_LIMIT = 30
 ASSIST_START_LIMIT = 240
 BLUE_ZONE_GRACE_SAMPLES = 3
@@ -12,12 +11,6 @@ ASSIST_ACTIVE_LIMIT = 2400
 ASSIST_ACTIVE_CONFIRMATIONS = 2
 ASSIST_MISSING_LIMIT = 30
 STOPPED_CONFIRMATIONS = 3
-CENTER_CONFIRMATIONS = 3
-APPROACH_CENTER_PIXELS = 16
-COARSE_DISTANCE_PIXELS = 40
-COARSE_HOLD_MS = 800
-MEDIUM_HOLD_MS = 300
-FINE_HOLD_MS = 250
 MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 MIN_TEXT_SIMILARITY = 0.72
@@ -321,58 +314,19 @@ def observe_supercruise_hud_stable():
         task.sleep(milliseconds=POLL_MS)
     fail("Supercruise HUD did not produce two consecutive ACTIVE observations")
 
-def observe_compass_target():
-    target = action.call(id="elite-dangerous/compass", inputs={})["target"]
-    if not target["detected"]:
-        fail("Compass target is absent after the locked destination was selected")
-    if target["presentation"] == "UNKNOWN":
-        fail("Compass target presentation is UNKNOWN")
-    return target
-
-def choose_alignment_command(target):
-    if target["presentation"] == "HOLLOW":
-        return ["YAW_LEFT", COARSE_HOLD_MS]
-    distance = target["centerDistancePixels"]
-    if distance <= APPROACH_CENTER_PIXELS:
-        return None
-    hold_ms = COARSE_HOLD_MS
-    if distance <= APPROACH_CENTER_PIXELS * 2:
-        hold_ms = FINE_HOLD_MS
-    elif distance <= COARSE_DISTANCE_PIXELS:
-        hold_ms = MEDIUM_HOLD_MS
-    offset_x = target["offsetX"]
-    offset_y = target["offsetY"]
-    if abs(offset_x) >= abs(offset_y) and offset_x != 0:
-        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", hold_ms]
-    if offset_y != 0:
-        return ["PITCH_DOWN" if offset_y > 0 else "PITCH_UP", hold_ms]
-    return None
-
-def apply_alignment(target):
-    command = choose_alignment_command(target)
-    if command == None:
-        return None
-    action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": command[0], "holdMs": command[1]})
-    return command[0] + ":" + str(command[1])
-
-def apply_supercruise_screen_alignment(target_name):
-    target = observe_compass_target()
-    return {"target": target, "command": apply_alignment(target)}
-
 def align_initial(target_name):
-    stable = 0
-    for sample in range(1, INITIAL_ALIGN_LIMIT + 1):
-        target = observe_compass_target()
-        command = apply_alignment(target)
-        if target["presentation"] == "SOLID" and target["centerDistancePixels"] <= APPROACH_CENTER_PIXELS:
-            stable += 1
-        else:
-            stable = 0
-        emit_update("ALIGNING", sample, target_name, target=target, last_command=command, reason="ALIGNING_BEFORE_ASSIST_ENTRY")
-        if stable >= CENTER_CONFIRMATIONS:
-            return sample
-        task.sleep(milliseconds=POLL_MS)
-    fail("target did not reach three consecutive aligned Compass observations")
+    compass_result = action.call(
+        id="elite-dangerous/align-station-target",
+        inputs={"mode": "ALIGN", "stopBeforeAlign": False, "controlProfile": "SUPERCRUISE_ASSIST"},
+    )
+    emit_update("ALIGNING", compass_result["sampleCount"], target_name, last_command="ALIGN_STATION_TARGET", reason="SUPERVISED_COMPASS_ALIGNMENT_COMPLETED")
+    visible_result = action.call(
+        id="elite-dangerous/align-visible-target",
+        inputs={"targetName": target_name, "stopBeforeAlign": False},
+    )
+    sample_count = compass_result["sampleCount"] + visible_result["sampleCount"]
+    emit_update("ALIGNING", sample_count, target_name, last_command="ALIGN_VISIBLE_TARGET", reason="SUPERVISED_VISIBLE_TARGET_ALIGNMENT_COMPLETED")
+    return sample_count
 
 def preflight(target_name):
     ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
@@ -404,7 +358,7 @@ def main(ctx):
     stream.activity(message="Aligning destination before Supercruise Assist entry", level="info")
     sample = align_initial(target_name)
 
-    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     charging_seen = supercruise_confirmed
     entered = supercruise_confirmed
     last_flight_status = "UNKNOWN"
@@ -429,8 +383,11 @@ def main(ctx):
                 charging_seen = True
             elif last_flight_status == "FSD_ALIGNMENT_REQUIRED":
                 charging_seen = True
-                target = observe_compass_target()
-                command = apply_alignment(target)
+                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+                emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
+                alignment_sample_count = align_initial(target_name)
+                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
+                command = "ALIGN_TARGETS:" + str(alignment_sample_count) + "+SET_THROTTLE_100"
                 phase = "ALIGNING_FOR_ENTRY"
             elif last_flight_status == "SUPERCRUISE":
                 if not charging_seen:
@@ -468,7 +425,7 @@ def main(ctx):
         request_assist(target_name, sample)
         close_panel(target_name, sample)
         action.clear_on_failure()
-        action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+        action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     else:
         emit_update("WAITING_FOR_ASSIST", sample, target_name, commanded_throttle=0, reason="ASSIST_REQUEST_CONFIRMED_AT_RESUME")
 
@@ -493,9 +450,12 @@ def main(ctx):
             assist_active_confirmations = 0
             alignment_required_samples += 1
             if alignment_required_samples > BLUE_ZONE_GRACE_SAMPLES:
-                alignment = apply_supercruise_screen_alignment(target_name)
-                target = alignment["target"]
-                command = alignment["command"]
+                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+                emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
+                alignment_sample_count = align_initial(target_name)
+                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+                command = "ALIGN_TARGETS:" + str(alignment_sample_count) + "+SET_THROTTLE_75"
+                alignment_required_samples = 0
                 phase = "ALIGNING_FOR_ENTRY"
         elif last_flight_status in ["SUPERCRUISE", "SAFE_DISENGAGE_READY", "UNKNOWN"]:
             assist_active_confirmations = 0

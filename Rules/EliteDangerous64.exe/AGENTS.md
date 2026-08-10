@@ -63,12 +63,14 @@ leased sustained control while Compass is sampled at a one-second
 start-to-start cadence. It releases the hold on hemisphere, axis, or fine-band
 transition. A far solid marker with meaningful error on both axes uses the
 compound pitch-plus-yaw lease for diagonal movement. Inside 40 pixels it
-returns to distance-scaled bounded pulses at the same cadence. Events expose
+returns to distance-scaled bounded pulses at the same cadence. Near-center
+pulses are 120 ms, and the first pulse-driven alignment-center entry applies a 100 ms
+opposite-axis brake before stable verification. Events expose
 control mode, lease state, sample timing, requested
 pulse duration, observed marker movement, distance delta, moving-away trend,
 and consecutive no-movement count. Four stationary samples
 or five consecutive front samples moving away fail explicitly. Three
-consecutive solid samples in the four-pixel center zone are required for
+consecutive solid samples within the stricter 1.5-pixel alignment radius are required for
 completion. Its structured update events are the durable control timeline;
 explicit activity events supply the Action OSD. An owning flight workflow may
 set `stopBeforeAlign=false` when it already controls throttle. It does not establish Station
@@ -166,7 +168,11 @@ watches indefinitely and builds a temporal distance trend: two readings within
 `1000m` establish continuity, a larger one-frame jump is rejected, and two
 mutually continuous readings can rebase the track. Admission requires at least
 three trusted trend samples followed by two accepted `ALLOWED` samples;
-`DENIED` and `UNKNOWN` remain visible waiting states. After its one-time range admission
+`UNKNOWN` remains a visible waiting state. Three trusted `DENIED` samples
+invoke `advance-toward-station` once with a 7000m stop target; the child owns
+its bounded movement and 0% compensation, after which the parent rebuilds the
+distance trend from current frames. An already allowed distance does not
+invoke the child. After its one-time range admission
 and verified docking request, monitoring uses explicit
 `action.try_call` results. A failed child observation is written as
 `OBSERVATION_ERROR`, does not advance the prompt-disappearance or Landing Gear
@@ -402,8 +408,9 @@ speed fields and report `COMPLETED`, `FAILED`, or `CANCELLED`.
 Up to five explicitly coded transient WGC capture failures may be skipped and
 are emitted as `OBSERVATION_ERROR`; the sixth fails the workflow. Immediately
 before the 100% command, the workflow registers a runtime failure compensation
-that sends 0% if any later path fails. A successful explicit 0% command clears
-that compensation.
+that sends 0% if any later path fails. The compensation is critical and has an
+independent timeout, so later panel cleanup cannot consume its execution budget.
+A successful explicit 0% command clears that compensation.
 
 ## Filesystem information Actions
 

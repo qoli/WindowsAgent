@@ -43,6 +43,7 @@ const (
 
 type Journal interface {
 	Append(context.Context, eventstream.AppendRequest) (eventstream.Event, error)
+	Replay(context.Context, uint64, int) ([]eventstream.Event, uint64, uint64, error)
 	Stream(context.Context, uint64, func(eventstream.Event) error) error
 }
 
@@ -116,11 +117,114 @@ func NewManager(ruleStore *rules.Store, executor Executor, journal Journal, fore
 	if ruleStore == nil || executor == nil || journal == nil || foregroundSnapshot == nil || logger == nil {
 		return nil, errors.New("Rule store, Action executor, event journal, foreground resolver, and logger are required")
 	}
-	return &Manager{
+	manager := &Manager{
 		rules: ruleStore, executor: executor, journal: journal, foreground: foregroundSnapshot,
 		now: time.Now, random: rand.Reader, logger: logger, runs: map[string]*run{},
 		sequenceByRule: map[string]string{}, activeExternal: map[string]uint32{},
-	}, nil
+	}
+	recoveryContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := manager.recoverInterrupted(recoveryContext); err != nil {
+		return nil, fmt.Errorf("recover interrupted Action invocations: %w", err)
+	}
+	return manager, nil
+}
+
+type interruptedRun struct {
+	instance *run
+	started  eventstream.Event
+	last     eventstream.Event
+}
+
+func (m *Manager) recoverInterrupted(ctx context.Context) error {
+	pending := map[string]interruptedRun{}
+	restartTerminated := map[string]*run{}
+	var cursor uint64
+	for {
+		events, next, last, err := m.journal.Replay(ctx, cursor, eventstream.MaxReplayLimit)
+		if err != nil {
+			return err
+		}
+		for _, event := range events {
+			if event.Stream != StreamName || event.CorrelationID == "" {
+				continue
+			}
+			switch event.Type {
+			case "action.started":
+				var payload struct {
+					Lifecycle     string `json:"lifecycle"`
+					Interruptible bool   `json:"interruptible"`
+				}
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					return fmt.Errorf("decode start event %s: %w", event.EventID, err)
+				}
+				action := rules.Action{
+					ID: event.Source.ModuleID, RuleID: event.Foreground.ExecutableName, Runtime: event.Source.Runtime,
+					Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: payload.Lifecycle, Interruptible: payload.Interruptible},
+				}
+				instance := &run{
+					manager: m, action: action, identity: event.CorrelationID, state: StateFailed,
+					ctx: context.Background(), cancel: func() {},
+					afterCursor: event.Sequence - 1, lastEventID: event.EventID,
+				}
+				pending[event.CorrelationID] = interruptedRun{instance: instance, started: event, last: event}
+			case "action.completed", "action.failed", "action.cancelled":
+				if event.Type == "action.failed" {
+					var payload struct {
+						Error     string `json:"error"`
+						ErrorCode string `json:"errorCode"`
+					}
+					if err := json.Unmarshal(event.Payload, &payload); err != nil {
+						return fmt.Errorf("decode terminal event %s: %w", event.EventID, err)
+					}
+					if payload.ErrorCode == "ABORTED_BY_AGENT_RESTART" {
+						if recovered, ok := pending[event.CorrelationID]; ok {
+							recovered.instance.errorText = payload.Error
+							recovered.instance.lastEventID = event.EventID
+							restartTerminated[event.CorrelationID] = recovered.instance
+						}
+					}
+				}
+				delete(pending, event.CorrelationID)
+			default:
+				if recovered, ok := pending[event.CorrelationID]; ok {
+					recovered.last = event
+					recovered.instance.lastEventID = event.EventID
+					pending[event.CorrelationID] = recovered
+				}
+			}
+		}
+		cursor = next
+		if cursor >= last {
+			break
+		}
+		if len(events) == 0 {
+			return fmt.Errorf("event replay made no progress at cursor %d of %d", cursor, last)
+		}
+	}
+	for identity, instance := range restartTerminated {
+		m.runs[identity] = instance
+	}
+	for identity, recovered := range pending {
+		errorText := "streaming Action was interrupted because the Windows Agent process exited"
+		recovered.instance.errorText = errorText
+		terminal, err := recovered.instance.appendEvent(ctx, "action.failed", map[string]any{
+			"state": StateFailed, "error": errorText, "errorCode": "ABORTED_BY_AGENT_RESTART",
+			"previousEventId": recovered.last.EventID,
+		})
+		if err != nil {
+			return fmt.Errorf("terminalize interrupted invocation %s: %w", identity, err)
+		}
+		recovered.instance.lastEventID = terminal.EventID
+		m.runs[identity] = recovered.instance
+		m.logger.Warn("streaming_action_interrupted_by_restart",
+			"invocation_id", identity,
+			"action_id", recovered.instance.action.ID,
+			"started_at", recovered.started.ObservedAt,
+			"last_event_id", recovered.last.EventID,
+		)
+	}
+	return nil
 }
 
 func (m *Manager) Invoke(ctx context.Context, invocation scriptlaunch.Invocation) (Invocation, error) {

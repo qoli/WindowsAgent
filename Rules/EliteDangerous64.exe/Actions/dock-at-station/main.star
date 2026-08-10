@@ -22,6 +22,9 @@ RANGE_ALLOWED_CONFIRMATIONS = 2
 RANGE_OBSERVATION_ERROR_LIMIT = 5
 RANGE_TREND_MIN_SAMPLES = 3
 RANGE_MAX_STEP_METERS = 1000
+SAFE_ADVANCE_THROTTLE_PERCENT = 75
+SAFE_ADVANCE_STOP_METERS = 7000
+SAFE_ADVANCE_MAX_DURATION_MS = 30000
 AUTO_DOCK_LIFECYCLE_STATUSES = ["WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "AUTO_DOCK"]
 
 def emit_update(phase, sample, contact_index, range_state, distance_meters, request_state, flight_status, landing_gear, auto_dock_seen, auto_dock_consecutive, auto_dock_missing, landing_gear_on_consecutive, last_command=None, reason=None, observation_error_count=0, observation_error=None, range_wait_samples=0, range_trend_state="NOT_STARTED", range_trend_samples=0, accepted_distance_meters=None, range_outlier_count=0):
@@ -86,6 +89,9 @@ def wait_for_range(sample):
     accepted_distance = None
     trend_samples = 0
     outlier_count = 0
+    safe_advance_used = False
+    safe_advance_initial_distance = None
+    safe_advance_final_distance = None
     while True:
         range_wait_samples += 1
         attempt = action.try_call(id="elite-dangerous/request-docking-range", inputs={})
@@ -137,7 +143,8 @@ def wait_for_range(sample):
                     rebase_candidate = distance_meters
         else:
             trend_state = "EVIDENCE_UNKNOWN"
-        if accepted_current and trend_samples >= RANGE_TREND_MIN_SAMPLES and range_state == "ALLOWED":
+        trusted_range = accepted_current and trend_samples >= RANGE_TREND_MIN_SAMPLES
+        if trusted_range and range_state == "ALLOWED":
             allowed_confirmations += 1
         else:
             allowed_confirmations = 0
@@ -149,7 +156,33 @@ def wait_for_range(sample):
                 "rangeWaitSamples": range_wait_samples,
                 "rangeTrendSamples": trend_samples,
                 "rangeOutlierCount": outlier_count,
+                "safeAdvanceUsed": safe_advance_used,
+                "safeAdvanceInitialDistanceMeters": safe_advance_initial_distance,
+                "safeAdvanceFinalDistanceMeters": safe_advance_final_distance,
             }
+        if trusted_range and range_state == "DENIED" and not safe_advance_used:
+            safe_advance_used = True
+            safe_advance_initial_distance = accepted_distance
+            stream.activity(message="Safely advancing into docking range", level="info")
+            emit_update("SAFE_ADVANCE_STARTED", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, last_command="ADVANCE_TOWARD_STATION", reason="TRUSTED_DISTANCE_OUTSIDE_DOCKING_RANGE", range_wait_samples=range_wait_samples, range_trend_state="TRACKING", range_trend_samples=trend_samples, accepted_distance_meters=accepted_distance, range_outlier_count=outlier_count)
+            advance = action.call(
+                id="elite-dangerous/advance-toward-station",
+                inputs={
+                    "throttlePercent": SAFE_ADVANCE_THROTTLE_PERCENT,
+                    "stopAtStationDistanceMeters": SAFE_ADVANCE_STOP_METERS,
+                    "maxDurationMs": SAFE_ADVANCE_MAX_DURATION_MS,
+                },
+            )
+            if not advance["completed"] or advance["finalPhase"] != "STATION_DISTANCE_REACHED" or advance["finalStationDistanceMeters"] > SAFE_ADVANCE_STOP_METERS:
+                fail("advance-toward-station returned an invalid completion result")
+            safe_advance_final_distance = advance["finalStationDistanceMeters"]
+            stream.activity(message="Safe docking-range advance completed", level="info")
+            emit_update("SAFE_ADVANCE_COMPLETED", sample, 0, "ALLOWED", safe_advance_final_distance, None, None, None, False, 0, 0, 0, last_command="SET_THROTTLE_0", reason="STATION_DISTANCE_REACHED", range_wait_samples=range_wait_samples, range_trend_state="NOT_STARTED", range_trend_samples=0, accepted_distance_meters=None, range_outlier_count=outlier_count)
+            allowed_confirmations = 0
+            baseline_candidate = None
+            rebase_candidate = None
+            accepted_distance = None
+            trend_samples = 0
         task.sleep(milliseconds=RANGE_POLL_MS)
 
 def open_contacts(sample, range_state, distance_meters):
@@ -288,6 +321,9 @@ def main(ctx):
     range_wait_samples = range_admission["rangeWaitSamples"]
     range_trend_samples = range_admission["rangeTrendSamples"]
     range_outlier_count = range_admission["rangeOutlierCount"]
+    safe_advance_used = range_admission["safeAdvanceUsed"]
+    safe_advance_initial_distance = range_admission["safeAdvanceInitialDistanceMeters"]
+    safe_advance_final_distance = range_admission["safeAdvanceFinalDistanceMeters"]
     stream.activity(message="Docking range confirmed", level="info")
     emit_update("RANGE_ADMITTED", sample, 0, range_state, distance_meters, None, None, None, False, 0, 0, 0, reason="TREND_CONFIRMED_WITH_TWO_ALLOWED_SAMPLES", range_wait_samples=range_wait_samples, range_trend_state="ADMITTED", range_trend_samples=range_trend_samples, accepted_distance_meters=distance_meters, range_outlier_count=range_outlier_count)
 
@@ -408,6 +444,9 @@ def main(ctx):
                 "rangeWaitSamples": range_wait_samples,
                 "rangeTrendSamples": range_trend_samples,
                 "rangeOutlierCount": range_outlier_count,
+                "safeAdvanceUsed": safe_advance_used,
+                "safeAdvanceInitialDistanceMeters": safe_advance_initial_distance,
+                "safeAdvanceFinalDistanceMeters": safe_advance_final_distance,
             }
         task.sleep(milliseconds=MONITOR_POLL_MS)
     fail("Auto Dock did not reach the visual confirmation Gate before the active limit")

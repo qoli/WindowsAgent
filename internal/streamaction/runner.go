@@ -13,6 +13,7 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 	"go.starlark.net/syntax"
@@ -31,7 +32,12 @@ type Runner struct {
 	Now   func() time.Time
 }
 
-const maxFailureActions = 8
+const (
+	maxFailureActions       = 8
+	defaultFailureTimeoutMS = 5000
+	minimumFailureTimeoutMS = 100
+	maximumFailureTimeoutMS = 30000
+)
 
 const (
 	ActivityEventType = "action.activity"
@@ -39,8 +45,10 @@ const (
 )
 
 type deferredAction struct {
-	id     string
-	inputs map[string]any
+	id       string
+	inputs   map[string]any
+	critical bool
+	timeout  time.Duration
 }
 
 func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, caller Caller, reporter Reporter) (output json.RawMessage, runErr error) {
@@ -66,9 +74,7 @@ func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, ca
 		if runErr == nil || len(host.failureActions) == 0 {
 			return
 		}
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if cleanupErr := host.runFailureActions(cleanupCtx); cleanupErr != nil {
+		if cleanupErr := host.runFailureActions(context.WithoutCancel(ctx)); cleanupErr != nil {
 			runErr = errors.Join(runErr, fmt.Errorf("streaming Action failure compensation: %w", cleanupErr))
 		}
 	}()
@@ -190,14 +196,14 @@ func (h *host) tryCall(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tu
 }
 
 func (h *host) onFailure(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	actionID, inputMap, err := unpackActionCall("action.on_failure", args, kwargs)
+	actionID, inputMap, critical, timeout, err := unpackFailureAction(args, kwargs)
 	if err != nil {
 		return nil, err
 	}
 	if len(h.failureActions) >= maxFailureActions {
 		return nil, fmt.Errorf("action.on_failure supports at most %d registrations", maxFailureActions)
 	}
-	h.failureActions = append(h.failureActions, deferredAction{id: actionID, inputs: inputMap})
+	h.failureActions = append(h.failureActions, deferredAction{id: actionID, inputs: inputMap, critical: critical, timeout: timeout})
 	return starlark.MakeInt(len(h.failureActions)), nil
 }
 
@@ -211,19 +217,57 @@ func (h *host) clearOnFailure(_ *starlark.Thread, _ *starlark.Builtin, args star
 
 func (h *host) runFailureActions(ctx context.Context) error {
 	var result error
-	for index := len(h.failureActions) - 1; index >= 0; index-- {
-		action := h.failureActions[index]
-		if _, err := h.caller.Call(ctx, action.id, action.inputs); err != nil {
-			result = errors.Join(result, fmt.Errorf("child Action %s failed: %w", action.id, err))
+	for _, critical := range []bool{true, false} {
+		for index := len(h.failureActions) - 1; index >= 0; index-- {
+			action := h.failureActions[index]
+			if action.critical != critical {
+				continue
+			}
+			actionCtx, cancel := context.WithTimeout(ctx, action.timeout)
+			_, err := h.caller.Call(actionCtx, action.id, action.inputs)
+			cancel()
+			if err != nil {
+				result = errors.Join(result, fmt.Errorf("child Action %s failed (critical=%t timeout=%s): %w", action.id, action.critical, action.timeout, err))
+			}
 		}
 	}
 	return result
+}
+
+func unpackFailureAction(args starlark.Tuple, kwargs []starlark.Tuple) (string, map[string]any, bool, time.Duration, error) {
+	var actionID string
+	var inputs *starlark.Dict
+	var critical bool
+	timeoutMS := defaultFailureTimeoutMS
+	if err := starlark.UnpackArgs("action.on_failure", args, kwargs,
+		"id", &actionID, "inputs", &inputs, "critical?", &critical, "timeout_milliseconds?", &timeoutMS); err != nil {
+		return "", nil, false, 0, err
+	}
+	if actionID == "" || strings.TrimSpace(actionID) != actionID || inputs == nil {
+		return "", nil, false, 0, errors.New("action.on_failure requires canonical id and inputs object")
+	}
+	if timeoutMS < minimumFailureTimeoutMS || timeoutMS > maximumFailureTimeoutMS {
+		return "", nil, false, 0, fmt.Errorf("action.on_failure timeout_milliseconds must be between %d and %d", minimumFailureTimeoutMS, maximumFailureTimeoutMS)
+	}
+	native, err := fromStarlark(inputs)
+	if err != nil {
+		return "", nil, false, 0, err
+	}
+	inputMap, ok := native.(map[string]any)
+	if !ok {
+		return "", nil, false, 0, errors.New("action.on_failure inputs must be an object")
+	}
+	return actionID, inputMap, critical, time.Duration(timeoutMS) * time.Millisecond, nil
 }
 
 func captureErrorCode(err error) any {
 	var captureErr *capture.Error
 	if errors.As(err, &captureErr) && captureErr.Code != "" {
 		return captureErr.Code
+	}
+	var launchErr *scriptlaunch.Error
+	if errors.As(err, &launchErr) && launchErr.Code != "" {
+		return launchErr.Code
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ STOP_VERIFICATION_LIMIT = 60
 ZERO_SPEED_CONFIRMATIONS = 3
 MAX_WGC_ERRORS = 5
 RETRYABLE_WGC_ERROR_CODES = [
+	"JOB_DEADLINE_EXCEEDED",
     "capture_device_failed",
     "capture_frame_failed",
     "capture_readback_failed",
@@ -321,7 +322,7 @@ def main(ctx):
         fail("Auto Launch visual handover was not confirmed before the sample limit")
 
     stream.activity(message="Auto Launch handover confirmed", level="info")
-    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     throttle_100 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
     stream.activity(message="Throttle set to 100%", level="info")
     emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100, throttle_command=throttle_100)

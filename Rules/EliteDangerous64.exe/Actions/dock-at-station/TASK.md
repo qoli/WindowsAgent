@@ -8,8 +8,14 @@ apart establish a track; a larger one-frame jump is rejected as an OCR outlier
 and cannot admit the workflow. Two mutually continuous readings on the new
 scale deliberately rebase the track. Admission needs at least three trusted
 trend samples and the last two accepted samples must both be `ALLOWED`.
-`DENIED` and `UNKNOWN` remain streamed waiting states. The admitted distance is
-recorded once and is never sampled again after admission.
+`UNKNOWN` remains a streamed waiting state and cannot cause movement. Three
+trusted `DENIED` samples conditionally invoke `advance-toward-station` once at
+75% throttle, with a 7000m stop target and a 30-second hard limit. The child
+Action owns throttle-zero compensation. After it completes at 0%, this Action
+discards the pre-movement trend and independently rebuilds the range Gate.
+When the initial trusted samples are already `ALLOWED`, the child is never
+invoked. The admitted distance is recorded once and is never sampled again
+after admission.
 
 The Action opens CONTACTS, scans at most sixteen current targets for a confirmed
 `REQUEST DOCKING` row, focuses it, sends `SELECT`, and requires two consecutive

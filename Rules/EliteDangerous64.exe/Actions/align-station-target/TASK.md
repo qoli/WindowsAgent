@@ -25,12 +25,17 @@ evidence.
 
 Inside 40 pixels, control returns to bounded pulses through
 `elite-dangerous/ship-attitude-control`. Both Yaw and Pitch use 300 ms pulses
-inside the 40-pixel band and 250 ms pulses inside the 16-pixel near-center
-band. When two consecutive pulse-band observations show no measurable
-response, the next pulse is raised to 400 ms before the existing no-progress
+inside the 40-pixel band and 120 ms pulses inside the 16-pixel near-center
+band. The first sample that crosses into the 1.5-pixel alignment radius after a
+pulse applies a 100 ms opposite-axis brake before stable verification. When two consecutive pulse-band observations show no measurable
+response, the next pulse is raised from 120 ms to 400 ms in normal space, or
+from 80 ms to a bounded 1000 ms in Supercruise, before the existing no-progress
 Gate can terminate the run. Pulse observations keep the same one-second start-to-start cadence as
-sustained control. Completion requires three consecutive solid samples inside
-the four-pixel zone.
+sustained control. Completion requires three consecutive solid samples at or
+within 1.5 reference pixels. This is deliberately stricter than the Compass
+Action's general-purpose four-pixel `centerZone`: live FSD testing proved that
+the wider observation zone can still leave the game requesting target
+alignment.
 
 `stopBeforeAlign=false` is reserved for an owning flight workflow that already
 controls throttle, such as an active Supercruise approach. In that mode this
@@ -47,7 +52,7 @@ the next bounded correction. It does not calculate marker displacement,
 distance delta, no-progress, or moving-away trends from consecutive frames:
 the target's own motion makes those values invalid control-response evidence.
 It emits those delta fields as null and never uses them as a Gate. ALIGN retains
-the strict four-pixel center Gate plus stationary-target no-progress and
+the strict 1.5-pixel alignment Gate plus stationary-target no-progress and
 moving-away failures. Child-Action failures remain explicit in both modes.
 
 Four consecutive binding-resolved Pitch commands with no Compass displacement

@@ -32,6 +32,12 @@
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     },
+    "elite-dangerous/align-visible-target": {
+      "path": "Actions/align-visible-target",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
     "elite-dangerous/ship-status": {
       "path": "Actions/ship-status",
       "runtime": "windows-composite-action-v1",

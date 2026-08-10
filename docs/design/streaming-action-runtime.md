@@ -71,9 +71,16 @@ A child call must resolve inside the same owning Rule and must declare
 `completion: return`. Event payloads and terminal output must pass the package
 schemas. `stream.activity` emits a Host-validated, one-line display activity;
 it does not bypass or replace the Action's domain event schema. Cancellation interrupts sleep and Starlark execution. Missing or
-contradictory declarations, cross-Rule calls, streaming children, invalid
-events, and invalid terminal output fail explicitly; no runtime or provider
-fallback is attempted.
+contradictory declarations, cross-Rule calls, invalid events, and invalid
+terminal output fail explicitly; no runtime or provider fallback is attempted.
+
+An interruptible linear Streaming Action may synchronously call another
+interruptible linear Streaming Action in the same Rule. The runtime assigns a
+child execution ID, wraps child start/events/completion/failure into the parent
+stream, and propagates the parent context for cancellation. Composite Actions,
+finite parents, loop children, non-interruptible children, cross-Rule calls,
+and dependency cycles remain invalid. A child failure fails the parent; the
+runtime does not silently replace it with another Action.
 
 That child restriction belongs to the Starlark package runtime. The separate
 Host-owned [Ephemeral Action Sequence](ephemeral-action-sequence.md) may invoke
@@ -101,8 +108,20 @@ or retaining stale observations. Events distinguish
 stop-gate age, and confirmations; missing or contradictory evidence and sample
 limits fail explicitly, with no inferred state or alternate execution path.
 
+## Restart termination
+
+At startup, the invocation manager replays the durable `action.runs` journal.
+Any invocation with `action.started` but no terminal event is restored as a
+queryable failed invocation and receives `action.failed` with
+`errorCode=ABORTED_BY_AGENT_RESTART`. It is never resumed automatically because
+the external game state and any previous input leases cannot be assumed valid.
+
+Failure compensations may declare `critical=True` and an individual bounded
+`timeout_milliseconds`. Critical compensations run first; each compensation
+receives an independent timeout, so a blocked UI cleanup cannot consume the
+throttle-zero or input-hold STOP budget.
+
 ## Deferred
 
-- restart recovery for invocations interrupted by Agent process exit;
 - retention or external indexing of the in-memory invocation status map;
 - registration scheduler and Reaction dispatcher.

@@ -94,7 +94,7 @@ def main(ctx):
         stream.activity(message="Station target distance already satisfies the requested stop point", level="info")
         return completed_output("TARGET_ALREADY_REACHED", throttle_percent, target_distance, initial_distance, initial_distance, 0, sample, stop_result)
 
-    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     throttle_result = action.call(id="elite-dangerous/set-throttle", inputs={"percent": throttle_percent})
     started_ms = task.elapsed_milliseconds()
     accepted_distance = initial_distance
