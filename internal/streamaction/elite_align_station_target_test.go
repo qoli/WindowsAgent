@@ -7,16 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
 
 type alignStationTargetCaller struct {
-	observations []json.RawMessage
-	index        int
-	throttles    []int
-	controls     []string
-	holds        []int
-	holdControls []string
-	holdOps      []string
+	observations    []json.RawMessage
+	index           int
+	throttles       []int
+	controls        []string
+	holds           []int
+	holdControls    []string
+	holdOps         []string
+	compassFailures []error
 }
 
 func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -29,6 +32,11 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 		c.throttles = append(c.throttles, int(percent))
 		return json.RawMessage(`{"schemaVersion":1,"selection":"0","control":"SetSpeedZero"}`), nil
 	case "elite-dangerous/compass":
+		if len(c.compassFailures) > 0 {
+			err := c.compassFailures[0]
+			c.compassFailures = c.compassFailures[1:]
+			return nil, err
+		}
 		if c.index >= len(c.observations) {
 			return nil, errors.New("unexpected Compass observation")
 		}
@@ -71,6 +79,39 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 		})
 	default:
 		return nil, errors.New("unexpected align-station-target child Action: " + id)
+	}
+}
+
+func TestEliteAlignStationTargetRetriesTransientCompassNotVisible(t *testing.T) {
+	caller := &alignStationTargetCaller{
+		compassFailures: []error{
+			&scriptlaunch.Error{Code: "COMPASS_NOT_VISIBLE", Stage: "executing-script", Cause: errors.New("HUD inertia")},
+			&scriptlaunch.Error{Code: "COMPASS_NOT_VISIBLE", Stage: "executing-script", Cause: errors.New("HUD inertia")},
+		},
+		observations: []json.RawMessage{
+			alignObservation("SOLID", 3, 0, 3, true),
+			alignObservation("SOLID", 2, 0, 2, true),
+			alignObservation("SOLID", 1, 0, 1, true),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":5`) {
+		t.Fatalf("output=%s", output)
+	}
+	retries := 0
+	for _, payload := range reporter.payloads {
+		if contains(string(payload), `"reason":"COMPASS_NOT_VISIBLE_RETRY"`) {
+			retries++
+		}
+	}
+	if retries != 2 {
+		t.Fatalf("retry events=%d payloads=%v", retries, reporter.payloads)
 	}
 }
 

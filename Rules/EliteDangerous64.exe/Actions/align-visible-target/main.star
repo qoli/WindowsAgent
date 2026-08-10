@@ -9,7 +9,7 @@ FINE_DISTANCE_PIXELS = 40.0
 COARSE_HOLD_MS = 300
 MEDIUM_HOLD_MS = 160
 FINE_HOLD_MS = 80
-TRANSIENT_UNKNOWN_LIMIT = 3
+TRANSIENT_UNKNOWN_LIMIT = 8
 MAX_DEADLINE_ERRORS = 5
 
 def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None):
@@ -91,7 +91,7 @@ def main(ctx):
             stable = 0
             emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_UNKNOWN")
             if unknown_count >= TRANSIENT_UNKNOWN_LIMIT:
-                fail("visible target was UNKNOWN for three consecutive observations")
+                fail("visible target was UNKNOWN for eight consecutive observations")
             wait_for_cadence(started_ms)
             continue
         unknown_count = 0

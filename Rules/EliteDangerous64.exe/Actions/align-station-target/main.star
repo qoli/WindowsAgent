@@ -25,6 +25,7 @@ AWAY_TREND_LIMIT = 5
 AMBIGUOUS_PRESENTATION_LIMIT = 12
 TRANSIENT_MISSING_LIMIT = 3
 MAX_COMPASS_DEADLINE_ERRORS = 5
+MAX_COMPASS_NOT_VISIBLE_ERRORS = 5
 
 def empty_target():
     return {
@@ -238,6 +239,7 @@ def main(ctx):
     transient_missing_count = 0
     target_seen = False
     compass_deadline_error_count = 0
+    compass_not_visible_error_count = 0
 
     for _ in range(sample_limit):
         sample_started_ms = task.elapsed_milliseconds()
@@ -258,10 +260,18 @@ def main(ctx):
                     fail("Compass deadline error limit exceeded after five skipped errors: " + error_text)
                 wait_for_sample_cadence(sample_started_ms)
                 continue
+            if attempt["errorCode"] == "COMPASS_NOT_VISIBLE":
+                compass_not_visible_error_count += 1
+                emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_NOT_VISIBLE_RETRY", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
+                if compass_not_visible_error_count > MAX_COMPASS_NOT_VISIBLE_ERRORS:
+                    fail("Compass remained invisible after five skipped observations: " + error_text)
+                wait_for_sample_cadence(sample_started_ms)
+                continue
             emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_OBSERVATION_FAILED", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
             fail("Compass observation failed: " + attempt["error"])
 
         observation = attempt["output"]
+        compass_not_visible_error_count = 0
         target = observation["target"]
         final_observation = observation
         observed_movement = None

@@ -104,8 +104,8 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 				"state": "STOPPED", "displayValue": 0, "rawCandidate": 0,
 				"evidence": map[string]any{
 					"reason": "SLASHED_ZERO_GLYPH_CONFIRMED", "rawText": "0",
-					"rawConfidence": 0.80, "constrainedText": "0",
-					"constrainedConfidence": 0.80, "rawConstraintMargin": 0.0,
+					"rawConfidence": 0.28, "constrainedText": "0",
+					"constrainedConfidence": 0.28, "rawConstraintMargin": 0.0,
 				},
 			}})
 		}
@@ -242,7 +242,7 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","finalStopState":"CONFIRMED","lastObservedSpeedConstrainedConfidence":0.8,"lastObservedSpeedConstrainedText":"0","lastObservedSpeedDisplayValue":0,"lastObservedSpeedRawCandidate":0,"lastObservedSpeedRawConstraintMargin":0,"lastObservedSpeedRawText":"0","lastObservedSpeedState":"STOPPED","sampleCount":18,"schemaVersion":3,"task":"LEAVE_STATION","zeroSpeedConfirmations":3}` {
+	if string(output) != `{"completed":true,"finalCommandedThrottle":0,"finalMassLock":"OFF","finalPhase":"COMPLETED","finalStopState":"CONFIRMED","lastObservedSpeedConstrainedConfidence":0.28,"lastObservedSpeedConstrainedText":"0","lastObservedSpeedDisplayValue":0,"lastObservedSpeedRawCandidate":0,"lastObservedSpeedRawConstraintMargin":0,"lastObservedSpeedRawText":"0","lastObservedSpeedState":"STOPPED","sampleCount":18,"schemaVersion":3,"task":"LEAVE_STATION","zeroSpeedConfirmations":3}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {

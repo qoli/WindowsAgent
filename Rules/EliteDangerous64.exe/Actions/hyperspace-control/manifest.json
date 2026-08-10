@@ -6,7 +6,7 @@
   "outputSchema": "output.schema.json",
   "taskDocument": "TASK.md",
   "bindingSource": {"type": "frontier-active-preset-v1"},
-  "gesture": {"type": "press", "holdMs": 40},
+  "gesture": {"type": "press", "holdMs": 120},
   "selector": {"inputField": "command"},
   "bindings": {
     "JUMP": {"control": "HyperSuperCombination"}

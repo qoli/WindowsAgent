@@ -14,6 +14,38 @@ def normalize(text):
             result += character
     return result
 
+def one_edit_or_exact(actual, expected):
+    if actual == expected:
+        return True
+    if len(actual) < 5 or len(expected) < 5:
+        return False
+    difference = len(actual) - len(expected)
+    if difference < -1 or difference > 1:
+        return False
+    if difference == 0:
+        mismatches = 0
+        for index in range(len(actual)):
+            if actual[index] != expected[index]:
+                mismatches += 1
+                if mismatches > 1:
+                    return False
+        return True
+    shorter = actual if len(actual) < len(expected) else expected
+    longer = expected if len(actual) < len(expected) else actual
+    short_index = 0
+    long_index = 0
+    skipped = False
+    while short_index < len(shorter) and long_index < len(longer):
+        if shorter[short_index] == longer[long_index]:
+            short_index += 1
+            long_index += 1
+        elif skipped:
+            return False
+        else:
+            skipped = True
+            long_index += 1
+    return True
+
 def bounds(points):
     left = points[0]["x"]
     top = points[0]["y"]
@@ -49,7 +81,7 @@ def main(ctx):
             raw_texts.append(region["text"])
             if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
                 continue
-            if normalize(region["text"]) != expected:
+            if not one_edit_or_exact(normalize(region["text"]), expected):
                 continue
             candidate_box = bounds(region["referencePoints"])
             duplicate_index = None

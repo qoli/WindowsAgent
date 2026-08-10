@@ -17,7 +17,7 @@
     "lastObservedSpeedRawCandidate": {"const": 0},
     "lastObservedSpeedRawText": {"const": "0"},
     "lastObservedSpeedConstrainedText": {"const": "0"},
-    "lastObservedSpeedConstrainedConfidence": {"type": "number", "minimum": 0.45, "maximum": 1},
+    "lastObservedSpeedConstrainedConfidence": {"type": "number", "minimum": 0, "maximum": 1},
     "lastObservedSpeedRawConstraintMargin": {"type": "number", "minimum": 0, "maximum": 0.02},
     "sampleCount": {"type": "integer", "minimum": 1, "maximum": 2000}
   }

@@ -11,5 +11,7 @@ handles rear-hemisphere and large-angle navigation; visible-target alignment
 handles the tighter on-screen Gate needed by FSD and similar forward-target
 workflows. The Action does not select a target or engage FSD. By default it
 commands 0% throttle before turning. Unknown target text is tolerated for at
-most two consecutive frames, and only exact deadline failures receive five
-bounded retries; other observation failures remain explicit.
+most seven consecutive frames because live Pitch/Yaw motion can temporarily
+blur or animate the OCR label; no control input is sent from an UNKNOWN frame,
+and the eighth consecutive miss fails explicitly. Only exact deadline failures
+receive five bounded retries; other observation failures remain explicit.
