@@ -158,7 +158,16 @@
       "registrableAs": []
     },
     "elite-dangerous/supercruise-target-text-regions": {
-      "path": "Actions/request-docking-action-regions",
+      "path": "Actions/supercruise-target-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-target-text-regions-lower": {
+      "path": "Actions/supercruise-target-text-regions-lower",
       "runtime": "ppocr-text-regions-v1",
       "runtimeProfile": "ocr/text-regions",
       "execution": {

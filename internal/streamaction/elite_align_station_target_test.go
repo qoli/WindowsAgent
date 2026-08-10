@@ -367,6 +367,79 @@ func TestEliteAlignStationTargetReleasesSustainedControlAcrossTransientAmbiguous
 	}
 }
 
+func TestEliteAlignStationTargetContinuesAcrossExtendedRearToFrontAmbiguity(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", 12, 2, 12.166, false),
+		alignObservation("UNKNOWN", 8, 2, 8.246, false),
+		alignObservation("UNKNOWN", 6, 2, 6.325, false),
+		alignObservation("UNKNOWN", 4, 1, 4.123, false),
+		alignObservation("UNKNOWN", -4, 1, 4.123, false),
+		alignObservation("UNKNOWN", -8, 2, 8.246, false),
+		alignObservation("UNKNOWN", -12, 2, 12.166, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"controlProfile": "SUPERCRUISE_ASSIST"}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"reason":"AMBIGUOUS_REAR_TRANSITION_CONTINUE"`) {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteAlignStationTargetBrakesSupercruiseSustainedRelease(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", 20, 0, 20, false),
+		alignObservation("SOLID", 12, 0, 12, false),
+		alignObservation("SOLID", 10, 0, 10, false),
+		alignObservation("SOLID", 9, 0, 9, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"controlProfile": "SUPERCRUISE_ASSIST"}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 300 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"SUPERCRUISE_SUSTAINED_RELEASE_BRAKE"`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignStationTargetBrakesSupercruisePulseCenterEntry(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -28, 0, 28, false),
+		alignObservation("SOLID", -14, 0, 14, false),
+		alignObservation("SOLID", -10, 0, 10, false),
+		alignObservation("SOLID", -9, 0, 9, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"controlProfile": "SUPERCRUISE_ASSIST"}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_RIGHT" || len(caller.holds) != 2 || caller.holds[0] != 80 || caller.holds[1] != 300 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"CENTER_ENTRY_BRAKE"`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
 func TestEliteAlignStationTargetToleratesTransientMissingMarkerAfterDetection(t *testing.T) {
 	missing := json.RawMessage(`{"schemaVersion":3,"target":{"detected":false,"presentation":"UNKNOWN","hemisphere":"UNKNOWN","offsetX":null,"offsetY":null,"centerDistancePixels":null,"centerZone":{"inside":null}}}`)
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{

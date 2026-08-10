@@ -4,8 +4,8 @@ MAX_COMMANDS = 120
 MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
 ALIGN_CENTER_RADIUS_PIXELS = 4.0
-SUPERCRUISE_CENTER_RADIUS_PIXELS = 4.0
-SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 1.0
+SUPERCRUISE_CENTER_RADIUS_PIXELS = 16.0
+SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 4.0
 SUSTAINED_DISTANCE_PIXELS = 40
 FINE_DISTANCE_PIXELS = 16
 DIAGONAL_COMPONENT_MIN_PIXELS = 8
@@ -16,12 +16,13 @@ FINE_HOLD_MS = 120
 SUPERCRUISE_FINE_DISTANCE_PIXELS = 40
 SUPERCRUISE_FINE_HOLD_MS = 80
 CENTER_ENTRY_BRAKE_MS = 100
+SUPERCRUISE_CENTER_ENTRY_BRAKE_MS = 300
 RECOVERY_HOLD_MS = 400
 SUPERCRUISE_RECOVERY_HOLD_MS = 1000
 MIN_OBSERVED_MOVEMENT_PIXELS = 1
 NO_MOVEMENT_LIMIT = 4
 AWAY_TREND_LIMIT = 5
-AMBIGUOUS_PRESENTATION_LIMIT = 5
+AMBIGUOUS_PRESENTATION_LIMIT = 12
 TRANSIENT_MISSING_LIMIT = 3
 MAX_COMPASS_DEADLINE_ERRORS = 5
 
@@ -232,6 +233,8 @@ def main(ctx):
     active_lease_control = None
     previous_sample_started_ms = None
     ambiguous_presentation_count = 0
+    last_clear_presentation = None
+    transition_control = None
     transient_missing_count = 0
     target_seen = False
     compass_deadline_error_count = 0
@@ -305,6 +308,8 @@ def main(ctx):
         if target["presentation"] == "UNKNOWN":
             ambiguous_presentation_count += 1
             released_control = active_lease_control
+            if released_control != None:
+                transition_control = released_control
             release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_FOR_AMBIGUOUS_OBSERVATION", sample_started_ms, sample_duration_ms, sample_interval_ms)
             released_lease_id = active_lease_id
             active_lease_id = None
@@ -312,8 +317,17 @@ def main(ctx):
             commanded_target = None
             commanded_control = None
             emit_update("OBSERVING", sample, command_count, target, 0, lease_id=released_lease_id, lease_state="RELEASED" if released_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="TARGET_PRESENTATION_UNKNOWN")
-            brake_control = opposite_control(released_control) if mode == "ALIGN" and released_control != None else None
-            if brake_control != None:
+            transition_command = transition_control if mode == "ALIGN" and supercruise_profile and last_clear_presentation == "HOLLOW" else None
+            brake_control = opposite_control(released_control) if transition_command == None and mode == "ALIGN" and released_control != None else None
+            if transition_command != None:
+                if command_count >= MAX_COMMANDS:
+                    emit_update("OBSERVING", sample, command_count, target, 0, reason="COMMAND_LIMIT_REACHED")
+                    fail("Compass alignment exhausted the bounded command limit")
+                transition_result = pulse_control(transition_command, fine_hold)
+                command_count += 1
+                stream.activity(message=transition_command + " rear-to-front transition pulse for " + str(fine_hold) + " ms", level="info")
+                emit_update("OBSERVING", sample, command_count, target, 0, control_mode="PULSE", command=transition_command, command_result=transition_result, command_hold_ms=fine_hold, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="AMBIGUOUS_REAR_TRANSITION_CONTINUE")
+            elif brake_control != None:
                 if command_count >= MAX_COMMANDS:
                     emit_update("OBSERVING", sample, command_count, target, 0, reason="COMMAND_LIMIT_REACHED")
                     fail("Compass alignment exhausted the bounded command limit")
@@ -326,6 +340,9 @@ def main(ctx):
             wait_for_sample_cadence(sample_started_ms)
             continue
         ambiguous_presentation_count = 0
+        last_clear_presentation = target["presentation"]
+        if target["presentation"] == "SOLID":
+            transition_control = None
         if mode == "ALIGN" and no_movement_count >= NO_MOVEMENT_LIMIT:
             if pitch_no_movement_count >= NO_MOVEMENT_LIMIT:
                 information = {
@@ -366,6 +383,16 @@ def main(ctx):
             commanded_target = None
             commanded_control = None
             emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="SUSTAINED", command=released_control, command_result=release_result, lease_id=released_id, lease_state="RELEASED", sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUSTAINED_CONTROL_RELEASED", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            if mode == "ALIGN" and supercruise_profile and alignment_centered:
+                brake_control = opposite_control(released_control)
+                if brake_control != None:
+                    if command_count >= MAX_COMMANDS:
+                        emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, reason="COMMAND_LIMIT_REACHED")
+                        fail("Compass alignment exhausted the bounded command limit")
+                    brake_result = pulse_control(brake_control, SUPERCRUISE_CENTER_ENTRY_BRAKE_MS)
+                    command_count += 1
+                    stream.activity(message=brake_control + " sustained-release brake for " + str(SUPERCRUISE_CENTER_ENTRY_BRAKE_MS) + " ms", level="info")
+                    emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=SUPERCRUISE_CENTER_ENTRY_BRAKE_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUPERCRUISE_SUSTAINED_RELEASE_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
 
         if phase != previous_phase:
             if phase == "TURNING_TO_FRONT":
@@ -388,7 +415,6 @@ def main(ctx):
 
         if (
             mode == "ALIGN" and
-            control_profile == "NORMAL_SPACE" and
             alignment_centered and
             commanded_target != None and
             commanded_control != None and
@@ -399,10 +425,11 @@ def main(ctx):
                 if command_count >= MAX_COMMANDS:
                     emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, reason="COMMAND_LIMIT_REACHED")
                     fail("Compass alignment exhausted the bounded command limit")
-                brake_result = pulse_control(brake_control, CENTER_ENTRY_BRAKE_MS)
+                brake_hold_ms = SUPERCRUISE_CENTER_ENTRY_BRAKE_MS if supercruise_profile else CENTER_ENTRY_BRAKE_MS
+                brake_result = pulse_control(brake_control, brake_hold_ms)
                 command_count += 1
-                stream.activity(message=brake_control + " center-entry brake for " + str(CENTER_ENTRY_BRAKE_MS) + " ms", level="info")
-                emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=CENTER_ENTRY_BRAKE_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="CENTER_ENTRY_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+                stream.activity(message=brake_control + " center-entry brake for " + str(brake_hold_ms) + " ms", level="info")
+                emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=brake_hold_ms, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="CENTER_ENTRY_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             commanded_target = None
             commanded_control = None
 

@@ -38,20 +38,35 @@ def square_root(value):
 def main(ctx):
     target_name = ctx.inputs["targetName"]
     expected = normalize(target_name)
-    raw = action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={})
+    bands = [
+        action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={}),
+        action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
+    ]
     matches = []
     raw_texts = []
-    for region in raw["regions"]:
-        raw_texts.append(region["text"])
-        if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
-            continue
-        if normalize(region["text"]) == expected:
-            matches.append(region)
+    for raw in bands:
+        for region in raw["regions"]:
+            raw_texts.append(region["text"])
+            if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
+                continue
+            if normalize(region["text"]) != expected:
+                continue
+            candidate_box = bounds(region["referencePoints"])
+            duplicate_index = None
+            for index in range(len(matches)):
+                existing_box = bounds(matches[index]["referencePoints"])
+                if abs(candidate_box["left"] - existing_box["left"]) <= 8.0 and abs(candidate_box["centerY"] - existing_box["centerY"]) <= 8.0:
+                    duplicate_index = index
+                    break
+            if duplicate_index == None:
+                matches.append(region)
+            elif region["recognitionConfidence"] > matches[duplicate_index]["recognitionConfidence"]:
+                matches[duplicate_index] = region
     if len(matches) != 1:
         return {
             "schemaVersion": 1,
             "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_UNIQUE", "rawTexts": raw_texts},
-            "timing": raw["timing"],
+            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"]]},
         }
     region = matches[0]
     box = bounds(region["referencePoints"])
@@ -71,5 +86,5 @@ def main(ctx):
             "reason": "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED",
             "rawTexts": raw_texts,
         },
-        "timing": raw["timing"],
+        "timing": {"bands": [bands[0]["timing"], bands[1]["timing"]]},
     }

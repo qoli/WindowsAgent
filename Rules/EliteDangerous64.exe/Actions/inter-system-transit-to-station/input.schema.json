@@ -2,17 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["destinationSystem", "destinationStation", "startMode", "normalSpaceConfirmed", "stationCompatibilityConfirmed", "autoThrottleConfirmed"],
+  "required": ["destinationSystem", "destinationStation", "startMode", "normalSpaceConfirmed", "supercruiseConfirmed", "stationCompatibilityConfirmed", "autoThrottleConfirmed"],
   "properties": {
     "destinationSystem": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
     "destinationStation": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
-    "startMode": {"enum": ["DOCKED", "NORMAL_SPACE"]},
+    "startMode": {"enum": ["DOCKED", "NORMAL_SPACE", "SUPERCRUISE"]},
     "normalSpaceConfirmed": {"type": "boolean"},
+    "supercruiseConfirmed": {"type": "boolean"},
     "stationCompatibilityConfirmed": {"const": true},
     "autoThrottleConfirmed": {"const": true}
   },
   "allOf": [
-    {"if": {"properties": {"startMode": {"const": "DOCKED"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}}}},
-    {"if": {"properties": {"startMode": {"const": "NORMAL_SPACE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": true}}}}
+    {"if": {"properties": {"startMode": {"const": "DOCKED"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": false}}}},
+    {"if": {"properties": {"startMode": {"const": "NORMAL_SPACE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": true}, "supercruiseConfirmed": {"const": false}}}},
+    {"if": {"properties": {"startMode": {"const": "SUPERCRUISE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": true}}}}
   ]
 }

@@ -24,9 +24,9 @@ def emit_update(phase, sample, target_name=None, child_action=None, hyperspace_s
         },
     )
 
-def align_target(target_name, sample, phase):
+def align_target(target_name, sample, phase, control_profile):
     emit_update(phase, sample, target_name=target_name, child_action="elite-dangerous/align-station-target", commanded_throttle=0, reason="COMPASS_COARSE_ALIGNMENT")
-    coarse = action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "stopBeforeAlign": True, "controlProfile": "NORMAL_SPACE"})
+    coarse = action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "stopBeforeAlign": True, "controlProfile": control_profile})
     emit_update(phase, sample, target_name=target_name, child_action="elite-dangerous/align-visible-target", commanded_throttle=0, reason="VISIBLE_TARGET_FINE_ALIGNMENT")
     fine = action.call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_name, "stopBeforeAlign": False})
     return {"coarseSamples": coarse["sampleCount"], "fineSamples": fine["sampleCount"]}
@@ -79,8 +79,12 @@ def main(ctx):
         fail("autoThrottleConfirmed must be true for Supercruise Assist")
     if start_mode == "NORMAL_SPACE" and not ctx.inputs["normalSpaceConfirmed"]:
         fail("normalSpaceConfirmed must be true for NORMAL_SPACE startMode")
-    if start_mode == "DOCKED" and ctx.inputs["normalSpaceConfirmed"]:
-        fail("normalSpaceConfirmed must be false for DOCKED startMode")
+    if start_mode == "SUPERCRUISE" and not ctx.inputs["supercruiseConfirmed"]:
+        fail("supercruiseConfirmed must be true for SUPERCRUISE startMode")
+    if start_mode != "NORMAL_SPACE" and ctx.inputs["normalSpaceConfirmed"]:
+        fail("normalSpaceConfirmed may be true only for NORMAL_SPACE startMode")
+    if start_mode != "SUPERCRUISE" and ctx.inputs["supercruiseConfirmed"]:
+        fail("supercruiseConfirmed may be true only for SUPERCRUISE startMode")
 
     sample = 0
     action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
@@ -98,7 +102,8 @@ def main(ctx):
     emit_update("SYSTEM_LOCKED", sample, target_name=destination_system, child_action="elite-dangerous/select-and-lock-destination", commanded_throttle=0, reason=system_lock["result"])
 
     stream.activity(message="Aligning hyperspace destination", level="info")
-    initial_alignment = align_target(destination_system, sample, "ALIGNING_SYSTEM")
+    initial_control_profile = "SUPERCRUISE_ASSIST" if start_mode == "SUPERCRUISE" else "NORMAL_SPACE"
+    initial_alignment = align_target(destination_system, sample, "ALIGNING_SYSTEM", initial_control_profile)
     initial = observe_hyperspace()
     if initial["cockpitHud"] != "PRESENT":
         fail("cockpit HUD was not present before hyperspace control")
@@ -129,7 +134,7 @@ def main(ctx):
             charging_seen = True
             throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
             emit_update("REALIGNING_SYSTEM", sample, target_name=destination_system, hyperspace_state=state, flight_status=observation["flightStatus"], cockpit_hud=observation["cockpitHud"], commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
-            recovery_alignment = align_target(destination_system, sample, "REALIGNING_SYSTEM")
+            recovery_alignment = align_target(destination_system, sample, "REALIGNING_SYSTEM", "SUPERCRUISE_ASSIST")
             throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
             throttle_100_sent = True
             command = "REALIGN_TARGETS+SET_THROTTLE_100"

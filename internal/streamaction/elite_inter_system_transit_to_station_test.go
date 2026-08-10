@@ -17,6 +17,7 @@ type interSystemTransitCaller struct {
 	systemLocks      int
 	hudCalls         int
 	targetCalls      int
+	alignProfiles    []string
 }
 
 func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -26,6 +27,8 @@ func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		c.systemLocks++
 		return json.RawMessage(`{"targetLocked":true,"result":"ACQUIRED"}`), nil
 	case "elite-dangerous/align-station-target":
+		profile, _ := inputs["controlProfile"].(string)
+		c.alignProfiles = append(c.alignProfiles, profile)
 		return json.RawMessage(`{"sampleCount":3}`), nil
 	case "elite-dangerous/align-visible-target":
 		return json.RawMessage(`{"sampleCount":3}`), nil
@@ -88,8 +91,33 @@ func interSystemInputs() map[string]any {
 		"destinationStation":            "SURAYEV HUB",
 		"startMode":                     "NORMAL_SPACE",
 		"normalSpaceConfirmed":          true,
+		"supercruiseConfirmed":          false,
 		"stationCompatibilityConfirmed": true,
 		"autoThrottleConfirmed":         true,
+	}
+}
+
+func TestEliteInterSystemTransitAcceptsExplicitSupercruiseStart(t *testing.T) {
+	pkg, err := Load(interSystemTransitPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &interSystemTransitCaller{hyperspaceStates: []string{
+		"COCKPIT_PRESENT", "FSD_CHARGING", "COCKPIT_ABSENT", "COCKPIT_ABSENT",
+		"COCKPIT_PRESENT", "COCKPIT_PRESENT",
+	}}
+	inputs := interSystemInputs()
+	inputs["startMode"] = "SUPERCRUISE"
+	inputs["normalSpaceConfirmed"] = false
+	inputs["supercruiseConfirmed"] = true
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, inputs, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.alignProfiles) == 0 || caller.alignProfiles[0] != "SUPERCRUISE_ASSIST" {
+		t.Fatalf("alignProfiles=%v", caller.alignProfiles)
 	}
 }
 

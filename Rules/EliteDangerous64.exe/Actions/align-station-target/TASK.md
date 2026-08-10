@@ -37,6 +37,23 @@ Action's general-purpose four-pixel `centerZone`: live FSD testing proved that
 the wider observation zone can still leave the game requesting target
 alignment.
 
+The `SUPERCRUISE_ASSIST` profile instead uses a sixteen-reference-pixel entry
+radius with four pixels of verification hysteresis. Live keyboard control showed
+that the minimum effective 80 ms Supercruise pulse moves the Compass marker
+roughly 11–17 reference pixels, followed by measured inertial drift from 3.6 to
+9.5 and 12.4 pixels in one run, and from 12.4 through 19.4 to 26.9 pixels in a
+rear-to-front run, so the normal-space Gate is unreachable without repeated
+overshoot. When a sustained Supercruise turn is released inside this Gate, the
+Action applies a 300 ms opposite-axis brake before stable verification. The
+same brake applies when a pulse or bounded no-response recovery first crosses
+from outside the fine band into the Supercruise Gate; it is not restricted to
+normal-space pulses, whose brake remains 100 ms. This
+profile remains limited to front-hemisphere coarse hyperspace/Supercruise
+alignment; the following visible-target Action still owns precise on-screen
+destination alignment before charging or travel. A live 32-pixel experiment was
+rejected because a 28.8-pixel Compass result still left the target label outside
+the central OCR field.
+
 `stopBeforeAlign=false` is reserved for an owning flight workflow that already
 controls throttle, such as an active Supercruise approach. In that mode this
 Action keeps the same visual alignment and verification contract but does not

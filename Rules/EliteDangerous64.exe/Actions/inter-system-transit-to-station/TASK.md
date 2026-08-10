@@ -1,10 +1,13 @@
 # Elite Dangerous inter-system transit to station
 
 This interruptible linear Streaming Action owns one visual single-hop journey
-from an origin Station or confirmed normal space to one exact Station in one
-exact destination System. A docked start delegates departure to `leave-station`;
+from an origin Station, confirmed normal space, or confirmed Supercruise to one
+exact Station in one exact destination System. A docked start delegates departure to `leave-station`;
 its existing `AWAITING_AUTO_LAUNCH` event remains an explicit supervised UI
 boundary. After departure, the parent owns every time-sensitive flight step.
+`SUPERCRUISE` is an explicit start mode with its own confirmation input and
+uses the Supercruise Compass control profile; it is never inferred from a
+`NORMAL_SPACE` claim.
 
 It locks the exact visible destination System row, aligns at 0% through the
 Compass and visible-target children, invokes only the binding-resolved
