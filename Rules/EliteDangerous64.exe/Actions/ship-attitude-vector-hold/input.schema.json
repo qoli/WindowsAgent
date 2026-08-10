@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation", "control"],
+  "properties": {
+    "operation": {"enum": ["START", "RENEW", "STOP"]},
+    "control": {"enum": ["PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT"]},
+    "leaseId": {"type": "string", "pattern": "^key_[0-9a-f]{32}$"}
+  },
+  "allOf": [{"if": {"properties": {"operation": {"enum": ["RENEW", "STOP"]}}}, "then": {"required": ["leaseId"]}}]
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "selection", "controls", "keys", "activePreset", "bindingFile", "bindingSource", "backend", "scanCodes", "extendedKeys", "leaseId", "leaseMs", "leaseState", "releaseReason"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "operation": {"enum": ["START", "RENEW", "STOP"]},
+    "selection": {"enum": ["PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT"]},
+    "controls": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["PitchUpButton", "PitchDownButton", "YawLeftButton", "YawRightButton"]}},
+    "keys": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+    "activePreset": {"type": "string", "minLength": 1, "maxLength": 128},
+    "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260},
+    "bindingSource": {"const": "frontier-active-preset-v1"},
+    "backend": {"const": "sendinput-scancode"},
+    "scanCodes": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
+    "extendedKeys": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "boolean"}},
+    "leaseId": {"type": "string", "pattern": "^key_[0-9a-f]{32}$"},
+    "leaseMs": {"const": 2500},
+    "leaseState": {"enum": ["ACTIVE", "RELEASED"]},
+    "releaseReason": {"type": ["string", "null"], "enum": ["EXPLICIT", "EXPIRED", null]}
+  }
+}

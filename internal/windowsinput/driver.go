@@ -13,6 +13,10 @@ type PressRequest struct {
 	Hold time.Duration
 }
 
+type KeyRequest struct {
+	Key string
+}
+
 type Evidence struct {
 	Backend  string
 	Key      string
@@ -23,4 +27,6 @@ type Evidence struct {
 
 type Driver interface {
 	Press(context.Context, PressRequest) (Evidence, error)
+	KeyDown(context.Context, KeyRequest) (Evidence, error)
+	KeyUp(context.Context, KeyRequest) (Evidence, error)
 }

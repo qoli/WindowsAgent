@@ -2,6 +2,7 @@ package inputaction
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,8 @@ import (
 
 type recordingDriver struct {
 	requests []windowsinput.PressRequest
+	downs    []windowsinput.KeyRequest
+	ups      []windowsinput.KeyRequest
 	err      error
 }
 
@@ -26,6 +29,22 @@ func (d *recordingDriver) Press(_ context.Context, request windowsinput.PressReq
 		Backend: windowsinput.BackendSendInputScanCode, Key: request.Key,
 		ScanCode: 0x41, Extended: false, HoldMS: request.Hold.Milliseconds(),
 	}, nil
+}
+
+func (d *recordingDriver) KeyDown(_ context.Context, request windowsinput.KeyRequest) (windowsinput.Evidence, error) {
+	d.downs = append(d.downs, request)
+	if d.err != nil {
+		return windowsinput.Evidence{}, d.err
+	}
+	return windowsinput.Evidence{Backend: windowsinput.BackendSendInputScanCode, Key: request.Key, ScanCode: 0x41}, nil
+}
+
+func (d *recordingDriver) KeyUp(_ context.Context, request windowsinput.KeyRequest) (windowsinput.Evidence, error) {
+	d.ups = append(d.ups, request)
+	if d.err != nil {
+		return windowsinput.Evidence{}, d.err
+	}
+	return windowsinput.Evidence{Backend: windowsinput.BackendSendInputScanCode, Key: request.Key, ScanCode: 0x41}, nil
 }
 
 func TestControllerResolvesCurrentKeyboardBindingAndPressesIt(t *testing.T) {
@@ -50,6 +69,133 @@ func TestControllerResolvesCurrentKeyboardBindingAndPressesIt(t *testing.T) {
 		!strings.Contains(string(output), `"key":"Key_F7"`) || !strings.Contains(string(output), `"activePreset":"ControlPadKeyboard"`) ||
 		!strings.Contains(string(output), `"backend":"sendinput-scancode"`) {
 		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
+func TestControllerStartsRenewsAndStopsKeyHoldLease(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `
+<Root PresetName="ControlPadKeyboard">
+  <PitchUpButton><Primary Device="Keyboard" Key="Key_UpArrow"/><Secondary Device="{NoDevice}" Key=""/></PitchUpButton>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "START", "control": "PITCH_UP"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var startResult map[string]any
+	if err := json.Unmarshal(started, &startResult); err != nil {
+		t.Fatal(err)
+	}
+	leaseID, _ := startResult["leaseId"].(string)
+	if !strings.HasPrefix(leaseID, "key_") || len(driver.downs) != 1 || driver.downs[0].Key != "Key_UpArrow" {
+		t.Fatalf("started=%s downs=%v", started, driver.downs)
+	}
+	renewed, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "RENEW", "control": "PITCH_UP", "leaseId": leaseID}, "EliteDangerous64.exe")
+	if err != nil || !strings.Contains(string(renewed), `"operation":"RENEW"`) {
+		t.Fatalf("renewed=%s error=%v", renewed, err)
+	}
+	controller.expireLease(leaseID, 1)
+	if len(driver.ups) != 0 {
+		t.Fatalf("stale expiry released renewed lease: ups=%v", driver.ups)
+	}
+	stopped, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "PITCH_UP", "leaseId": leaseID}, "EliteDangerous64.exe")
+	if err != nil || !strings.Contains(string(stopped), `"leaseState":"RELEASED"`) || !strings.Contains(string(stopped), `"releaseReason":"EXPLICIT"`) {
+		t.Fatalf("stopped=%s error=%v", stopped, err)
+	}
+	if len(driver.ups) != 1 || driver.ups[0].Key != "Key_UpArrow" {
+		t.Fatalf("ups=%v", driver.ups)
+	}
+	if _, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "PITCH_UP", "leaseId": leaseID}, "EliteDangerous64.exe"); err != nil || len(driver.ups) != 1 {
+		t.Fatalf("idempotent stop error=%v ups=%v", err, driver.ups)
+	}
+}
+
+func TestControllerStartsAndStopsCompoundKeyHoldLease(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-vector-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `
+<Root PresetName="ControlPadKeyboard">
+  <PitchUpButton><Primary Device="Keyboard" Key="Key_UpArrow"/></PitchUpButton>
+  <YawLeftButton><Primary Device="Keyboard" Key="Key_A"/></YawLeftButton>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "START", "control": "PITCH_UP_YAW_LEFT"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(started, &result); err != nil {
+		t.Fatal(err)
+	}
+	leaseID := result["leaseId"].(string)
+	if len(driver.downs) != 2 || driver.downs[0].Key != "Key_UpArrow" || driver.downs[1].Key != "Key_A" ||
+		!strings.Contains(string(started), `"controls":["PitchUpButton","YawLeftButton"]`) ||
+		!strings.Contains(string(started), `"keys":["Key_UpArrow","Key_A"]`) {
+		t.Fatalf("started=%s downs=%v", started, driver.downs)
+	}
+	stopped, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "PITCH_UP_YAW_LEFT", "leaseId": leaseID}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.ups) != 2 || driver.ups[0].Key != "Key_A" || driver.ups[1].Key != "Key_UpArrow" ||
+		!strings.Contains(string(stopped), `"leaseState":"RELEASED"`) {
+		t.Fatalf("stopped=%s ups=%v", stopped, driver.ups)
+	}
+}
+
+func TestControllerExpiresKeyHoldLeaseAndReportsExpiryOnStop(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `
+<Root PresetName="ControlPadKeyboard">
+  <YawLeftButton><Primary Device="Keyboard" Key="Key_A"/><Secondary Device="{NoDevice}" Key=""/></YawLeftButton>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "START", "control": "YAW_LEFT"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(started, &result); err != nil {
+		t.Fatal(err)
+	}
+	leaseID := result["leaseId"].(string)
+	controller.expireLease(leaseID, 1)
+	stopped, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "YAW_LEFT", "leaseId": leaseID}, "EliteDangerous64.exe")
+	if err != nil || !strings.Contains(string(stopped), `"releaseReason":"EXPIRED"`) || len(driver.ups) != 1 {
+		t.Fatalf("stopped=%s error=%v ups=%v", stopped, err, driver.ups)
 	}
 }
 

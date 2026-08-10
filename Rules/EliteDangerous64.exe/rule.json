@@ -242,6 +242,18 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/ship-attitude-hold": {
+      "path": "Actions/ship-attitude-hold",
+      "runtime": "windows-key-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/ship-attitude-vector-hold": {
+      "path": "Actions/ship-attitude-vector-hold",
+      "runtime": "windows-key-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/set-throttle": {
       "path": "Actions/set-throttle",
       "runtime": "windows-key-action-v1",

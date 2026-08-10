@@ -37,33 +37,12 @@ func (WindowsDriver) Press(ctx context.Context, request PressRequest) (Evidence,
 	if request.Hold <= 0 || request.Hold > time.Second {
 		return Evidence{}, errors.New("key press hold duration must be between 1ms and 1s")
 	}
-	virtualKey, err := VirtualKey(request.Key)
+	evidence, flags, err := resolveKey(request.Key)
 	if err != nil {
 		return Evidence{}, err
 	}
-	mapped, _, mapErr := mapVirtualKeyProc.Call(uintptr(virtualKey), mapVirtualKeyToScanEx)
-	if mapped == 0 {
-		if mapErr != nil && mapErr != syscall.Errno(0) {
-			return Evidence{}, fmt.Errorf("MapVirtualKeyW failed for %s: %w", request.Key, mapErr)
-		}
-		return Evidence{}, fmt.Errorf("MapVirtualKeyW returned no scan code for %s", request.Key)
-	}
-	scanCode, extended, err := decodeMappedScanCode(mapped)
-	if err != nil {
-		return Evidence{}, fmt.Errorf("map key %s to scan code: %w", request.Key, err)
-	}
-	if RequiresExtendedScanCode(request.Key) {
-		extended = true
-	}
-	flags := uint32(keyEventScanCode)
-	if extended {
-		flags |= keyEventExtendedKey
-	}
-	evidence := Evidence{
-		Backend: BackendSendInputScanCode, Key: request.Key, ScanCode: scanCode,
-		Extended: extended, HoldMS: request.Hold.Milliseconds(),
-	}
-	if err := sendKeyboardScanCode(scanCode, flags); err != nil {
+	evidence.HoldMS = request.Hold.Milliseconds()
+	if err := sendKeyboardScanCode(evidence.ScanCode, flags); err != nil {
 		return Evidence{}, fmt.Errorf("send scan-code key down: %w", err)
 	}
 
@@ -77,7 +56,7 @@ func (WindowsDriver) Press(ctx context.Context, request PressRequest) (Evidence,
 		}
 	case <-timer.C:
 	}
-	releaseErr := sendKeyboardScanCode(scanCode, flags|keyEventKeyUp)
+	releaseErr := sendKeyboardScanCode(evidence.ScanCode, flags|keyEventKeyUp)
 	if releaseErr != nil {
 		releaseErr = fmt.Errorf("send scan-code key up: %w", releaseErr)
 	}
@@ -85,6 +64,68 @@ func (WindowsDriver) Press(ctx context.Context, request PressRequest) (Evidence,
 		return Evidence{}, err
 	}
 	return evidence, nil
+}
+
+func (WindowsDriver) KeyDown(ctx context.Context, request KeyRequest) (Evidence, error) {
+	if ctx == nil {
+		return Evidence{}, errors.New("context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Evidence{}, err
+	}
+	evidence, flags, err := resolveKey(request.Key)
+	if err != nil {
+		return Evidence{}, err
+	}
+	if err := sendKeyboardScanCode(evidence.ScanCode, flags); err != nil {
+		return Evidence{}, fmt.Errorf("send scan-code key down: %w", err)
+	}
+	return evidence, nil
+}
+
+func (WindowsDriver) KeyUp(ctx context.Context, request KeyRequest) (Evidence, error) {
+	if ctx == nil {
+		return Evidence{}, errors.New("context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Evidence{}, err
+	}
+	evidence, flags, err := resolveKey(request.Key)
+	if err != nil {
+		return Evidence{}, err
+	}
+	if err := sendKeyboardScanCode(evidence.ScanCode, flags|keyEventKeyUp); err != nil {
+		return Evidence{}, fmt.Errorf("send scan-code key up: %w", err)
+	}
+	return evidence, nil
+}
+
+func resolveKey(key string) (Evidence, uint32, error) {
+	virtualKey, err := VirtualKey(key)
+	if err != nil {
+		return Evidence{}, 0, err
+	}
+	mapped, _, mapErr := mapVirtualKeyProc.Call(uintptr(virtualKey), mapVirtualKeyToScanEx)
+	if mapped == 0 {
+		if mapErr != nil && mapErr != syscall.Errno(0) {
+			return Evidence{}, 0, fmt.Errorf("MapVirtualKeyW failed for %s: %w", key, mapErr)
+		}
+		return Evidence{}, 0, fmt.Errorf("MapVirtualKeyW returned no scan code for %s", key)
+	}
+	scanCode, extended, err := decodeMappedScanCode(mapped)
+	if err != nil {
+		return Evidence{}, 0, fmt.Errorf("map key %s to scan code: %w", key, err)
+	}
+	if RequiresExtendedScanCode(key) {
+		extended = true
+	}
+	flags := uint32(keyEventScanCode)
+	if extended {
+		flags |= keyEventExtendedKey
+	}
+	return Evidence{
+		Backend: BackendSendInputScanCode, Key: key, ScanCode: scanCode, Extended: extended,
+	}, flags, nil
 }
 
 type windowsInput struct {

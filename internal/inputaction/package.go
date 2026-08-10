@@ -51,6 +51,9 @@ type Gesture struct {
 	HoldMSInputField string `json:"holdMsInputField,omitempty"`
 	MinHoldMS        uint32 `json:"minHoldMs,omitempty"`
 	MaxHoldMS        uint32 `json:"maxHoldMs,omitempty"`
+	LeaseMS          uint32 `json:"leaseMs,omitempty"`
+	OperationField   string `json:"operationField,omitempty"`
+	LeaseIDField     string `json:"leaseIdField,omitempty"`
 }
 
 type Selector struct {
@@ -59,8 +62,9 @@ type Selector struct {
 }
 
 type Binding struct {
-	Control string `json:"control"`
-	Key     string `json:"key"`
+	Control  string   `json:"control"`
+	Controls []string `json:"controls,omitempty"`
+	Key      string   `json:"key"`
 }
 
 type Package struct {
@@ -158,23 +162,43 @@ func validateManifest(manifest Manifest) error {
 	if manifest.BindingSource.Type != BindingSourceFrontier && manifest.BindingSource.Type != BindingSourceLiteral {
 		return fmt.Errorf("input Action bindingSource type %q is unsupported", manifest.BindingSource.Type)
 	}
-	if manifest.Gesture.Type != "press" || manifest.Gesture.HoldMS == 0 || manifest.Gesture.HoldMS > 1000 {
-		return errors.New("input Action gesture must declare press with holdMs between 1 and 1000")
-	}
-	if manifest.Gesture.HoldMSInputField == "" {
-		if manifest.Gesture.MinHoldMS != 0 || manifest.Gesture.MaxHoldMS != 0 {
-			return errors.New("input Action gesture hold bounds require holdMsInputField")
+	switch manifest.Gesture.Type {
+	case "press":
+		if manifest.Gesture.HoldMS == 0 || manifest.Gesture.HoldMS > 1000 {
+			return errors.New("press input Action gesture holdMs must be between 1 and 1000")
 		}
-	} else {
-		if strings.TrimSpace(manifest.Gesture.HoldMSInputField) != manifest.Gesture.HoldMSInputField {
-			return errors.New("input Action gesture holdMsInputField must be canonical")
+		if manifest.Gesture.LeaseMS != 0 || manifest.Gesture.OperationField != "" || manifest.Gesture.LeaseIDField != "" {
+			return errors.New("press input Action gesture must not declare lease fields")
 		}
-		if manifest.Gesture.MinHoldMS == 0 || manifest.Gesture.MaxHoldMS < manifest.Gesture.MinHoldMS || manifest.Gesture.MaxHoldMS > 1000 {
-			return errors.New("input Action dynamic hold bounds must be from 1 through 1000")
+		if manifest.Gesture.HoldMSInputField == "" {
+			if manifest.Gesture.MinHoldMS != 0 || manifest.Gesture.MaxHoldMS != 0 {
+				return errors.New("input Action gesture hold bounds require holdMsInputField")
+			}
+		} else {
+			if strings.TrimSpace(manifest.Gesture.HoldMSInputField) != manifest.Gesture.HoldMSInputField {
+				return errors.New("input Action gesture holdMsInputField must be canonical")
+			}
+			if manifest.Gesture.MinHoldMS == 0 || manifest.Gesture.MaxHoldMS < manifest.Gesture.MinHoldMS || manifest.Gesture.MaxHoldMS > 1000 {
+				return errors.New("input Action dynamic hold bounds must be from 1 through 1000")
+			}
+			if manifest.Gesture.HoldMS < manifest.Gesture.MinHoldMS || manifest.Gesture.HoldMS > manifest.Gesture.MaxHoldMS {
+				return errors.New("input Action default holdMs must be within dynamic hold bounds")
+			}
 		}
-		if manifest.Gesture.HoldMS < manifest.Gesture.MinHoldMS || manifest.Gesture.HoldMS > manifest.Gesture.MaxHoldMS {
-			return errors.New("input Action default holdMs must be within dynamic hold bounds")
+	case "lease":
+		if manifest.Gesture.HoldMS != 0 || manifest.Gesture.HoldMSInputField != "" || manifest.Gesture.MinHoldMS != 0 || manifest.Gesture.MaxHoldMS != 0 {
+			return errors.New("lease input Action gesture must not declare press hold fields")
 		}
+		if manifest.Gesture.LeaseMS < 1000 || manifest.Gesture.LeaseMS > 10000 {
+			return errors.New("lease input Action gesture leaseMs must be from 1000 through 10000")
+		}
+		if strings.TrimSpace(manifest.Gesture.OperationField) == "" || strings.TrimSpace(manifest.Gesture.OperationField) != manifest.Gesture.OperationField ||
+			strings.TrimSpace(manifest.Gesture.LeaseIDField) == "" || strings.TrimSpace(manifest.Gesture.LeaseIDField) != manifest.Gesture.LeaseIDField ||
+			manifest.Gesture.OperationField == manifest.Gesture.LeaseIDField {
+			return errors.New("lease input Action gesture requires distinct canonical operationField and leaseIdField")
+		}
+	default:
+		return fmt.Errorf("input Action gesture type %q is unsupported", manifest.Gesture.Type)
 	}
 	if constant {
 		if _, ok := manifest.Bindings[manifest.Selector.Constant]; !ok {
@@ -186,9 +210,10 @@ func validateManifest(manifest Manifest) error {
 			return fmt.Errorf("input Action binding %q is not canonical", name)
 		}
 		control := binding.Control != ""
+		controls := len(binding.Controls) != 0
 		key := binding.Key != ""
-		if control == key {
-			return fmt.Errorf("input Action binding %q must declare exactly one of control or key", name)
+		if boolCount(control, controls, key) != 1 {
+			return fmt.Errorf("input Action binding %q must declare exactly one of control, controls, or key", name)
 		}
 		if control && (manifest.BindingSource.Type != BindingSourceFrontier || strings.TrimSpace(binding.Control) != binding.Control) {
 			return fmt.Errorf("input Action binding %q has an invalid Frontier control", name)
@@ -201,11 +226,36 @@ func validateManifest(manifest Manifest) error {
 				return fmt.Errorf("input Action binding %q: %w", name, err)
 			}
 		}
+		if controls {
+			if manifest.Gesture.Type != "lease" || manifest.BindingSource.Type != BindingSourceFrontier || len(binding.Controls) != 2 {
+				return fmt.Errorf("input Action binding %q controls requires exactly two Frontier controls on a lease gesture", name)
+			}
+			seen := map[string]struct{}{}
+			for _, candidate := range binding.Controls {
+				if strings.TrimSpace(candidate) == "" || strings.TrimSpace(candidate) != candidate {
+					return fmt.Errorf("input Action binding %q has an invalid Frontier control", name)
+				}
+				if _, ok := seen[candidate]; ok {
+					return fmt.Errorf("input Action binding %q repeats Frontier control %q", name, candidate)
+				}
+				seen[candidate] = struct{}{}
+			}
+		}
 	}
 	if manifest.Files == nil || len(manifest.Files) != 3 {
 		return errors.New("input Action files must declare exactly task, input schema, and output schema")
 	}
 	return nil
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
 }
 
 func validateMembers(root string, declared []string) error {

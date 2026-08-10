@@ -107,6 +107,11 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize Frontier key Action controller: %w", err)
 	}
+	defer func() {
+		if err := inputController.Close(); err != nil {
+			logger.Error("input_controller_shutdown_failed", "error", err)
+		}
+	}()
 	actionExecutor, err := actionlaunch.New(ruleStore, observationExecutor, capturer, ocrManager, inputController, foreground.Snapshot)
 	if err != nil {
 		return fmt.Errorf("initialize Action executor: %w", err)

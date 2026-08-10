@@ -3,9 +3,9 @@
 ## Status
 
 **Partially landed.** The game-neutral `windows-key-action-v1` runtime
-implements one serialized, foreground-bound keyboard press through Windows
-scan-code `SendInput`. Pointer input, held-key leases, chords, and arbitrary
-key sequences remain deferred.
+implements serialized, foreground-bound keyboard presses and one non-blocking
+held-key lease through Windows scan-code `SendInput`. Pointer input, chords,
+and arbitrary key sequences remain deferred.
 
 ## Boundary
 
@@ -19,11 +19,19 @@ of two binding sources:
   `SetSpeed100` or `UI_Select` and resolves its physical key from the active
   Frontier preset.
 
-Both sources use the same `windowsinput` driver. The manifest also declares a
-single `press` gesture and a default hold time from 1 to 1000 milliseconds. A
+Both sources use the same `windowsinput` driver. The manifest declares either
+a `press` gesture or a `lease` gesture. A press has a default hold time from 1
+to 1000 milliseconds. A
 package may expose one schema-validated integer input as an explicit hold-time
 override within manifest-declared minimum and maximum bounds; physical keys
-remain non-callable input.
+remain non-callable input. Lease packages expose explicit `START`, `RENEW`, and
+`STOP`. Only one lease is active in the controller at once. A lease normally
+owns one resolved key; a compound Frontier binding may own exactly two
+distinct controls for overlapping diagonal input under the same lease ID. A
+package-declared one through ten second duration bounds each renewal; the
+shipped Elite attitude hold uses 2500 ms. Ordinary press Actions fail while a
+lease remains active. Explicit stop, expiry, streaming failure compensation,
+and Agent shutdown release the same resolved key or key pair.
 Literal-key packages do not require Frontier configuration; a missing Frontier
 root fails only a package that explicitly selects the Frontier binding source.
 
@@ -72,9 +80,12 @@ diagnostic-only filename.
   using the player's active binding preset.
 - `elite-dangerous/ship-attitude-control`: one pitch, yaw, or roll pulse using
   the player's active binding preset and an optional bounded hold override.
+- `elite-dangerous/ship-attitude-hold`: one leased pitch, yaw, or roll key hold
+  with explicit start, renewal, and release evidence.
 
 ## Deferred
 
-- pointer input, chords, held-key leases, and multi-key sequences;
+- pointer input, chords, multiple independent held-key leases, and arbitrary
+  multi-key sequences;
 - authenticated remote Action invocation and a complete durable finite-action
   lifecycle journal.

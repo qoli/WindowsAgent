@@ -2,6 +2,8 @@ package inputaction
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -25,6 +27,22 @@ type Controller struct {
 	driver               windowsinput.Driver
 	foreground           func() (foreground.Info, error)
 	mu                   sync.Mutex
+	activeLease          *keyLease
+	lastLease            *keyLease
+}
+
+type keyLease struct {
+	id            string
+	ruleID        string
+	selection     string
+	resolved      []resolvedBinding
+	evidence      []windowsinput.Evidence
+	leaseMS       uint32
+	timer         *time.Timer
+	state         string
+	releaseReason string
+	releaseErr    error
+	generation    uint64
 }
 
 func NewController(frontierBindingsRoot string, driver windowsinput.Driver, foregroundSnapshot func() (foreground.Info, error)) (*Controller, error) {
@@ -55,6 +73,9 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	if !ok {
 		return nil, fmt.Errorf("input Action selector resolved undeclared binding %q", selection)
 	}
+	if pkg.Manifest.Gesture.Type == "lease" {
+		return c.runLease(ctx, pkg, inputs, ruleID, selection, binding)
+	}
 	holdMS, err := resolveHoldMS(pkg.Manifest.Gesture, inputs)
 	if err != nil {
 		return nil, err
@@ -62,6 +83,9 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.activeLease != nil {
+		return nil, fmt.Errorf("key hold lease %q is active; stop it before invoking a press Action", c.activeLease.id)
+	}
 	before, err := c.foreground()
 	if err != nil {
 		return nil, fmt.Errorf("resolve foreground before input Action: %w", err)
@@ -110,6 +134,283 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 		return nil, fmt.Errorf("validate input Action output: %w", err)
 	}
 	return json.Marshal(result)
+}
+
+func (c *Controller) runLease(ctx context.Context, pkg *Package, inputs map[string]any, ruleID, selection string, binding Binding) (json.RawMessage, error) {
+	operationValue, ok := inputs[pkg.Manifest.Gesture.OperationField]
+	if !ok {
+		return nil, fmt.Errorf("lease input Action operation field %q is missing", pkg.Manifest.Gesture.OperationField)
+	}
+	operation, ok := operationValue.(string)
+	if !ok || (operation != "START" && operation != "RENEW" && operation != "STOP") {
+		return nil, fmt.Errorf("lease input Action operation field %q must be START, RENEW, or STOP", pkg.Manifest.Gesture.OperationField)
+	}
+	if operation == "START" {
+		return c.startLease(ctx, pkg, ruleID, selection, binding)
+	}
+	leaseValue, ok := inputs[pkg.Manifest.Gesture.LeaseIDField]
+	if !ok {
+		return nil, fmt.Errorf("lease input Action lease field %q is missing", pkg.Manifest.Gesture.LeaseIDField)
+	}
+	leaseID, ok := leaseValue.(string)
+	if !ok || strings.TrimSpace(leaseID) == "" || strings.TrimSpace(leaseID) != leaseID {
+		return nil, fmt.Errorf("lease input Action lease field %q must be a canonical string", pkg.Manifest.Gesture.LeaseIDField)
+	}
+	if operation == "STOP" {
+		return c.stopLease(ctx, pkg, ruleID, selection, leaseID)
+	}
+	return c.renewLease(ctx, pkg, ruleID, selection, leaseID)
+}
+
+func (c *Controller) startLease(ctx context.Context, pkg *Package, ruleID, selection string, binding Binding) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeLease != nil {
+		return nil, fmt.Errorf("key hold lease %q is already active", c.activeLease.id)
+	}
+	before, err := c.foreground()
+	if err != nil {
+		return nil, fmt.Errorf("resolve foreground before key hold lease: %w", err)
+	}
+	if !strings.EqualFold(before.ExecutableName, ruleID) {
+		return nil, fmt.Errorf("foreground executable is %q, expected owning Rule %q", before.ExecutableName, ruleID)
+	}
+	resolved, err := c.resolveLeaseBindings(pkg.Manifest.BindingSource, binding)
+	if err != nil {
+		return nil, err
+	}
+	revalidated, err := c.resolveLeaseBindings(pkg.Manifest.BindingSource, binding)
+	if err != nil {
+		return nil, fmt.Errorf("revalidate key hold binding before injection: %w", err)
+	}
+	if !sameResolvedBindings(revalidated, resolved) {
+		return nil, errors.New("key hold binding changed before injection")
+	}
+	current, err := c.foreground()
+	if err != nil {
+		return nil, fmt.Errorf("revalidate foreground before key hold injection: %w", err)
+	}
+	if !sameForeground(before, current) || !strings.EqualFold(current.ExecutableName, ruleID) {
+		return nil, errors.New("foreground process changed before key hold injection")
+	}
+	leaseID, err := newLeaseID()
+	if err != nil {
+		return nil, err
+	}
+	evidence := make([]windowsinput.Evidence, 0, len(resolved))
+	for _, item := range resolved {
+		itemEvidence, downErr := c.driver.KeyDown(ctx, windowsinput.KeyRequest{Key: item.key})
+		if downErr != nil {
+			var releaseErrors []error
+			for index := len(evidence) - 1; index >= 0; index-- {
+				if _, releaseErr := c.driver.KeyUp(context.Background(), windowsinput.KeyRequest{Key: resolved[index].key}); releaseErr != nil {
+					releaseErrors = append(releaseErrors, releaseErr)
+				}
+			}
+			return nil, errors.Join(fmt.Errorf("start key hold lease for %s: %w", item.key, downErr), errors.Join(releaseErrors...))
+		}
+		evidence = append(evidence, itemEvidence)
+	}
+	lease := &keyLease{
+		id: leaseID, ruleID: ruleID, selection: selection, resolved: resolved,
+		evidence: evidence, leaseMS: pkg.Manifest.Gesture.LeaseMS, state: "ACTIVE", generation: 1,
+	}
+	lease.timer = time.AfterFunc(time.Duration(lease.leaseMS)*time.Millisecond, func() { c.expireLease(leaseID, 1) })
+	c.activeLease = lease
+	return c.encodeLeaseResult(pkg, "START", lease)
+}
+
+func (c *Controller) renewLease(ctx context.Context, pkg *Package, ruleID, selection, leaseID string) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	lease, err := c.requireActiveLease(ruleID, selection, leaseID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := c.foreground()
+	if err != nil {
+		return nil, fmt.Errorf("resolve foreground before key hold renewal: %w", err)
+	}
+	if !strings.EqualFold(current.ExecutableName, ruleID) {
+		return nil, fmt.Errorf("foreground executable is %q, expected owning Rule %q", current.ExecutableName, ruleID)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lease.generation++
+	generation := lease.generation
+	lease.timer.Stop()
+	lease.timer = time.AfterFunc(time.Duration(lease.leaseMS)*time.Millisecond, func() { c.expireLease(leaseID, generation) })
+	return c.encodeLeaseResult(pkg, "RENEW", lease)
+}
+
+func (c *Controller) stopLease(ctx context.Context, pkg *Package, ruleID, selection, leaseID string) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeLease == nil {
+		if c.lastLease != nil && c.lastLease.id == leaseID && strings.EqualFold(c.lastLease.ruleID, ruleID) && c.lastLease.selection == selection {
+			if c.lastLease.releaseErr != nil {
+				return nil, fmt.Errorf("key hold lease %q release failed: %w", leaseID, c.lastLease.releaseErr)
+			}
+			return c.encodeLeaseResult(pkg, "STOP", c.lastLease)
+		}
+		return nil, fmt.Errorf("key hold lease %q is not active", leaseID)
+	}
+	lease, err := c.requireActiveLease(ruleID, selection, leaseID)
+	if err != nil {
+		return nil, err
+	}
+	lease.timer.Stop()
+	if err := c.releaseLeaseKeys(ctx, lease); err != nil {
+		return nil, fmt.Errorf("stop key hold lease %q: %w", leaseID, err)
+	}
+	lease.state = "RELEASED"
+	lease.releaseReason = "EXPLICIT"
+	c.activeLease = nil
+	c.lastLease = lease
+	return c.encodeLeaseResult(pkg, "STOP", lease)
+}
+
+func (c *Controller) requireActiveLease(ruleID, selection, leaseID string) (*keyLease, error) {
+	if c.activeLease == nil || c.activeLease.id != leaseID {
+		return nil, fmt.Errorf("key hold lease %q is not active", leaseID)
+	}
+	if !strings.EqualFold(c.activeLease.ruleID, ruleID) || c.activeLease.selection != selection {
+		return nil, fmt.Errorf("key hold lease %q ownership does not match this Action", leaseID)
+	}
+	return c.activeLease, nil
+}
+
+func (c *Controller) expireLease(leaseID string, generation uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeLease == nil || c.activeLease.id != leaseID || c.activeLease.generation != generation {
+		return
+	}
+	lease := c.activeLease
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	err := c.releaseLeaseKeys(ctx, lease)
+	cancel()
+	lease.state = "RELEASED"
+	lease.releaseReason = "EXPIRED"
+	lease.releaseErr = err
+	c.activeLease = nil
+	c.lastLease = lease
+}
+
+func (c *Controller) encodeLeaseResult(pkg *Package, operation string, lease *keyLease) (json.RawMessage, error) {
+	result := map[string]any{
+		"schemaVersion": int64(1), "operation": operation, "selection": lease.selection,
+		"bindingSource": pkg.Manifest.BindingSource.Type, "backend": lease.evidence[0].Backend, "leaseId": lease.id,
+		"leaseMs": int64(lease.leaseMS), "leaseState": lease.state,
+		"releaseReason": nil,
+	}
+	if lease.releaseReason != "" {
+		result["releaseReason"] = lease.releaseReason
+	}
+	if len(lease.resolved) == 1 {
+		result["key"] = lease.resolved[0].key
+		result["scanCode"] = int64(lease.evidence[0].ScanCode)
+		result["extended"] = lease.evidence[0].Extended
+		if lease.resolved[0].control != "" {
+			result["control"] = lease.resolved[0].control
+		}
+	} else {
+		controls := make([]any, len(lease.resolved))
+		keys := make([]any, len(lease.resolved))
+		scanCodes := make([]any, len(lease.resolved))
+		extended := make([]any, len(lease.resolved))
+		for index := range lease.resolved {
+			controls[index] = lease.resolved[index].control
+			keys[index] = lease.resolved[index].key
+			scanCodes[index] = int64(lease.evidence[index].ScanCode)
+			extended[index] = lease.evidence[index].Extended
+		}
+		result["controls"] = controls
+		result["keys"] = keys
+		result["scanCodes"] = scanCodes
+		result["extendedKeys"] = extended
+	}
+	if lease.resolved[0].preset != "" {
+		result["activePreset"] = lease.resolved[0].preset
+		result["bindingFile"] = lease.resolved[0].filename
+	}
+	if err := pkg.ValidateOutput(result); err != nil {
+		return nil, fmt.Errorf("validate key hold Action output: %w", err)
+	}
+	return json.Marshal(result)
+}
+
+func (c *Controller) Close() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.activeLease == nil {
+		return nil
+	}
+	lease := c.activeLease
+	lease.timer.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := c.releaseLeaseKeys(ctx, lease)
+	c.activeLease = nil
+	return err
+}
+
+func (c *Controller) releaseLeaseKeys(ctx context.Context, lease *keyLease) error {
+	var releaseErrors []error
+	for index := len(lease.resolved) - 1; index >= 0; index-- {
+		if _, err := c.driver.KeyUp(ctx, windowsinput.KeyRequest{Key: lease.resolved[index].key}); err != nil {
+			releaseErrors = append(releaseErrors, fmt.Errorf("release %s: %w", lease.resolved[index].key, err))
+		}
+	}
+	return errors.Join(releaseErrors...)
+}
+
+func (c *Controller) resolveLeaseBindings(source BindingSource, binding Binding) ([]resolvedBinding, error) {
+	if len(binding.Controls) == 0 {
+		resolved, err := c.resolveBinding(source, binding)
+		if err != nil {
+			return nil, err
+		}
+		return []resolvedBinding{resolved}, nil
+	}
+	result := make([]resolvedBinding, 0, len(binding.Controls))
+	seenKeys := map[string]struct{}{}
+	for _, control := range binding.Controls {
+		resolved, err := c.resolveBinding(source, Binding{Control: control})
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seenKeys[resolved.key]; exists {
+			return nil, fmt.Errorf("compound key hold resolves duplicate key %s", resolved.key)
+		}
+		seenKeys[resolved.key] = struct{}{}
+		result = append(result, resolved)
+	}
+	return result, nil
+}
+
+func sameResolvedBindings(left, right []resolvedBinding) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func newLeaseID() (string, error) {
+	buffer := make([]byte, 16)
+	if _, err := rand.Read(buffer); err != nil {
+		return "", fmt.Errorf("generate key hold lease ID: %w", err)
+	}
+	return "key_" + hex.EncodeToString(buffer), nil
 }
 
 func resolveHoldMS(gesture Gesture, inputs map[string]any) (uint32, error) {
