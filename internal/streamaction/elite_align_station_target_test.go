@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,8 @@ type alignStationTargetCaller struct {
 	throttles    []int
 	controls     []string
 	holds        []int
+	holdControls []string
+	holdOps      []string
 }
 
 func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -44,6 +47,28 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 		}
 		c.holds = append(c.holds, int(hold))
 		return json.Marshal(map[string]any{"schemaVersion": 1, "selection": control, "control": control, "holdMs": hold})
+	case "elite-dangerous/ship-attitude-hold", "elite-dangerous/ship-attitude-vector-hold":
+		operation, ok := inputs["operation"].(string)
+		if !ok {
+			return nil, errors.New("attitude hold operation is not a string")
+		}
+		control, ok := inputs["control"].(string)
+		if !ok {
+			return nil, errors.New("attitude hold control is not a string")
+		}
+		c.holdOps = append(c.holdOps, operation)
+		c.holdControls = append(c.holdControls, control)
+		state := "ACTIVE"
+		reason := any(nil)
+		if operation == "STOP" {
+			state = "RELEASED"
+			reason = "EXPLICIT"
+		}
+		return json.Marshal(map[string]any{
+			"schemaVersion": 1, "operation": operation, "selection": control, "control": control,
+			"leaseId": "key_00000000000000000000000000000001", "leaseMs": 2500,
+			"leaseState": state, "releaseReason": reason,
+		})
 	default:
 		return nil, errors.New("unexpected align-station-target child Action: " + id)
 	}
@@ -93,14 +118,14 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"centerContactCount":3,"commandCount":3,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
+	if string(output) != `{"centerContactCount":3,"commandCount":2,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
-	wantControls := []string{"YAW_LEFT", "YAW_LEFT", "YAW_RIGHT"}
-	wantHolds := []int{800, 800, 800}
+	wantControls := []string{"YAW_RIGHT"}
+	wantHolds := []int{250}
 	if len(caller.controls) != len(wantControls) {
 		t.Fatalf("controls=%v", caller.controls)
 	}
@@ -108,6 +133,9 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 		}
+	}
+	if strings.Join(caller.holdOps, ",") != "START,RENEW,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT,YAW_LEFT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
 }
 
@@ -190,11 +218,122 @@ func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantControls := []string{"YAW_LEFT", "PITCH_DOWN"}
-	wantHolds := []int{800, 250}
+	wantHolds := []int{300, 250}
 	for index := range wantControls {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 		}
+	}
+}
+
+func TestEliteAlignStationTargetUsesSustainedControlOutsideFineBand(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 45, 0, 45, false),
+		alignObservation("SOLID", 42, 0, 42, false),
+		alignObservation("SOLID", 35, 0, 35, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,RENEW,STOP" || strings.Join(caller.holdControls, ",") != "YAW_RIGHT,YAW_RIGHT,YAW_RIGHT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 300 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	joined := ""
+	for _, payload := range reporter.payloads {
+		joined += string(payload)
+	}
+	if !contains(joined, `"controlMode":"SUSTAINED"`) || !contains(joined, `"leaseState":"ACTIVE"`) ||
+		!contains(joined, `"reason":"SUSTAINED_CONTROL_RELEASED"`) || !contains(joined, `"sampleDurationMs":`) ||
+		!contains(joined, `"sampleIntervalMs":`) {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteAlignStationTargetUsesDiagonalSustainedControlForTwoFarAxes(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 38, -20, 42.94, false),
+		alignObservation("SOLID", 35, -15, 38.08, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP" ||
+		strings.Join(caller.holdControls, ",") != "PITCH_UP_YAW_RIGHT,PITCH_UP_YAW_RIGHT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+}
+
+func TestEliteAlignStationTargetReleasesSustainedControlAcrossTransientAmbiguousPresentation(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", -10, 9, 14.21, false),
+		alignObservation("UNKNOWN", 24, 6, 24.74, false),
+		alignObservation("HOLLOW", 20, 6, 20.88, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP,START,STOP" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+	joined := ""
+	for _, payload := range reporter.payloads {
+		joined += string(payload)
+	}
+	if !contains(joined, `"reason":"SUSTAINED_CONTROL_RELEASED_FOR_AMBIGUOUS_OBSERVATION"`) ||
+		!contains(joined, `"reason":"TARGET_PRESENTATION_UNKNOWN"`) ||
+		!contains(joined, `"leaseState":"RELEASED"`) {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteAlignStationTargetToleratesTransientMissingMarkerAfterDetection(t *testing.T) {
+	missing := json.RawMessage(`{"schemaVersion":3,"target":{"detected":false,"presentation":"UNKNOWN","hemisphere":"UNKNOWN","offsetX":null,"offsetY":null,"centerDistancePixels":null,"centerZone":{"inside":null}}}`)
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", 20, 4, 20.396, false),
+		missing,
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) || strings.Join(caller.holdOps, ",") != "START,STOP" {
+		t.Fatalf("output=%s holdOps=%v", output, caller.holdOps)
+	}
+	joined := ""
+	for _, payload := range reporter.payloads {
+		joined += string(payload)
+	}
+	if !contains(joined, `"reason":"TARGET_NOT_DETECTED_TRANSIENT"`) || !contains(joined, `"leaseState":"RELEASED"`) {
+		t.Fatalf("events=%s", joined)
 	}
 }
 
@@ -213,10 +352,12 @@ func TestEliteAlignStationTargetKeepsRearTurnDirectionAcrossCenter(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"YAW_LEFT", "YAW_LEFT", "YAW_LEFT"}
-	for index := range wantControls {
-		if caller.controls[index] != wantControls[index] || caller.holds[index] != 800 {
-			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	if len(caller.controls) != 0 || strings.Join(caller.holdOps, ",") != "START,RENEW,RENEW,STOP" {
+		t.Fatalf("controls=%v holdOps=%v holdControls=%v", caller.controls, caller.holdOps, caller.holdControls)
+	}
+	for _, control := range caller.holdControls {
+		if control != "YAW_LEFT" {
+			t.Fatalf("holdControls=%v", caller.holdControls)
 		}
 	}
 }
@@ -257,7 +398,7 @@ func TestEliteAlignStationTargetUsesFinePulseAtReviewedFourteenPixels(t *testing
 	}
 }
 
-func TestEliteAlignStationTargetUsesSettledYawPulseInsideFineBand(t *testing.T) {
+func TestEliteAlignStationTargetUsesFineYawPulseInsideNearCenterBand(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", -14, 0, 14, false),
 		alignObservation("SOLID", 0, 0, 0, true),
@@ -270,8 +411,57 @@ func TestEliteAlignStationTargetUsesSettledYawPulseInsideFineBand(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.controls) != 1 || caller.controls[0] != "YAW_LEFT" || caller.holds[0] != 800 {
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_LEFT" || caller.holds[0] != 250 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetEscalatesFinePulseAfterTwoNoMovementSamples(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -14, 0, 14, false),
+		alignObservation("SOLID", -14, 0, 14, false),
+		alignObservation("SOLID", -14, 0, 14, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int{250, 250, 400}
+	if len(caller.holds) != len(want) {
+		t.Fatalf("holds=%v", caller.holds)
+	}
+	for index := range want {
+		if caller.holds[index] != want[index] {
+			t.Fatalf("holds=%v want=%v", caller.holds, want)
+		}
+	}
+}
+
+func TestEliteAlignStationTargetEscalatesMediumPulseAfterTwoNoMovementSamples(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -23, 0, 23, false),
+		alignObservation("SOLID", -23, 0, 23, false),
+		alignObservation("SOLID", -23, 0, 23, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int{300, 300, 400}
+	for index := range want {
+		if caller.holds[index] != want[index] {
+			t.Fatalf("holds=%v want=%v", caller.holds, want)
+		}
 	}
 }
 
@@ -289,8 +479,8 @@ func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
 	if err == nil || !contains(err.Error(), "no measurable Compass movement") {
 		t.Fatalf("error=%v", err)
 	}
-	if len(caller.controls) != 4 {
-		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	if len(caller.controls) != 0 || strings.Join(caller.holdOps, ",") != "START,RENEW,RENEW,RENEW,STOP" {
+		t.Fatalf("controls=%v holdOps=%v", caller.controls, caller.holdOps)
 	}
 }
 

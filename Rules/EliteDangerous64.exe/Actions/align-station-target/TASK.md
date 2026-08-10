@@ -7,20 +7,30 @@ docking computer. The caller must establish the intended Station target lock
 before starting this Action.
 
 By default the Action first commands 0% throttle, then repeatedly reads
-`elite-dangerous/compass` and issues one bounded yaw or pitch press
-through `elite-dangerous/ship-attitude-control`. While the marker is hollow,
-the Action locks a coarse yaw-left turn until it reaches the front hemisphere;
+`elite-dangerous/compass`. While the marker is hollow, the Action starts a
+non-blocking `elite-dangerous/ship-attitude-hold` yaw-left lease and samples
+Compass on a one-second start-to-start cadence until it reaches the front hemisphere;
 it deliberately does not reverse from the hollow marker's offset sign as that
-projection crosses the compass antipode. Once solid, the dominant screen axis
-selects yaw or pitch. Yaw retains the explicit 800 ms press at every distance;
-pitch is distance-scaled to 800, 300, or 250 ms. After every ALIGN command the
-Action waits 3.5 seconds before reading the next Gate. Live calibration on a
-locked Station target showed that an 800 ms yaw press first appears to cross
-the center, but settles after about 3.4 seconds with only roughly three
-reference pixels of net movement. The previous fast feedback loop sampled that
-transient and issued an opposite command, producing the observed oscillation.
-Completion requires three consecutive solid samples inside the four-pixel
-zone.
+projection crosses the compass antipode. A solid target more than 40 reference
+pixels from center uses a leased hold. When both pitch and yaw components are
+at least eight reference pixels, one compound lease overlaps both resolved
+keys for diagonal movement; otherwise the dominant single axis is held.
+The lease is renewed after each successful observation and released before an
+axis change or entry into the 40-pixel fine band.
+After at least one target observation, the Action also treats at most two
+consecutive missing-marker frames as a transient compass-edge crossing. It
+releases the active lease and resumes observation; an initially missing target
+or a third consecutive missing frame still fails as missing destination-lock
+evidence.
+
+Inside 40 pixels, control returns to bounded pulses through
+`elite-dangerous/ship-attitude-control`. Both Yaw and Pitch use 300 ms pulses
+inside the 40-pixel band and 250 ms pulses inside the 16-pixel near-center
+band. When two consecutive pulse-band observations show no measurable
+response, the next pulse is raised to 400 ms before the existing no-progress
+Gate can terminate the run. Pulse observations keep the same one-second start-to-start cadence as
+sustained control. Completion requires three consecutive solid samples inside
+the four-pixel zone.
 
 `stopBeforeAlign=false` is reserved for an owning flight workflow that already
 controls throttle, such as an active Supercruise approach. In that mode this
@@ -50,7 +60,9 @@ binding, scan-code, or Compass debugging for the known condition. Controller
 enumeration is deliberately not a Gate: the controller that restored Pitch in
 the reviewed live A/B test was not exposed by XInput.
 
-In ALIGN, each post-command observation reports marker displacement,
+In ALIGN, each observation reports its start time, execution duration, and
+start-to-start interval together with `NONE`, `SUSTAINED`, or `PULSE` control
+mode and current lease evidence. Each post-command observation also reports marker displacement,
 center-distance delta, consecutive no-movement count, and a front-marker
 moving-away trend. Four exactly stationary observations or five consecutive
 front observations moving at least one reference pixel farther from center
@@ -62,4 +74,5 @@ Every observation and command is emitted as
 phase transitions and control pulses to the Windows Action OSD. The Action
 fails rather than guessing when the compass target is absent, its hollow/solid
 topology is ambiguous, a child Action fails, or the bounded command limit is
-exhausted.
+exhausted. Failure or cancellation runs the registered lease STOP compensation;
+the 2500 ms runtime lease independently expires if the workflow cannot renew it.

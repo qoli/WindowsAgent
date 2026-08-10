@@ -28,6 +28,7 @@ type Reporter interface {
 
 type Runner struct {
 	Sleep func(context.Context, time.Duration) error
+	Now   func() time.Time
 }
 
 const maxFailureActions = 8
@@ -56,7 +57,11 @@ func (r Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, ca
 	if sleep == nil {
 		sleep = sleepContext
 	}
-	host := &host{ctx: ctx, pkg: pkg, caller: caller, reporter: reporter, sleepFn: sleep}
+	now := r.Now
+	if now == nil {
+		now = time.Now
+	}
+	host := &host{ctx: ctx, pkg: pkg, caller: caller, reporter: reporter, sleepFn: sleep, nowFn: now, startedAt: now()}
 	defer func() {
 		if runErr == nil || len(host.failureActions) == 0 {
 			return
@@ -124,6 +129,8 @@ type host struct {
 	caller         Caller
 	reporter       Reporter
 	sleepFn        func(context.Context, time.Duration) error
+	nowFn          func() time.Time
+	startedAt      time.Time
 	failureActions []deferredAction
 }
 
@@ -139,7 +146,8 @@ func (h *host) predeclared() starlark.StringDict {
 		"activity": starlark.NewBuiltin("stream.activity", h.activity),
 	})
 	taskModule := starlarkstruct.FromStringDict(starlark.String("task"), starlark.StringDict{
-		"sleep": starlark.NewBuiltin("task.sleep", h.sleep),
+		"sleep":                starlark.NewBuiltin("task.sleep", h.sleep),
+		"elapsed_milliseconds": starlark.NewBuiltin("task.elapsed_milliseconds", h.elapsedMilliseconds),
 	})
 	return starlark.StringDict{"action": actionModule, "stream": streamModule, "task": taskModule}
 }
@@ -322,6 +330,17 @@ func (h *host) sleep(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tupl
 		return nil, err
 	}
 	return starlark.None, nil
+}
+
+func (h *host) elapsedMilliseconds(_ *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+	if len(args) != 0 || len(kwargs) != 0 {
+		return nil, errors.New("task.elapsed_milliseconds accepts no arguments")
+	}
+	elapsed := h.nowFn().Sub(h.startedAt).Milliseconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	return starlark.MakeInt64(elapsed), nil
 }
 
 func sleepContext(ctx context.Context, duration time.Duration) error {

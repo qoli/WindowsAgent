@@ -262,6 +262,32 @@ def main(ctx):
 	}
 }
 
+func TestRunnerExposesMonotonicElapsedMilliseconds(t *testing.T) {
+	root := writeFixturePackage(t, `
+def main(ctx):
+    return {"done": True, "sequence": task.elapsed_milliseconds()}
+`)
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(100, 0)
+	calls := 0
+	output, err := (Runner{Now: func() time.Time {
+		calls++
+		if calls == 1 {
+			return now
+		}
+		return now.Add(1250 * time.Millisecond)
+	}}).Run(context.Background(), pkg, map[string]any{"enabled": true}, &fixtureCaller{}, &fixtureReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != `{"done":true,"sequence":1250}` {
+		t.Fatalf("output=%s", output)
+	}
+}
+
 func TestRunnerEmitsHostValidatedDisplayActivity(t *testing.T) {
 	root := writeFixturePackage(t, `
 def main(ctx):

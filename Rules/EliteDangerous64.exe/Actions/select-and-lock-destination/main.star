@@ -7,7 +7,8 @@ MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 MIN_TEXT_SIMILARITY = 0.75
 MIN_TEXT_MARGIN = 0.15
-FOCUSED_FILL_MINIMUM = 0.50
+FOCUSED_FILL_MINIMUM = 0.40
+FOCUSED_FILL_MARGIN = 0.10
 LIST_MIN_Y = 320.0
 LIST_MAX_Y = 760.0
 LIST_MAX_X = 920.0
@@ -103,8 +104,10 @@ def inspect_target(raw, target_name):
     expected = normalize_text(target_name)
     best = None
     runner_up_score = 0.0
-    focused_rows = []
+    focus_best = None
+    focus_runner_up = 0.0
     meaningful = 0
+    exact_match_count = 0
     for region in raw["regions"]:
         if len(region["referencePoints"]) != 4:
             continue
@@ -116,6 +119,8 @@ def inspect_target(raw, target_name):
             continue
         meaningful += 1
         text_similarity = similarity(normalized, expected)
+        if normalized == expected:
+            exact_match_count += 1
         score = region["recognitionConfidence"] * text_similarity
         candidate = {"region": region, "similarity": text_similarity, "score": score, "bounds": box}
         if best == None or score > best["score"]:
@@ -125,15 +130,32 @@ def inspect_target(raw, target_name):
         elif score > runner_up_score:
             runner_up_score = score
         ratio = focus_fill_ratio(region)
-        if ratio != None and ratio >= FOCUSED_FILL_MINIMUM:
-            focused_rows.append({"text": region["text"], "centerY": box["centerY"], "fillRatio": ratio})
+        if ratio != None:
+            focus_candidate = {"text": region["text"], "normalized": normalized, "centerY": box["centerY"], "fillRatio": ratio}
+            if focus_best == None or ratio > focus_best["fillRatio"]:
+                if focus_best != None and focus_best["fillRatio"] > focus_runner_up:
+                    focus_runner_up = focus_best["fillRatio"]
+                focus_best = focus_candidate
+            elif ratio > focus_runner_up:
+                focus_runner_up = ratio
     margin = 0.0 if best == None else best["score"] - runner_up_score
-    if best == None or best["similarity"] < MIN_TEXT_SIMILARITY or margin < MIN_TEXT_MARGIN:
+    unique_exact_match = best != None and best["similarity"] == 1.0 and exact_match_count == 1
+    if best == None or best["similarity"] < MIN_TEXT_SIMILARITY or (margin < MIN_TEXT_MARGIN and not unique_exact_match):
         return {"state": "UNKNOWN", "locked": None, "focused": None, "direction": None, "text": None if best == None else best["region"]["text"], "similarity": 0.0 if best == None else best["similarity"], "margin": margin, "meaningfulRegionCount": meaningful, "focusFillRatio": None, "reason": "TARGET_TEXT_NOT_CONFIRMED"}
     text = best["region"]["text"]
-    locked = "<" in text and ">" in text
+    has_leading_bracket = "<" in text
+    has_trailing_bracket = ">" in text
+    locked = has_leading_bracket or has_trailing_bracket
+    bracket_evidence = "NONE"
+    if has_leading_bracket and has_trailing_bracket:
+        bracket_evidence = "BOTH"
+    elif has_leading_bracket:
+        bracket_evidence = "LEADING_ONLY"
+    elif has_trailing_bracket:
+        bracket_evidence = "TRAILING_ONLY"
     target_fill = focus_fill_ratio(best["region"])
-    focused = target_fill != None and target_fill >= FOCUSED_FILL_MINIMUM
+    focus_unique = focus_best != None and focus_best["fillRatio"] >= FOCUSED_FILL_MINIMUM and focus_best["fillRatio"] - focus_runner_up >= FOCUSED_FILL_MARGIN
+    focused = focus_unique and focus_best["normalized"] == expected
     # These rows belong specifically to NAVIGATION: angle brackets are direct
     # LOCK DESTINATION evidence here. CONTACTS uses the same glyphs for a
     # different ship-target concept and is classified by another Action.
@@ -141,17 +163,17 @@ def inspect_target(raw, target_name):
     direction = None
     reason = "NAVIGATION_DESTINATION_BRACKETS_CONFIRMED" if locked else ("TARGET_ROW_FOCUSED" if focused else "TARGET_ROW_VISIBLE")
     if not locked and not focused:
-        if len(focused_rows) != 1:
+        if not focus_unique:
             state = "UNKNOWN"
             reason = "FOCUSED_ROW_NOT_UNIQUE"
-        elif focused_rows[0]["centerY"] < best["bounds"]["centerY"]:
+        elif focus_best["centerY"] < best["bounds"]["centerY"]:
             direction = "DOWN"
-        elif focused_rows[0]["centerY"] > best["bounds"]["centerY"]:
+        elif focus_best["centerY"] > best["bounds"]["centerY"]:
             direction = "UP"
         else:
             state = "UNKNOWN"
             reason = "FOCUS_GEOMETRY_AMBIGUOUS"
-    return {"state": state, "locked": locked, "focused": focused, "direction": direction, "text": text, "similarity": best["similarity"], "margin": margin, "meaningfulRegionCount": meaningful, "focusFillRatio": target_fill, "reason": reason}
+    return {"state": state, "locked": locked, "bracketEvidence": bracket_evidence, "focused": focused, "direction": direction, "text": text, "similarity": best["similarity"], "margin": margin, "meaningfulRegionCount": meaningful, "focusFillRatio": target_fill, "reason": reason}
 
 def observe_target_stable(target_name, phase, panel_cycles, navigation_count, opened_panel):
     previous = None

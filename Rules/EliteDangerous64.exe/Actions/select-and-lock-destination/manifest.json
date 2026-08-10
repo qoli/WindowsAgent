@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 2,
+  "version": 5,
   "title": "Elite Dangerous select and lock Navigation destination",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

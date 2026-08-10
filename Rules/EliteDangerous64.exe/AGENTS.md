@@ -33,6 +33,18 @@ declared 40 ms default. Frontier's `Key_*Arrow` names map to the same extended
 Windows scan codes as their canonical directional-key counterparts. Successful
 output proves key injection only, not attitude movement.
 
+`elite-dangerous/ship-attitude-hold` is the non-blocking counterpart for one
+coarse attitude axis. `START` returns a 2500 ms lease after key-down, `RENEW`
+extends that exact lease, and `STOP` releases it. Only one hold lease may be
+active; ordinary press Actions fail while it remains active. Streaming failure
+compensation, lease expiry, and Agent shutdown release the resolved key.
+
+`elite-dangerous/ship-attitude-vector-hold` owns one pitch-plus-yaw pair under
+the same lease contract. START resolves and presses both keys into an
+overlapping hold; STOP, expiry, partial START failure, and Agent shutdown
+release the pair together. Its grouped output exposes both controls, keys,
+scan codes, and extended-key flags.
+
 Elite Dangerous has a reproduced startup input-initialization failure: when the
 configured controller was off during a cold game start, binding-resolved
 `PITCH_UP` injections completed but produced no visual or Compass movement,
@@ -45,14 +57,16 @@ another binding, scan-code, or Compass investigation. Report the included
 retry the Streaming Action without restarting Elite Dangerous.
 
 `elite-dangerous/align-station-target` is an interruptible linear Streaming
-Action over the selected target. By default it first commands 0% throttle, drives a hollow
-rear marker away from center until it becomes solid, then drives the solid
-marker toward center. The rear phase locks coarse pitch-up until the marker is
-solid instead of reversing around the rear projection's antipode. The front
-phase may use roll for coarse lateral correction, then pitch or yaw for direct
-correction. Every pulse is followed by a fresh Compass observation. Events
-expose requested hold duration, observed marker movement, distance delta,
-moving-away trend, and consecutive no-movement count. Four stationary samples
+Action over the selected target. By default it first commands 0% throttle. A
+hollow rear marker or solid marker farther than 40 reference pixels uses one
+leased sustained control while Compass is sampled at a one-second
+start-to-start cadence. It releases the hold on hemisphere, axis, or fine-band
+transition. A far solid marker with meaningful error on both axes uses the
+compound pitch-plus-yaw lease for diagonal movement. Inside 40 pixels it
+returns to distance-scaled bounded pulses at the same cadence. Events expose
+control mode, lease state, sample timing, requested
+pulse duration, observed marker movement, distance delta, moving-away trend,
+and consecutive no-movement count. Four stationary samples
 or five consecutive front samples moving away fail explicitly. Three
 consecutive solid samples in the four-pixel center zone are required for
 completion. Its structured update events are the durable control timeline;

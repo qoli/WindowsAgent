@@ -6,9 +6,12 @@ opens the left panel when absent, reads the active four-state tab directly,
 cycles with `NEXT_PANEL` until NAVIGATION is observed, locates
 the named row through current PP-OCR boxes, moves focus one settled row at a
 time, opens its detail card, activates the confirmed focused `LOCK DESTINATION`
-tile, and requires two angle-bracketed observations of the named row.
+tile, and requires two bracket-bearing observations of the exact named row.
+Either bracket is sufficient because PP-OCR may crop one edge of a skewed HUD
+text box; each observation reports `BOTH`, `LEADING_ONLY`, or `TRAILING_ONLY`
+bracket evidence. A normal focused row has neither bracket and is not accepted.
 
-Within NAVIGATION, an already angle-bracketed named row is direct destination
+Within NAVIGATION, an already bracket-bearing named row is direct destination
 lock evidence and returns `EXISTING`. This meaning is deliberately local to
 NAVIGATION; angle brackets in CONTACTS describe a different ship-target lock.
 For an unlocked row, highlight is only keyboard focus: the Action must move the
@@ -26,3 +29,9 @@ ambiguous OCR match, non-unique focused row, unknown detail label, unexpected
 panel state, or missing post-selection brackets fails explicitly. It never
 scrolls an unbounded list, selects the nearest row, substitutes another target,
 or calls the older streaming `lock-destination` Action as a hidden fallback.
+A unique normalized exact-name match remains selectable even when a similarly
+named neighboring system lowers the fuzzy runner-up margin; duplicate exact
+names remain ambiguous and are rejected.
+Keyboard focus is the unique strongest row-fill sample, not merely every row
+above one absolute threshold. The strongest sample must reach 0.40 and lead
+the runner-up by 0.10, which tolerates HUD skew while rejecting ambiguous focus.
