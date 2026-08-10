@@ -186,16 +186,35 @@ two later `CANCEL DOCKING` observations override it, while two returned Request
 Docking observations confirm rejection without resubmitting.
 
 `elite-dangerous/ui-control` is a finite slow-interaction primitive. A
-supervising model chooses exactly one logical `FOCUS_LEFT_PANEL`, `NEXT_PANEL`,
-`PREVIOUS_PANEL`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, or `BACK` after
+supervising model chooses exactly one logical `FOCUS_LEFT_PANEL`,
+`OPEN_GALAXY_MAP`, `NEXT_PANEL`, `PREVIOUS_PANEL`, `UP`, `DOWN`, `LEFT`,
+`RIGHT`, `SELECT`, or `BACK` after
 inspecting a fresh screenshot.
 `FOCUS_LEFT_PANEL` resolves the dedicated Frontier control; `LEFT` remains
 in-panel navigation. `NEXT_PANEL` and `PREVIOUS_PANEL` resolve the dedicated
 Frontier panel-cycle controls and must not be replaced with `LEFT` or `RIGHT`.
+`OPEN_GALAXY_MAP` resolves the dedicated Frontier map control and proves only
+key injection, not a plotted route.
 The runtime resolves that logical control from the game's active binding preset, then uses the
 game-neutral Windows scan-code input driver; never assume Space or any other
 fixed physical key. Successful output includes the binding source, backend,
 scan code, extended-key flag, and configured hold time.
+
+`elite-dangerous/text-entry-key` is the finite single-key text primitive for a
+model-confirmed active game field. It accepts one allowlisted ASCII letter,
+digit, Space, Backspace, or Enter and uses the same foreground-revalidated
+scan-code input driver. It does not accept a string, clipboard payload, chord,
+or arbitrary key name. Use a fresh frame to establish field focus and verify
+the resulting text or transition; successful injection alone is not input
+acceptance or route creation.
+
+`elite-dangerous/pointer-click` is the finite mouse primitive for game UI that
+has no Frontier keyboard-focus route. It accepts one point in the centered
+1920x1080 reference coordinate space, maps it to the current primary display,
+and emits one left click after foreground revalidation. Use a fresh frame to
+identify the control and another fresh frame to verify the resulting focus or
+transition. Its output reports both reference and native mapped coordinates;
+successful injection alone is never click acceptance.
 
 `elite-dangerous/left-panel-tab-state` is a finite observation Action. It scans
 four fixed `4x4` header squares and returns the active member of the four-state
@@ -353,14 +372,94 @@ the central flight-prompt OCR and reports `FSD_CHARGING`,
 `ALIGNMENT_REQUIRED`, `COCKPIT_PRESENT`, or `COCKPIT_ABSENT`. It does not read
 Journal, Status, NavRoute, command history, or prior observations.
 
+`elite-dangerous/hyperspace-jump-to-system` is the reusable one-hop Streaming
+Action. It verifies or acquires one exact Navigation System target unless the
+caller explicitly supplies `targetLockConfirmed=true`. The multi-System route
+owner may do so only after the same Status snapshot's Destination name and
+SystemAddress exactly match the frozen hop; this avoids reopening Navigation
+after the game has already auto-selected the plotted route's next jump. It
+coarsely aligns through Compass, runs the current-frame stellar obstruction
+Gate before and after visible-target fine alignment, and permits at most two
+trend-guided Supercruise escapes when the destination projects through the
+local star. Only a `CLEAR` target line may reach `hyperspace-control`.
+It then requires charging before stable cockpit absence, and sends 0% on the first
+returning cockpit frame after transit has been established. Stable cockpit and
+Supercruise HUD evidence then complete the child at
+`ARRIVED_IN_SUPERCRUISE`. It does not read a route, choose another hop, or
+enter the Station workflow.
+
+`elite-dangerous/hyperspace-target-occlusion` is the finite directional CV
+Gate over a wide 1680 by 900 forward-view reference region. It uses sparse
+high-luminance pixels for a 5 by 3 stellar occupancy grid, total coverage, and
+centroid direction; warm-orange pixels remain diagnostic because Elite's HUD
+and cockpit trim are orange. `CLEAR` means the nearby star has left the broad
+forward field, not merely the old central crop. `PARTIAL` and `BLOCKING` are
+current-frame states. A symmetric or full-frame body returns no recommended
+control rather than inventing a direction.
+
+`elite-dangerous/clear-hyperspace-occlusion` is its interruptible streaming
+owner. It stops first, measures every turn, and uses a bounded Pitch Up probe
+when the finite Gate has no reliable direction. Coverage improvement preserves
+the probe direction; worsening coverage reverses it. Once a turn first reaches
+`CLEAR`, attitude input ends. The Action waits 1.5 seconds and requires three
+current no-input `CLEAR` observations, so an in-motion frame cannot authorize
+FSD charging. Landing Gear and Cargo Scoop must then be visually OFF, current
+`Status.json` must show no FSD charge, cooldown, Mass Lock, or overheat. It
+preserves the verified away-from-star heading for a 120-second normal-space escape,
+requires at least two current visual `ship-speed` non-zero confirmations among
+four samples at five through eight seconds, and aborts
+that escape if known heat reaches 75%. After stopping, `ship-heat` must return
+three known readings at or below 60%. Only then does it
+invoke the dedicated `Supercruise` binding. Each Status observation permits at
+most three bounded launcher attempts and never substitutes stale evidence.
+Only a supervising model holding a prior durable 120-second escape, 0%
+compensation, and safe-heat checkpoint may explicitly resume with
+`normalSpaceSeparationConfirmed=true`; omission always performs the escape.
+After charging begins, it never
+aligns and never waits on slow HUD OCR: current Status flags exclusively decide
+Supercruise entry, timeout, cancellation, or unsafe overheat/charge state. It
+allows up to fifteen seconds for the already-aligned, low-heat charge to enter
+Supercruise, sampling visual heat each second and cancelling at 90%; a still-
+charging timeout is also actively cancelled and confirmed. It
+travels tangentially for 30 seconds and completes at 0% with current `CLEAR`
+and Supercruise evidence. It never aligns the destination or sends the
+hyperspace control itself.
+
+`elite-dangerous/ship-heat` is the finite visual charge-start Gate. Its OCR
+front end reads the fixed two- or three-digit cockpit heat percentage with a
+digits-only decoder; the pure classifier returns `KNOWN` only for a sufficiently
+confident value from 0 through 250 whose constrained and raw readings do not
+materially disagree. `UNKNOWN` must delay or reject initial charging. During
+charging, the Action retains the last known value across an `UNKNOWN` sample
+and cancels when a new known visual value reaches the declared safety limit,
+because Elite's ship heat is not exposed as a live numeric field in
+`Status.json`.
+
+`elite-dangerous/nav-route-plan` is the pure semantic boundary over the RAW
+`filesystem/nav-route` result. It validates every plotted System entry, the
+exact expected final System, unique positive SystemAddress values, and the
+caller-owned jump limit, then returns one frozen ordered route identity.
+`NavRouteClear`, missing or malformed entries, destination mismatch, and
+excessive hop counts fail explicitly. Source age is evidence, not automatic
+route invalidation; an owning workflow must compare the route identity again.
+
+`elite-dangerous/multi-system-transit` is the interruptible route owner. It
+freezes one game-plotted NavRoute, optionally delegates a docked departure,
+then invokes one `hyperspace-jump-to-system` child per ordered hop. Before each
+hop and after each arrival it requires a CURRENT `Status.json` snapshot with a
+new timestamp and numeric FuelMain plus an explicit minimum fuel reserve. The
+Status snapshot does not expose a temperature field, so this Action does not
+claim a temperature Gate. It re-reads and compares the route
+identity after every hop. Completion means every frozen hop was consumed and
+the final System was reached in confirmed Supercruise at 0%; it does not select
+a Station or dock. Route mutation, unavailable safety evidence, child failure,
+or cancellation terminates with registered 0% compensation.
+
 `elite-dangerous/inter-system-transit-to-station` is the parent single-hop
-Streaming Action. It may delegate a docked start to `leave-station`, locks the
-exact visible System target, completes Compass and visible-target alignment at
-0%, and invokes only `hyperspace-control`. Charging must precede two absent
-cockpit samples. Two consecutive returning cockpit samples command 0% on the
-confirming sample; arrival then
-requires stable cockpit presence, persistent Supercruise HUD evidence, and two
-exact destination-System target-text observations. The destination Station
+Streaming Action. It may delegate a docked start to `leave-station`, then
+delegates its one System transition to `hyperspace-jump-to-system`. The parent
+still requires two exact destination-System target-text observations before it
+enters the Station phase. The destination Station
 must already be present in the current visible Navigation list; stale filters
 fail as a missing target rather than triggering blind icon-menu input. A hyperspace exit is
 already Supercruise, so the workflow locks the exact Station and resumes

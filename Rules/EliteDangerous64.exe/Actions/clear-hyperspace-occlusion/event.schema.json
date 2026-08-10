@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "type": {
+      "const": "action.clear-hyperspace-occlusion.update"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "targetName",
+        "sample",
+        "turnCount",
+        "occlusionState",
+        "stellarCoverageRatio",
+        "centerCoverageRatio",
+        "directionConfidence",
+        "recommendedControl",
+        "selectedControl",
+        "probeDelta",
+        "clearConfirmations",
+        "stableHeadingConfirmations",
+        "commandedThrottle",
+        "massLock",
+        "heatPercent",
+        "fsdCharging",
+        "fsdHyperdriveCharging",
+        "fsdCooldown",
+        "overHeating",
+        "supercruise",
+        "elapsedMs",
+        "reason"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "VERIFYING_OBSTRUCTION",
+            "PROBING_DIRECTION",
+            "TURNING_AWAY",
+            "STABILIZING_HEADING",
+            "WAITING_CURRENT_STATUS",
+            "NORMAL_ESCAPE",
+            "NORMAL_STELLAR_ESCAPE",
+            "RESUMING_AFTER_STELLAR_ESCAPE",
+            "COOLING_BEFORE_CHARGE",
+            "ENTERING_SUPERCRUISE",
+            "CANCELLING_CHARGE",
+            "SUPERCRUISE_ESCAPE",
+            "STOPPING",
+            "COMPLETED"
+          ]
+        },
+        "targetName": {
+          "type": "string"
+        },
+        "sample": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "turnCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 14
+        },
+        "occlusionState": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "CLEAR",
+            "PARTIAL",
+            "BLOCKING",
+            "UNKNOWN",
+            null
+          ]
+        },
+        "stellarCoverageRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "centerCoverageRatio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "directionConfidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "recommendedControl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "PITCH_UP",
+            "PITCH_DOWN",
+            "YAW_LEFT",
+            "YAW_RIGHT",
+            null
+          ]
+        },
+        "selectedControl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "PITCH_UP",
+            "PITCH_DOWN",
+            "YAW_LEFT",
+            "YAW_RIGHT",
+            null
+          ]
+        },
+        "probeDelta": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": -1,
+          "maximum": 1
+        },
+        "clearConfirmations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "stableHeadingConfirmations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "commandedThrottle": {
+          "enum": [
+            0,
+            100
+          ]
+        },
+        "massLock": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ON",
+            "OFF",
+            null
+          ]
+        },
+        "heatPercent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 250
+        },
+        "fsdCharging": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "fsdHyperdriveCharging": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "fsdCooldown": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "overHeating": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "supercruise": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 120000
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

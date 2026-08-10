@@ -1,9 +1,4 @@
 POLL_MS = 250
-CHARGING_LIMIT = 80
-TRANSIT_ABSENT_CONFIRMATIONS = 2
-ARRIVAL_PRESENT_CONFIRMATIONS = 2
-ARRIVAL_LIMIT = 240
-SUPERCRUISE_HUD_CONFIRMATIONS = 2
 SYSTEM_TEXT_CONFIRMATIONS = 2
 SYSTEM_TEXT_LIMIT = 20
 
@@ -23,36 +18,6 @@ def emit_update(phase, sample, target_name=None, child_action=None, hyperspace_s
             "reason": reason,
         },
     )
-
-def align_target(target_name, sample, phase, control_profile):
-    emit_update(phase, sample, target_name=target_name, child_action="elite-dangerous/align-station-target", commanded_throttle=0, reason="COMPASS_COARSE_ALIGNMENT")
-    coarse = action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "stopBeforeAlign": True, "controlProfile": control_profile})
-    emit_update(phase, sample, target_name=target_name, child_action="elite-dangerous/align-visible-target", commanded_throttle=0, reason="VISIBLE_TARGET_FINE_ALIGNMENT")
-    fine = action.call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_name, "stopBeforeAlign": False})
-    return {"coarseSamples": coarse["sampleCount"], "fineSamples": fine["sampleCount"]}
-
-def observe_hyperspace():
-    observation = action.call(id="elite-dangerous/hyperspace-state", inputs={})["hyperspaceState"]
-    return {
-        "state": observation["state"],
-        "flightStatus": observation["flightStatus"],
-        "cockpitHud": observation["cockpitHud"]["state"],
-        "promptText": observation["promptText"],
-    }
-
-def require_supercruise_hud(sample, target_name):
-    confirmations = 0
-    for _ in range(8):
-        hud = action.call(id="elite-dangerous/supercruise-hud-state", inputs={})["supercruiseHud"]
-        if hud["state"] == "ACTIVE":
-            confirmations += 1
-        else:
-            confirmations = 0
-        emit_update("CONFIRMING_ARRIVAL", sample, target_name=target_name, child_action="elite-dangerous/supercruise-hud-state", commanded_throttle=0, reason="SUPERCRUISE_HUD_" + hud["state"])
-        if confirmations >= SUPERCRUISE_HUD_CONFIRMATIONS:
-            return confirmations
-        task.sleep(milliseconds=POLL_MS)
-    fail("persistent Supercruise HUD was not confirmed after hyperspace cockpit return")
 
 def require_destination_system_text(sample, target_name):
     confirmations = 0
@@ -81,10 +46,6 @@ def main(ctx):
         fail("normalSpaceConfirmed must be true for NORMAL_SPACE startMode")
     if start_mode == "SUPERCRUISE" and not ctx.inputs["supercruiseConfirmed"]:
         fail("supercruiseConfirmed must be true for SUPERCRUISE startMode")
-    if start_mode != "NORMAL_SPACE" and ctx.inputs["normalSpaceConfirmed"]:
-        fail("normalSpaceConfirmed may be true only for NORMAL_SPACE startMode")
-    if start_mode != "SUPERCRUISE" and ctx.inputs["supercruiseConfirmed"]:
-        fail("supercruiseConfirmed may be true only for SUPERCRUISE startMode")
 
     sample = 0
     action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
@@ -93,94 +54,30 @@ def main(ctx):
         emit_update("DEPARTURE", sample, child_action="elite-dangerous/leave-station", reason="AWAITING_CHILD_WORKFLOW")
         action.call(id="elite-dangerous/leave-station", inputs={"stationConfirmed": True})
         emit_update("DEPARTURE_COMPLETED", sample, child_action="elite-dangerous/leave-station", commanded_throttle=0, reason="NORMAL_SPACE_STOP_CONFIRMED")
+        jump_start_mode = "NORMAL_SPACE"
+    else:
+        jump_start_mode = start_mode
 
-    stream.activity(message="Locking destination system", level="info")
-    emit_update("LOCKING_SYSTEM", sample, target_name=destination_system, child_action="elite-dangerous/select-and-lock-destination", commanded_throttle=0)
-    system_lock = action.call(id="elite-dangerous/select-and-lock-destination", inputs={"targetName": destination_system})
-    if not system_lock["targetLocked"]:
-        fail("destination system lock Action did not confirm targetLocked")
-    emit_update("SYSTEM_LOCKED", sample, target_name=destination_system, child_action="elite-dangerous/select-and-lock-destination", commanded_throttle=0, reason=system_lock["result"])
+    stream.activity(message="Starting one-System hyperspace jump", level="info")
+    emit_update("LOCKING_SYSTEM", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-jump-to-system", commanded_throttle=0)
+    jump = action.call(id="elite-dangerous/hyperspace-jump-to-system", inputs={
+        "targetSystem": destination_system,
+        "targetSystemAddress": None,
+        "targetLockConfirmed": False,
+        "startMode": jump_start_mode,
+        "normalSpaceConfirmed": jump_start_mode == "NORMAL_SPACE",
+        "supercruiseConfirmed": jump_start_mode == "SUPERCRUISE",
+    })
+    if not jump["completed"] or jump["finalPhase"] != "ARRIVED_IN_SUPERCRUISE" or not jump["arrivalBrakeSent"]:
+        fail("hyperspace-jump-to-system did not reach a stopped Supercruise arrival")
+    sample = jump["sampleCount"]
+    emit_update("SYSTEM_LOCKED", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-jump-to-system", commanded_throttle=0, reason="TARGET_LOCK_CONFIRMED_BY_CHILD")
+    emit_update("FSD_CHARGING", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-jump-to-system", hyperspace_state="FSD_CHARGING", flight_status="FSD_CHARGING", cockpit_hud="PRESENT", commanded_throttle=0, reason="CHILD_CONFIRMED")
+    emit_update("HYPERSPACE_TRANSIT", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-jump-to-system", hyperspace_state="COCKPIT_ABSENT", cockpit_hud="ABSENT", commanded_throttle=0, reason="CHILD_CONFIRMED")
 
-    stream.activity(message="Aligning hyperspace destination", level="info")
-    initial_control_profile = "SUPERCRUISE_ASSIST" if start_mode == "SUPERCRUISE" else "NORMAL_SPACE"
-    initial_alignment = align_target(destination_system, sample, "ALIGNING_SYSTEM", initial_control_profile)
-    initial = observe_hyperspace()
-    if initial["cockpitHud"] != "PRESENT":
-        fail("cockpit HUD was not present before hyperspace control")
-
-    jump = action.call(id="elite-dangerous/hyperspace-control", inputs={"command": "JUMP"})
-    emit_update("AWAITING_FSD_CHARGING", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-control", hyperspace_state=initial["state"], flight_status=initial["flightStatus"], cockpit_hud=initial["cockpitHud"], commanded_throttle=0, last_command="HYPERSPACE_JUMP", reason=jump["control"])
-
-    charging_seen = False
-    transit_absent = 0
-    throttle_100_sent = False
-    recovery_alignment = None
-    for _ in range(CHARGING_LIMIT):
-        sample += 1
-        observation = observe_hyperspace()
-        state = observation["state"]
-        command = None
-        phase = "AWAITING_FSD_CHARGING"
-        reason = observation["promptText"]
-        if state == "FSD_CHARGING":
-            charging_seen = True
-            phase = "FSD_CHARGING"
-            if not throttle_100_sent:
-                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
-                throttle_100_sent = True
-                command = "SET_THROTTLE_100"
-                reason = throttle["control"]
-        elif state == "ALIGNMENT_REQUIRED":
-            charging_seen = True
-            throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-            emit_update("REALIGNING_SYSTEM", sample, target_name=destination_system, hyperspace_state=state, flight_status=observation["flightStatus"], cockpit_hud=observation["cockpitHud"], commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
-            recovery_alignment = align_target(destination_system, sample, "REALIGNING_SYSTEM", "SUPERCRUISE_ASSIST")
-            throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
-            throttle_100_sent = True
-            command = "REALIGN_TARGETS+SET_THROTTLE_100"
-            phase = "REALIGNING_SYSTEM"
-            reason = throttle["control"]
-        elif state == "COCKPIT_ABSENT":
-            if not charging_seen:
-                fail("cockpit HUD disappeared before FSD charging was visually confirmed")
-            transit_absent += 1
-            phase = "HYPERSPACE_TRANSIT_CANDIDATE"
-        else:
-            transit_absent = 0
-        emit_update(phase, sample, target_name=destination_system, hyperspace_state=state, flight_status=observation["flightStatus"], cockpit_hud=observation["cockpitHud"], commanded_throttle=100 if throttle_100_sent else 0, last_command=command, reason=reason)
-        if transit_absent >= TRANSIT_ABSENT_CONFIRMATIONS:
-            break
-        task.sleep(milliseconds=POLL_MS)
-    if not charging_seen or transit_absent < TRANSIT_ABSENT_CONFIRMATIONS:
-        fail("FSD charging followed by stable hyperspace cockpit absence was not confirmed")
-    stream.activity(message="Hyperspace transit confirmed", level="info")
-    emit_update("HYPERSPACE_TRANSIT", sample, target_name=destination_system, hyperspace_state="COCKPIT_ABSENT", cockpit_hud="ABSENT", commanded_throttle=100, reason="TWO_CONSECUTIVE_COCKPIT_ABSENT_SAMPLES")
-
-    arrival_present = 0
-    arrival_stop_sent = False
-    for _ in range(ARRIVAL_LIMIT):
-        sample += 1
-        observation = observe_hyperspace()
-        command = None
-        if observation["cockpitHud"] == "PRESENT":
-            arrival_present += 1
-            if arrival_present >= ARRIVAL_PRESENT_CONFIRMATIONS and not arrival_stop_sent:
-                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-                arrival_stop_sent = True
-                command = "SET_THROTTLE_0"
-        else:
-            arrival_present = 0
-        emit_update("AWAITING_COCKPIT_RETURN", sample, target_name=destination_system, hyperspace_state=observation["state"], flight_status=observation["flightStatus"], cockpit_hud=observation["cockpitHud"], commanded_throttle=0 if arrival_stop_sent else 100, last_command=command, reason=observation["promptText"])
-        if arrival_present >= ARRIVAL_PRESENT_CONFIRMATIONS:
-            break
-        task.sleep(milliseconds=POLL_MS)
-    if arrival_present < ARRIVAL_PRESENT_CONFIRMATIONS or not arrival_stop_sent:
-        fail("stable cockpit return was not confirmed after hyperspace transit")
-
-    supercruise_confirmations = require_supercruise_hud(sample, destination_system)
     system_confirmation = require_destination_system_text(sample, destination_system)
     stream.activity(message="Destination system arrival confirmed", level="info")
-    emit_update("DESTINATION_SYSTEM_CONFIRMED", sample, target_name=destination_system, commanded_throttle=0, reason="COCKPIT_RETURN+SUPERCRUISE_HUD+TARGET_TEXT")
+    emit_update("DESTINATION_SYSTEM_CONFIRMED", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-jump-to-system", commanded_throttle=0, reason="HYPERSPACE_CHILD+TARGET_TEXT")
 
     stream.activity(message="Locking destination station", level="info")
     emit_update("LOCKING_STATION", sample, target_name=destination_station, child_action="elite-dangerous/select-and-lock-destination", commanded_throttle=0)
@@ -220,13 +117,13 @@ def main(ctx):
         "destinationStation": destination_station,
         "systemTargetLocked": True,
         "stationTargetLocked": True,
-        "hyperspaceChargingConfirmed": charging_seen,
-        "hyperspaceTransitConfirmed": True,
-        "cockpitReturnConfirmations": arrival_present,
-        "supercruiseHudConfirmations": supercruise_confirmations,
+        "hyperspaceChargingConfirmed": jump["hyperspaceChargingConfirmed"],
+        "hyperspaceTransitConfirmed": jump["hyperspaceTransitConfirmed"],
+        "cockpitReturnConfirmations": jump["cockpitReturnConfirmations"],
+        "supercruiseHudConfirmations": jump["supercruiseHudConfirmations"],
         "destinationSystemTextConfirmations": system_confirmation["confirmations"],
-        "initialAlignment": initial_alignment,
-        "recoveryAlignment": recovery_alignment,
+        "initialAlignment": jump["initialAlignment"],
+        "recoveryAlignment": jump["recoveryAlignment"],
         "supercruiseCompleted": True,
         "dockingCompleted": True,
         "visualConfirmed": False,

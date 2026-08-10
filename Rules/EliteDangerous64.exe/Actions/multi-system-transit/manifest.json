@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 3,
-  "title": "Elite Dangerous inter-system transit to station",
+  "version": 1,
+  "title": "Elite Dangerous multi-System transit",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {"maxSteps": 1000000000000, "maxOutputBytes": 16384, "maxEventBytes": 4096, "maxSleepMs": 1000}
+  "limits": {"maxSteps": 1000000000000, "maxOutputBytes": 65536, "maxEventBytes": 16384, "maxSleepMs": 1000}
 }

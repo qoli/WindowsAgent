@@ -4,6 +4,6 @@
   "additionalProperties": false,
   "required": ["control"],
   "properties": {
-    "control": {"enum": ["FOCUS_LEFT_PANEL", "NEXT_PANEL", "PREVIOUS_PANEL", "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK"]}
+    "control": {"enum": ["FOCUS_LEFT_PANEL", "OPEN_GALAXY_MAP", "NEXT_PANEL", "PREVIOUS_PANEL", "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK"]}
   }
 }

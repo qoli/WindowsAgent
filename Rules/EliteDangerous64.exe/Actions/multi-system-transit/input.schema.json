@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["destinationSystem", "startMode", "normalSpaceConfirmed", "supercruiseConfirmed", "maxJumps", "routeFuelConfirmed", "minimumFuelMain"],
+  "properties": {
+    "destinationSystem": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
+    "startMode": {"enum": ["DOCKED", "NORMAL_SPACE", "SUPERCRUISE"]},
+    "normalSpaceConfirmed": {"type": "boolean"},
+    "supercruiseConfirmed": {"type": "boolean"},
+    "maxJumps": {"type": "integer", "minimum": 1, "maximum": 32},
+    "routeFuelConfirmed": {"const": true},
+    "minimumFuelMain": {"type": "number", "minimum": 0, "maximum": 128}
+  },
+  "allOf": [
+    {"if": {"properties": {"startMode": {"const": "DOCKED"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": false}}}},
+    {"if": {"properties": {"startMode": {"const": "NORMAL_SPACE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": true}, "supercruiseConfirmed": {"const": false}}}},
+    {"if": {"properties": {"startMode": {"const": "SUPERCRUISE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": true}}}}
+  ]
+}

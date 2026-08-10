@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "routeId", "originSystem", "destinationSystem", "jumpCount", "completedJumps", "finalFuelMain", "finalStatusTimestamp", "visualConfirmed"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "MULTI_SYSTEM_TRANSIT"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "FINAL_SYSTEM_REACHED"},
+    "routeId": {"type": "string", "minLength": 5, "maxLength": 256},
+    "originSystem": {"type": "string", "minLength": 1, "maxLength": 96},
+    "destinationSystem": {"type": "string", "minLength": 2, "maxLength": 96},
+    "jumpCount": {"type": "integer", "minimum": 1, "maximum": 32},
+    "completedJumps": {"type": "integer", "minimum": 1, "maximum": 32},
+    "finalFuelMain": {"type": "number", "minimum": 0},
+    "finalStatusTimestamp": {"type": "string", "format": "date-time", "maxLength": 64},
+    "visualConfirmed": {"const": false}
+  }
+}

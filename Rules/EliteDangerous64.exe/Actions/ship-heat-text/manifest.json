@@ -1,0 +1,1 @@
+{"schemaVersion":2,"title":"Read Elite Dangerous ship heat digits","inputSchema":"input.schema.json","outputSchema":"output.schema.json","referenceRegion":{"x":800,"y":800,"w":75,"h":45},"sampling":"reference","maxPixels":3375,"characterConstraint":"digits"}

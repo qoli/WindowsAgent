@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["raw", "expectedDestinationSystem", "maxJumps"],
+  "properties": {
+    "raw": {"type": "object"},
+    "expectedDestinationSystem": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
+    "maxJumps": {"type": "integer", "minimum": 1, "maximum": 32}
+  }
+}

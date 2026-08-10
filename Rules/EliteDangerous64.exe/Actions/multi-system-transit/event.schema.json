@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.multi-system-transit.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "hopIndex", "jumpCount", "fromSystem", "toSystem", "nextSystem", "routeId", "childAction", "commandedThrottle", "fuelMain", "temperature", "statusTimestamp", "reason"],
+      "properties": {
+        "phase": {"enum": ["PLANNING_ROUTE", "ROUTE_READY", "ROUTE_RESUMED", "DEPARTURE", "DEPARTURE_COMPLETED", "WAITING_READINESS", "HOP_STARTING", "HOP_COMPLETED", "REVALIDATING_ROUTE", "ROUTE_REVALIDATED", "FINAL_SYSTEM_REACHED"]},
+        "hopIndex": {"type": "integer", "minimum": 0, "maximum": 32},
+        "jumpCount": {"type": "integer", "minimum": 0, "maximum": 32},
+        "fromSystem": {"type": ["string", "null"]},
+        "toSystem": {"type": ["string", "null"]},
+        "nextSystem": {"type": ["string", "null"]},
+        "routeId": {"type": ["string", "null"]},
+        "childAction": {"type": ["string", "null"]},
+        "commandedThrottle": {"enum": [0, null]},
+        "fuelMain": {"type": ["number", "null"]},
+        "temperature": {"type": ["number", "null"]},
+        "statusTimestamp": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

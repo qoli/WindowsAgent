@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "targetSystem", "targetLocked", "hyperspaceChargingConfirmed", "hyperspaceTransitConfirmed", "arrivalEvidence", "arrivalBrakeSent", "cockpitReturnConfirmations", "supercruiseHudConfirmations", "initialAlignment", "recoveryAlignment", "sampleCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "HYPERSPACE_JUMP_TO_SYSTEM"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "ARRIVED_IN_SUPERCRUISE"},
+    "targetSystem": {"type": "string", "minLength": 2, "maxLength": 96},
+    "targetLocked": {"const": true},
+    "hyperspaceChargingConfirmed": {"const": true},
+    "hyperspaceTransitConfirmed": {"const": true},
+    "arrivalEvidence": {"enum": ["COCKPIT_TRANSITION", "JOURNAL_FSDJUMP"]},
+    "arrivalBrakeSent": {"const": true},
+    "cockpitReturnConfirmations": {"type": "integer", "minimum": 0},
+    "supercruiseHudConfirmations": {"type": "integer", "minimum": 2},
+    "initialAlignment": {"type": "object"},
+    "recoveryAlignment": {"type": ["object", "null"]},
+    "sampleCount": {"type": "integer", "minimum": 1}
+  }
+}

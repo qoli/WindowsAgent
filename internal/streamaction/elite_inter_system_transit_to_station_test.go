@@ -10,19 +10,33 @@ import (
 )
 
 type interSystemTransitCaller struct {
-	hyperspaceStates []string
-	hyperspaceIndex  int
-	throttles        []int64
-	calls            []string
-	systemLocks      int
-	hudCalls         int
-	targetCalls      int
-	alignProfiles    []string
+	hyperspaceStates   []string
+	hyperspaceIndex    int
+	throttles          []int64
+	calls              []string
+	systemLocks        int
+	hudCalls           int
+	targetCalls        int
+	alignProfiles      []string
+	jumpStartModes     []string
+	failJump           bool
+	journalCalls       int
+	journalArrival     bool
+	hyperspaceControls int
+	occlusionStates    []string
+	occlusionIndex     int
+	occlusionEscapes   int
 }
 
 func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	c.calls = append(c.calls, id)
 	switch id {
+	case "elite-dangerous/hyperspace-jump-to-system":
+		c.jumpStartModes = append(c.jumpStartModes, inputs["startMode"].(string))
+		if c.failJump {
+			return nil, errors.New("FSD charging followed by stable hyperspace cockpit absence was not confirmed")
+		}
+		return json.RawMessage(`{"completed":true,"finalPhase":"ARRIVED_IN_SUPERCRUISE","arrivalBrakeSent":true,"hyperspaceChargingConfirmed":true,"hyperspaceTransitConfirmed":true,"cockpitReturnConfirmations":2,"supercruiseHudConfirmations":2,"initialAlignment":{"coarseSamples":3,"fineSamples":3},"recoveryAlignment":null,"sampleCount":7}`), nil
 	case "elite-dangerous/select-and-lock-destination":
 		c.systemLocks++
 		return json.RawMessage(`{"targetLocked":true,"result":"ACQUIRED"}`), nil
@@ -53,6 +67,7 @@ func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map
 			"state": state, "flightStatus": flight, "promptText": "", "cockpitHud": map[string]any{"state": cockpit},
 		}})
 	case "elite-dangerous/hyperspace-control":
+		c.hyperspaceControls++
 		return json.RawMessage(`{"control":"HyperSuperCombination"}`), nil
 	case "elite-dangerous/set-throttle":
 		percent, _ := inputs["percent"].(int64)
@@ -61,6 +76,26 @@ func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map
 	case "elite-dangerous/supercruise-hud-state":
 		c.hudCalls++
 		return json.RawMessage(`{"supercruiseHud":{"state":"ACTIVE"}}`), nil
+	case "elite-dangerous/filesystem/journal-navigation-tail":
+		c.journalCalls++
+		if c.journalArrival && c.journalCalls > 1 {
+			return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-10T11:03:03Z","event":"FSDJump","StarSystem":"Acihaut","SystemAddress":123,"JumpType":null,"RemainingJumpsInRoute":null}]}`), nil
+		}
+		return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-10T11:00:00Z","event":"FSDTarget","StarSystem":null,"SystemAddress":null,"JumpType":null,"RemainingJumpsInRoute":1}]}`), nil
+	case "elite-dangerous/hyperspace-target-occlusion":
+		state := "CLEAR"
+		if c.occlusionIndex < len(c.occlusionStates) {
+			state = c.occlusionStates[c.occlusionIndex]
+			c.occlusionIndex++
+		}
+		ratio := 0.01
+		if state != "CLEAR" {
+			ratio = 0.8
+		}
+		return json.Marshal(map[string]any{"occlusion": map[string]any{"state": state, "brightRatio": ratio, "warmOrangeRatio": ratio, "stellarCoverageRatio": ratio, "centerCoverageRatio": ratio, "directionConfidence": 0.5, "recommendedControl": "PITCH_UP"}})
+	case "elite-dangerous/clear-hyperspace-occlusion":
+		c.occlusionEscapes++
+		return json.RawMessage(`{"completed":true,"turnCount":4,"finalOcclusionState":"CLEAR","finalSupercruiseConfirmed":true}`), nil
 	case "elite-dangerous/supercruise-target-position":
 		c.targetCalls++
 		return json.RawMessage(`{"target":{"state":"DETECTED","reason":"TARGET_LABEL_TO_MARKER_OFFSET_APPLIED"}}`), nil
@@ -116,8 +151,8 @@ func TestEliteInterSystemTransitAcceptsExplicitSupercruiseStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.alignProfiles) == 0 || caller.alignProfiles[0] != "SUPERCRUISE_ASSIST" {
-		t.Fatalf("alignProfiles=%v", caller.alignProfiles)
+	if len(caller.jumpStartModes) != 1 || caller.jumpStartModes[0] != "SUPERCRUISE" {
+		t.Fatalf("jumpStartModes=%v", caller.jumpStartModes)
 	}
 }
 
@@ -141,10 +176,10 @@ func TestEliteInterSystemTransitComposesVisualSingleHopAndDocking(t *testing.T) 
 	if !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
 		!contains(string(output), `"destinationSystem":"NLTT 8084"`) ||
 		!contains(string(output), `"destinationStation":"SURAYEV HUB"`) ||
-		caller.systemLocks != 2 || caller.hudCalls != 2 || caller.targetCalls != 2 {
+		caller.systemLocks != 1 || caller.hudCalls != 0 || caller.targetCalls != 2 {
 		t.Fatalf("output=%s locks=%d hud=%d target=%d", output, caller.systemLocks, caller.hudCalls, caller.targetCalls)
 	}
-	if !equalInt64s(caller.throttles, []int64{100, 0}) {
+	if len(caller.throttles) != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
 	joined := joinEventPhases(reporter.payloads)
@@ -160,11 +195,7 @@ func TestEliteInterSystemTransitFailsWithoutChargingAndUsesOnlyZeroCompensation(
 	if err != nil {
 		t.Fatal(err)
 	}
-	states := make([]string, 81)
-	for index := range states {
-		states[index] = "COCKPIT_PRESENT"
-	}
-	caller := &interSystemTransitCaller{hyperspaceStates: states}
+	caller := &interSystemTransitCaller{failJump: true}
 	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
 		context.Background(), pkg, interSystemInputs(), caller, &fixtureReporter{},
 	)

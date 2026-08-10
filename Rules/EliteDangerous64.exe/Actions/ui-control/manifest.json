@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 3,
+  "version": 4,
   "title": "Elite Dangerous bounded UI control",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -10,6 +10,7 @@
   "selector": {"inputField": "control"},
   "bindings": {
     "FOCUS_LEFT_PANEL": {"control": "FocusLeftPanel"},
+    "OPEN_GALAXY_MAP": {"control": "GalaxyMapOpen"},
     "NEXT_PANEL": {"control": "CycleNextPanel"},
     "PREVIOUS_PANEL": {"control": "CyclePreviousPanel"},
     "UP": {"control": "UI_Up"},

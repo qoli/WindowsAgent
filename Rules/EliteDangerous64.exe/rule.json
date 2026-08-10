@@ -89,6 +89,25 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/ship-heat": {
+      "path": "Actions/ship-heat",
+      "runtime": "windows-composite-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/ship-heat-text": {
+      "path": "Actions/ship-heat-text",
+      "runtime": "ppocr-w480-text-v1",
+      "runtimeProfile": "ocr/w480",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/ship-heat-classifier": {
+      "path": "Actions/ship-heat-classifier",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/flight-prompt-text": {
       "path": "Actions/flight-prompt-text",
       "runtime": "ppocr-w480-text-v1",
@@ -335,11 +354,47 @@
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     },
+    "elite-dangerous/hyperspace-jump-to-system": {
+      "path": "Actions/hyperspace-jump-to-system",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
+    "elite-dangerous/multi-system-transit": {
+      "path": "Actions/multi-system-transit",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
+    "elite-dangerous/nav-route-plan": {
+      "path": "Actions/nav-route-plan",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/filesystem/status": {
       "path": "Actions/filesystem-status",
       "runtime": "windows-observation-v1",
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/filesystem/journal-navigation-tail": {
+      "path": "Actions/filesystem-journal-navigation-tail",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/hyperspace-target-occlusion": {
+      "path": "Actions/hyperspace-target-occlusion",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/clear-hyperspace-occlusion": {
+      "path": "Actions/clear-hyperspace-occlusion",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion":"stream","lifecycle":"linear","interruptible":true},
+      "registrableAs": []
     },
     "elite-dangerous/filesystem/cargo": {
       "path": "Actions/filesystem-cargo",

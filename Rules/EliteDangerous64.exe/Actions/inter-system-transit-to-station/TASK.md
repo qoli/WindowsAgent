@@ -9,13 +9,11 @@ boundary. After departure, the parent owns every time-sensitive flight step.
 uses the Supercruise Compass control profile; it is never inferred from a
 `NORMAL_SPACE` claim.
 
-It locks the exact visible destination System row, aligns at 0% through the
-Compass and visible-target children, invokes only the binding-resolved
-`HyperSuperCombination`, requires FSD charging, and then commands 100%.
-Hyperspace transit is two consecutive cockpit-HUD-absent samples after charging.
-Two consecutive returning cockpit samples command 0% on the confirming sample; arrival requires
-two cockpit-present samples, two persistent Supercruise HUD samples, and two
-exact destination-System target-text observations.
+It delegates the exact target lock, 0% alignment, binding-resolved
+`HyperSuperCombination`, FSD charging, hyperspace transition, first-returning-
+cockpit-frame 0% brake, and persistent Supercruise arrival evidence to
+`hyperspace-jump-to-system`. The parent then requires two exact destination-
+System target-text observations before it may enter the Station phase.
 
 Because a hyperspace exit is already in Supercruise, the Action does not wait
 for `ship-speed STOPPED`. It locks the exact destination Station, resumes
