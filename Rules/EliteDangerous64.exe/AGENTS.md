@@ -345,6 +345,29 @@ resolves only Frontier's `Supercruise` control. It does not fall back to
 `HyperSuperCombination`, which could initiate a hyperspace jump when a route
 target is active. Missing or ambiguous Keyboard bindings fail explicitly.
 
+`elite-dangerous/cockpit-hud-presence` is a finite reference-density pixel
+observation over the reviewed right ship-hologram HUD region. It returns only `PRESENT` or
+`ABSENT` with separate orange and FSD-charge-cyan pixel counts. Neither state is a scene or transition
+claim. `elite-dangerous/hyperspace-state` combines that current sample with
+the central flight-prompt OCR and reports `FSD_CHARGING`,
+`ALIGNMENT_REQUIRED`, `COCKPIT_PRESENT`, or `COCKPIT_ABSENT`. It does not read
+Journal, Status, NavRoute, command history, or prior observations.
+
+`elite-dangerous/inter-system-transit-to-station` is the parent single-hop
+Streaming Action. It may delegate a docked start to `leave-station`, locks the
+exact visible System target, completes Compass and visible-target alignment at
+0%, and invokes only `hyperspace-control`. Charging must precede two absent
+cockpit samples. Two consecutive returning cockpit samples command 0% on the
+confirming sample; arrival then
+requires stable cockpit presence, persistent Supercruise HUD evidence, and two
+exact destination-System target-text observations. The destination Station
+must already be present in the current visible Navigation list; stale filters
+fail as a missing target rather than triggering blind icon-menu input. A hyperspace exit is
+already Supercruise, so the workflow locks the exact Station and resumes
+`supercruise-assist-to-destination` with `supercruiseConfirmed=true` before
+delegating to `dock-at-station`. Any missing Gate or child failure terminates
+with 0% compensation. The final phase is `VISUAL_CONFIRMATION_REQUIRED`.
+
 `elite-dangerous/supercruise-to-destination` is an interruptible linear
 Streaming Action from an already confirmed Navigation destination lock to a
 safe normal-space arrival. The caller must first complete

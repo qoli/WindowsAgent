@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "destinationSystem", "destinationStation", "systemTargetLocked", "stationTargetLocked", "hyperspaceChargingConfirmed", "hyperspaceTransitConfirmed", "cockpitReturnConfirmations", "supercruiseHudConfirmations", "destinationSystemTextConfirmations", "initialAlignment", "recoveryAlignment", "supercruiseCompleted", "dockingCompleted", "visualConfirmed", "sampleCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "INTER_SYSTEM_TRANSIT_TO_STATION"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "VISUAL_CONFIRMATION_REQUIRED"},
+    "destinationSystem": {"type": "string", "minLength": 2, "maxLength": 96},
+    "destinationStation": {"type": "string", "minLength": 2, "maxLength": 96},
+    "systemTargetLocked": {"const": true},
+    "stationTargetLocked": {"const": true},
+    "hyperspaceChargingConfirmed": {"const": true},
+    "hyperspaceTransitConfirmed": {"const": true},
+    "cockpitReturnConfirmations": {"type": "integer", "minimum": 2},
+    "supercruiseHudConfirmations": {"type": "integer", "minimum": 2},
+    "destinationSystemTextConfirmations": {"type": "integer", "minimum": 2},
+    "initialAlignment": {"type": "object"},
+    "recoveryAlignment": {"type": ["object", "null"]},
+    "supercruiseCompleted": {"const": true},
+    "dockingCompleted": {"const": true},
+    "visualConfirmed": {"const": false},
+    "sampleCount": {"type": "integer", "minimum": 1}
+  }
+}

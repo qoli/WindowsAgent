@@ -1,0 +1,221 @@
+package streamaction
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+type interSystemTransitCaller struct {
+	hyperspaceStates []string
+	hyperspaceIndex  int
+	throttles        []int64
+	calls            []string
+	systemLocks      int
+	hudCalls         int
+	targetCalls      int
+}
+
+func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	c.calls = append(c.calls, id)
+	switch id {
+	case "elite-dangerous/select-and-lock-destination":
+		c.systemLocks++
+		return json.RawMessage(`{"targetLocked":true,"result":"ACQUIRED"}`), nil
+	case "elite-dangerous/align-station-target":
+		return json.RawMessage(`{"sampleCount":3}`), nil
+	case "elite-dangerous/align-visible-target":
+		return json.RawMessage(`{"sampleCount":3}`), nil
+	case "elite-dangerous/hyperspace-state":
+		if c.hyperspaceIndex >= len(c.hyperspaceStates) {
+			return nil, errors.New("unexpected hyperspace-state observation")
+		}
+		state := c.hyperspaceStates[c.hyperspaceIndex]
+		c.hyperspaceIndex++
+		flight := "UNKNOWN"
+		cockpit := "PRESENT"
+		if state == "FSD_CHARGING" {
+			flight = "FSD_CHARGING"
+		}
+		if state == "ALIGNMENT_REQUIRED" {
+			flight = "FSD_ALIGNMENT_REQUIRED"
+		}
+		if state == "COCKPIT_ABSENT" {
+			cockpit = "ABSENT"
+		}
+		return json.Marshal(map[string]any{"hyperspaceState": map[string]any{
+			"state": state, "flightStatus": flight, "promptText": "", "cockpitHud": map[string]any{"state": cockpit},
+		}})
+	case "elite-dangerous/hyperspace-control":
+		return json.RawMessage(`{"control":"HyperSuperCombination"}`), nil
+	case "elite-dangerous/set-throttle":
+		percent, _ := inputs["percent"].(int64)
+		c.throttles = append(c.throttles, percent)
+		return json.Marshal(map[string]any{"control": map[int64]string{0: "SetSpeedZero", 100: "SetSpeed100"}[percent]})
+	case "elite-dangerous/supercruise-hud-state":
+		c.hudCalls++
+		return json.RawMessage(`{"supercruiseHud":{"state":"ACTIVE"}}`), nil
+	case "elite-dangerous/supercruise-target-position":
+		c.targetCalls++
+		return json.RawMessage(`{"target":{"state":"DETECTED","reason":"TARGET_LABEL_TO_MARKER_OFFSET_APPLIED"}}`), nil
+	case "elite-dangerous/supercruise-assist-to-destination":
+		if inputs["supercruiseConfirmed"] != true || inputs["normalSpaceConfirmed"] != false {
+			return nil, errors.New("hyperspace arrival must resume existing Supercruise")
+		}
+		return json.RawMessage(`{"completed":true}`), nil
+	case "elite-dangerous/dock-at-station":
+		return json.RawMessage(`{"completed":true,"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"}`), nil
+	default:
+		return nil, errors.New("unexpected inter-system child Action: " + id)
+	}
+}
+
+func interSystemTransitPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "inter-system-transit-to-station"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func interSystemInputs() map[string]any {
+	return map[string]any{
+		"destinationSystem":             "NLTT 8084",
+		"destinationStation":            "SURAYEV HUB",
+		"startMode":                     "NORMAL_SPACE",
+		"normalSpaceConfirmed":          true,
+		"stationCompatibilityConfirmed": true,
+		"autoThrottleConfirmed":         true,
+	}
+}
+
+func TestEliteInterSystemTransitComposesVisualSingleHopAndDocking(t *testing.T) {
+	pkg, err := Load(interSystemTransitPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &interSystemTransitCaller{hyperspaceStates: []string{
+		"COCKPIT_PRESENT",
+		"FSD_CHARGING", "COCKPIT_PRESENT", "COCKPIT_ABSENT", "COCKPIT_ABSENT",
+		"COCKPIT_ABSENT", "COCKPIT_PRESENT", "COCKPIT_ABSENT", "COCKPIT_PRESENT", "COCKPIT_PRESENT",
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, interSystemInputs(), caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
+		!contains(string(output), `"destinationSystem":"NLTT 8084"`) ||
+		!contains(string(output), `"destinationStation":"SURAYEV HUB"`) ||
+		caller.systemLocks != 2 || caller.hudCalls != 2 || caller.targetCalls != 2 {
+		t.Fatalf("output=%s locks=%d hud=%d target=%d", output, caller.systemLocks, caller.hudCalls, caller.targetCalls)
+	}
+	if !equalInt64s(caller.throttles, []int64{100, 0}) {
+		t.Fatalf("throttles=%v", caller.throttles)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	for _, phase := range []string{"SYSTEM_LOCKED", "FSD_CHARGING", "HYPERSPACE_TRANSIT", "DESTINATION_SYSTEM_CONFIRMED", "STATION_LOCKED", "SUPERCRUISE_TO_STATION", "DOCKING", "VISUAL_CONFIRMATION_REQUIRED"} {
+		if !contains(joined, phase) {
+			t.Fatalf("missing phase %s in %s", phase, joined)
+		}
+	}
+}
+
+func TestEliteInterSystemTransitFailsWithoutChargingAndUsesOnlyZeroCompensation(t *testing.T) {
+	pkg, err := Load(interSystemTransitPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := make([]string, 81)
+	for index := range states {
+		states[index] = "COCKPIT_PRESENT"
+	}
+	caller := &interSystemTransitCaller{hyperspaceStates: states}
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, interSystemInputs(), caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "FSD charging followed by stable hyperspace cockpit absence was not confirmed") {
+		t.Fatalf("error=%v", err)
+	}
+	if !equalInt64s(caller.throttles, []int64{0}) {
+		t.Fatalf("failure compensation throttles=%v", caller.throttles)
+	}
+	for _, id := range caller.calls {
+		if id == "elite-dangerous/supercruise-control" || id == "elite-dangerous/filesystem/status" || id == "elite-dangerous/filesystem/nav-route" {
+			t.Fatalf("forbidden fallback Action called: %s", id)
+		}
+	}
+}
+
+func equalInt64s(left, right []int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func joinEventPhases(payloads []json.RawMessage) string {
+	joined := ""
+	for _, payload := range payloads {
+		if len(joined) != 0 {
+			joined += ","
+		}
+		joined += string(payload)
+	}
+	return joined
+}
+
+type hyperspaceStateCaller struct {
+	flightState  string
+	cockpitState string
+}
+
+func (c *hyperspaceStateCaller) Call(_ context.Context, id string, _ map[string]any) (json.RawMessage, error) {
+	switch id {
+	case "elite-dangerous/flight-prompt-text":
+		return json.RawMessage(`{"text":"PRESS TO ABORT"}`), nil
+	case "elite-dangerous/flight-status":
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": c.flightState}})
+	case "elite-dangerous/cockpit-hud-presence":
+		return json.Marshal(map[string]any{"cockpitHud": map[string]any{"state": c.cockpitState, "orangePixelCount": 0, "chargeCyanPixelCount": 0, "hudPixelCount": 0, "minimumHudPixels": 150}, "profile": map[string]any{"capturedAt": "2026-08-10T00:00:00Z"}})
+	default:
+		return nil, errors.New("unexpected hyperspace-state child Action: " + id)
+	}
+}
+
+func TestEliteHyperspaceStatePreservesSingleFrameEvidence(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "hyperspace-state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		flight, cockpit, want string
+	}{
+		{flight: "FSD_CHARGING", cockpit: "PRESENT", want: "FSD_CHARGING"},
+		{flight: "FSD_ALIGNMENT_REQUIRED", cockpit: "PRESENT", want: "ALIGNMENT_REQUIRED"},
+		{flight: "UNKNOWN", cockpit: "ABSENT", want: "COCKPIT_ABSENT"},
+		{flight: "UNKNOWN", cockpit: "PRESENT", want: "COCKPIT_PRESENT"},
+	} {
+		output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+			context.Background(), pkg, map[string]any{}, &hyperspaceStateCaller{flightState: test.flight, cockpitState: test.cockpit}, &fixtureReporter{},
+		)
+		if err != nil || !contains(string(output), `"state":"`+test.want+`"`) {
+			t.Fatalf("flight=%s cockpit=%s output=%s error=%v", test.flight, test.cockpit, output, err)
+		}
+	}
+}

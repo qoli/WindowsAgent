@@ -9,6 +9,7 @@ SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 1.0
 SUSTAINED_DISTANCE_PIXELS = 40
 FINE_DISTANCE_PIXELS = 16
 DIAGONAL_COMPONENT_MIN_PIXELS = 8
+FINE_DIAGONAL_COMPONENT_MIN_PIXELS = 4
 COARSE_HOLD_MS = 800
 MEDIUM_HOLD_MS = 300
 FINE_HOLD_MS = 120
@@ -88,7 +89,21 @@ def is_alignment_centered(target, radius_pixels):
     )
 
 def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, supercruise_profile):
-    control = choose_front_control(target)
+    offset_x = target["offsetX"]
+    offset_y = target["offsetY"]
+    control = None
+    if (
+        target["presentation"] == "SOLID" and
+        abs(offset_x) >= FINE_DIAGONAL_COMPONENT_MIN_PIXELS and
+        abs(offset_y) >= FINE_DIAGONAL_COMPONENT_MIN_PIXELS and
+        abs(offset_x) <= abs(offset_y) * 2 and
+        abs(offset_y) <= abs(offset_x) * 2
+    ):
+        pitch = "PITCH_DOWN" if offset_y > 0 else "PITCH_UP"
+        yaw = "YAW_RIGHT" if offset_x > 0 else "YAW_LEFT"
+        control = pitch + "_" + yaw
+    else:
+        control = choose_front_control(target)
     if control == None:
         return None
     distance = target["centerDistancePixels"]
@@ -146,6 +161,21 @@ def stop_hold(control, lease_id):
     if is_vector_control(control):
         return action.call(id="elite-dangerous/ship-attitude-vector-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id})
     return action.call(id="elite-dangerous/ship-attitude-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id})
+
+def pulse_control(control, hold_ms):
+    if not is_vector_control(control):
+        return action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": control, "holdMs": hold_ms})
+    start_result = start_hold(control)
+    lease_id = start_result["leaseId"]
+    register_hold_failure(control, lease_id)
+    remaining = hold_ms
+    while remaining > 0:
+        step = remaining if remaining <= MAX_SLEEP_STEP_MS else MAX_SLEEP_STEP_MS
+        task.sleep(milliseconds=step)
+        remaining -= step
+    stop_result = stop_hold(control, lease_id)
+    action.clear_on_failure()
+    return {"start": start_result, "stop": stop_result, "holdMs": hold_ms}
 
 def register_hold_failure(control, lease_id):
     if is_vector_control(control):
@@ -287,7 +317,7 @@ def main(ctx):
                 if command_count >= MAX_COMMANDS:
                     emit_update("OBSERVING", sample, command_count, target, 0, reason="COMMAND_LIMIT_REACHED")
                     fail("Compass alignment exhausted the bounded command limit")
-                brake_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": brake_control, "holdMs": FINE_HOLD_MS})
+                brake_result = pulse_control(brake_control, FINE_HOLD_MS)
                 command_count += 1
                 stream.activity(message=brake_control + " transition brake for " + str(FINE_HOLD_MS) + " ms", level="info")
                 emit_update("OBSERVING", sample, command_count, target, 0, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=FINE_HOLD_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="AMBIGUOUS_TRANSITION_BRAKE")
@@ -356,13 +386,20 @@ def main(ctx):
         else:
             stable_confirmations = 0
 
-        if mode == "ALIGN" and control_profile == "NORMAL_SPACE" and alignment_centered and commanded_target != None and commanded_control != None:
+        if (
+            mode == "ALIGN" and
+            control_profile == "NORMAL_SPACE" and
+            alignment_centered and
+            commanded_target != None and
+            commanded_control != None and
+            commanded_target["centerDistancePixels"] > FINE_DISTANCE_PIXELS
+        ):
             brake_control = opposite_control(commanded_control)
             if brake_control != None:
                 if command_count >= MAX_COMMANDS:
                     emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, reason="COMMAND_LIMIT_REACHED")
                     fail("Compass alignment exhausted the bounded command limit")
-                brake_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": brake_control, "holdMs": CENTER_ENTRY_BRAKE_MS})
+                brake_result = pulse_control(brake_control, CENTER_ENTRY_BRAKE_MS)
                 command_count += 1
                 stream.activity(message=brake_control + " center-entry brake for " + str(CENTER_ENTRY_BRAKE_MS) + " ms", level="info")
                 emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=CENTER_ENTRY_BRAKE_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="CENTER_ENTRY_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
@@ -439,7 +476,7 @@ def main(ctx):
 
         command = pulse[0]
         hold_ms = pulse[1]
-        command_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": command, "holdMs": hold_ms})
+        command_result = pulse_control(command, hold_ms)
         command_count += 1
         commanded_target = target
         commanded_control = command

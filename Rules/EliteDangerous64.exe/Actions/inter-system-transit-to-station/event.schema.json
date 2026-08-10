@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.inter-system-transit-to-station.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "targetName", "childAction", "hyperspaceState", "flightStatus", "cockpitHud", "commandedThrottle", "lastCommand", "reason"],
+      "properties": {
+        "phase": {"enum": ["DEPARTURE", "DEPARTURE_COMPLETED", "LOCKING_SYSTEM", "SYSTEM_LOCKED", "ALIGNING_SYSTEM", "AWAITING_FSD_CHARGING", "FSD_CHARGING", "REALIGNING_SYSTEM", "HYPERSPACE_TRANSIT_CANDIDATE", "HYPERSPACE_TRANSIT", "AWAITING_COCKPIT_RETURN", "CONFIRMING_ARRIVAL", "CONFIRMING_DESTINATION_SYSTEM", "DESTINATION_SYSTEM_CONFIRMED", "LOCKING_STATION", "STATION_LOCKED", "SUPERCRUISE_TO_STATION", "DOCKING", "VISUAL_CONFIRMATION_REQUIRED"]},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "targetName": {"type": ["string", "null"], "maxLength": 96},
+        "childAction": {"type": ["string", "null"], "maxLength": 128},
+        "hyperspaceState": {"enum": ["FSD_CHARGING", "ALIGNMENT_REQUIRED", "COCKPIT_PRESENT", "COCKPIT_ABSENT", null]},
+        "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN", null]},
+        "cockpitHud": {"enum": ["PRESENT", "ABSENT", null]},
+        "commandedThrottle": {"enum": [0, 100, null]},
+        "lastCommand": {"enum": ["HYPERSPACE_JUMP", "SET_THROTTLE_0", "SET_THROTTLE_100", "REALIGN_TARGETS+SET_THROTTLE_100", null]},
+        "reason": {"type": ["string", "null"], "maxLength": 512}
+      }
+    }
+  }
+}

@@ -54,6 +54,10 @@ func (b *compassBroker) RecordNative(context.Context, NativeRecord) error {
 
 func (b *compassBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
 	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	x, _ := arguments["x"].(int64)
+	y, _ := arguments["y"].(int64)
+	w, _ := arguments["w"].(int64)
+	h, _ := arguments["h"].(int64)
 	return map[string]any{
 		"sampling": "reference",
 		"coordinateSpace": map[string]any{
@@ -68,13 +72,13 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 			"left": int64(0), "top": int64(0), "width": int64(3840), "height": int64(2160),
 		},
 		"region": map[string]any{
-			"x": int64(682), "y": int64(771), "w": int64(96), "h": int64(96),
+			"x": x, "y": y, "w": w, "h": h,
 		},
 		"physicalRegion": map[string]any{
-			"left": int64(1364), "top": int64(1542), "width": int64(192), "height": int64(192),
+			"left": x * 2, "top": y * 2, "width": w * 2, "height": h * 2,
 		},
 		"image": map[string]any{
-			"width": int64(96), "height": int64(96),
+			"width": w, "height": h,
 			"encoding": "rgb24-packed", "pixels": b.pixels,
 		},
 	}, nil
@@ -114,6 +118,15 @@ func (b *leftPanelTabBroker) Call(_ context.Context, namespace, operation string
 func compassPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "compass"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func cockpitHUDPresencePackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "cockpit-hud-presence"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1371,6 +1384,44 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		math.Abs(target["centerDistancePixels"].(float64)-13.038) > 0.0001 ||
 		zone["shape"] != "circle" || zone["radiusPixels"] != float64(4) || zone["inside"] != false {
 		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestEliteCockpitHUDPresenceSeparatesPresentAndAbsent(t *testing.T) {
+	pkg, err := scriptpackage.Load(cockpitHUDPresencePackageRoot(t), "elite-dangerous/cockpit-hud-presence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name      string
+		orange    int
+		cyan      int
+		wantState string
+	}{
+		{name: "reviewed HUD is present", orange: 250, wantState: "PRESENT"},
+		{name: "FSD charge cyan HUD is present", cyan: 250, wantState: "PRESENT"},
+		{name: "insufficient HUD evidence is absent", orange: 249, wantState: "ABSENT"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pixels := make([]any, 120*120)
+			for index := range pixels {
+				pixels[index] = uint32(0)
+			}
+			for index := 0; index < test.orange; index++ {
+				pixels[index] = uint32(0xFF7700)
+			}
+			for index := test.orange; index < test.orange+test.cyan; index++ {
+				pixels[index] = uint32(0x40DDEB)
+			}
+			runner, _ := New(&compassBroker{pixels: pixels})
+			output, err := runner.Run(context.Background(), pkg, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(output), `"state":"`+test.wantState+`"`) || !strings.Contains(string(output), `"orangePixelCount":`+fmt.Sprint(test.orange)) || !strings.Contains(string(output), `"chargeCyanPixelCount":`+fmt.Sprint(test.cyan)) {
+				t.Fatalf("output=%s", output)
+			}
+		})
 	}
 }
 

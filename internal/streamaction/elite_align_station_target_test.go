@@ -118,14 +118,14 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"centerContactCount":3,"commandCount":3,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
+	if string(output) != `{"centerContactCount":3,"commandCount":2,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
-	wantControls := []string{"YAW_RIGHT", "YAW_LEFT"}
-	wantHolds := []int{120, 100}
+	wantControls := []string{"YAW_RIGHT"}
+	wantHolds := []int{120}
 	if len(caller.controls) != len(wantControls) {
 		t.Fatalf("controls=%v", caller.controls)
 	}
@@ -193,6 +193,27 @@ func TestEliteAlignStationTargetCanPreserveOwningWorkflowThrottle(t *testing.T) 
 	}
 }
 
+func TestEliteAlignStationTargetUsesDiagonalPulseWhenBothFineComponentsMatter(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 5, 5, 7.071, false),
+		alignObservation("SOLID", 3, 3, 4.0, true),
+		alignObservation("SOLID", 2, 2, 2.828, true),
+		alignObservation("SOLID", 1, 1, 1.414, true),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"stopBeforeAlign": false}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "PITCH_DOWN_YAW_RIGHT,PITCH_DOWN_YAW_RIGHT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
 func TestEliteAlignStationTargetTracksMovingTargetPastTransientCenter(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 4, 0, 4, true),
@@ -254,8 +275,8 @@ func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"YAW_LEFT", "PITCH_DOWN", "PITCH_UP"}
-	wantHolds := []int{300, 120, 100}
+	wantControls := []string{"YAW_LEFT", "PITCH_DOWN"}
+	wantHolds := []int{300, 120}
 	for index := range wantControls {
 		if caller.controls[index] != wantControls[index] || caller.holds[index] != wantHolds[index] {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
@@ -430,7 +451,7 @@ func TestEliteAlignStationTargetUsesFinePulseAtReviewedFourteenPixels(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.controls) != 2 || caller.controls[0] != "PITCH_UP" || caller.holds[0] != 120 || caller.controls[1] != "PITCH_DOWN" || caller.holds[1] != 100 {
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_UP" || caller.holds[0] != 120 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
@@ -448,7 +469,7 @@ func TestEliteAlignStationTargetUsesFineYawPulseInsideNearCenterBand(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.controls) != 2 || caller.controls[0] != "YAW_LEFT" || caller.holds[0] != 120 || caller.controls[1] != "YAW_RIGHT" || caller.holds[1] != 100 {
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_LEFT" || caller.holds[0] != 120 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
@@ -468,7 +489,7 @@ func TestEliteAlignStationTargetEscalatesFinePulseAfterTwoNoMovementSamples(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []int{120, 120, 400, 100}
+	want := []int{120, 120, 400}
 	if len(caller.holds) != len(want) {
 		t.Fatalf("holds=%v", caller.holds)
 	}
