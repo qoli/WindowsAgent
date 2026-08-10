@@ -13,7 +13,7 @@ RECOVERY_HOLD_MS = 400
 MIN_OBSERVED_MOVEMENT_PIXELS = 1
 NO_MOVEMENT_LIMIT = 4
 AWAY_TREND_LIMIT = 5
-AMBIGUOUS_PRESENTATION_LIMIT = 3
+AMBIGUOUS_PRESENTATION_LIMIT = 5
 TRANSIENT_MISSING_LIMIT = 3
 
 def empty_target():
@@ -101,6 +101,19 @@ def choose_sustained_control(target):
 
 def is_vector_control(control):
     return "_YAW_" in control
+
+def opposite_control(control):
+    opposites = {
+        "YAW_LEFT": "YAW_RIGHT",
+        "YAW_RIGHT": "YAW_LEFT",
+        "PITCH_UP": "PITCH_DOWN",
+        "PITCH_DOWN": "PITCH_UP",
+        "PITCH_UP_YAW_LEFT": "PITCH_DOWN_YAW_RIGHT",
+        "PITCH_UP_YAW_RIGHT": "PITCH_DOWN_YAW_LEFT",
+        "PITCH_DOWN_YAW_LEFT": "PITCH_UP_YAW_RIGHT",
+        "PITCH_DOWN_YAW_RIGHT": "PITCH_UP_YAW_LEFT",
+    }
+    return opposites[control] if control in opposites else None
 
 def start_hold(control):
     if is_vector_control(control):
@@ -228,6 +241,7 @@ def main(ctx):
         transient_missing_count = 0
         if target["presentation"] == "UNKNOWN":
             ambiguous_presentation_count += 1
+            released_control = active_lease_control
             release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_FOR_AMBIGUOUS_OBSERVATION", sample_started_ms, sample_duration_ms, sample_interval_ms)
             released_lease_id = active_lease_id
             active_lease_id = None
@@ -235,6 +249,15 @@ def main(ctx):
             commanded_target = None
             commanded_control = None
             emit_update("OBSERVING", sample, command_count, target, 0, lease_id=released_lease_id, lease_state="RELEASED" if released_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="TARGET_PRESENTATION_UNKNOWN")
+            brake_control = opposite_control(released_control) if mode == "ALIGN" and released_control != None else None
+            if brake_control != None:
+                if command_count >= MAX_COMMANDS:
+                    emit_update("OBSERVING", sample, command_count, target, 0, reason="COMMAND_LIMIT_REACHED")
+                    fail("Compass alignment exhausted the bounded command limit")
+                brake_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": brake_control, "holdMs": FINE_HOLD_MS})
+                command_count += 1
+                stream.activity(message=brake_control + " transition brake for " + str(FINE_HOLD_MS) + " ms", level="info")
+                emit_update("OBSERVING", sample, command_count, target, 0, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=FINE_HOLD_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="AMBIGUOUS_TRANSITION_BRAKE")
             if ambiguous_presentation_count >= AMBIGUOUS_PRESENTATION_LIMIT:
                 fail("Compass target hollow or solid presentation remained ambiguous")
             wait_for_sample_cadence(sample_started_ms)

@@ -139,6 +139,43 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	}
 }
 
+func TestEliteAlignStationTargetBrakesResidualTurnDuringPresentationTransition(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("HOLLOW", 1, -8, 8.06, false),
+		alignObservation("UNKNOWN", -12, -7, 13.89, false),
+		alignObservation("UNKNOWN", -13, -7, 14.76, false),
+		alignObservation("SOLID", 3, 0, 3, true),
+		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"COMPLETED"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 250 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	brakeEventFound := false
+	for _, payload := range reporter.payloads {
+		if contains(string(payload), `"reason":"AMBIGUOUS_TRANSITION_BRAKE"`) {
+			brakeEventFound = true
+			break
+		}
+	}
+	if !brakeEventFound {
+		t.Fatalf("payloads=%v", reporter.payloads)
+	}
+}
+
 func TestEliteAlignStationTargetCanPreserveOwningWorkflowThrottle(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 2, 0, 2, true),
