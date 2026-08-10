@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["state", "available", "focused"],
       "properties": {
-        "state": {"enum": ["AVAILABLE", "FOCUSED", "UNAVAILABLE", "DOCKING_ACTIVE", "UNKNOWN"]},
+        "state": {"enum": ["AVAILABLE", "FOCUSED", "UNAVAILABLE", "DOCKING_ACTIVE", "DENIED", "UNKNOWN"]},
         "available": {"type": ["boolean", "null"]},
         "focused": {"type": ["boolean", "null"]}
       }

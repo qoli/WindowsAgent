@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 5,
+  "version": 6,
   "title": "Elite Dangerous dock at station",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

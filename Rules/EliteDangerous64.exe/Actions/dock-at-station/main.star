@@ -234,11 +234,14 @@ def request_and_verify(sample, contact_index, range_state, distance_meters, alre
             task.sleep(milliseconds=OBSERVATION_SETTLE_MS)
             request = action.call(id="elite-dangerous/request-docking-availability", inputs={})
             state = request["requestDocking"]["state"]
+            phase = "REQUEST_DENIED" if state == "DENIED" else "VERIFYING_GRANTED"
             if state == "DOCKING_ACTIVE":
                 confirmations += 1
             else:
                 confirmations = 0
-            emit_update("VERIFYING_GRANTED", sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=request["decision"]["reason"])
+            emit_update(phase, sample, contact_index, range_state, distance_meters, state, None, None, False, 0, 0, 0, reason=request["decision"]["reason"])
+            if state == "DENIED":
+                fail("DOCKING_REQUEST_DENIED: the game rejected the docking request")
             if confirmations >= REQUEST_CONFIRMATIONS:
                 return
         if state not in ["AVAILABLE", "FOCUSED"]:

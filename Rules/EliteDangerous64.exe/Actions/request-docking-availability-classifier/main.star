@@ -5,6 +5,7 @@ MIN_TEXT_MARGIN = 0.12
 AMBIGUOUS_TEXT_SIMILARITY = 0.45
 MIN_ANCHOR_SIMILARITY = 0.75
 MIN_ANCHOR_MARGIN = 0.12
+MIN_DENIAL_SIMILARITY = 0.80
 MIN_ACTION_VERTICAL_OFFSET = 4.0
 MAX_ACTION_VERTICAL_OFFSET = 170.0
 MIN_ACTION_HORIZONTAL_OFFSET = -96.0
@@ -131,6 +132,9 @@ def select_candidates(regions, anchor_bounds):
         return cancel, request
     return request, cancel
 
+def select_denial(regions):
+    return select_candidate(regions, "DENIED", "DOCKINGREQUESTDENIED")
+
 def pixel_channels(pixel):
     return pixel // 65536, (pixel // 256) % 256, pixel % 256
 
@@ -215,6 +219,47 @@ def evidence_unknown_result(contacts, raw, reason, anchor, anchor_margin, candid
         },
     }
 
+def denied_result(contacts, raw, denial, anchor, anchor_accepted, anchor_margin):
+    anchor_source = None
+    if anchor != None and anchor_accepted:
+        anchor_source = {
+            "text": anchor["region"]["text"],
+            "normalizedText": anchor["normalizedText"],
+            "referencePoints": anchor["region"]["referencePoints"],
+            "bounds": anchor["bounds"],
+            "similarity": anchor["similarity"],
+            "margin": anchor_margin,
+        }
+    return {
+        "schemaVersion": 1,
+        # The notification proves rejection, but it does not prove the
+        # post-submit button's current availability or focus state.
+        "requestDocking": {"state": "DENIED", "available": None, "focused": None},
+        "source": {
+            "activeTab": contacts["activeTab"],
+            "searchRegion": raw["evidence"]["referenceRegion"],
+            "ocrTiming": raw["timing"],
+            "regionCount": len(raw["regions"]),
+            "anchor": anchor_source,
+            "text": denial["region"]["text"],
+            "normalizedText": denial["normalizedText"],
+            "referencePoints": denial["region"]["referencePoints"],
+            "leftContextRegion": denial["region"]["leftContext"]["referenceRegion"],
+            "visual": None,
+        },
+        "decision": {
+            "accepted": True,
+            "candidate": "DENIED",
+            "candidateScore": denial["score"],
+            "candidateSimilarity": denial["similarity"],
+            "margin": 0.0,
+            "minimumDetectionConfidence": MIN_DETECTION_CONFIDENCE,
+            "minimumRecognitionConfidence": MIN_RECOGNITION_CONFIDENCE,
+            "minimumDenialSimilarity": MIN_DENIAL_SIMILARITY,
+            "reason": "DOCKING_REQUEST_DENIED_CONFIRMED",
+        },
+    }
+
 def main(ctx):
     contacts = ctx.inputs["contacts"]
     contacts_state = contacts["activeTab"]["state"]
@@ -226,6 +271,14 @@ def main(ctx):
     regions = raw["regions"]
     meaningful_count = meaningful_region_count(regions)
     anchor, anchor_accepted, anchor_margin = select_anchor(regions)
+    denial = select_denial(regions)
+    denial_accepted = denial != None and denial["region"]["detectionConfidence"] >= MIN_DETECTION_CONFIDENCE and denial["region"]["recognitionConfidence"] >= MIN_RECOGNITION_CONFIDENCE and denial["similarity"] >= MIN_DENIAL_SIMILARITY
+    # The complete denial notification is a distinctive, terminal response to
+    # SELECT. It is accepted anywhere inside this Action's already-bounded
+    # Request Docking ROI, even if the short-lived frame does not also yield a
+    # stable FACTION anchor or tab probe.
+    if denial_accepted:
+        return denied_result(contacts, raw, denial, anchor, anchor_accepted, anchor_margin)
     if not anchor_accepted:
         return evidence_unknown_result(contacts, raw, "CONTACTS_ACTION_ANCHOR_NOT_CONFIRMED", anchor, anchor_margin)
     best, runner_up = select_candidates(regions, anchor["bounds"])

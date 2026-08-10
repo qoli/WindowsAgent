@@ -1091,6 +1091,22 @@ func requestDockingRegionsInput(text string, detection, recognition float64, bri
 	return requestDockingRegionsInputAt(text, detection, recognition, bright, dark, 0, 0, true)
 }
 
+func appendRequestDockingTextRegion(input map[string]any, text string, detection, recognition, left, top float64) {
+	pixels := make([]any, 100*50)
+	for index := range pixels {
+		pixels[index] = uint32(0x202020)
+	}
+	regions := input["regions"].([]any)
+	input["regions"] = append(regions, map[string]any{
+		"points": []any{}, "referencePoints": requestDockingReferencePoints(left, top),
+		"detectionConfidence": detection, "text": text, "recognitionConfidence": recognition,
+		"leftContext": map[string]any{
+			"x": int64(0), "y": int64(0), "w": int64(100), "h": int64(50), "pixels": pixels,
+			"referenceRegion": map[string]any{"x": left - 100, "y": top - 8, "w": 100.0, "h": 50.0},
+		},
+	})
+}
+
 func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels(t *testing.T) {
 	for _, test := range []struct {
 		name, text, want       string
@@ -1237,6 +1253,47 @@ func TestEliteRequestDockingAvailabilityAcceptsCancelDuringTransientTabDrift(t *
 		if !strings.Contains(string(output), `"state":"`+test.wantState+`"`) || !strings.Contains(string(output), `"reason":"`+test.wantReason+`"`) {
 			t.Fatalf("text=%q output=%s", test.text, output)
 		}
+	}
+}
+
+func TestEliteRequestDockingAvailabilityReportsExplicitDenialNotification(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := New(&fixtureBroker{})
+	for _, test := range []struct {
+		name, contactsState string
+		includeAnchor       bool
+	}{
+		{name: "denial outranks still-visible request row", contactsState: "CONTACTS", includeAnchor: true},
+		{name: "transient tab and missing anchor", contactsState: "UNKNOWN", includeAnchor: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := requestDockingRegionsInputAt("REQUEST DOCKING", .847374, .999730, 0, 625, 0, 0, test.includeAnchor)
+			appendRequestDockingTextRegion(input, "DOCKING REQUEST DENIED.", .845842, .999919, 995, 623)
+			output, err := runner.Run(context.Background(), pkg, map[string]any{
+				"contacts": map[string]any{"activeTab": map[string]any{"state": test.contactsState}},
+				"regions":  input,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expected := range []string{
+				`"state":"DENIED"`,
+				`"available":null`,
+				`"focused":null`,
+				`"text":"DOCKING REQUEST DENIED."`,
+				`"reason":"DOCKING_REQUEST_DENIED_CONFIRMED"`,
+			} {
+				if !strings.Contains(string(output), expected) {
+					t.Fatalf("missing %s in output=%s", expected, output)
+				}
+			}
+			if !test.includeAnchor && !strings.Contains(string(output), `"anchor":null`) {
+				t.Fatalf("unaccepted anchor must remain null: output=%s", output)
+			}
+		})
 	}
 }
 

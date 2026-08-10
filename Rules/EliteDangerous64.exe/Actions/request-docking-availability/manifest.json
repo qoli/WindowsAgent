@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Read Elite Dangerous Request Docking availability",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

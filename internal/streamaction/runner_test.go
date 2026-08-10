@@ -79,6 +79,7 @@ type dockAtStationCaller struct {
 	gearIndex            int
 	flightPromptFailures int
 	rangeCalls           int
+	cleanupCalls         int
 	controls             []string
 }
 
@@ -134,6 +135,9 @@ func (c *dockAtStationCaller) Call(_ context.Context, id string, inputs map[stri
 		control, _ := inputs["control"].(string)
 		c.controls = append(c.controls, control)
 		return json.RawMessage(`{"schemaVersion":1}`), nil
+	case "elite-dangerous/close-left-panel":
+		c.cleanupCalls++
+		return json.RawMessage(`{"schemaVersion":1,"closed":true}`), nil
 	case "elite-dangerous/set-throttle":
 		if inputs["percent"] != int64(0) && inputs["percent"] != 0 {
 			return nil, errors.New("unexpected throttle input")
@@ -989,6 +993,46 @@ func TestEliteDockAtStationRefocusesAndRetriesDroppedSelect(t *testing.T) {
 	}
 	if selects != 2 || rights != 2 {
 		t.Fatalf("controls=%v", caller.controls)
+	}
+}
+
+func TestEliteDockAtStationStopsAfterExplicitDockingDenial(t *testing.T) {
+	pkg, err := Load(dockAtStationPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &dockAtStationCaller{
+		contactsStates: []string{"ABSENT", "ABSENT", "CONTACTS", "CONTACTS"},
+		requestStates:  []string{"AVAILABLE", "FOCUSED", "DENIED"},
+		rangeState:     "ALLOWED",
+	}
+	reporter := &fixtureReporter{}
+	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, map[string]any{}, caller, reporter,
+	)
+	if err == nil || !contains(err.Error(), "DOCKING_REQUEST_DENIED") {
+		t.Fatalf("error=%v", err)
+	}
+	selects := 0
+	for _, control := range caller.controls {
+		if control == "SELECT" {
+			selects++
+		}
+	}
+	if selects != 1 || caller.cleanupCalls != 1 {
+		t.Fatalf("controls=%v cleanupCalls=%d", caller.controls, caller.cleanupCalls)
+	}
+	foundDenialEvent := false
+	for _, payload := range reporter.payloads {
+		if contains(string(payload), `"phase":"REQUEST_DENIED"`) &&
+			contains(string(payload), `"requestDocking":"DENIED"`) &&
+			contains(string(payload), `"reason":"FIXTURE_DENIED"`) {
+			foundDenialEvent = true
+			break
+		}
+	}
+	if !foundDenialEvent {
+		t.Fatalf("denial event not emitted: %s", reporter.payloads)
 	}
 }
 
