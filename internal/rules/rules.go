@@ -543,6 +543,9 @@ func (s *Store) ruleDirectories() ([]string, error) {
 	result := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
+			if entry.Name() == AgentsFilename {
+				continue
+			}
 			return nil, fmt.Errorf("unexpected file in rules directory: %s", entry.Name())
 		}
 		id := entry.Name()

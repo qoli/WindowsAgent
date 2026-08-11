@@ -53,6 +53,38 @@ func TestStoreReportsUnmatchedExplicitly(t *testing.T) {
 	}
 }
 
+func TestStoreAllowsRootAgentsDevelopmentContract(t *testing.T) {
+	root := testRulesRoot(t)
+	if err := os.WriteFile(filepath.Join(root, AgentsFilename), []byte("# Rules\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := store.RuleIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids, []string{"CrimsonDesert.exe"}) {
+		t.Fatalf("Rule IDs = %v", ids)
+	}
+}
+
+func TestStoreRejectsOtherRootFiles(t *testing.T) {
+	root := testRulesRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("unexpected\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RuleIDs(); err == nil || !strings.Contains(err.Error(), "unexpected file") {
+		t.Fatalf("unexpected root file error = %v", err)
+	}
+}
+
 func TestStoreReadsActionsAndExplicitRegistrations(t *testing.T) {
 	root := t.TempDir()
 	actions := map[string]ActionDeclaration{
