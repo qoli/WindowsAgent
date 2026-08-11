@@ -1,17 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 9,
-  "title": "Elite Dangerous serviced Auto Launch and leave station",
+  "version": 2,
+  "title": "Visually align Elite Dangerous station services and optionally select Auto Launch",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {
-    "maxSteps": 1000000,
-    "maxOutputBytes": 4096,
-    "maxEventBytes": 8192,
-    "maxSleepMs": 1000
-  }
+  "limits": {"maxSteps": 1000000, "maxOutputBytes": 4096, "maxEventBytes": 1024, "maxSleepMs": 1000}
 }

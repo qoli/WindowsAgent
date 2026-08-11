@@ -49,6 +49,11 @@ type leftPanelTabBroker struct {
 	calls  []fixtureObserverCall
 }
 
+type stationServiceFocusBroker struct {
+	pixels []any
+	calls  []fixtureObserverCall
+}
+
 func (b *compassBroker) BlobPath(context.Context, map[string]any) (string, error) {
 	return "", errors.New("unexpected compass blob path request")
 }
@@ -140,6 +145,30 @@ func (b *leftPanelTabBroker) Call(_ context.Context, namespace, operation string
 		"region":          map[string]any{"x": x, "y": y, "w": w, "h": h},
 		"physicalRegion":  map[string]any{"left": x * 2, "top": y * 2, "width": w * 2, "height": h * 2},
 		"image":           map[string]any{"width": w, "height": h, "encoding": "rgb24-packed", "pixels": pixels},
+	}, nil
+}
+
+func (b *stationServiceFocusBroker) BlobPath(context.Context, map[string]any) (string, error) {
+	return "", errors.New("unexpected station-service-focus blob path request")
+}
+
+func (b *stationServiceFocusBroker) RecordNative(context.Context, NativeRecord) error {
+	return errors.New("unexpected station-service-focus native record")
+}
+
+func (b *stationServiceFocusBroker) Call(_ context.Context, namespace, operation string, arguments map[string]any) (any, error) {
+	b.calls = append(b.calls, fixtureObserverCall{namespace: namespace, operation: operation, arguments: arguments})
+	x := arguments["x"].(int64)
+	y := arguments["y"].(int64)
+	w := arguments["w"].(int64)
+	h := arguments["h"].(int64)
+	return map[string]any{
+		"sampling":        "reference",
+		"coordinateSpace": map[string]any{"width": int64(1920), "height": int64(1080), "fit": "centered-16:9"},
+		"frame":           map[string]any{"width": int64(3840), "height": int64(2160), "capturedAt": "2026-08-11T04:49:43Z"},
+		"region":          map[string]any{"x": x, "y": y, "w": w, "h": h},
+		"physicalRegion":  map[string]any{"left": x * 2, "top": y * 2, "width": w * 2, "height": h * 2},
+		"image":           map[string]any{"width": w, "height": h, "encoding": "rgb24-packed", "pixels": b.pixels},
 	}, nil
 }
 
@@ -263,6 +292,15 @@ func requestDockingRangePackageRoot(t *testing.T) string {
 func leftPanelTabPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "left-panel-tab-state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func stationServiceFocusPackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "station-service-focus"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1143,6 +1181,112 @@ func TestEliteLeftPanelTabStateRejectsIncompletePixelEvidence(t *testing.T) {
 	runner, _ := New(broker)
 	_, err = runner.Run(context.Background(), pkg, map[string]any{})
 	if err == nil || !strings.Contains(err.Error(), "LEFT_PANEL_TAB_EVIDENCE_INVALID") || !strings.Contains(err.Error(), "pixel count is incomplete") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+var stationServiceTileRanges = map[string][2]int{
+	"REFUEL":       {0, 62},
+	"REPAIR":       {67, 130},
+	"RESTOCK":      {134, 197},
+	"LAYER_SWITCH": {202, 264},
+}
+
+func stationServiceFocusPixels(highlights map[string]uint32) []any {
+	pixels := make([]any, 264*36)
+	for index := range pixels {
+		pixels[index] = uint32(0x202020)
+	}
+	for name, color := range highlights {
+		xRange := stationServiceTileRanges[name]
+		for y := 0; y < 36; y++ {
+			for x := xRange[0]; x < xRange[1]; x++ {
+				pixels[y*264+x] = color
+			}
+		}
+	}
+	return pixels
+}
+
+func TestEliteStationServiceFocusClassifiesAllFourRememberedTiles(t *testing.T) {
+	for _, test := range []struct {
+		name, want string
+		color      uint32
+	}{
+		{name: "refuel orange fill", want: "REFUEL", color: 0xFFA000},
+		{name: "repair orange fill", want: "REPAIR", color: 0xFFA000},
+		{name: "restock unavailable grey fill", want: "RESTOCK", color: 0xE0E0E0},
+		{name: "layer switch orange fill", want: "LAYER_SWITCH", color: 0xFFA000},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg, err := scriptpackage.Load(stationServiceFocusPackageRoot(t), "elite-dangerous/station-service-focus")
+			if err != nil {
+				t.Fatal(err)
+			}
+			broker := &stationServiceFocusBroker{pixels: stationServiceFocusPixels(map[string]uint32{test.want: test.color})}
+			runner, _ := New(broker)
+			output, err := runner.Run(context.Background(), pkg, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			focus := result["focus"].(map[string]any)
+			if focus["state"] != test.want {
+				t.Fatalf("focus=%#v", focus)
+			}
+			if len(broker.calls) != 1 || broker.calls[0].arguments["x"] != int64(814) ||
+				broker.calls[0].arguments["y"] != int64(759) || broker.calls[0].arguments["w"] != int64(264) ||
+				broker.calls[0].arguments["h"] != int64(36) || broker.calls[0].arguments["sampling"] != "reference" {
+				t.Fatalf("screen calls=%#v", broker.calls)
+			}
+		})
+	}
+}
+
+func TestEliteStationServiceFocusPreservesUnknownEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		highlights map[string]uint32
+		wantReason string
+	}{
+		{name: "service row absent", highlights: nil, wantReason: "HIGHLIGHT_LUMINANCE_TOO_LOW"},
+		{name: "two bright tiles", highlights: map[string]uint32{"REFUEL": 0xFFA000, "REPAIR": 0xFFA000}, wantReason: "HIGHLIGHT_LUMINANCE_AMBIGUOUS"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pkg, err := scriptpackage.Load(stationServiceFocusPackageRoot(t), "elite-dangerous/station-service-focus")
+			if err != nil {
+				t.Fatal(err)
+			}
+			broker := &stationServiceFocusBroker{pixels: stationServiceFocusPixels(test.highlights)}
+			runner, _ := New(broker)
+			output, err := runner.Run(context.Background(), pkg, map[string]any{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			focus := result["focus"].(map[string]any)
+			if focus["state"] != "UNKNOWN" || focus["index"] != nil || focus["reason"] != test.wantReason {
+				t.Fatalf("focus=%#v", focus)
+			}
+		})
+	}
+}
+
+func TestEliteStationServiceFocusRejectsIncompletePixelEvidence(t *testing.T) {
+	pkg, err := scriptpackage.Load(stationServiceFocusPackageRoot(t), "elite-dangerous/station-service-focus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker := &stationServiceFocusBroker{pixels: make([]any, 10)}
+	runner, _ := New(broker)
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "STATION_SERVICE_FOCUS_EVIDENCE_INVALID") || !strings.Contains(err.Error(), "pixel count is incomplete") {
 		t.Fatalf("error=%v", err)
 	}
 }

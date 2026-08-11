@@ -29,6 +29,7 @@ type leaveStationCaller struct {
 	flightPromptCalls           int
 	shipStatusCalls             int
 	shipSpeedCalls              int
+	prepareAutoLaunchCalls      int
 	autoLaunchCycles            map[int]bool
 	speedByCycle                map[int]int
 	throttles                   []int
@@ -53,6 +54,16 @@ func (c *leaveStationCaller) visibleSpeed() (int, bool) {
 
 func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
+	case "elite-dangerous/prepare-auto-launch":
+		if inputs["activateAutoLaunch"] != true {
+			return nil, errors.New("leave-station did not explicitly activate Auto Launch")
+		}
+		c.prepareAutoLaunchCalls++
+		return json.Marshal(map[string]any{
+			"schemaVersion": 1, "task": "PREPARE_AUTO_LAUNCH", "completed": true,
+			"controlCount": 16, "focusBaseline": "DISEMBARK", "refuelAttempted": true,
+			"repairAttempted": true, "autoLaunchSelected": true,
+		})
 	case "elite-dangerous/flight-prompt-text":
 		c.flightPromptCalls++
 		c.cycle++
@@ -247,6 +258,9 @@ func TestEliteLeaveStationWorkflowWaitsForModelThenControlsThrottle(t *testing.T
 	}
 	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
+	}
+	if caller.prepareAutoLaunchCalls != 1 {
+		t.Fatalf("prepare Auto Launch calls=%d", caller.prepareAutoLaunchCalls)
 	}
 	if caller.flightPromptCalls != 15 || caller.shipStatusCalls != 15 || caller.shipSpeedCalls != 18 {
 		t.Fatalf("unexpected observation calls: prompt=%d status=%d speed=%d", caller.flightPromptCalls, caller.shipStatusCalls, caller.shipSpeedCalls)

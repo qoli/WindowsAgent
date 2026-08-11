@@ -181,7 +181,7 @@ def main(ctx):
     if ctx.inputs["stationConfirmed"] != True:
         fail("stationConfirmed must be true")
 
-    stream.activity(message="Waiting for Auto Launch", level="info")
+    stream.activity(message="Preparing station services and Auto Launch", level="info")
     sample = 0
     unknown = unknown_observation("NONE")
     gate = gate_state()
@@ -191,8 +191,10 @@ def main(ctx):
         sample,
         unknown,
         gate,
-        instruction="Use elite-dangerous/ui-control with screenshot feedback to select AUTO LAUNCH.",
+        instruction="Running the deterministic dock-menu service and Auto Launch sequence.",
     )
+    action.call(id="elite-dangerous/prepare-auto-launch", inputs={"activateAutoLaunch": True})
+    stream.activity(message="Auto Launch selection submitted; waiting for visual confirmation", level="info")
 
     auto_launch_seen = False
     unknown_mass_lock_count = 0

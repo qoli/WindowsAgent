@@ -1,13 +1,16 @@
-# Elite Dangerous supervised leave station
+# Elite Dangerous serviced Auto Launch and leave station
 
-This version 8 interruptible linear Streaming Action begins only after a supervising
-model supplies `stationConfirmed: true`. It immediately starts observing raw
-flight prompt text, classified flight status, ship status, and visual ship
-speed, then emits `AWAITING_AUTO_LAUNCH` with instructions for the model.
-
-The model owns the deliberately slow Auto Launch menu interaction. It may take
-screenshots and call `elite-dangerous/ui-control` one key at a time. The
-workflow never blindly presses Select or navigates the station menu.
+This version 9 interruptible linear Streaming Action begins only after a supervising
+model supplies `stationConfirmed: true` for the visible docked cockpit menu.
+It first delegates to `elite-dangerous/prepare-auto-launch` with
+`activateAutoLaunch=true`. The child reads the remembered four-tile service
+focus, cyclically aligns to Refuel, visually confirms Refuel and Repair before
+their safe purchase attempts, and then selects `AUTO LAUNCH`. Grey service
+tiles remain keyboard-focusable, so the grayscale CV classifies focus rather
+than availability. Unknown or contradictory focus fails without a fixed-input
+fallback, and successful input remains distinct from launch evidence. The
+workflow then starts observing raw flight prompt text, classified flight
+status, ship status, and visual ship speed.
 
 After observing `AUTO_LAUNCH` or `WAITING_IN_QUEUE`, the workflow latches that
 positive evidence and follows the visible motion lifecycle. A `MOVING` speed

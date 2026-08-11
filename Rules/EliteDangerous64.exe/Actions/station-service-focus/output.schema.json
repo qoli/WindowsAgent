@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "focus", "evidence"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "focus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "index", "luminanceMeans", "selectedLuminance", "runnerUpLuminance", "luminanceMargin", "minimumSelectedLuminance", "minimumLuminanceMargin", "reason"],
+      "properties": {
+        "state": {"enum": ["REFUEL", "REPAIR", "RESTOCK", "LAYER_SWITCH", "UNKNOWN"]},
+        "index": {"type": ["integer", "null"], "minimum": 0, "maximum": 3},
+        "luminanceMeans": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["REFUEL", "REPAIR", "RESTOCK", "LAYER_SWITCH"],
+          "properties": {
+            "REFUEL": {"type": "number", "minimum": 0, "maximum": 255},
+            "REPAIR": {"type": "number", "minimum": 0, "maximum": 255},
+            "RESTOCK": {"type": "number", "minimum": 0, "maximum": 255},
+            "LAYER_SWITCH": {"type": "number", "minimum": 0, "maximum": 255}
+          }
+        },
+        "selectedLuminance": {"type": "number", "minimum": 0, "maximum": 255},
+        "runnerUpLuminance": {"type": "number", "minimum": 0, "maximum": 255},
+        "luminanceMargin": {"type": "number", "minimum": 0, "maximum": 255},
+        "minimumSelectedLuminance": {"const": 120.0},
+        "minimumLuminanceMargin": {"const": 25.0},
+        "reason": {"type": "string", "maxLength": 64}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["referenceRegion", "physicalRegion", "capturedAt", "coordinateSpace"],
+      "properties": {
+        "referenceRegion": {"type": "object"},
+        "physicalRegion": {"type": "object"},
+        "capturedAt": {"type": "string", "minLength": 1},
+        "coordinateSpace": {"type": "object"}
+      }
+    }
+  }
+}

@@ -219,6 +219,13 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 		!reflect.DeepEqual(leftPanelTabState.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
 		t.Fatalf("left-panel-tab-state action = %+v", leftPanelTabState)
 	}
+	stationServiceFocus, err := store.ResolveAction("elite-dangerous/station-service-focus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stationServiceFocus.Runtime != ObservationRuntimeV1 || len(stationServiceFocus.RegistrableAs) != 0 || stationServiceFocus.SequenceEligible {
+		t.Fatalf("station-service-focus action = %+v", stationServiceFocus)
+	}
 	if _, err := store.ResolveAction("elite-dangerous/contacts-tab-state"); err == nil {
 		t.Fatal("retired contacts-tab-state action still resolves")
 	}

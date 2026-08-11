@@ -217,6 +217,12 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
+    "elite-dangerous/station-service-focus": {
+      "path": "Actions/station-service-focus",
+      "runtime": "windows-observation-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/close-left-panel": {
       "path": "Actions/close-left-panel",
       "runtime": "windows-composite-action-v1",
@@ -229,6 +235,12 @@
       "execution": {
         "completion": "return"
       },
+      "registrableAs": []
+    },
+    "elite-dangerous/prepare-auto-launch": {
+      "path": "Actions/prepare-auto-launch",
+      "runtime": "windows-composite-action-v1",
+      "execution": {"completion": "return"},
       "registrableAs": []
     },
     "elite-dangerous/select-contacts-panel": {
@@ -468,6 +480,7 @@
       "elite-dangerous/hyperspace-control",
       "elite-dangerous/inter-system-transit-to-station",
       "elite-dangerous/lock-destination",
+      "elite-dangerous/prepare-auto-launch",
       "elite-dangerous/select-and-lock-destination",
       "elite-dangerous/select-contacts-panel",
       "elite-dangerous/select-station-target",

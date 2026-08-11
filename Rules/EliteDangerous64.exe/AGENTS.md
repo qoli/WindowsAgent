@@ -507,11 +507,31 @@ not progress: the Action fails and its registered 0% throttle compensation
 runs instead of leaving the ship moving in normal space for the longer Assist
 activation window.
 
+`elite-dangerous/station-service-focus` is the finite visual primitive for the
+four docked-cockpit service tiles. It reads the row once at reference density,
+converts each tile interior to grayscale luminance, and returns `REFUEL`,
+`REPAIR`, `RESTOCK`, `LAYER_SWITCH`, or evidence-preserving `UNKNOWN`. It uses
+relative brightness plus an absolute floor because unavailable grey tiles can
+still receive the game's bright keyboard-focus fill. It never interprets
+service availability or remembers a prior focus.
+
+`elite-dangerous/prepare-auto-launch` is a finite composite Action for the
+visible docked cockpit menu. Four `DOWN` inputs clamp focus at `DISEMBARK` and
+three `UP` inputs enter the service row at its game-remembered horizontal
+position. Two consistent `station-service-focus` observations establish the
+current tile; the Action computes the minimum cyclic `RIGHT` count to Refuel,
+visually confirms Refuel and Repair before their safe purchase attempts, then
+returns to the `AUTO LAUNCH` row. `activateAutoLaunch=false` is a safety-test
+mode that stops before the final `SELECT`; only `true` sends it. Unknown,
+ambiguous, inconsistent, or contradicted focus evidence fails explicitly
+without reverting to the retired fixed sequence.
+
 `elite-dangerous/leave-station` is an interruptible linear Streaming Action.
 Invoke it with `{"stationConfirmed":true}` only after high-level visual
-confirmation that the ship is inside a station, then follow the returned NDJSON
-watch URL. While its phase is `AWAITING_AUTO_LAUNCH`, arrange Auto Launch slowly
-with the visual focus evidence loop above. Once Auto Launch is observed, the
+confirmation that the docked cockpit menu containing `STARPORT SERVICES`,
+`AUTO LAUNCH`, and `DISEMBARK` is visible, then follow the returned NDJSON watch
+URL. It first calls `prepare-auto-launch` with `activateAutoLaunch=true`; it no longer asks the supervising
+model to navigate the menu. Once Auto Launch is observed, the
 workflow first requires a `KNOWN` speed of at least 15 to prove that Auto
 Launch actually moved the ship. It then requires the Auto Launch prompt to be
 absent for five samples, Mass Lock to remain `ON`, and two `KNOWN` speed samples
