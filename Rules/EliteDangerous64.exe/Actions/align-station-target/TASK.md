@@ -37,24 +37,50 @@ evidence.
 Inside 40 pixels, control returns to bounded pulses through
 `elite-dangerous/ship-attitude-control`. Both Yaw and Pitch use 300 ms pulses
 inside the 40-pixel band and 120 ms pulses inside the 16-pixel near-center
-band. The first sample that crosses into the 1.5-pixel alignment radius after a
+band. The first sample that crosses into the four-pixel alignment radius after a
 pulse applies a 100 ms opposite-axis brake before stable verification. When two consecutive pulse-band observations show no measurable
 response, the next pulse is raised from 120 ms to 400 ms in normal space, or
 from 120 ms to a bounded 240 ms in Supercruise, before the existing no-progress
 Gate can terminate the run. Pulse observations keep the same one-second start-to-start cadence as
-sustained control. Completion requires three consecutive solid samples at or
-within 1.5 reference pixels. This is deliberately stricter than the Compass
-Action's general-purpose four-pixel `centerZone`: live FSD testing proved that
-the wider observation zone can still leave the game requesting target
-alignment.
+sustained control. Ordinary normal-space completion requires three consecutive
+SOLID samples within the Compass Action's calibrated four-pixel `centerZone`.
 
-The `SUPERCRUISE_ASSIST` profile instead uses a sixteen-reference-pixel entry
-radius and requires two current SOLID center contacts before handing off to the
-required visible-target Action. A former one-frame completion was rejected by
+`targetMotion=STATIC` also affects normal-space ALIGN. This combination is the
+Station/Supercruise-entry handoff: live testing showed the selected Station
+marker repeatedly settling between roughly 8 and 13 reference pixels while
+120 ms pulses continued to perturb the already useful direction. It enters a
+12-pixel Gate and then uses two pixels of verification hysteresis, still
+requiring three current SOLID observations. It does not apply the ordinary
+normal-space center-entry brake after the first contact because that open-loop
+reverse pulse would invalidate this already stable Station handoff. System-jump precision alignment
+does not request `STATIC` and retains the four-pixel Gate. This is a declared
+control law, not a fallback to OCR or a visible-target search.
+
+The `SUPERCRUISE_ASSIST` profile with the default `MOVING` target instead uses
+a sixteen-reference-pixel entry radius and requires two current SOLID center
+contacts before returning control to its owning workflow. `STATIC` ALIGN uses
+the same four-pixel entry and six-pixel verification hysteresis as STATIC TRACK,
+with 80 ms pulses inside ten pixels and 160 ms pulses through thirty pixels.
+Live Station Assist evidence showed that the former 16/20px ALIGN Gate repeatedly
+returned completed at 9.8-16.7px while the game continued to display `ALIGN WITH
+TARGET DESTINATION`; the owning workflow then re-entered the same ineffective
+alignment loop. The stricter STATIC law keeps Compass as the feedback source
+until the game's required collision-course accuracy is materially satisfied.
+The ten-pixel fine-control handoff is not a wider completion Gate: a deployed
+four-pixel test showed 160 ms corrections repeatedly crossing between roughly
+5 and 10 pixels without entering the required center, so only the bounded pulse
+size changes before the same four-pixel verification. Once a bounded STATIC
+Supercruise pulse first enters four pixels, the Action applies one 80 ms
+opposite-axis brake and discards that pre-brake sample. Live evidence reached
+3.162 pixels but drifted to 15.133 pixels on the following frame without this
+brake; completion therefore still requires two fresh post-brake observations.
+A former one-frame completion was rejected by
 live distance evidence: after thrust was restored, the target drifted from a
 6px Compass contact through the rear hemisphere while distance increased from
-2.71 to 3.04 kLs. It does not demand the normal-space three confirmations;
-the following screen-space Action remains the owner of precise tracking. Live keyboard control showed
+2.71 to 3.04 kLs. It does not demand the normal-space three confirmations.
+Consumers that need continued Station alignment can call this Action again or
+use its STATIC TRACK mode; this Action does not substitute an OCR/visible-target
+search. Live keyboard control showed
 that an 80 ms Supercruise pulse can move the Compass marker roughly 11–17
 reference pixels in some frames but repeatedly produced only 0–1 pixels during
 live gravity-well alignment. The base pulse is therefore 120 ms, followed by
@@ -86,8 +112,7 @@ retains a stronger recovery without repeating that overshoot.
 Normal-space entry braking retains its own 16-pixel fine-band boundary and
 100 ms duration. This
 profile remains limited to front-hemisphere coarse hyperspace/Supercruise
-alignment; the following visible-target Action still owns precise on-screen
-destination alignment before charging or travel. A live 32-pixel experiment was
+alignment. A live 32-pixel experiment was
 rejected because a 28.8-pixel Compass result still left the target label outside
 the central OCR field.
 
@@ -150,7 +175,8 @@ recovery pulses; it does not use that value as a TRACK failure Gate. ALIGN retai
 the strict 1.5-pixel alignment Gate plus stationary-target no-progress and
 moving-away failures. Child-Action failures remain explicit in both modes.
 
-`TRACK` also accepts `targetMotion`. The default `MOVING` preserves the
+Both modes accept `targetMotion`; the detailed tracking behavior below applies
+when `mode=TRACK`. The default `MOVING` preserves the
 20/24px following Gate described above. `STATIC` is for a selected planet,
 station, or system destination whose direction must remain precise while the
 ship advances. In Supercruise it uses a 4px entry Gate, 6px hysteresis exit,

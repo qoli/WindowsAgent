@@ -317,19 +317,24 @@ def observe_supercruise_hud_stable():
         task.sleep(milliseconds=POLL_MS)
     fail("Supercruise HUD did not produce two consecutive ACTIVE observations")
 
-def align_initial(target_name):
+def align_compass(target_name, control_profile):
     compass_result = action.call(
         id="elite-dangerous/align-station-target",
-        inputs={"mode": "ALIGN", "stopBeforeAlign": False, "controlProfile": "SUPERCRUISE_ASSIST"},
+        inputs={
+            "mode": "ALIGN",
+            "targetMotion": "STATIC",
+            "stopBeforeAlign": False,
+            "controlProfile": control_profile,
+        },
     )
-    emit_update("ALIGNING", compass_result["sampleCount"], target_name, last_command="ALIGN_STATION_TARGET", reason="SUPERVISED_COMPASS_ALIGNMENT_COMPLETED")
-    visible_result = action.call(
-        id="elite-dangerous/align-visible-target",
-        inputs={"targetName": target_name, "stopBeforeAlign": False, "searchWhenUnknown": True},
+    emit_update(
+        "ALIGNING",
+        compass_result["sampleCount"],
+        target_name,
+        last_command="ALIGN_STATION_TARGET",
+        reason="SUPERVISED_STATIC_COMPASS_ALIGNMENT_COMPLETED:" + control_profile,
     )
-    sample_count = compass_result["sampleCount"] + visible_result["sampleCount"]
-    emit_update("ALIGNING", sample_count, target_name, last_command="ALIGN_VISIBLE_TARGET", reason="SUPERVISED_VISIBLE_TARGET_ALIGNMENT_COMPLETED")
-    return sample_count
+    return compass_result["sampleCount"]
 
 def preflight(target_name):
     ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
@@ -360,7 +365,8 @@ def main(ctx):
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("PREFLIGHT", 0, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
     stream.activity(message="Aligning destination before Supercruise Assist entry", level="info")
-    sample = align_initial(target_name)
+    initial_alignment_profile = "SUPERCRUISE_ASSIST" if supercruise_confirmed else "NORMAL_SPACE"
+    sample = align_compass(target_name, initial_alignment_profile)
 
     action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     charging_seen = supercruise_confirmed
@@ -385,11 +391,16 @@ def main(ctx):
             phase = "CHARGING"
             if last_flight_status == "FSD_CHARGING":
                 charging_seen = True
+            elif last_flight_status == "FSD_THROTTLE_UP_REQUIRED":
+                charging_seen = True
+                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
+                command = "SET_THROTTLE_100"
+                phase = "CHARGING"
             elif last_flight_status == "FSD_ALIGNMENT_REQUIRED":
                 charging_seen = True
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
                 emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
-                alignment_sample_count = align_initial(target_name)
+                alignment_sample_count = align_compass(target_name, "NORMAL_SPACE")
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
                 command = "ALIGN_TARGETS:" + str(alignment_sample_count) + "+SET_THROTTLE_100"
                 phase = "ALIGNING_FOR_ENTRY"
@@ -456,7 +467,7 @@ def main(ctx):
             if alignment_required_samples > BLUE_ZONE_GRACE_SAMPLES:
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
                 emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
-                alignment_sample_count = align_initial(target_name)
+                alignment_sample_count = align_compass(target_name, "SUPERCRUISE_ASSIST")
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
                 command = "ALIGN_TARGETS:" + str(alignment_sample_count) + "+SET_THROTTLE_75"
                 alignment_required_samples = 0

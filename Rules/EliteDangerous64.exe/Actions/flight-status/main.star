@@ -28,6 +28,10 @@ STATUS_RULES = [
         "aliases": ["PRESS TO ABORT", "CHARGING", "CHARGING PRESS TO ABORT"],
     },
     {
+        "state": "FSD_THROTTLE_UP_REQUIRED",
+        "aliases": ["THROTTLE UP TO ENGAGE"],
+    },
+    {
         "state": "FSD_ALIGNMENT_REQUIRED",
         "aliases": ["ALIGN WITH TARGET DESTINATION"],
     },

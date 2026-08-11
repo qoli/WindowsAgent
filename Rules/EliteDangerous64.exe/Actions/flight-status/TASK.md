@@ -26,6 +26,9 @@ ACTIVE` is a separate `SUPERCRUISE_ASSIST_ACTIVE` state rather than ordinary
 throttle inputs after the game computer takes control. `ALIGN WITH ESCAPE
 VECTOR` is classified separately as `FSD_ESCAPE_VECTOR_REQUIRED`; a workflow
 must not infer that Compass ownership changed from `FSD_CHARGING` alone.
+The live `THROTTLE UP TO ENGAGE` prompt is
+`FSD_THROTTLE_UP_REQUIRED`: it proves the FSD reached its charged throttle
+handoff, but does not prove that Supercruise entry occurred.
 Missing, unrelated, ambiguous, or
 low-confidence content remains `UNKNOWN`; never choose a status merely because
 it is the closest catalog phrase.

@@ -15,7 +15,7 @@
         "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
         "panelTab": {"type": ["string", "null"], "enum": ["ABSENT", "SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS", "UNKNOWN", null]},
         "assistButtonState": {"type": ["string", "null"], "enum": ["AVAILABLE", "FOCUSED", "UNKNOWN", null]},
-        "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN"]},
+        "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_THROTTLE_UP_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN"]},
         "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},
         "landingGear": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},

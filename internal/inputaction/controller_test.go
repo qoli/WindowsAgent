@@ -454,7 +454,7 @@ func TestEliteSupercruiseControlRequiresDedicatedBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_J" ||
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_J" || driver.requests[0].Hold != 80*time.Millisecond ||
 		!strings.Contains(string(output), `"control":"Supercruise"`) || strings.Contains(string(output), "HyperSuperCombination") {
 		t.Fatalf("requests=%v output=%s", driver.requests, output)
 	}

@@ -5,6 +5,8 @@ MAX_COMMANDS = 120
 MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
 ALIGN_CENTER_RADIUS_PIXELS = 4.0
+NORMAL_SPACE_STATIC_ALIGN_CENTER_RADIUS_PIXELS = 12.0
+NORMAL_SPACE_STATIC_ALIGN_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_CENTER_RADIUS_PIXELS = 16.0
 SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS = 20.0
 SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 4.0
@@ -22,7 +24,7 @@ SUPERCRUISE_FINE_HOLD_MS = 120
 SUPERCRUISE_TRACK_FINE_HOLD_MS = 160
 SUPERCRUISE_TRACK_NEAR_DISTANCE_PIXELS = 30
 SUPERCRUISE_TRACK_NEAR_HOLD_MS = 120
-SUPERCRUISE_STATIC_TRACK_FINE_DISTANCE_PIXELS = 6
+SUPERCRUISE_STATIC_TRACK_FINE_DISTANCE_PIXELS = 10
 SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS = 80
 SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS = 160
 CENTER_ENTRY_BRAKE_MS = 100
@@ -266,17 +268,20 @@ def main(ctx):
     stable_confirmations_required = 2 if supercruise_profile else STABLE_CENTER_CONFIRMATIONS
     alignment_radius = SUPERCRUISE_CENTER_RADIUS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else ALIGN_CENTER_RADIUS_PIXELS
     alignment_hysteresis = SUPERCRUISE_CENTER_HYSTERESIS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else 0.0
-    if control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK":
+    if control_profile == "NORMAL_SPACE" and mode == "ALIGN" and target_motion == "STATIC":
+        alignment_radius = NORMAL_SPACE_STATIC_ALIGN_CENTER_RADIUS_PIXELS
+        alignment_hysteresis = NORMAL_SPACE_STATIC_ALIGN_HYSTERESIS_PIXELS
+    if control_profile == "SUPERCRUISE_ASSIST" and target_motion == "STATIC":
+        alignment_radius = SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS
+        alignment_hysteresis = SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS
+    elif control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK":
         alignment_radius = SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS
-        if target_motion == "STATIC":
-            alignment_radius = SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS
-            alignment_hysteresis = SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS
     fine_distance = SUPERCRUISE_FINE_DISTANCE_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else FINE_DISTANCE_PIXELS
     fine_hold = FINE_HOLD_MS
     if control_profile == "SUPERCRUISE_ASSIST":
         fine_hold = SUPERCRUISE_TRACK_FINE_HOLD_MS if mode == "TRACK" else SUPERCRUISE_FINE_HOLD_MS
     sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
-    sample_cadence_ms = SUPERCRUISE_STATIC_TRACK_CADENCE_MS if mode == "TRACK" and target_motion == "STATIC" and supercruise_profile else SAMPLE_CADENCE_MS
+    sample_cadence_ms = SUPERCRUISE_STATIC_TRACK_CADENCE_MS if target_motion == "STATIC" and supercruise_profile else SAMPLE_CADENCE_MS
 
     stream.activity(message="Compass control profile " + control_profile + " selected from " + control_profile_source, level="info")
     if mode == "TRACK":
@@ -323,24 +328,38 @@ def main(ctx):
         previous_sample_started_ms = sample_started_ms
         sample += 1
         if not attempt["ok"]:
-            release_lease(active_lease_id, active_lease_control, "OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
+            released_lease_id = active_lease_id
+            released_lease_control = active_lease_control
+            release_lease(released_lease_id, released_lease_control, "OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
+            # The lease release above is authoritative even when the Compass
+            # observation failed. Clear every local control reference before
+            # the bounded retry so a second consecutive observation error
+            # cannot STOP the same already-released lease again.
+            active_lease_id = None
+            active_lease_control = None
+            commanded_target = None
+            commanded_control = None
+            commanded_hold_ms = None
+            no_movement_count = 0
+            pitch_no_movement_count = 0
+            away_trend_count = 0
             error_text = attempt["error"]
             bounded_error = error_text if len(error_text) <= 512 else error_text[:512]
             if attempt["errorCode"] == "JOB_DEADLINE_EXCEEDED":
                 compass_deadline_error_count += 1
-                emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_DEADLINE_RETRY", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
+                emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=released_lease_id, lease_state="RELEASED" if released_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_DEADLINE_RETRY", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
                 if compass_deadline_error_count > MAX_COMPASS_DEADLINE_ERRORS:
                     fail("Compass deadline error limit exceeded after five skipped errors: " + error_text)
                 wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
                 continue
             if attempt["errorCode"] == "COMPASS_NOT_VISIBLE":
                 compass_not_visible_error_count += 1
-                emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_NOT_VISIBLE_RETRY", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
+                emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=released_lease_id, lease_state="RELEASED" if released_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_NOT_VISIBLE_RETRY", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
                 if compass_not_visible_error_count > MAX_COMPASS_NOT_VISIBLE_ERRORS:
                     fail("Compass remained invisible after five skipped observations: " + error_text)
                 wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
                 continue
-            emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_OBSERVATION_FAILED", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
+            emit_update("OBSERVATION_ERROR", sample, command_count, empty_target(), stable_confirmations, lease_id=released_lease_id, lease_state="RELEASED" if released_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="COMPASS_OBSERVATION_FAILED", observation_error_code=attempt["errorCode"], observation_error=bounded_error)
             fail("Compass observation failed: " + attempt["error"])
 
         observation = attempt["output"]
@@ -576,7 +595,11 @@ def main(ctx):
             alignment_centered and
             commanded_target != None and
             commanded_control != None and
-            commanded_target["centerDistancePixels"] > fine_distance
+            (
+                commanded_target["centerDistancePixels"] > fine_distance or
+                (supercruise_profile and target_motion == "STATIC")
+            ) and
+            not (control_profile == "NORMAL_SPACE" and target_motion == "STATIC")
         )
         if should_brake_center_entry:
             brake_control = opposite_control(commanded_control)
@@ -585,7 +608,7 @@ def main(ctx):
                 if command_count >= MAX_COMMANDS:
                     emit_update("VERIFYING_CENTER", sample, command_count, target, stable_confirmations, reason="COMMAND_LIMIT_REACHED")
                     fail("Compass alignment exhausted the bounded command limit")
-                brake_hold_ms = SUPERCRUISE_CENTER_ENTRY_BRAKE_MS if supercruise_profile else CENTER_ENTRY_BRAKE_MS
+                brake_hold_ms = SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS if supercruise_profile and target_motion == "STATIC" else (SUPERCRUISE_CENTER_ENTRY_BRAKE_MS if supercruise_profile else CENTER_ENTRY_BRAKE_MS)
                 brake_result = pulse_control(brake_control, brake_hold_ms)
                 command_count += 1
                 brake_applied = True
@@ -734,7 +757,6 @@ def main(ctx):
                 ):
                     pulse = [pulse[0], SUPERCRUISE_TRACK_NEAR_HOLD_MS]
                 if (
-                    mode == "TRACK" and
                     target_motion == "STATIC" and
                     supercruise_profile and
                     control_target["presentation"] == "SOLID" and

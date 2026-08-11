@@ -120,6 +120,7 @@ accepts the complete raw OCR output and combines OCR confidence with reviewed
 phrase similarity. A candidate must also meet the explicit `0.60` phrase
 similarity floor; high-confidence unrelated OCR remains `UNKNOWN`. It returns `SUPERCRUISE`, `AUTO_LAUNCH`,
 `WAITING_IN_QUEUE`, `SLOW_DOWN_FOR_AUTO_DOCK`, `FSD_CHARGING`,
+`FSD_THROTTLE_UP_REQUIRED`,
 `FSD_ALIGNMENT_REQUIRED`, `SUPERCRUISE_ASSIST_ACTIVE`,
 `SAFE_DISENGAGE_READY`, `AUTO_DOCK`, or
 evidence-preserving `UNKNOWN`. It
@@ -546,9 +547,13 @@ registered 0% throttle compensation.
 `elite-dangerous/supercruise-assist-to-destination` is the separate game-
 computer workflow for `destinationMode=DROP`, initially targeting `NAV BEACON`.
 It requires the caller to have confirmed the destination lock, normal space,
-and the ship's `Auto Throttle` Assist setting. It first enters Supercruise
-manually, then commands minimum Supercruise throttle before opening the locked
-target's Navigation detail. Two OCR frames must identify the non-orbit
+and the ship's `Auto Throttle` Assist setting. It aligns a Station as a STATIC
+target through Compass only: the strict NORMAL_SPACE profile owns pre-entry
+alignment, and the SUPERCRUISE_ASSIST profile owns later correction after
+entry. It does not invoke `align-visible-target` or replace an out-of-band OCR
+label with a blind search. It first enters Supercruise manually, then commands
+minimum Supercruise throttle before opening the locked target's Navigation
+detail. Two OCR frames must identify the non-orbit
 `SUPERCRUISE ASSIST` action. The detail icon label is contextual, so the Action
 sends one `RIGHT` from BACK and treats two matching label frames as focus
 evidence before `SELECT`. Missing module/button/focus

@@ -7,27 +7,30 @@ is separate from the retained manual `supercruise-to-destination` workflow.
 The caller must first complete `select-and-lock-destination`, visually confirm
 normal space, and confirm the ship's Supercruise Assist setting is `Auto
 Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, then
-invokes `align-station-target` with its `SUPERCRUISE_ASSIST` control profile
-for Compass-based coarse alignment, then invokes `align-visible-target` for
-the OCR-derived forward-HUD centre Gate. Both children must complete while
-throttle remains at 0% before acceleration is permitted. Compass owns coarse
-holds, 80 ms fine pulses inside 40 reference pixels, and a bounded 1000 ms
-no-movement recovery pulse; visible-target alignment supplies the final
-screen-space proof. `supercruise-assist-to-destination` does not contain a
-third attitude-control loop.
+invokes `align-station-target` with `targetMotion=STATIC`. Before Supercruise
+entry it uses the strict `NORMAL_SPACE` Compass profile; after a confirmed
+Supercruise entry it uses `SUPERCRUISE_ASSIST`. The Compass child remains the
+sole alignment feedback source and must complete while throttle is 0% before
+acceleration is permitted.
 
-When nearby HUD contacts pollute Compass coarse evidence and the exact locked
-destination remains outside the OCR bands, the visible child is invoked with
-its bounded exact-name search enabled. The child may sweep yaw while throttle
-remains 0%, but it cannot accept another label or bypass its heat Gate.
+This workflow does not invoke `align-visible-target`. A selected Station label
+outside the OCR bands is not permission to replace current Compass feedback
+with a blind search. Destination OCR remains responsible for Navigation UI
+identity and Assist-button interaction, not flight alignment.
 
-The runtime supervises this nested Streaming Action synchronously: its start,
+The runtime supervises the nested Compass Streaming Action synchronously: its start,
 events, completion, and failure are wrapped in the parent stream with a child
 execution ID. Parent cancellation propagates through the shared context, and a
 child failure fails the parent without a manual alignment fallback. The child
 remains independently invokable. After alignment, the workflow starts the
 dedicated Supercruise control and temporarily commands 100% only to enter
 Supercruise. FSD charging must precede visual entry.
+
+The dedicated `Supercruise` binding is one 80 ms press. During the entry loop,
+`FSD_THROTTLE_UP_REQUIRED` is accepted as current OCR evidence that charging
+reached its throttle handoff; the Action reissues 100% throttle and still waits
+for independently observed Supercruise HUD entry. It does not treat that prompt
+as completed entry or issue a blind second FSD toggle.
 
 Only after Supercruise entry does the Action command 0% minimum Supercruise
 throttle and reopen NAVIGATION. This avoids racing the version-dependent UI

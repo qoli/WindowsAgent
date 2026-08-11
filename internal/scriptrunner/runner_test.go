@@ -429,6 +429,17 @@ func TestEliteFlightStatusPackageRecognizesSafeDisengageReady(t *testing.T) {
 	}
 }
 
+func TestEliteFlightStatusPackageRecognizesFSDThrottleUpRequired(t *testing.T) {
+	for _, text := range []string{"THROTTLE UP TO ENGAGE", "THROTTLEUPTOENGAGE", "THROTTLE UP TO ENGAGF"} {
+		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "FSD_THROTTLE_UP_REQUIRED" || status["known"] != true || decision["accepted"] != true {
+			t.Fatalf("text %q result = %#v", text, result)
+		}
+	}
+}
+
 func TestEliteFlightStatusPackageRecognizesSlowDownForAutoDock(t *testing.T) {
 	for _, text := range []string{
 		"SLOW DOWN FOR AUTO DOCK",

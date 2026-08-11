@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Elite Dangerous Supercruise control",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "taskDocument": "TASK.md",
   "bindingSource": {"type": "frontier-active-preset-v1"},
-  "gesture": {"type": "press", "holdMs": 40},
+  "gesture": {"type": "press", "holdMs": 80},
   "selector": {"inputField": "command"},
   "bindings": {
     "TOGGLE": {"control": "Supercruise"}

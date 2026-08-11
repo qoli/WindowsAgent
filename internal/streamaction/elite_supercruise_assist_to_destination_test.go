@@ -23,6 +23,7 @@ type supercruiseAssistDestinationCaller struct {
 	throttles              []int
 	supercruiseKeys        int
 	alignmentCalls         int
+	alignmentInputs        []map[string]any
 	visibleAlignmentCalls  int
 	assistOwnershipActive  bool
 	flightInputAfterAssist []string
@@ -104,10 +105,16 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		return json.Marshal(map[string]any{"control": map[int64]string{0: "SetSpeedZero", 100: "SetSpeed100"}[percent]})
 	case "elite-dangerous/align-station-target":
 		c.alignmentCalls++
+		c.alignmentInputs = append(c.alignmentInputs, map[string]any{
+			"mode":            inputs["mode"],
+			"targetMotion":    inputs["targetMotion"],
+			"stopBeforeAlign": inputs["stopBeforeAlign"],
+			"controlProfile":  inputs["controlProfile"],
+		})
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_STATION_TARGET","completed":true,"sampleCount":3}`), nil
 	case "elite-dangerous/align-visible-target":
 		c.visibleAlignmentCalls++
-		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"sampleCount":3}`), nil
+		return nil, errors.New("supercruise Assist must not replace Compass feedback with visible-target search")
 	case "elite-dangerous/supercruise-control":
 		c.supercruiseKeys++
 		c.recordFlightInput("FSD")
@@ -200,8 +207,15 @@ func TestEliteSupercruiseAssistToDestinationHandsFlightToGameComputer(t *testing
 	if len(caller.flightInputAfterAssist) != 0 {
 		t.Fatalf("flight input after Assist ownership=%v", caller.flightInputAfterAssist)
 	}
-	if caller.alignmentCalls != 1 || caller.visibleAlignmentCalls != 1 {
+	if caller.alignmentCalls != 1 || caller.visibleAlignmentCalls != 0 {
 		t.Fatalf("alignment calls compass=%d visible=%d", caller.alignmentCalls, caller.visibleAlignmentCalls)
+	}
+	if len(caller.alignmentInputs) != 1 ||
+		caller.alignmentInputs[0]["mode"] != "ALIGN" ||
+		caller.alignmentInputs[0]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[0]["stopBeforeAlign"] != false ||
+		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" {
+		t.Fatalf("initial alignment inputs=%v", caller.alignmentInputs)
 	}
 	wantControls := []string{"FOCUS_LEFT_PANEL", "SELECT", "RIGHT", "SELECT", "FOCUS_LEFT_PANEL"}
 	if len(caller.controls) != len(wantControls) {
@@ -271,8 +285,15 @@ func TestEliteSupercruiseAssistReusesAlignmentActionWhenAssistRequiresAlignment(
 	if caller.alignmentCalls != 2 {
 		t.Fatalf("expected initial and Assist-required alignment calls, got %d", caller.alignmentCalls)
 	}
-	if caller.visibleAlignmentCalls != 2 {
-		t.Fatalf("expected initial and Assist-required visible alignment calls, got %d", caller.visibleAlignmentCalls)
+	if caller.visibleAlignmentCalls != 0 {
+		t.Fatalf("visible-target search replaced Compass feedback %d times", caller.visibleAlignmentCalls)
+	}
+	if len(caller.alignmentInputs) != 2 ||
+		caller.alignmentInputs[0]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" ||
+		caller.alignmentInputs[1]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[1]["controlProfile"] != "SUPERCRUISE_ASSIST" {
+		t.Fatalf("alignment inputs=%v", caller.alignmentInputs)
 	}
 	wantThrottles := []int{0, 100, 0, 75, 0, 75}
 	if len(caller.throttles) != len(wantThrottles) {
@@ -391,5 +412,32 @@ func TestEliteSupercruiseAssistEntryUnknownIsBoundedAndStopsShip(t *testing.T) {
 	}
 	if len(caller.throttles) != 3 || caller.throttles[0] != 0 || caller.throttles[1] != 100 || caller.throttles[2] != 0 {
 		t.Fatalf("failure compensation did not bound movement: throttles=%v", caller.throttles)
+	}
+}
+
+func TestEliteSupercruiseAssistRestoresThrottleAtChargedHandoff(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = []string{
+		"FSD_THROTTLE_UP_REQUIRED", "SUPERCRUISE", "SUPERCRUISE",
+		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	wantThrottles := []int{0, 100, 100, 0, 75}
+	if len(caller.throttles) != len(wantThrottles) {
+		t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+	}
+	for index := range wantThrottles {
+		if caller.throttles[index] != wantThrottles[index] {
+			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+		}
 	}
 }

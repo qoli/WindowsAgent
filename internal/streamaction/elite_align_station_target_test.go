@@ -12,17 +12,18 @@ import (
 )
 
 type alignStationTargetCaller struct {
-	observations    []json.RawMessage
-	index           int
-	throttles       []int
-	controls        []string
-	holds           []int
-	holdControls    []string
-	holdOps         []string
-	compassFailures []error
-	statusFlags     int64
-	statusState     string
-	statusError     error
+	observations      []json.RawMessage
+	index             int
+	throttles         []int
+	controls          []string
+	holds             []int
+	holdControls      []string
+	holdOps           []string
+	compassFailures   []error
+	compassFailuresAt map[int][]error
+	statusFlags       int64
+	statusState       string
+	statusError       error
 }
 
 func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -44,6 +45,11 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 		c.throttles = append(c.throttles, int(percent))
 		return json.RawMessage(`{"schemaVersion":1,"selection":"0","control":"SetSpeedZero"}`), nil
 	case "elite-dangerous/compass":
+		if failures := c.compassFailuresAt[c.index]; len(failures) > 0 {
+			err := failures[0]
+			c.compassFailuresAt[c.index] = failures[1:]
+			return nil, err
+		}
 		if len(c.compassFailures) > 0 {
 			err := c.compassFailures[0]
 			c.compassFailures = c.compassFailures[1:]
@@ -91,6 +97,36 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 		})
 	default:
 		return nil, errors.New("unexpected align-station-target child Action: " + id)
+	}
+}
+
+func TestEliteAlignStationTargetClearsReleasedLeaseAcrossConsecutiveCompassErrors(t *testing.T) {
+	caller := &alignStationTargetCaller{
+		observations: []json.RawMessage{
+			alignObservation("HOLLOW", 0, -20, 20, false),
+			alignObservation("SOLID", 0, -3, 3, true),
+			alignObservation("SOLID", 0, -2, 2, true),
+		},
+		compassFailuresAt: map[int][]error{
+			1: {
+				&scriptlaunch.Error{Code: "COMPASS_NOT_VISIBLE", Stage: "executing-script", Cause: errors.New("HUD inertia")},
+				&scriptlaunch.Error{Code: "COMPASS_NOT_VISIBLE", Stage: "executing-script", Cause: errors.New("HUD inertia")},
+			},
+		},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":5`) {
+		t.Fatalf("output=%s", output)
+	}
+	if got := strings.Join(caller.holdOps, ","); got != "START,STOP" {
+		t.Fatalf("the sustained lease must be stopped exactly once across consecutive observation errors: %s", got)
 	}
 }
 
@@ -245,6 +281,63 @@ func TestEliteAlignStationTargetCanPreserveOwningWorkflowThrottle(t *testing.T) 
 	}
 	if len(caller.throttles) != 0 {
 		t.Fatalf("unexpected throttles=%v", caller.throttles)
+	}
+}
+
+func TestEliteAlignStationTargetStaticNormalSpaceUsesStableStationHandoffGate(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 14, -8, 16.125, false),
+		alignObservation("SOLID", 5, 9, 10.296, false),
+		alignObservation("SOLID", 10, -4, 10.770, false),
+		alignObservation("SOLID", 12, -6, 13.416, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) ||
+		!contains(string(output), `"sampleCount":4`) ||
+		!contains(string(output), `"stableConfirmations":3`) ||
+		!contains(string(output), `"targetMotion":"STATIC"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP" ||
+		strings.Join(caller.holdControls, ",") != "PITCH_UP_YAW_RIGHT,PITCH_UP_YAW_RIGHT" {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("static handoff must stop perturbing the centered Station marker: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetStaticSupercruiseAlignUsesPrecisionGate(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -13, 13, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -3, 3, true),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) ||
+		!contains(string(output), `"sampleCount":5`) ||
+		!contains(string(output), `"stableConfirmations":2`) {
+		t.Fatalf("output=%s", output)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP,PITCH_DOWN" ||
+		len(caller.holds) != 3 || caller.holds[0] != 160 || caller.holds[1] != 80 || caller.holds[2] != 80 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 
