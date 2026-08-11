@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,18 +22,23 @@ import (
 )
 
 const maxLauncherOutputBytes = 1 << 20
+const maxWGCTransportAttempts = 2
 
 type LocalExecutor struct {
 	launcher string
 	rulesDir string
+	logger   *slog.Logger
 }
 
-func NewLocalExecutor(installRoot, rulesDir string) (*LocalExecutor, error) {
+func NewLocalExecutor(installRoot, rulesDir string, logger *slog.Logger) (*LocalExecutor, error) {
 	if installRoot == "" || !filepath.IsAbs(installRoot) {
 		return nil, errors.New("script runtime install root must be absolute")
 	}
 	if rulesDir == "" || !filepath.IsAbs(rulesDir) {
 		return nil, errors.New("rules directory must be absolute")
+	}
+	if logger == nil {
+		return nil, errors.New("script runtime logger is required")
 	}
 	launcher := filepath.Join(installRoot, "windows-observation-job.exe")
 	for name, target := range map[string]string{
@@ -48,7 +54,7 @@ func NewLocalExecutor(installRoot, rulesDir string) (*LocalExecutor, error) {
 			return nil, fmt.Errorf("%s must be a regular file", name)
 		}
 	}
-	return &LocalExecutor{launcher: launcher, rulesDir: rulesDir}, nil
+	return &LocalExecutor{launcher: launcher, rulesDir: rulesDir, logger: logger}, nil
 }
 
 func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.RawMessage, error) {
@@ -101,6 +107,27 @@ func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.Ra
 		return nil, fmt.Errorf("write Script request: %w", err)
 	}
 
+	for attempt := 1; attempt <= maxWGCTransportAttempts; attempt++ {
+		output, err := e.runAttempt(ctx, invocation, requestPath, foregroundInfo)
+		if err == nil || attempt == maxWGCTransportAttempts || !retryableWGCTransportFailure(err) {
+			return output, err
+		}
+		e.logger.WarnContext(ctx, "script_wgc_transport_retry",
+			"capability", invocation.Capability,
+			"attempt", attempt,
+			"max_attempts", maxWGCTransportAttempts,
+			"error", err,
+		)
+	}
+	return nil, errors.New("unreachable Script transport retry state")
+}
+
+func (e *LocalExecutor) runAttempt(
+	ctx context.Context,
+	invocation Invocation,
+	requestPath string,
+	foregroundInfo foreground.Info,
+) (json.RawMessage, error) {
 	var stdout limitedBuffer
 	var stderr limitedBuffer
 	command := exec.CommandContext(

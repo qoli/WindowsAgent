@@ -36,7 +36,8 @@ output proves key injection only, not attitude movement.
 `elite-dangerous/ship-attitude-hold` is the non-blocking counterpart for one
 coarse attitude axis. `START` returns a 2500 ms lease after key-down, `RENEW`
 extends that exact lease, and `STOP` releases it. Only one hold lease may be
-active; ordinary press Actions fail while it remains active. Streaming failure
+active; press Actions on distinct resolved keys remain available, while an
+exact physical-key conflict fails before injection. Streaming failure
 compensation, lease expiry, and Agent shutdown release the resolved key.
 
 `elite-dangerous/ship-attitude-vector-hold` owns one pitch-plus-yaw pair under
@@ -57,14 +58,32 @@ another binding, scan-code, or Compass investigation. Report the included
 retry the Streaming Action without restarting Elite Dangerous.
 
 `elite-dangerous/align-station-target` is an interruptible linear Streaming
-Action over the selected target. By default it first commands 0% throttle. A
-hollow rear marker or solid marker farther than 40 reference pixels uses one
+Action over the selected target. Its `controlProfile` defaults to `AUTO`: the
+Action requires AVAILABLE Status.json Flags and selects the Supercruise or
+normal-space control law itself. Missing or malformed automatic-profile
+evidence fails explicitly rather than silently selecting normal space. The
+terminal output records the resolved profile and evidence source. By default
+it first commands 0% throttle. A
+hollow rear marker uses one fixed `PITCH_UP` great-circle hold because live
+gravity-well evidence showed that fixed Yaw can orbit a near-centered rear
+projection without reaching the front hemisphere. A solid marker farther than
+40 reference pixels uses one
 leased sustained control while Compass is sampled at a one-second
 start-to-start cadence. It releases the hold on hemisphere, axis, or fine-band
 transition. A far solid marker with meaningful error on both axes uses the
 compound pitch-plus-yaw lease for diagonal movement. Inside 40 pixels it
 returns to distance-scaled bounded pulses at the same cadence. Near-center
-pulses are 120 ms, and the first pulse-driven alignment-center entry applies a 100 ms
+pulses are 120 ms in normal space and 80 ms in Supercruise. Two measured
+no-movement Supercruise samples permit one 240 ms recovery pulse; the retired
+1000 ms recovery crossed the center by 34 reference pixels in live testing.
+Supercruise sustained-turn release uses a 160 ms reverse brake and requires two
+current SOLID contacts. The retired 80 ms brake plus one-frame completion let a
+6px transient drift through the rear hemisphere while target distance rose
+from 2.71 to 3.04 kLs after thrust was restored.
+The 240 ms no-movement recovery is not reverse-braked inside the 16px Gate:
+live evidence showed the retired 80 ms recovery brake repeatedly moved a
+14–16px result back to 24–25px.
+The first pulse-driven alignment-center entry applies a 100 ms
 opposite-axis brake before stable verification. Events expose
 control mode, lease state, sample timing, requested
 pulse duration, observed marker movement, distance delta, moving-away trend,
@@ -76,6 +95,20 @@ explicit activity events supply the Action OSD. An owning flight workflow may
 set `stopBeforeAlign=false` when it already controls throttle. It does not establish Station
 target lock, approach the Station, request docking, or participate in the
 docking-computer workflow.
+
+`align-station-target mode=TRACK` keeps a HOLLOW target under the same fixed
+`PITCH_UP` sustained lease used by ALIGN; one-second 80 ms rear pulses were
+live-measured to remain around 22–28px until the command budget was exhausted.
+The lease is explicitly released at the tracking-window terminal boundary.
+For a front target, Supercruise TRACK uses the calibrated 16-reference-pixel
+alignment Gate rather than the generic four-pixel Compass zone. Live approach
+evidence showed the four-pixel Gate repeatedly corrected valid 8-12px contacts
+back through the rear hemisphere while Station distance stopped improving.
+From 16px through the ordinary 40px fine band, Supercruise TRACK uses a 240ms
+bounded pulse. The retired 80ms pulse left a 27px marker unchanged for 18
+samples, while a sustained fine-band lease crossed the front and rear
+hemispheres every second. Above 40px it keeps the sustained lease; inside 16px
+it only observes.
 
 `elite-dangerous/flight-prompt-text` is a second finite Action. It captures the
 reviewed central prompt as a 400x40 reference-density RGB line and sends it to
@@ -424,13 +457,21 @@ SOLID proves only that the target is in the front hemisphere; it never proves
 that the visible Escape Vector lies inside the OCR ROI. While the same probe
 charge is active, `escape-vector-visible-position` is the independent ROI
 Gate. `UNKNOWN` cancels the probe and permits one Compass-derived segment.
-Only `DETECTED` hands control to heat-protected `align-visible-target` with its
-faster Escape Vector profile and bounded active-charge heat policy. After a
+Only two consecutive geometrically consistent `DETECTED` observations inside
+a three-sample window hand control to heat-protected `align-visible-target`
+with its faster Escape Vector profile and bounded active-charge heat policy.
+After a
 known reading no higher than 60%, charge-obscured UNKNOWN heat is tolerated for
 at most four seconds while the visible Escape Vector remains the control
 source; known heat at 75% still fails immediately. After two stable visible confirmations, the
 Action preserves that charge, commands 100%, stops reading Compass and visible
 reticle evidence, and waits for the FSD entry countdown.
+
+The completed output reports prealignment probe, turn, flashing-Compass miss,
+visible-handoff, prealignment elapsed, and total elapsed counters. A repeated
+near-center SOLID snapshot with less than one reference pixel of measured
+improvement receives a 600 ms recovery segment rather than another ineffective
+300 ms segment.
 
 Before the visible ROI is acquired, known heat at 75% or three consecutive UNKNOWN heat
 observations cancel formal charge. During the already-aligned countdown, the

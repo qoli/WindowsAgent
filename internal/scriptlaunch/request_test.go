@@ -113,3 +113,24 @@ func TestParseLauncherOutputPreservesStructuredFailure(t *testing.T) {
 		t.Fatalf("error = %#v", err)
 	}
 }
+
+func TestRetryableWGCTransportFailureIsNarrow(t *testing.T) {
+	retryable := &Error{
+		Code:  "JOB_BROKER_FAILED",
+		Stage: "brokering-observer-calls",
+		Cause: errors.New("read observer response for screen.readRegion: read frame header: EOF"),
+	}
+	if !retryableWGCTransportFailure(retryable) {
+		t.Fatal("exact screen.readRegion observer EOF must be retryable")
+	}
+	for _, err := range []error{
+		&Error{Code: "JOB_BROKER_FAILED", Stage: "brokering-observer-calls", Cause: errors.New("read observer response for file.read: read frame header: EOF")},
+		&Error{Code: "JOB_BROKER_FAILED", Stage: "brokering-observer-calls", Cause: errors.New("screen.readRegion returned SCREEN_CAPTURE_FAILED")},
+		&Error{Code: "JOB_DEADLINE_EXCEEDED", Stage: "executing-script", Cause: errors.New("read observer response for screen.readRegion: read frame header: EOF")},
+		errors.New("read observer response for screen.readRegion: read frame header: EOF"),
+	} {
+		if retryableWGCTransportFailure(err) {
+			t.Fatalf("unrelated failure became retryable: %v", err)
+		}
+	}
+}

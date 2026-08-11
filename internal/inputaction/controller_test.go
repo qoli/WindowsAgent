@@ -199,6 +199,151 @@ func TestControllerExpiresKeyHoldLeaseAndReportsExpiryOnStop(t *testing.T) {
 	}
 }
 
+func TestControllerStopsOlderExpiredLeaseAfterNewLeaseStarts(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `
+<Root PresetName="ControlPadKeyboard">
+  <YawLeftButton><Primary Device="Keyboard" Key="Key_A"/></YawLeftButton>
+  <YawRightButton><Primary Device="Keyboard" Key="Key_D"/></YawRightButton>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "START", "control": "YAW_LEFT"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstResult map[string]any
+	if err := json.Unmarshal(first, &firstResult); err != nil {
+		t.Fatal(err)
+	}
+	firstLeaseID := firstResult["leaseId"].(string)
+	controller.expireLease(firstLeaseID, 1)
+
+	second, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "START", "control": "YAW_RIGHT"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var secondResult map[string]any
+	if err := json.Unmarshal(second, &secondResult); err != nil {
+		t.Fatal(err)
+	}
+	secondLeaseID := secondResult["leaseId"].(string)
+
+	stopped, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "YAW_LEFT", "leaseId": firstLeaseID}, "EliteDangerous64.exe")
+	if err != nil || !strings.Contains(string(stopped), `"releaseReason":"EXPIRED"`) {
+		t.Fatalf("stopped=%s error=%v", stopped, err)
+	}
+	if len(driver.ups) != 1 || driver.ups[0].Key != "Key_A" {
+		t.Fatalf("stopping older expired lease altered active key: ups=%v", driver.ups)
+	}
+	if _, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "YAW_RIGHT", "leaseId": secondLeaseID}, "EliteDangerous64.exe"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestControllerRejectsUnknownLeaseWhileAnotherLeaseIsActive(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <YawLeftButton><Primary Device="Keyboard" Key="Key_A"/></YawLeftButton>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "START", "control": "YAW_LEFT"}, "EliteDangerous64.exe"); err != nil {
+		t.Fatal(err)
+	}
+	unknownLeaseID := "key_00000000000000000000000000000000"
+	if _, err := controller.Run(context.Background(), pkg, map[string]any{"operation": "STOP", "control": "YAW_LEFT", "leaseId": unknownLeaseID}, "EliteDangerous64.exe"); err == nil {
+		t.Fatal("unknown lease unexpectedly stopped active input")
+	}
+	if len(driver.ups) != 0 {
+		t.Fatalf("unknown lease released active key: ups=%v", driver.ups)
+	}
+}
+
+func TestControllerAllowsDistinctPressDuringKeyHoldLease(t *testing.T) {
+	holdRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holdPackage, err := Load(holdRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pressPackage := writeInputPackage(t, Selector{InputField: "percent"}, map[string]Binding{
+		"0": {Control: "SetSpeedZero"},
+	})
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <PitchUpButton><Primary Device="Keyboard" Key="Key_UpArrow"/></PitchUpButton>
+  <SetSpeedZero><Primary Device="Keyboard" Key="Key_X"/></SetSpeedZero>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Run(context.Background(), holdPackage, map[string]any{"operation": "START", "control": "PITCH_UP"}, "EliteDangerous64.exe"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Run(context.Background(), pressPackage, map[string]any{"percent": int64(0)}, "EliteDangerous64.exe"); err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_X" || len(driver.ups) != 0 {
+		t.Fatalf("requests=%v ups=%v", driver.requests, driver.ups)
+	}
+}
+
+func TestControllerRejectsConflictingPressDuringKeyHoldLease(t *testing.T) {
+	holdRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-hold"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	holdPackage, err := Load(holdRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pressPackage := writeInputPackage(t, Selector{InputField: "percent"}, map[string]Binding{
+		"0": {Control: "SetSpeedZero"},
+	})
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <PitchUpButton><Primary Device="Keyboard" Key="Key_UpArrow"/></PitchUpButton>
+  <SetSpeedZero><Primary Device="Keyboard" Key="Key_UpArrow"/></SetSpeedZero>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Run(context.Background(), holdPackage, map[string]any{"operation": "START", "control": "PITCH_UP"}, "EliteDangerous64.exe"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.Run(context.Background(), pressPackage, map[string]any{"percent": int64(0)}, "EliteDangerous64.exe"); err == nil || !strings.Contains(err.Error(), "conflicts with active key hold lease") {
+		t.Fatalf("conflicting press error=%v", err)
+	}
+	if len(driver.requests) != 0 || len(driver.ups) != 0 {
+		t.Fatalf("conflicting press mutated input: requests=%v ups=%v", driver.requests, driver.ups)
+	}
+}
+
 func TestControllerUsesValidatedDynamicHoldOverride(t *testing.T) {
 	pkg := writeInputPackage(t, Selector{InputField: "percent"}, map[string]Binding{
 		"0": {Control: "SetSpeedZero"},

@@ -22,13 +22,16 @@ import (
 
 const activePresetFilename = "StartPreset.4.start"
 
+const recentReleasedLeaseLimit = 64
+
 type Controller struct {
 	frontierBindingsRoot string
 	driver               windowsinput.Driver
 	foreground           func() (foreground.Info, error)
 	mu                   sync.Mutex
 	activeLease          *keyLease
-	lastLease            *keyLease
+	recentReleasedLeases map[string]*keyLease
+	releasedLeaseOrder   []string
 }
 
 type keyLease struct {
@@ -52,7 +55,12 @@ func NewController(frontierBindingsRoot string, driver windowsinput.Driver, fore
 	if driver == nil || foregroundSnapshot == nil {
 		return nil, errors.New("Windows input driver and foreground resolver are required")
 	}
-	return &Controller{frontierBindingsRoot: frontierBindingsRoot, driver: driver, foreground: foregroundSnapshot}, nil
+	return &Controller{
+		frontierBindingsRoot: frontierBindingsRoot,
+		driver:               driver,
+		foreground:           foregroundSnapshot,
+		recentReleasedLeases: make(map[string]*keyLease),
+	}, nil
 }
 
 func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]any, ruleID string) (json.RawMessage, error) {
@@ -83,9 +91,6 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.activeLease != nil {
-		return nil, fmt.Errorf("key hold lease %q is active; stop it before invoking a press Action", c.activeLease.id)
-	}
 	before, err := c.foreground()
 	if err != nil {
 		return nil, fmt.Errorf("resolve foreground before input Action: %w", err)
@@ -110,6 +115,13 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	}
 	if !sameForeground(before, current) || !strings.EqualFold(current.ExecutableName, ruleID) {
 		return nil, errors.New("foreground process changed before input injection")
+	}
+	if c.activeLease != nil {
+		for _, held := range c.activeLease.resolved {
+			if held.key == resolved.key {
+				return nil, fmt.Errorf("press Action key %s conflicts with active key hold lease %q", resolved.key, c.activeLease.id)
+			}
+		}
 	}
 	evidence, err := c.driver.Press(ctx, windowsinput.PressRequest{
 		Key: resolved.key, Hold: time.Duration(holdMS) * time.Millisecond,
@@ -247,12 +259,12 @@ func (c *Controller) renewLease(ctx context.Context, pkg *Package, ruleID, selec
 func (c *Controller) stopLease(ctx context.Context, pkg *Package, ruleID, selection, leaseID string) (json.RawMessage, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.activeLease == nil {
-		if c.lastLease != nil && c.lastLease.id == leaseID && strings.EqualFold(c.lastLease.ruleID, ruleID) && c.lastLease.selection == selection {
-			if c.lastLease.releaseErr != nil {
-				return nil, fmt.Errorf("key hold lease %q release failed: %w", leaseID, c.lastLease.releaseErr)
+	if c.activeLease == nil || c.activeLease.id != leaseID {
+		if lease := c.recentReleasedLeases[leaseID]; lease != nil && strings.EqualFold(lease.ruleID, ruleID) && lease.selection == selection {
+			if lease.releaseErr != nil {
+				return nil, fmt.Errorf("key hold lease %q release failed: %w", leaseID, lease.releaseErr)
 			}
-			return c.encodeLeaseResult(pkg, "STOP", c.lastLease)
+			return c.encodeLeaseResult(pkg, "STOP", lease)
 		}
 		return nil, fmt.Errorf("key hold lease %q is not active", leaseID)
 	}
@@ -267,8 +279,24 @@ func (c *Controller) stopLease(ctx context.Context, pkg *Package, ruleID, select
 	lease.state = "RELEASED"
 	lease.releaseReason = "EXPLICIT"
 	c.activeLease = nil
-	c.lastLease = lease
+	c.recordReleasedLease(lease)
 	return c.encodeLeaseResult(pkg, "STOP", lease)
+}
+
+func (c *Controller) recordReleasedLease(lease *keyLease) {
+	if lease == nil {
+		return
+	}
+	if _, exists := c.recentReleasedLeases[lease.id]; !exists {
+		c.releasedLeaseOrder = append(c.releasedLeaseOrder, lease.id)
+	}
+	c.recentReleasedLeases[lease.id] = lease
+	if len(c.releasedLeaseOrder) <= recentReleasedLeaseLimit {
+		return
+	}
+	oldest := c.releasedLeaseOrder[0]
+	c.releasedLeaseOrder = c.releasedLeaseOrder[1:]
+	delete(c.recentReleasedLeases, oldest)
 }
 
 func (c *Controller) requireActiveLease(ruleID, selection, leaseID string) (*keyLease, error) {
@@ -295,7 +323,7 @@ func (c *Controller) expireLease(leaseID string, generation uint64) {
 	lease.releaseReason = "EXPIRED"
 	lease.releaseErr = err
 	c.activeLease = nil
-	c.lastLease = lease
+	c.recordReleasedLease(lease)
 }
 
 func (c *Controller) encodeLeaseResult(pkg *Package, operation string, lease *keyLease) (json.RawMessage, error) {

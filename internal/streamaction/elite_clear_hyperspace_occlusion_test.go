@@ -9,34 +9,42 @@ import (
 )
 
 type clearHyperspaceOcclusionCaller struct {
-	occlusions             []json.RawMessage
-	occlusionIndex         int
-	compassTargets         []json.RawMessage
-	compassIndex           int
-	compassCallIndex       int
-	compassUnavailableAt   map[int]bool
-	heatPercents           []int64
-	heatIndex              int
-	heatUnknownAt          map[int]bool
-	controls               []string
-	holdOperations         []string
-	holdControls           []string
-	throttles              []int64
-	supercruiseToggle      int
-	statusIndex            int
-	lastStatusTime         string
-	staleCancelReads       int
-	unsafeCharge           bool
-	statusFailures         int
-	statusFreshness        string
-	preventEntry           bool
-	visibleAligned         bool
-	atFullThrottle         bool
-	enteredSupercruise     bool
-	entryCountdownReads    int
-	countdownReadIndex     int
-	countdownOverheat      bool
-	visiblePositionUnknown bool
+	occlusions                []json.RawMessage
+	occlusionIndex            int
+	compassTargets            []json.RawMessage
+	compassIndex              int
+	compassCallIndex          int
+	compassUnavailableAt      map[int]bool
+	heatPercents              []int64
+	heatIndex                 int
+	heatUnknownAt             map[int]bool
+	controls                  []string
+	holdOperations            []string
+	holdControls              []string
+	throttles                 []int64
+	supercruiseToggle         int
+	statusIndex               int
+	lastStatusTime            string
+	staleCancelReads          int
+	unsafeCharge              bool
+	statusFailures            int
+	statusFreshness           string
+	preventEntry              bool
+	visibleAligned            bool
+	atFullThrottle            bool
+	enteredSupercruise        bool
+	entryRequiresFullThrottle bool
+	promptEscapeVector        bool
+	baselineTarget            json.RawMessage
+	enterDuringCancel         bool
+	visibleAlignFailures      int
+	entryCountdownReads       int
+	countdownReadIndex        int
+	countdownOverheat         bool
+	visiblePositionUnknown    bool
+	visiblePositionUnknownAt  map[int]bool
+	visiblePositionCallCount  int
+	visibleAlignmentCalls     int
 }
 
 func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -55,6 +63,9 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 		return result, nil
 	case "elite-dangerous/compass":
 		if c.supercruiseToggle%2 == 0 {
+			if c.baselineTarget != nil {
+				return c.baselineTarget, nil
+			}
 			return escapeVectorTarget("SOLID", 100, 0, 100), nil
 		}
 		callIndex := c.compassCallIndex
@@ -69,13 +80,20 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 		c.compassIndex++
 		return result, nil
 	case "elite-dangerous/escape-vector-visible-position":
-		if c.visiblePositionUnknown {
+		callIndex := c.visiblePositionCallCount
+		c.visiblePositionCallCount++
+		if c.visiblePositionUnknown || c.visiblePositionUnknownAt[callIndex] {
 			return json.RawMessage(`{"schemaVersion":1,"target":{"state":"UNKNOWN","referenceX":null,"referenceY":null,"offsetX":null,"offsetY":null,"centerDistancePixels":null,"reason":"TEST_OUTSIDE_ROI","rawTexts":[]},"timing":{}}`), nil
 		}
 		return json.RawMessage(`{"schemaVersion":1,"target":{"state":"DETECTED","referenceX":960,"referenceY":540,"offsetX":0,"offsetY":0,"centerDistancePixels":0,"reason":"TEST","rawTexts":["ESCAPE","VECTOR"]},"timing":{}}`), nil
 	case "elite-dangerous/align-visible-target":
+		c.visibleAlignmentCalls++
 		if inputs["heatPolicy"] != "ESCAPE_VECTOR_CHARGE" {
 			return nil, errors.New("escape-vector alignment did not request its bounded charge heat policy")
+		}
+		if c.visibleAlignFailures > 0 {
+			c.visibleAlignFailures--
+			return nil, errors.New("visible target remained UNKNOWN")
 		}
 		c.visibleAligned = true
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"targetName":"ESCAPE VECTOR","sampleCount":3,"commandCount":0,"stableConfirmations":3,"finalTarget":{"state":"DETECTED"}}`), nil
@@ -95,6 +113,9 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 	case "elite-dangerous/flight-prompt-text":
 		return json.RawMessage(`{"schemaVersion":1,"text":"ALIGN WITH ESCAPE VECTOR","confidence":0.99,"evidence":{},"model":{},"timing":{}}`), nil
 	case "elite-dangerous/flight-status":
+		if !c.promptEscapeVector {
+			return json.RawMessage(`{"flightStatus":{"state":"UNKNOWN","known":false}}`), nil
+		}
 		return json.RawMessage(`{"flightStatus":{"state":"FSD_ESCAPE_VECTOR_REQUIRED","known":true}}`), nil
 	case "elite-dangerous/filesystem/status":
 		if c.statusFailures > 0 {
@@ -113,7 +134,7 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 					flags += 1048576
 				}
 				c.countdownReadIndex++
-			} else if !c.preventEntry && ((c.visibleAligned && c.atFullThrottle) || (c.supercruiseToggle >= 3 && len(c.compassTargets) > 0 && c.compassIndex >= len(c.compassTargets))) {
+			} else if !c.preventEntry && ((c.visibleAligned && c.atFullThrottle) || (c.supercruiseToggle >= 3 && (!c.entryRequiresFullThrottle || c.atFullThrottle) && len(c.compassTargets) > 0 && c.compassIndex >= len(c.compassTargets))) {
 				flags = 16
 				c.enteredSupercruise = true
 			} else {
@@ -150,6 +171,9 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 		return json.Marshal(map[string]any{"heat": map[string]any{"state": "KNOWN", "percent": percent}})
 	case "elite-dangerous/supercruise-control":
 		c.supercruiseToggle++
+		if c.enterDuringCancel && c.atFullThrottle && c.supercruiseToggle%2 == 0 {
+			c.enteredSupercruise = true
+		}
 		return json.RawMessage(`{"control":"Supercruise"}`), nil
 	default:
 		return nil, errors.New("unexpected clear-occlusion child Action: " + id)
@@ -264,6 +288,41 @@ func TestEliteClearHyperspaceOcclusionAlignsEscapeVectorThenEntersSupercruise(t 
 	}
 }
 
+func TestEliteClearHyperspaceOcclusionAcceptsGameEntryWhenFinalCompassCenterFrameIsMissed(t *testing.T) {
+	matchingBaseline := escapeVectorTarget("SOLID", 10, 0, 10)
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: clearThenCruiseOcclusions(),
+		compassTargets: repeatCompassTargets(
+			matchingBaseline,
+			escapeVectorTarget("SOLID", 0, 0, 0),
+		),
+		heatPercents:              []int64{54, 53, 52, 53, 54},
+		heatUnknownAt:             map[int]bool{},
+		visiblePositionUnknown:    true,
+		entryRequiresFullThrottle: true,
+		promptEscapeVector:        true,
+		baselineTarget:            matchingBaseline,
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "Aldebaran"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("game-confirmed Supercruise entry must win the disappearing Compass race: %v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	for _, expected := range []string{`"escapeVectorAlignmentConfirmations":0`, `"entryAlignmentEvidence":"GAME_SUPERCRUISE_TRANSITION"`, `"finalSupercruiseConfirmed":true`} {
+		if !contains(string(output), expected) {
+			t.Fatalf("missing %s output=%s", expected, output)
+		}
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"GAME_SUPERCRUISE_ENTRY_CONFIRMED_ALIGNMENT"`) {
+		t.Fatalf("missing game-entry alignment event: %s", joinEventPhases(reporter.payloads))
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"PROMPT_OWNERSHIP_CONFIRMED:FSD_ESCAPE_VECTOR_REQUIRED"`) {
+		t.Fatalf("matching Compass geometry must use the OCR prompt ownership Gate: %s", joinEventPhases(reporter.payloads))
+	}
+}
+
 func TestEliteClearHyperspaceOcclusionUsesFixedCoarseDirectionForHollowProbe(t *testing.T) {
 	occlusions := []json.RawMessage{}
 	for range 10 {
@@ -291,6 +350,77 @@ func TestEliteClearHyperspaceOcclusionUsesFixedCoarseDirectionForHollowProbe(t *
 	}
 	if contains(joinEventPhases(reporter.payloads), `"reason":"UNSAFE_TRIAL_ROLLED_BACK"`) {
 		t.Fatalf("CV must not override Escape Vector direction: %s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionFallsBackWhenVisibleHandoffTurnsUnknown(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: clearThenCruiseOcclusions(),
+		compassTargets: repeatCompassTargets(
+			escapeVectorTarget("HOLLOW", -30, 20, 36),
+			escapeVectorTarget("SOLID", 18, 9, 20),
+			escapeVectorTarget("SOLID", 1, -1, 1.4),
+		),
+		heatPercents:              []int64{54, 53, 52, 53, 54, 55, 56},
+		heatUnknownAt:             map[int]bool{},
+		visibleAlignFailures:      1,
+		entryRequiresFullThrottle: true,
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "Aldebaran"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("tentative visible handoff must fall back to Compass probes: %v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `VISIBLE_ESCAPE_VECTOR_ALIGNMENT_FAILED_FALLING_BACK_TO_COMPASS`) {
+		t.Fatalf("missing visible-handoff fallback event: %s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionRequiresStableVisibleHandoffAndEscalatesStagnantFineSegment(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: clearThenCruiseOcclusions(),
+		compassTargets: repeatCompassTargets(
+			escapeVectorTarget("SOLID", -2, -4, 4.472),
+			escapeVectorTarget("SOLID", -2, -4, 4.472),
+			escapeVectorTarget("SOLID", 0, 0, 0),
+		),
+		heatPercents:              []int64{54, 53, 52, 53, 54, 53, 52, 51, 52},
+		heatUnknownAt:             map[int]bool{},
+		visiblePositionUnknownAt:  map[int]bool{1: true, 2: true, 3: true, 4: true, 5: true},
+		entryRequiresFullThrottle: true,
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "Aldebaran"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("%v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	if caller.visibleAlignmentCalls != 1 {
+		t.Fatalf("visible alignment calls=%d, one-frame detections must not start the child", caller.visibleAlignmentCalls)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"reason":"VISIBLE_ESCAPE_VECTOR_ROI_NOT_STABLE:0:ATTEMPTS:3"`) {
+		t.Fatalf("missing unstable handoff evidence: %s", joined)
+	}
+	if !contains(joined, `"reason":"DISTANCE_STAGNATION_RECOVERY_SEGMENT"`) || !contains(joined, `"commandHoldMs":600`) {
+		t.Fatalf("missing stagnant fine-segment escalation: %s", joined)
+	}
+	for _, expected := range []string{
+		`"schemaVersion":8`,
+		`"prealignmentProbeCount":3`,
+		`"prealignmentTurnCount":2`,
+		`"visibleHandoffAttemptCount":1`,
+		`"visibleHandoffFailureCount":0`,
+	} {
+		if !contains(string(output), expected) {
+			t.Fatalf("missing %s output=%s", expected, output)
+		}
 	}
 }
 
@@ -417,6 +547,38 @@ func TestEliteClearHyperspaceOcclusionCancelsAfterThreeUnknownChargeHeatSamples(
 	}
 	if caller.heatIndex != 9 || caller.supercruiseToggle != 4 {
 		t.Fatalf("heatCalls=%d toggles=%d", caller.heatIndex, caller.supercruiseToggle)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionLetsGameEntryWinHeatCancellationRace(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: clearThenCruiseOcclusions(),
+		compassTargets: repeatCompassTargets(
+			escapeVectorTarget("SOLID", 0, 0, 0),
+			escapeVectorTarget("SOLID", 18, 9, 20),
+			escapeVectorTarget("SOLID", 12, 6, 13.4),
+			escapeVectorTarget("SOLID", 8, 4, 8.9),
+			escapeVectorTarget("SOLID", 7, 4, 8.1),
+			escapeVectorTarget("SOLID", 6, 3, 6.7),
+		),
+		heatPercents:           []int64{54, 53, 52},
+		heatUnknownAt:          map[int]bool{6: true, 7: true, 8: true},
+		preventEntry:           true,
+		visiblePositionUnknown: true,
+		enterDuringCancel:      true,
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "Aldebaran"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("game-confirmed Supercruise must win the local heat cancellation race: %v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	if !contains(string(output), `"entryAlignmentEvidence":"GAME_SUPERCRUISE_TRANSITION"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"GAME_SUPERCRUISE_ENTRY_WON_CANCELLATION_RACE"`) {
+		t.Fatalf("missing cancellation-race event: %s", joinEventPhases(reporter.payloads))
 	}
 }
 

@@ -1,5 +1,5 @@
 {
-  "schemaVersion":1,"version":34,"title":"Escape a gravity obstruction with Compass and visible-target handoff",
+  "schemaVersion":1,"version":40,"title":"Escape a gravity obstruction with Compass and visible-target handoff",
   "entrypoint":"main.star","taskDocument":"TASK.md","inputSchema":"input.schema.json","outputSchema":"output.schema.json","eventSchema":"event.schema.json",
   "files":["main.star","TASK.md","input.schema.json","output.schema.json","event.schema.json"],
   "limits":{"maxSteps":500000,"maxOutputBytes":8192,"maxEventBytes":8192,"maxSleepMs":1000}

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
@@ -111,4 +112,14 @@ func parseLauncherOutput(output []byte, runErr error) (json.RawMessage, error) {
 		return nil, errors.New("Script launcher returned ok=false with exit code zero")
 	}
 	return append(json.RawMessage(nil), output...), nil
+}
+
+func retryableWGCTransportFailure(err error) bool {
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Code != "JOB_BROKER_FAILED" || typed.Stage != "brokering-observer-calls" {
+		return false
+	}
+	message := typed.Error()
+	return strings.Contains(message, "read observer response for screen.readRegion") &&
+		strings.Contains(message, "read frame header: EOF")
 }

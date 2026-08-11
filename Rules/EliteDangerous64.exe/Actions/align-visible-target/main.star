@@ -20,6 +20,7 @@ SEARCH_LEFT_SAMPLES = 4
 SEARCH_HEAT_RETRY_SETTLE_MS = 500
 MAX_DEADLINE_ERRORS = 5
 MAX_HEAT_PERCENT = 75
+HIGH_HEAT_CONFIRMATIONS = 2
 MAX_UNKNOWN_HEAT_SAMPLES = 3
 ESCAPE_CHARGE_LAST_KNOWN_MAX_PERCENT = 60
 ESCAPE_CHARGE_UNKNOWN_GRACE_MS = 4000
@@ -86,7 +87,6 @@ def main(ctx):
     heat_policy = ctx.inputs["heatPolicy"] if "heatPolicy" in ctx.inputs else "STRICT"
     if heat_policy == "ESCAPE_VECTOR_CHARGE" and position_source != "ESCAPE_VECTOR":
         fail("ESCAPE_VECTOR_CHARGE heat policy requires the Escape Vector position source")
-    position_action = "elite-dangerous/escape-vector-visible-position" if position_source == "ESCAPE_VECTOR" else "elite-dangerous/supercruise-target-position"
     stable_confirmations_required = 2 if position_source == "ESCAPE_VECTOR" else STABLE_CONFIRMATIONS
     if stop_before_align:
         throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
@@ -97,6 +97,7 @@ def main(ctx):
     unknown_count = 0
     deadline_count = 0
     unknown_heat_count = 0
+    high_heat_count = 0
     last_known_heat_percent = None
     last_known_heat_ms = None
     final_target = None
@@ -120,12 +121,23 @@ def main(ctx):
             heat_percent = heat["percent"]
         if heat_state == "KNOWN":
             unknown_heat_count = 0
+            if heat_percent >= MAX_HEAT_PERCENT:
+                high_heat_count += 1
+                if high_heat_count >= HIGH_HEAT_CONFIRMATIONS:
+                    emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="MAX_HEAT_PERCENT_CONFIRMED", heat_state=heat_state, heat_percent=heat_percent)
+                    fail("visible target alignment crossed the confirmed 75 percent heat safety gate")
+                # A single constrained OCR frame can concatenate the real heat
+                # digits with a neighbouring HUD digit (23 -> 238). Stop
+                # steering for this cadence and require an independent high
+                # sample before treating it as real heat.
+                emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HIGH_HEAT_AWAITING_CONFIRMATION", heat_state=heat_state, heat_percent=heat_percent)
+                wait_for_cadence(started_ms, position_source)
+                continue
+            high_heat_count = 0
             last_known_heat_percent = heat_percent
             last_known_heat_ms = task.elapsed_milliseconds()
-            if heat_percent >= MAX_HEAT_PERCENT:
-                emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="MAX_HEAT_PERCENT_REACHED", heat_state=heat_state, heat_percent=heat_percent)
-                fail("visible target alignment crossed the 75 percent heat safety gate")
         else:
+            high_heat_count = 0
             unknown_heat_count += 1
             charge_grace = (
                 heat_policy == "ESCAPE_VECTOR_CHARGE" and
@@ -138,8 +150,10 @@ def main(ctx):
             elif unknown_heat_count >= MAX_UNKNOWN_HEAT_SAMPLES:
                 emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HEAT_UNKNOWN_LIMIT_REACHED", heat_state=heat_state, heat_percent=heat_percent)
                 fail("visible target alignment heat remained UNKNOWN for three consecutive samples")
-        position_inputs = {} if position_source == "ESCAPE_VECTOR" else {"targetName": target_name}
-        attempt = action.try_call(id=position_action, inputs=position_inputs)
+        if position_source == "ESCAPE_VECTOR":
+            attempt = action.try_call(id="elite-dangerous/escape-vector-visible-position", inputs={})
+        else:
+            attempt = action.try_call(id="elite-dangerous/supercruise-target-position", inputs={"targetName": target_name})
         if not attempt["ok"]:
             text = attempt["error"]
             bounded = text if len(text) <= 512 else text[:512]

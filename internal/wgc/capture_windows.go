@@ -74,10 +74,11 @@ var (
 )
 
 type Capturer struct {
-	logger   *slog.Logger
-	sequence atomic.Uint64
-	active   atomic.Int64
-	trace    atomic.Bool
+	logger      *slog.Logger
+	captureGate chan struct{}
+	sequence    atomic.Uint64
+	active      atomic.Int64
+	trace       atomic.Bool
 }
 
 type rect struct {
@@ -223,7 +224,12 @@ func New(logger *slog.Logger) (*Capturer, error) {
 	if ok == 0 {
 		return nil, fmt.Errorf("set per-monitor-v2 DPI awareness: %w", callErr)
 	}
-	return &Capturer{logger: logger}, nil
+	// WGC and the D3D11 immediate context are process-global native pressure
+	// points even though each request owns its COM objects. Keep only one
+	// capture/readback operation in native code at a time. Live evidence showed
+	// that overlapping Compass and OCR region captures could terminate the
+	// whole Agent inside ID3D11DeviceContext::Map with 0xc0000005.
+	return &Capturer{logger: logger, captureGate: make(chan struct{}, 1)}, nil
 }
 
 func (c *Capturer) SetTrace(enabled bool) {
@@ -394,6 +400,22 @@ func (c *Capturer) withCapturedFrame(
 ) (returnErr error) {
 	if process == nil {
 		return errors.New("captured frame processor is required")
+	}
+	queuedAt := time.Now()
+	select {
+	case c.captureGate <- struct{}{}:
+		defer func() { <-c.captureGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	queueWait := time.Since(queuedAt)
+	if queueWait >= time.Millisecond {
+		c.logCaptureLifecycle(
+			ctx,
+			"wgc_capture_dequeued",
+			"capture_kind", captureKind,
+			"queue_wait_ms", queueWait.Milliseconds(),
+		)
 	}
 	operationID := c.sequence.Add(1)
 	active := c.active.Add(1)

@@ -26,6 +26,8 @@ type supercruiseAssistDestinationCaller struct {
 	visibleAlignmentCalls  int
 	assistOwnershipActive  bool
 	flightInputAfterAssist []string
+	supercruiseHUDStates   []string
+	supercruiseHUDIndex    int
 }
 
 func focusedPixels(focused bool) []any {
@@ -123,7 +125,12 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		}
 		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
 	case "elite-dangerous/supercruise-hud-state":
-		return json.RawMessage(`{"supercruiseHud":{"state":"INACTIVE"}}`), nil
+		state := "INACTIVE"
+		if c.supercruiseHUDIndex < len(c.supercruiseHUDStates) {
+			state = c.supercruiseHUDStates[c.supercruiseHUDIndex]
+			c.supercruiseHUDIndex++
+		}
+		return json.Marshal(map[string]any{"supercruiseHud": map[string]any{"state": state}})
 	case "elite-dangerous/ship-speed":
 		if c.speedIndex >= len(c.speedStates) {
 			return nil, errors.New("unexpected ship-speed observation")
@@ -300,6 +307,45 @@ func TestEliteSupercruiseAssistRejectsOrbitButtonWithoutSelectingIt(t *testing.T
 	}
 	if selects != 1 {
 		t.Fatalf("DROP workflow selected an ORBIT action: controls=%v", caller.controls)
+	}
+}
+
+func TestEliteSupercruiseAssistHandsOrbitFlightToGameWithoutClaimingArrival(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.assistRegions = []json.RawMessage{
+		textRegionRaw("SUPERCRUISE ASSIST AND ORBIT", 720, true),
+		textRegionRaw("SUPERCRUISE ASSIST AND ORBIT", 720, true),
+	}
+	caller.navigationRegions = []json.RawMessage{
+		textRegionRaw("<LTT 11244 A 2>", 400, true),
+		textRegionRaw("<LTT 11244 A 2>", 400, true),
+	}
+	caller.flightStates = []string{"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE"}
+	caller.supercruiseHUDStates = []string{"ACTIVE", "ACTIVE"}
+	inputs := map[string]any{
+		"targetName": "LTT 11244 A 2", "targetLocked": true,
+		"normalSpaceConfirmed": false, "supercruiseConfirmed": true,
+		"autoThrottleConfirmed": true, "destinationMode": "ORBIT_HANDOFF",
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), inputs, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"destinationMode":"ORBIT_HANDOFF"`) ||
+		!contains(string(output), `"finalPhase":"ASSIST_HANDOFF"`) ||
+		!contains(string(output), `"finalSpeed":null`) {
+		t.Fatalf("output=%s", output)
+	}
+	selects := 0
+	for _, control := range caller.controls {
+		if control == "SELECT" {
+			selects++
+		}
+	}
+	if selects != 2 {
+		t.Fatalf("ORBIT workflow did not open the target and select Assist: controls=%v", caller.controls)
 	}
 }
 

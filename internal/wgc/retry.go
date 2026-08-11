@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	wgcCaptureAttempts = 3
+	wgcCaptureAttempts = 5
 	wgcRetryDelay      = 25 * time.Millisecond
 )
 
@@ -66,7 +66,7 @@ func isTransientWGCError(err error) bool {
 		return false
 	}
 	switch captureErr.Code {
-	case "capture_frame_failed", "capture_session_failed", "capture_size_mismatch":
+	case "capture_frame_failed", "capture_session_failed", "capture_size_mismatch", "capture_readback_failed", "capture_region_shader_failed":
 		return true
 	case "desktop_unavailable":
 		return captureErr.Message == "primary monitor capture size is invalid"

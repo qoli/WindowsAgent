@@ -54,6 +54,9 @@ drop and stop. Thirty missing Assist samples without that stop fail as
 `ASSIST_INTERRUPTED`; no manual-flight fallback is attempted. Failure or
 cancellation still invokes the registered 0% throttle compensation.
 
-The first version intentionally supports only `destinationMode=DROP`.
-`SUPERCRUISE ASSIST AND ORBIT` is rejected instead of being interpreted with
-the wrong completion Gate.
+`destinationMode=DROP` accepts only `SUPERCRUISE ASSIST` and retains the
+automatic drop-and-stop completion contract. `destinationMode=ORBIT_HANDOFF`
+accepts only `SUPERCRUISE ASSIST AND ORBIT` and completes at the explicit
+`ASSIST_HANDOFF` boundary after two visual ownership confirmations. It does
+not claim that the body has been reached or that the ship left Supercruise;
+those are separate distance/arrival and drop Actions.

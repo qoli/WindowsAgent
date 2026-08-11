@@ -32,8 +32,15 @@ Streaming events expose that lifetime as `escapeVectorEvidenceState`:
 attitude pulse, and `EXPIRED` means no later command may use it. Historical
 Compass coordinates in the log are evidence, not a durable world-state claim.
 
-An absent-to-detected Compass transition, presentation change, or at least
-eight pixels of pre/post-charge movement establishes charge ownership. Missing
+`flight-status=FSD_ESCAPE_VECTOR_REQUIRED`, an absent-to-detected Compass
+transition, presentation change, or at least eight pixels of pre/post-charge
+movement establishes charge ownership. The OCR-derived flight status covers
+the valid case where the pre-existing destination and the Escape Vector have
+identical Compass geometry; the Action still requires two consistent SOLID or
+HOLLOW samples before using any direction. The prompt pipeline is invoked as
+`flight-prompt-text` followed by `flight-status`, and is sampled both when the
+new charging Status first appears and after the bounded Compass window so a
+late HUD prompt is not missed. Missing
 samples are emitted explicitly instead of silently shrinking the voting
 window. The 137 ms interval intentionally walks across the flashing Compass
 phase; a fixed 100 ms interval reproduced alternating and then fully
@@ -55,9 +62,14 @@ A SOLID Compass observation is only a front-hemisphere Gate. While the probe
 charge remains active, the Action calls `escape-vector-visible-position`.
 `UNKNOWN` means the reticle is still outside or unresolved in the forward OCR
 ROI, so the charge is cancelled and one Compass-derived segment is allowed.
-Only `DETECTED` hands control to heat-protected `align-visible-target` with
-`positionSource=ESCAPE_VECTOR` and its bounded `ESCAPE_VECTOR_CHARGE` heat
-policy. Successful visible alignment keeps the same
+Only two consecutive geometrically consistent `DETECTED` observations within
+a three-sample window hand control to heat-protected `align-visible-target`
+with `positionSource=ESCAPE_VECTOR` and its bounded `ESCAPE_VECTOR_CHARGE` heat
+policy. This keeps a single-frame detection tentative without starting the
+child after the label has already disappeared. If the child Action's bounded
+observations still become UNKNOWN, the parent logs the failure, cancels that
+probe, and resumes fresh Compass-owned snapshots. Successful
+visible alignment keeps the same
 safe Supercruise charge alive for entry; SOLID alone never enters this path.
 
 Once a probe reports a centered SOLID marker, the probe charge is still
@@ -67,6 +79,13 @@ charge-owned Compass evidence before accepting alignment or Supercruise
 entry. It may make current-charge corrections while that Compass remains
 visible, but it never treats a cancelled-probe observation as a completion
 Gate.
+
+A repeated near-center SOLID snapshot with less than one reference pixel of
+improvement receives one stronger 600 ms recovery segment instead of repeating
+an ineffective 300 ms segment. The completed output reports prealignment
+probe, turn, flashing-Compass miss, visible-handoff, prealignment elapsed, and
+end-to-end elapsed counters so later tests compare workflow cost rather than
+isolated OCR inference time.
 
 ## Safety and completion
 
@@ -79,6 +98,11 @@ waiting for Supercruise. Heat OCR may become UNKNOWN behind that transient heat
 wall, so UNKNOWN is logged but does not cancel during the already-aligned,
 bounded countdown. Every heat OCR return is followed by a fresh fast Status
 read; a confirmed Supercruise transition wins the race before any cancellation.
+The cancellation helper repeats that fast check immediately before its toggle
+and while waiting for post-command Status. If the game finishes entry during
+this narrow race, it emits
+`GAME_SUPERCRUISE_ENTRY_WON_CANCELLATION_RACE` and continues with cruise
+verification instead of reporting a false heat-gate failure.
 Mass Lock and hyperspace-charge flags remain immediate failures. Before the
 visible ROI is acquired, three consecutive UNKNOWN heat samples still fail
 closed. During visible alignment, a last known heat no higher than 60% permits
@@ -86,6 +110,15 @@ at most four seconds of UNKNOWN caused by the active charge animation; the 75%
 known ceiling remains unchanged and the grace is not renewed by UNKNOWN. Failure
 and cancellation own local STOP-hold, one charge-cancel command, and 0% throttle
 compensation.
+
+After Escape Vector ownership has been established, a confirmed Supercruise
+Status transition is itself game-level alignment evidence: Elite Dangerous
+does not permit this gravity-well transition until the Escape Vector is
+aligned. A final four-pixel Compass observation is retained when available,
+but is not allowed to turn a successful transition into a false failure while
+the charging HUD disappears. The output distinguishes
+`LOCAL_CENTERED_COMPASS` from `GAME_SUPERCRUISE_TRANSITION` and preserves the
+actual local confirmation count.
 
 After Status confirms Supercruise, the Action maintains the aligned escape for
 30 seconds while checking cruise and overheat every second. CV is sampled

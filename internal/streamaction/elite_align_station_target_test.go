@@ -20,10 +20,22 @@ type alignStationTargetCaller struct {
 	holdControls    []string
 	holdOps         []string
 	compassFailures []error
+	statusFlags     int64
+	statusState     string
+	statusError     error
 }
 
 func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
+	case "elite-dangerous/filesystem/status":
+		if c.statusError != nil {
+			return nil, c.statusError
+		}
+		state := c.statusState
+		if state == "" {
+			state = "AVAILABLE"
+		}
+		return json.Marshal(map[string]any{"state": state, "data": map[string]any{"Flags": c.statusFlags}})
 	case "elite-dangerous/set-throttle":
 		percent, ok := inputs["percent"].(int64)
 		if !ok {
@@ -160,7 +172,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"centerContactCount":3,"commandCount":2,"completed":true,"finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":1,"stableConfirmations":3,"task":"ALIGN_STATION_TARGET"}` {
+	if string(output) != `{"centerContactCount":3,"commandCount":2,"completed":true,"controlProfile":"NORMAL_SPACE","controlProfileSource":"STATUS_JSON","finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":2,"stableConfirmations":3,"targetMotion":"MOVING","task":"ALIGN_STATION_TARGET"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
@@ -176,7 +188,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 			t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 		}
 	}
-	if strings.Join(caller.holdOps, ",") != "START,RENEW,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT,YAW_LEFT" {
+	if strings.Join(caller.holdOps, ",") != "START,RENEW,STOP" || strings.Join(caller.holdControls, ",") != "PITCH_UP,PITCH_UP,PITCH_UP" {
 		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
 }
@@ -201,10 +213,10 @@ func TestEliteAlignStationTargetBrakesResidualTurnDuringPresentationTransition(t
 	if !contains(string(output), `"finalPhase":"COMPLETED"`) {
 		t.Fatalf("output=%s", output)
 	}
-	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT" {
+	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "PITCH_UP,PITCH_UP" {
 		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
-	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 120 {
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_DOWN" || caller.holds[0] != 120 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 	brakeEventFound := false
@@ -301,6 +313,36 @@ func TestEliteAlignStationTargetTrackKeepsCorrectingCurrentOffsetWithoutInferrin
 	}
 	if len(caller.controls) != 9 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetTrackDampsNearCenterHollowMarkerWithPulses(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", -6, -20, 20.881, false),
+		alignObservation("HOLLOW", -14, -14, 19.799, false),
+		alignObservation("SOLID", -6, -8, 10, false),
+		alignObservation("HOLLOW", -12, 10, 15.62, false),
+		alignObservation("SOLID", -5, -7, 8.602, false),
+		alignObservation("SOLID", -4, -6, 7.211, false),
+		alignObservation("SOLID", -3, -5, 5.831, false),
+		alignObservation("SOLID", -2, -4, 4.472, false),
+		alignObservation("SOLID", -2, -3, 3.606, true),
+		alignObservation("SOLID", -1, -2, 2.236, true),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP" || len(caller.holds) != 1 || caller.holds[0] != 120 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP,START,STOP" || strings.Join(caller.holdControls, ",") != "PITCH_DOWN,PITCH_DOWN,PITCH_UP,PITCH_UP" {
+		t.Fatalf("near-center HOLLOW recovery did not reverse its sustained lease: ops=%v controls=%v", caller.holdOps, caller.holdControls)
 	}
 }
 
@@ -445,23 +487,39 @@ func TestEliteAlignStationTargetBrakesSupercruiseSustainedRelease(t *testing.T) 
 		alignObservation("SOLID", 12, 0, 12, false),
 		alignObservation("SOLID", 10, 0, 10, false),
 		alignObservation("SOLID", 9, 0, 9, false),
-	}}
+	}, statusFlags: 16}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"controlProfile": "SUPERCRUISE_ASSIST"}, caller, reporter,
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
 	)
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT" {
+	if !contains(string(output), `"controlProfile":"SUPERCRUISE_ASSIST"`) || !contains(string(output), `"controlProfileSource":"STATUS_JSON"`) {
+		t.Fatalf("automatic Supercruise profile evidence missing: %s", output)
+	}
+	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "PITCH_UP,PITCH_UP" {
 		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
-	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 80 {
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_DOWN" || caller.holds[0] != 160 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 	if !contains(joinEventPhases(reporter.payloads), `"reason":"SUPERCRUISE_SUSTAINED_RELEASE_BRAKE"`) ||
 		!contains(joinEventPhases(reporter.payloads), `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
 		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignStationTargetAutoProfileFailsWithoutAvailableStatus(t *testing.T) {
+	caller := &alignStationTargetCaller{statusState: "ABSENT"}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "requires AVAILABLE Status.json evidence") {
+		t.Fatalf("error=%v", err)
+	}
+	if caller.index != 0 || len(caller.controls) != 0 || len(caller.holdOps) != 0 {
+		t.Fatalf("automatic profile failure must not reach Compass or input: index=%d controls=%v holdOps=%v", caller.index, caller.controls, caller.holdOps)
 	}
 }
 
@@ -479,7 +537,7 @@ func TestEliteAlignStationTargetDoesNotBrakeSupercruiseFinePulseCenterEntry(t *t
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if strings.Join(caller.controls, ",") != "YAW_LEFT" || len(caller.holds) != 1 || caller.holds[0] != 80 {
+	if strings.Join(caller.controls, ",") != "YAW_LEFT" || len(caller.holds) != 1 || caller.holds[0] != 120 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 	if contains(joinEventPhases(reporter.payloads), `"reason":"CENTER_ENTRY_BRAKE"`) {
@@ -487,7 +545,7 @@ func TestEliteAlignStationTargetDoesNotBrakeSupercruiseFinePulseCenterEntry(t *t
 	}
 }
 
-func TestEliteAlignStationTargetBrakesSupercruiseRecoveryCenterEntry(t *testing.T) {
+func TestEliteAlignStationTargetDoesNotBrakeSupercruiseRecoveryCenterEntry(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", -30, 0, 30, false),
 		alignObservation("SOLID", -30, 0, 30, false),
@@ -503,10 +561,10 @@ func TestEliteAlignStationTargetBrakesSupercruiseRecoveryCenterEntry(t *testing.
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_LEFT,YAW_LEFT,YAW_RIGHT" {
+	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_LEFT,YAW_LEFT" {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
-	wantHolds := []int{80, 80, 1000, 80}
+	wantHolds := []int{120, 120, 240}
 	if len(caller.holds) != len(wantHolds) {
 		t.Fatalf("holds=%v", caller.holds)
 	}
@@ -515,10 +573,7 @@ func TestEliteAlignStationTargetBrakesSupercruiseRecoveryCenterEntry(t *testing.
 			t.Fatalf("holds=%v", caller.holds)
 		}
 	}
-	if !contains(joinEventPhases(reporter.payloads), `"reason":"RECOVERY_CENTER_ENTRY_BRAKE"`) {
-		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
-	}
-	if !contains(joinEventPhases(reporter.payloads), `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
+	if contains(joinEventPhases(reporter.payloads), `CENTER_ENTRY_BRAKE`) || contains(joinEventPhases(reporter.payloads), `WAITING_POST_BRAKE_OBSERVATION`) {
 		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
 	}
 }
@@ -570,7 +625,7 @@ func TestEliteAlignStationTargetKeepsRearTurnDirectionAcrossCenter(t *testing.T)
 		t.Fatalf("controls=%v holdOps=%v holdControls=%v", caller.controls, caller.holdOps, caller.holdControls)
 	}
 	for _, control := range caller.holdControls {
-		if control != "YAW_LEFT" {
+		if control != "PITCH_UP" {
 			t.Fatalf("holdControls=%v", caller.holdControls)
 		}
 	}
@@ -692,7 +747,7 @@ func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
 	)
-	if err == nil || !contains(err.Error(), "no measurable Compass movement") {
+	if err == nil || !contains(err.Error(), "ED_PITCH_INPUT_CONTEXT_NOT_READY") {
 		t.Fatalf("error=%v", err)
 	}
 	if len(caller.controls) != 0 || strings.Join(caller.holdOps, ",") != "START,RENEW,RENEW,RENEW,STOP" {
@@ -729,23 +784,217 @@ func TestEliteAlignStationTargetReportsKnownEDPitchInitializationState(t *testin
 	}
 }
 
-func TestEliteAlignStationTargetTrackDoesNotInferNoProgressFromMovingTargetFrames(t *testing.T) {
+func TestEliteAlignStationTargetTrackRequiresInitialFrontMarker(t *testing.T) {
 	observations := make([]json.RawMessage, 10)
 	for index := range observations {
 		observations[index] = alignObservation("HOLLOW", -15, -4, 15.524, false)
 	}
 	caller := &alignStationTargetCaller{observations: observations}
-	output, err := (Runner{Sleep: immediateSleep}).Run(
+	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"mode": "TRACK", "trackingSamples": float64(10)}, caller, &fixtureReporter{},
 	)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !contains(err.Error(), "initial SOLID Compass target") {
+		t.Fatalf("error=%v", err)
 	}
-	if !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
-		t.Fatalf("output=%s", output)
+	if len(caller.controls) != 0 || len(caller.holdOps) != 0 {
+		t.Fatalf("controls=%v holds=%v holdOps=%v", caller.controls, caller.holds, caller.holdOps)
 	}
-	if len(caller.controls) != 9 {
-		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+}
+
+func TestEliteAlignStationTargetSupercruiseTrackAcceptsCalibratedCenterGate(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", -2, -27, 27.074, false),
+		alignObservation("SOLID", -2, -25, 25.08, false),
+		alignObservation("SOLID", -2, -9, 9.22, false),
+		alignObservation("SOLID", -1, -8, 8.062, false),
+		alignObservation("SOLID", 0, -7, 7, false),
+		alignObservation("SOLID", 1, -10, 10.05, false),
+		alignObservation("SOLID", 2, -12, 12.166, false),
+		alignObservation("SOLID", 1, -11, 11.045, false),
+		alignObservation("SOLID", 0, -9, 9, false),
+		alignObservation("SOLID", -1, -8, 8.062, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "TRACK", "trackingSamples": float64(10), "stopBeforeAlign": false,
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) ||
+		!contains(string(output), `"controlProfile":"SUPERCRUISE_ASSIST"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP" || len(caller.holds) != 2 || caller.holds[0] != 120 || caller.holds[1] != 120 {
+		t.Fatalf("one-Hertz Supercruise TRACK fine pulses are expected until the 20px Gate: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if len(caller.holdOps) != 0 || len(caller.holdControls) != 0 {
+		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	}
+}
+
+func TestEliteAlignStationTargetSupercruiseTrackSettlesAfterPulseEntersHysteresis(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -25, 25, false),
+		alignObservation("SOLID", 0, -21, 21, false),
+		alignObservation("SOLID", 0, -22, 22, false),
+		alignObservation("SOLID", 0, -25, 25, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -21, 21, false),
+		alignObservation("SOLID", 0, -22, 22, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -19, 19, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "TRACK", "trackingSamples": float64(10), "stopBeforeAlign": false,
+		}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP" || len(caller.holds) != 2 || caller.holds[0] != 120 || caller.holds[1] != 120 {
+		t.Fatalf("TRACK must settle inside 24px and only pulse again after leaving it: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"TRACKING_POST_COMMAND_SETTLE"`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignStationTargetSupercruiseTrackStagesFarAndNearPulses(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -35, 35, false),
+		alignObservation("SOLID", 0, -28, 28, false),
+		alignObservation("SOLID", 0, -22, 22, false),
+		alignObservation("SOLID", 0, -22, 22, false),
+		alignObservation("SOLID", 0, -21, 21, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -21, 21, false),
+		alignObservation("SOLID", 0, -22, 22, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "TRACK", "trackingSamples": float64(10), "stopBeforeAlign": false,
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP" || len(caller.holds) != 2 || caller.holds[0] != 160 || caller.holds[1] != 120 {
+		t.Fatalf("TRACK must use a 160ms far pulse followed by a 120ms near pulse: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetSupercruiseStaticTrackUsesPrecisionGate(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -15, 15, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -5, 5, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "TRACK", "targetMotion": "STATIC", "trackingSamples": float64(10), "stopBeforeAlign": false,
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) || !contains(string(output), `"targetMotion":"STATIC"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP" || len(caller.holds) != 2 || caller.holds[0] != 80 || caller.holds[1] != 160 {
+		t.Fatalf("STATIC TRACK must use an 80ms precision pulse inside 6px and 160ms outside it: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetSupercruiseStaticTrackDoesNotPromoteNearNoProgress(t *testing.T) {
+	observations := make([]json.RawMessage, 10)
+	for index := range observations {
+		observations[index] = alignObservation("SOLID", 0, -15, 15, false)
+	}
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: observations}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "TRACK", "targetMotion": "STATIC", "trackingSamples": float64(10), "stopBeforeAlign": false,
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.holds) != 9 {
+		t.Fatalf("holds=%v", caller.holds)
+	}
+	for _, hold := range caller.holds {
+		if hold != 160 {
+			t.Fatalf("STATIC near-band no-progress must stay at 160ms, holds=%v", caller.holds)
+		}
+	}
+}
+
+func TestEliteAlignStationTargetSupercruiseStaticTrackLatchesFrontTopologyAcrossNearHollowFrames(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -18, 18, false),
+		alignObservation("HOLLOW", 0, -22, 22, false),
+		alignObservation("HOLLOW", -25, -34, 42.202, false),
+		alignObservation("SOLID", 0, -18, 18, false),
+		alignObservation("SOLID", 0, -16, 16, false),
+		alignObservation("SOLID", 0, -14, 14, false),
+		alignObservation("SOLID", 0, -16, 16, false),
+		alignObservation("SOLID", 0, -18, 18, false),
+		alignObservation("SOLID", 0, -16, 16, false),
+		alignObservation("SOLID", 0, -14, 14, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "TRACK", "targetMotion": "STATIC", "trackingSamples": float64(10), "stopBeforeAlign": false,
+		}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"TRACKING_WINDOW_COMPLETED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.holdOps) != 0 {
+		t.Fatalf("near HOLLOW continuity must not start sustained rear recovery: ops=%v controls=%v", caller.holdOps, caller.holdControls)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP,PITCH_UP,PITCH_UP,PITCH_UP,PITCH_UP,PITCH_UP,PITCH_UP,PITCH_UP" {
+		t.Fatalf("near HOLLOW frames must retain bounded front screen-space correction: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if caller.holds[1] != 160 || caller.holds[2] != 160 {
+		t.Fatalf("HOLLOW continuity pulses must remain staged and bounded: holds=%v", caller.holds)
+	}
+	continuityEvents := 0
+	for _, payload := range reporter.payloads {
+		if contains(string(payload), `"reason":"STATIC_TRACK_PRESENTATION_CONTINUITY"`) {
+			continuityEvents++
+		}
+	}
+	if continuityEvents != 2 {
+		t.Fatalf("continuity events=%d payloads=%v", continuityEvents, reporter.payloads)
+	}
+}
+
+func TestEliteAlignStationTargetSupercruiseAlignRetainsStricterCenterGate(t *testing.T) {
+	caller := &alignStationTargetCaller{statusFlags: 16, observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -18, 18, false),
+		alignObservation("SOLID", 0, -14, 14, false),
+		alignObservation("SOLID", 0, -12, 12, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "stopBeforeAlign": false,
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"finalPhase":"COMPLETED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP" || len(caller.holds) != 1 || caller.holds[0] != 120 {
+		t.Fatalf("ALIGN must still correct an 18px target outside its 16px Gate: controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 

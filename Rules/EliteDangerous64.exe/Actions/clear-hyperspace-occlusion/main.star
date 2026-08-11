@@ -36,7 +36,14 @@ HOLLOW_PREALIGN_HOLD_MS = 3000
 PREALIGN_FAR_HOLD_MS = 3000
 PREALIGN_MEDIUM_HOLD_MS = 1800
 PREALIGN_NEAR_HOLD_MS = 700
-PREALIGN_FINE_HOLD_MS = 200
+PREALIGN_FINE_HOLD_MS = 300
+PREALIGN_FINE_RECOVERY_HOLD_MS = 600
+PREALIGN_NEAR_RECOVERY_HOLD_MS = 1200
+PREALIGN_STAGNATION_PIXELS = 1.0
+VISIBLE_ROI_SAMPLE_LIMIT = 3
+VISIBLE_ROI_CONFIRMATIONS_REQUIRED = 2
+VISIBLE_ROI_SAMPLE_INTERVAL_MS = 100
+VISIBLE_ROI_TRACK_DELTA_PIXELS = 24.0
 SUPERCRUISE_CANCEL_LIMIT = 40
 SUPERCRUISE_ESCAPE_DURATION_MS = 30000
 
@@ -85,6 +92,15 @@ def emit_update(phase, target_name, sample, turn_count, observation=None, target
 
 def observe_obstruction():
     return action.call(id="elite-dangerous/hyperspace-target-occlusion", inputs={})["occlusion"]
+
+def observe_flight_status_state():
+    raw_attempt = action.try_call(id="elite-dangerous/flight-prompt-text", inputs={})
+    if not raw_attempt["ok"]:
+        return None
+    classified_attempt = action.try_call(id="elite-dangerous/flight-status", inputs=raw_attempt["output"])
+    if not classified_attempt["ok"]:
+        return None
+    return classified_attempt["output"]["flightStatus"]["state"]
 
 def has_flag(value, bit_value):
     return (value // bit_value) % 2 == 1
@@ -162,6 +178,39 @@ def choose_prealignment_hold(target):
         return PREALIGN_NEAR_HOLD_MS
     return PREALIGN_FINE_HOLD_MS
 
+def choose_stagnation_recovery_hold(target, default_hold_ms):
+    if target["presentation"] != "SOLID":
+        return default_hold_ms
+    if target["centerDistancePixels"] <= 6:
+        return PREALIGN_FINE_RECOVERY_HOLD_MS
+    if target["centerDistancePixels"] <= 16:
+        return PREALIGN_NEAR_RECOVERY_HOLD_MS
+    return default_hold_ms
+
+def observe_visible_escape_vector_stably():
+    confirmations = 0
+    attempts = 0
+    last_target = None
+    for attempt_index in range(VISIBLE_ROI_SAMPLE_LIMIT):
+        attempt = action.try_call(id="elite-dangerous/escape-vector-visible-position", inputs={})
+        attempts += 1
+        if attempt["ok"] and attempt["output"]["target"]["state"] == "DETECTED":
+            target = attempt["output"]["target"]
+            same_track = (
+                last_target == None or
+                abs(target["offsetX"] - last_target["offsetX"]) + abs(target["offsetY"] - last_target["offsetY"]) <= VISIBLE_ROI_TRACK_DELTA_PIXELS
+            )
+            confirmations = confirmations + 1 if same_track else 1
+            last_target = target
+            if confirmations >= VISIBLE_ROI_CONFIRMATIONS_REQUIRED:
+                return {"detected": True, "confirmations": confirmations, "attempts": attempts, "target": target}
+        else:
+            confirmations = 0
+            last_target = None
+        if attempt_index + 1 < VISIBLE_ROI_SAMPLE_LIMIT:
+            task.sleep(milliseconds=VISIBLE_ROI_SAMPLE_INTERVAL_MS)
+    return {"detected": False, "confirmations": confirmations, "attempts": attempts, "target": last_target}
+
 def choose_sustained_escape_control(target):
     if target["presentation"] == "HOLLOW":
         return choose_escape_vector_control(target)
@@ -195,10 +244,16 @@ def run_prealignment_segment(control, duration_ms):
     action.call(id="elite-dangerous/ship-attitude-hold", inputs={"operation": "STOP", "control": control, "leaseId": lease_id})
     reset_failure_compensation()
 
-def cancel_supercruise_charge(target_name, sample, turn_count, observation, target, selected_control, reason, pre_cancel_timestamp, preserve_snapshot=False):
+def cancel_supercruise_charge(target_name, sample, turn_count, observation, target, selected_control, reason, pre_cancel_timestamp, preserve_snapshot=False, allow_supercruise_entry=False):
     # This function owns the single explicit cancel command. Remove the generic
     # charge-phase toggle compensation first so a later observer failure cannot
     # issue a second toggle and accidentally restart charging.
+    if allow_supercruise_entry:
+        latest_status = observe_status_flags()
+        if latest_status["supercruise"]:
+            emit_update("VERIFYING_ESCAPE_VECTOR_ALIGNMENT", target_name, sample, turn_count, observation=observation, target=target, selected_control=selected_control, throttle=100, mass_lock="OFF", fsd_charging=False, supercruise=True, reason="GAME_SUPERCRUISE_ENTRY_WON_CANCELLATION_RACE")
+            reset_failure_compensation()
+            return {"sample": sample, "supercruise": True}
     reset_failure_compensation()
     action.call(id="elite-dangerous/supercruise-control", inputs={"command": "TOGGLE"})
     action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
@@ -210,9 +265,13 @@ def cancel_supercruise_charge(target_name, sample, turn_count, observation, targ
         has_snapshot = target != None and target["detected"] == True
         evidence_state = "LIVE_CHARGE" if status["fsdCharging"] and has_snapshot else ("CACHED_ONE_SHOT" if preserve_snapshot and has_snapshot else "EXPIRED")
         emit_update("CANCELLING_CHARGE", target_name, sample, turn_count, observation=observation, target=target, selected_control=selected_control, throttle=0, mass_lock="ON" if status["massLock"] else "OFF", fsd_charging=status["fsdCharging"], fsd_hyperdrive_charging=status["fsdHyperdriveCharging"], fsd_cooldown=status["fsdCooldown"], over_heating=status["overHeating"], supercruise=status["supercruise"], reason=reason if current_after_command else "WAITING_POST_CANCEL_STATUS", escape_vector_evidence_state=evidence_state)
+        if allow_supercruise_entry and status["supercruise"]:
+            emit_update("VERIFYING_ESCAPE_VECTOR_ALIGNMENT", target_name, sample, turn_count, observation=observation, target=target, selected_control=selected_control, throttle=100, mass_lock="OFF", fsd_charging=False, supercruise=True, reason="GAME_SUPERCRUISE_ENTRY_WON_CANCELLATION_RACE")
+            reset_failure_compensation()
+            return {"sample": sample, "supercruise": True}
         if current_after_command and not status["fsdCharging"] and not status["fsdHyperdriveCharging"]:
             reset_failure_compensation()
-            return sample
+            return {"sample": sample, "supercruise": False}
     fail("FSD cancellation did not produce a newer non-charging Status snapshot within ten seconds")
 
 def wait_for_safe_heat(target_name, sample, turn_count, observation, selected_control, stable_heading_confirmations):
@@ -231,6 +290,7 @@ def wait_for_safe_heat(target_name, sample, turn_count, observation, selected_co
     fail("ship heat did not produce three known observations at or below the charge-start limit")
 
 def main(ctx):
+    action_started_ms = task.elapsed_milliseconds()
     target_name = ctx.inputs["targetName"]
     reset_failure_compensation()
     action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
@@ -263,6 +323,7 @@ def main(ctx):
     # all potentially long attitude work therefore happens at 0% throttle and
     # without an active heat-producing FSD charge.
     prealigned = False
+    escape_vector_ownership_confirmed = False
     visible_alignment_completed = False
     visible_alignment_confirmations = 0
     final_target = empty_target()
@@ -270,7 +331,14 @@ def main(ctx):
     prealign_previous_presentation = None
     prealign_previous_distance = None
     prealign_last_control = None
+    prealignment_started_ms = task.elapsed_milliseconds()
+    prealignment_probe_count = 0
+    prealignment_turn_count = 0
+    prealignment_compass_unavailable_count = 0
+    visible_handoff_attempt_count = 0
+    visible_handoff_failure_count = 0
     for _ in range(PREALIGN_PROBE_LIMIT):
+        prealignment_probe_count += 1
         baseline_attempt = action.try_call(id="elite-dangerous/compass", inputs={})
         baseline_target = empty_target()
         baseline_detected = False
@@ -294,7 +362,12 @@ def main(ctx):
         if probe_status["massLock"] or probe_status["overHeating"] or probe_status["fsdHyperdriveCharging"]:
             cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_STATUS_SAFETY_GATE", probe_status["sourceTimestamp"])
             fail("Supercruise prealignment probe crossed a Status safety gate")
-        ownership_confirmed = False
+        prompt_ownership_confirmed = False
+        flight_status_state = observe_flight_status_state()
+        if flight_status_state == "FSD_ESCAPE_VECTOR_REQUIRED":
+            prompt_ownership_confirmed = True
+            emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=empty_target(), selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="PROMPT_OWNERSHIP_CONFIRMED:FSD_ESCAPE_VECTOR_REQUIRED")
+        ownership_confirmed = prompt_ownership_confirmed
         solid_votes = 0
         hollow_votes = 0
         solid_target = None
@@ -304,6 +377,7 @@ def main(ctx):
             candidate_attempt = action.try_call(id="elite-dangerous/compass", inputs={})
             sample += 1
             if not candidate_attempt["ok"]:
+                prealignment_compass_unavailable_count += 1
                 emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=empty_target(), selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="COMPASS_SAMPLE_UNAVAILABLE:" + str(candidate_attempt["errorCode"]))
                 continue
             if not candidate_attempt["output"]["target"]["detected"]:
@@ -312,17 +386,21 @@ def main(ctx):
             candidate_target = candidate_attempt["output"]["target"]
             switch_delta = 200.0 if not baseline_detected else float(abs(candidate_target["offsetX"] - baseline_target["offsetX"]) + abs(candidate_target["offsetY"] - baseline_target["offsetY"]))
             presentation_changed = not baseline_detected or candidate_target["presentation"] != baseline_target["presentation"]
-            if presentation_changed or switch_delta >= PREALIGN_COMPASS_SWITCH_PIXELS:
+            if candidate_target["presentation"] == "SOLID":
+                solid_votes += 1
+                solid_target = candidate_target
+            elif candidate_target["presentation"] == "HOLLOW":
+                hollow_votes += 1
+                hollow_target = candidate_target
+            if prompt_ownership_confirmed or presentation_changed or switch_delta >= PREALIGN_COMPASS_SWITCH_PIXELS:
                 ownership_confirmed = True
-                if candidate_target["presentation"] == "SOLID":
-                    solid_votes += 1
-                    solid_target = candidate_target
-                elif candidate_target["presentation"] == "HOLLOW":
-                    hollow_votes += 1
-                    hollow_target = candidate_target
             emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=candidate_target, selected_control=None, probe_delta=min(1.0, switch_delta / 200.0), stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="COMPASS_SWITCH_DELTA:" + str(switch_delta) + ":PRESENTATION_VOTES:S" + str(solid_votes) + ":H" + str(hollow_votes))
-            if solid_votes >= 2 or hollow_votes >= 2:
+            if ownership_confirmed and (solid_votes >= 2 or hollow_votes >= 2):
                 break
+        if not ownership_confirmed and observe_flight_status_state() == "FSD_ESCAPE_VECTOR_REQUIRED":
+            prompt_ownership_confirmed = True
+            ownership_confirmed = True
+            emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=solid_target if solid_votes >= hollow_votes else hollow_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="DELAYED_PROMPT_OWNERSHIP_CONFIRMED:FSD_ESCAPE_VECTOR_REQUIRED")
         probe_heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
         probe_status = observe_status_flags()
         if probe_status["massLock"] or probe_status["overHeating"] or probe_status["fsdHyperdriveCharging"] or (probe_heat["state"] == "KNOWN" and probe_heat["percent"] >= PREALIGN_HEAT_CANCEL_PERCENT):
@@ -330,39 +408,48 @@ def main(ctx):
             fail("Supercruise prealignment burst crossed its local heat or Status safety gate")
         if not ownership_confirmed:
             cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_OWNERSHIP_NOT_CONFIRMED", probe_status["sourceTimestamp"])
-            fail("Supercruise prealignment could not confirm Compass ownership from prompt or pre/post-charge differential")
+            fail("Supercruise prealignment could not confirm Compass ownership from flight-status or pre/post-charge differential")
+        escape_vector_ownership_confirmed = True
         if solid_votes >= 2:
             final_target = solid_target
         elif hollow_votes >= 2:
             final_target = hollow_target
         else:
-            sample = cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_PRESENTATION_NOT_STABLE", probe_status["sourceTimestamp"])
+            sample = cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_PRESENTATION_NOT_STABLE", probe_status["sourceTimestamp"])["sample"]
             status = observe_status_flags()
             heat_result = wait_for_safe_heat(target_name, sample, turn_count, final_observation, selected_control, stable_heading_confirmations)
             sample = heat_result["sample"]
             continue
         emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="SHORT_CHARGE_PROBE")
         if final_target["presentation"] == "SOLID":
-            visible_attempt = action.try_call(id="elite-dangerous/escape-vector-visible-position", inputs={})
-            if visible_attempt["ok"] and visible_attempt["output"]["target"]["state"] == "DETECTED":
-                emit_update("ALIGNING_VISIBLE_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ROI_DETECTED")
-                visible_result = action.call(id="elite-dangerous/align-visible-target", inputs={"targetName": "ESCAPE VECTOR", "stopBeforeAlign": False, "positionSource": "ESCAPE_VECTOR", "heatPolicy": "ESCAPE_VECTOR_CHARGE"})
-                status = observe_status_flags()
-                if not status["fsdCharging"] or status["fsdHyperdriveCharging"] or status["overHeating"]:
-                    fail("visible Escape Vector alignment lost its safe Supercruise charge context")
-                emit_update("ALIGNING_VISIBLE_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ALIGNMENT_COMPLETED")
-                visible_alignment_completed = True
-                visible_alignment_confirmations = visible_result["stableConfirmations"]
-                prealigned = True
-                break
-            emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ROI_UNKNOWN")
-        sample = cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_PROBE_COMPLETE", probe_status["sourceTimestamp"], preserve_snapshot=True)
+            visible_gate = observe_visible_escape_vector_stably()
+            if visible_gate["detected"]:
+                visible_handoff_attempt_count += 1
+                emit_update("ALIGNING_VISIBLE_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ROI_STABLY_DETECTED:" + str(visible_gate["confirmations"]) + ":ATTEMPTS:" + str(visible_gate["attempts"]))
+                visible_result_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": "ESCAPE VECTOR", "stopBeforeAlign": False, "positionSource": "ESCAPE_VECTOR", "heatPolicy": "ESCAPE_VECTOR_CHARGE"})
+                if visible_result_attempt["ok"]:
+                    visible_result = visible_result_attempt["output"]
+                    status = observe_status_flags()
+                    if not status["fsdCharging"] or status["fsdHyperdriveCharging"] or status["overHeating"]:
+                        fail("visible Escape Vector alignment lost its safe Supercruise charge context")
+                    emit_update("ALIGNING_VISIBLE_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ALIGNMENT_COMPLETED")
+                    visible_alignment_completed = True
+                    visible_alignment_confirmations = visible_result["stableConfirmations"]
+                    prealigned = True
+                    break
+                visible_handoff_failure_count += 1
+                probe_status = observe_status_flags()
+                emit_update("ALIGNING_VISIBLE_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=probe_status["fsdCharging"], supercruise=probe_status["supercruise"], reason="VISIBLE_ESCAPE_VECTOR_ALIGNMENT_FAILED_FALLING_BACK_TO_COMPASS:" + str(visible_result_attempt["errorCode"]))
+            else:
+                emit_update("PROBING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ROI_NOT_STABLE:" + str(visible_gate["confirmations"]) + ":ATTEMPTS:" + str(visible_gate["attempts"]))
+        sample = cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_PROBE_COMPLETE", probe_status["sourceTimestamp"], preserve_snapshot=True)["sample"]
         status = observe_status_flags()
         if final_target["detected"] and final_target["presentation"] == "SOLID" and final_target["centerDistancePixels"] <= ESCAPE_VECTOR_CENTER_RADIUS_PIXELS:
             prealigned = True
             break
         if not final_target["detected"] or final_target["presentation"] == "UNKNOWN":
             continue
+        prealign_worsened = False
         if final_target["presentation"] == "HOLLOW":
             if prealign_hollow_control == None:
                 # A rear projection provides no reliable signed screen-space
@@ -374,13 +461,25 @@ def main(ctx):
         else:
             prealign_hollow_control = None
             selected_control = choose_escape_vector_control(final_target)
-            if prealign_previous_presentation == "SOLID" and prealign_previous_distance != None and final_target["centerDistancePixels"] > prealign_previous_distance + ALIGNMENT_WORSENING_PIXELS and selected_control == prealign_last_control:
+            prealign_worsened = prealign_previous_presentation == "SOLID" and prealign_previous_distance != None and final_target["centerDistancePixels"] > prealign_previous_distance + ALIGNMENT_WORSENING_PIXELS and selected_control == prealign_last_control
+            if prealign_worsened:
                 selected_control = opposite(selected_control)
         if selected_control == None:
             fail("Supercruise prealignment probe returned no usable Escape Vector direction")
         prealign_hold_ms = choose_prealignment_hold(final_target)
-        emit_update("PREALIGNING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=selected_control, command_hold_ms=prealign_hold_ms, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=False, supercruise=False, reason="TURN_SEGMENT_FROM_CACHED_ONE_SHOT_SNAPSHOT", escape_vector_evidence_state="CACHED_ONE_SHOT")
+        prealign_stagnated = (
+            final_target["presentation"] == "SOLID" and
+            prealign_previous_presentation == "SOLID" and
+            prealign_previous_distance != None and
+            final_target["centerDistancePixels"] >= prealign_previous_distance - PREALIGN_STAGNATION_PIXELS and
+            selected_control == prealign_last_control
+        )
+        if prealign_stagnated:
+            prealign_hold_ms = choose_stagnation_recovery_hold(final_target, prealign_hold_ms)
+        segment_reason = "DISTANCE_STAGNATION_RECOVERY_SEGMENT" if prealign_stagnated else ("DISTANCE_TREND_REVERSAL_SEGMENT" if prealign_worsened else "TURN_SEGMENT_FROM_CACHED_ONE_SHOT_SNAPSHOT")
+        emit_update("PREALIGNING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=selected_control, command_hold_ms=prealign_hold_ms, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=False, supercruise=False, reason=segment_reason, escape_vector_evidence_state="CACHED_ONE_SHOT")
         run_prealignment_segment(selected_control, prealign_hold_ms)
+        prealignment_turn_count += 1
         prealign_previous_presentation = final_target["presentation"]
         prealign_previous_distance = final_target["centerDistancePixels"]
         prealign_last_control = selected_control
@@ -396,6 +495,7 @@ def main(ctx):
         status = observe_status_flags()
     if not prealigned:
         fail("Escape Vector did not become a centered front marker within bounded short-charge probes")
+    prealignment_elapsed_ms = task.elapsed_milliseconds() - prealignment_started_ms
 
     precharge_timestamp = status["sourceTimestamp"]
     if not status["fsdCharging"]:
@@ -403,10 +503,12 @@ def main(ctx):
         reset_failure_compensation(cancel_charge=True)
     action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
     entry_started_ms = task.elapsed_milliseconds()
-    # Prealignment snapshots expire when their probe charge is cancelled.
-    # Formal entry must obtain fresh charge-owned Compass evidence.
+    # Prealignment coordinates expire when their probe charge is cancelled,
+    # but the task-level fact that the charging Compass belongs to the Escape
+    # Vector remains valid. Formal entry still needs either fresh Compass
+    # centering or the game's own successful Supercruise transition.
     final_target = empty_target()
-    escape_vector_seen = visible_alignment_completed
+    escape_vector_seen = escape_vector_ownership_confirmed
     missing_count = 0
     unknown_count = 0
     alignment_confirmations = visible_alignment_confirmations
@@ -481,7 +583,11 @@ def main(ctx):
                 release_escape_hold(active_lease_control, active_lease_id, cancel_charge=True)
                 active_lease_id = None
                 active_lease_control = None
-                cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "CHARGE_HEAT_GATE", status["sourceTimestamp"])
+                cancel_result = cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "CHARGE_HEAT_GATE", status["sourceTimestamp"], allow_supercruise_entry=True)
+                sample = cancel_result["sample"]
+                if cancel_result["supercruise"]:
+                    status = observe_status_flags()
+                    break
                 fail("Supercruise escape charge was cancelled by the local visual heat gate")
 
         if visible_alignment_completed:
@@ -595,9 +701,20 @@ def main(ctx):
         if status["fsdCharging"]:
             cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "SUPERCRUISE_ENTRY_TIMEOUT", status["sourceTimestamp"])
         fail("Supercruise did not enter after bounded Escape Vector alignment")
-    if not escape_vector_seen or alignment_confirmations < ESCAPE_VECTOR_CENTER_CONFIRMATIONS_REQUIRED:
+    if not escape_vector_seen:
         action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-        fail("Supercruise entered without a durable centered Escape Vector observation")
+        fail("Supercruise entered without confirmed Escape Vector ownership")
+    entry_alignment_evidence = "LOCAL_CENTERED_COMPASS"
+    if alignment_confirmations < ESCAPE_VECTOR_CENTER_CONFIRMATIONS_REQUIRED:
+        # The game cannot transition from a gravity-well Supercruise charge to
+        # Supercruise until the Escape Vector is aligned.  That fast Status
+        # transition is stronger completion evidence than requiring a final
+        # four-pixel Compass sample during the disappearing charge HUD.  Keep
+        # the local confirmation count honest and identify the evidence source
+        # explicitly instead of turning a successful entry into a false
+        # failure.
+        entry_alignment_evidence = "GAME_SUPERCRUISE_TRANSITION"
+        emit_update("VERIFYING_ESCAPE_VECTOR_ALIGNMENT", target_name, sample, turn_count, observation=final_observation, target=final_target, stable_heading_confirmations=stable_heading_confirmations, alignment_confirmations=alignment_confirmations, throttle=100, mass_lock="OFF", heat_percent=heat_percent, fsd_charging=False, supercruise=True, elapsed_ms=task.elapsed_milliseconds() - entry_started_ms, reason="GAME_SUPERCRUISE_ENTRY_CONFIRMED_ALIGNMENT")
 
     elapsed = 0
     while elapsed < SUPERCRUISE_ESCAPE_DURATION_MS:
@@ -621,4 +738,4 @@ def main(ctx):
         fail("final Supercruise stellar escape evidence is not safe and CLEAR")
     action.clear_on_failure()
     emit_update("COMPLETED", target_name, sample, turn_count, observation=final_observation, target=final_target, stable_heading_confirmations=stable_heading_confirmations, alignment_confirmations=alignment_confirmations, throttle=0, mass_lock="OFF", heat_percent=heat_percent, supercruise=True, elapsed_ms=elapsed, reason="READY_TO_RESTORE_HYPERSPACE_DESTINATION")
-    return {"schemaVersion":6,"task":"CLEAR_HYPERSPACE_OCCLUSION","completed":True,"targetName":target_name,"initialTurnCount":turn_count,"stableInitialHeadingConfirmations":stable_heading_confirmations,"maximumChargeStartHeatPercent":MAX_CHARGE_START_HEAT_PERCENT,"chargeStartHeatPercent":charge_start_heat_percent,"escapeVectorDetected":escape_vector_seen,"escapeVectorAlignmentConfirmations":alignment_confirmations,"escapeVectorAlignmentCommands":alignment_commands,"supercruiseEscapeDurationMs":elapsed,"finalOcclusionState":final_observation["state"],"finalStellarCoverageRatio":final_observation["stellarCoverageRatio"],"finalSupercruiseConfirmed":True,"restoreHyperspaceDestinationRequired":True,"finalCommandedThrottle":0}
+    return {"schemaVersion":8,"task":"CLEAR_HYPERSPACE_OCCLUSION","completed":True,"targetName":target_name,"initialTurnCount":turn_count,"stableInitialHeadingConfirmations":stable_heading_confirmations,"maximumChargeStartHeatPercent":MAX_CHARGE_START_HEAT_PERCENT,"chargeStartHeatPercent":charge_start_heat_percent,"prealignmentProbeCount":prealignment_probe_count,"prealignmentTurnCount":prealignment_turn_count,"prealignmentCompassUnavailableCount":prealignment_compass_unavailable_count,"prealignmentElapsedMs":prealignment_elapsed_ms,"visibleHandoffAttemptCount":visible_handoff_attempt_count,"visibleHandoffFailureCount":visible_handoff_failure_count,"escapeVectorDetected":escape_vector_seen,"escapeVectorAlignmentConfirmations":alignment_confirmations,"entryAlignmentEvidence":entry_alignment_evidence,"escapeVectorAlignmentCommands":alignment_commands,"supercruiseEscapeDurationMs":elapsed,"totalElapsedMs":task.elapsed_milliseconds() - action_started_ms,"finalOcclusionState":final_observation["state"],"finalStellarCoverageRatio":final_observation["stellarCoverageRatio"],"finalSupercruiseConfirmed":True,"restoreHyperspaceDestinationRequired":True,"finalCommandedThrottle":0}

@@ -56,6 +56,20 @@ func TestRetryTransientWGCCaptureExhaustionPreservesCaptureError(t *testing.T) {
 	}
 }
 
+func TestRetryTransientWGCCaptureRecoversFromRegionReadbackFailure(t *testing.T) {
+	calls := 0
+	err := retryTransientWGCCapture(context.Background(), 5, 0, func() error {
+		calls++
+		if calls <= 2 {
+			return capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", errors.New("HRESULT 0x80070057"))
+		}
+		return nil
+	}, nil)
+	if err != nil || calls != 3 {
+		t.Fatalf("error=%v calls=%d", err, calls)
+	}
+}
+
 func TestRetryTransientWGCCaptureHonorsCancellationBetweenAttempts(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0

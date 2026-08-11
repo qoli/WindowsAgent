@@ -4,8 +4,9 @@
   "additionalProperties": false,
   "properties": {
     "mode": {"enum": ["ALIGN", "TRACK"], "default": "ALIGN"},
+    "targetMotion": {"enum": ["MOVING", "STATIC"], "default": "MOVING"},
     "trackingSamples": {"type": "integer", "minimum": 10, "maximum": 240, "default": 120},
     "stopBeforeAlign": {"type": "boolean", "default": true},
-    "controlProfile": {"enum": ["NORMAL_SPACE", "SUPERCRUISE_ASSIST"], "default": "NORMAL_SPACE"}
+    "controlProfile": {"enum": ["AUTO", "NORMAL_SPACE", "SUPERCRUISE_ASSIST"], "default": "AUTO"}
   }
 }

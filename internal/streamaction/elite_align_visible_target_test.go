@@ -105,3 +105,40 @@ func TestEliteAlignVisibleTargetStrictPolicyStillFailsThreeUnknownHeatSamples(t 
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestEliteAlignVisibleTargetRejectsSingleFrameHighHeatOutlier(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{
+			visibleHeat("KNOWN", 23), visibleHeat("KNOWN", 238), visibleHeat("KNOWN", 23), visibleHeat("KNOWN", 23),
+		},
+		positions: []json.RawMessage{
+			visiblePosition(100, 20, 102), visiblePosition(8, 5, 9.4), visiblePosition(7, 4, 8.1),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "ESCAPE VECTOR", "stopBeforeAlign": false, "positionSource": "ESCAPE_VECTOR",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `HIGH_HEAT_AWAITING_CONFIRMATION`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignVisibleTargetFailsTwoConsecutiveHighHeatSamples(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 76), visibleHeat("KNOWN", 77)},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false,
+	}, caller, reporter)
+	if err == nil || !contains(err.Error(), "confirmed 75 percent") {
+		t.Fatalf("error=%v", err)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `MAX_HEAT_PERCENT_CONFIRMED`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}

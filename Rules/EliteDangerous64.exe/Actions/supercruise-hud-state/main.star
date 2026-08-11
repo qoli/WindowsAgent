@@ -1,5 +1,6 @@
 MIN_DETECTION_CONFIDENCE = 0.70
 MIN_RECOGNITION_CONFIDENCE = 0.75
+MIN_SPEED_DETECTION_CONFIDENCE = 0.60
 LABELS = ["DISTANCE", "SPEED", "ALIGNMENT"]
 
 def normalize(text):
@@ -10,6 +11,28 @@ def normalize(text):
         if character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
             result += character
     return result
+
+def normalize_speed(text):
+    result = ""
+    upper = text.upper()
+    for index in range(len(upper)):
+        character = upper[index]
+        if character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./":
+            result += character
+    return result
+
+def supercruise_speed_unit(raw):
+    for region in raw["regions"]:
+        if region["detectionConfidence"] < MIN_SPEED_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
+            continue
+        text = normalize_speed(region["text"])
+        if "KM/S" in text:
+            return "KM/S"
+        if "MM/S" in text:
+            return "MM/S"
+        if len(text) >= 2 and text[len(text) - 1] == "C":
+            return "C"
+    return None
 
 def main(ctx):
     raw = action.call(id="elite-dangerous/request-docking-distance-regions", inputs={})
@@ -23,7 +46,15 @@ def main(ctx):
         for label in LABELS:
             if text == label and label not in matched:
                 matched.append(label)
-    state = "ACTIVE" if len(matched) >= 2 else "INACTIVE"
+    speed_raw = None
+    speed_unit = None
+    speed_raw_texts = []
+    if len(matched) < 2:
+        speed_raw = action.call(id="elite-dangerous/ship-speed-text-regions", inputs={})
+        for region in speed_raw["regions"]:
+            speed_raw_texts.append(region["text"])
+        speed_unit = supercruise_speed_unit(speed_raw)
+    state = "ACTIVE" if len(matched) >= 2 or speed_unit != None else "INACTIVE"
     return {
         "schemaVersion": 1,
         "supercruiseHud": {
@@ -34,7 +65,10 @@ def main(ctx):
                 "rawTexts": raw_texts,
                 "minimumDetectionConfidence": MIN_DETECTION_CONFIDENCE,
                 "minimumRecognitionConfidence": MIN_RECOGNITION_CONFIDENCE,
+                "minimumSpeedDetectionConfidence": MIN_SPEED_DETECTION_CONFIDENCE,
+                "speedRawTexts": speed_raw_texts,
+                "supercruiseSpeedUnit": speed_unit,
             },
         },
-        "timing": raw["timing"],
+        "timing": raw["timing"] if speed_raw == None else {"dashboard": raw["timing"], "speed": speed_raw["timing"]},
     }

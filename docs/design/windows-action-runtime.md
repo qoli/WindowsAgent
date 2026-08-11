@@ -29,8 +29,9 @@ remain non-callable input. Lease packages expose explicit `START`, `RENEW`, and
 owns one resolved key; a compound Frontier binding may own exactly two
 distinct controls for overlapping diagonal input under the same lease ID. A
 package-declared one through ten second duration bounds each renewal; the
-shipped Elite attitude hold uses 2500 ms. Ordinary press Actions fail while a
-lease remains active. Explicit stop, expiry, streaming failure compensation,
+shipped Elite attitude hold uses 2500 ms. A press Action may run while a lease
+remains active only when its resolved physical key differs from every held key;
+an exact key conflict fails before injection. Explicit stop, expiry, streaming failure compensation,
 and Agent shutdown release the same resolved key or key pair.
 Literal-key packages do not require Frontier configuration; a missing Frontier
 root fails only a package that explicitly selects the Frontier binding source.

@@ -91,7 +91,7 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
-	observationExecutor, err := scriptlaunch.NewLocalExecutor(filepath.Dir(executable), cfg.RulesDir)
+	observationExecutor, err := scriptlaunch.NewLocalExecutor(filepath.Dir(executable), cfg.RulesDir, logger)
 	if err != nil {
 		return fmt.Errorf("initialize local Script executor: %w", err)
 	}

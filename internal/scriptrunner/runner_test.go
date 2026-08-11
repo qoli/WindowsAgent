@@ -1841,6 +1841,44 @@ func TestEliteCompassPackageClassifiesHollowRearMarker(t *testing.T) {
 	}
 }
 
+func TestEliteCompassPackageClassifiesAntialiasedHollowRearMarker(t *testing.T) {
+	pixels := make([]any, 96*96)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	for index := 0; index < 200; index++ {
+		pixels[index] = uint32(0xFF7700)
+	}
+	for position := 45; position <= 51; position++ {
+		pixels[45*96+position] = uint32(0x40DDEB)
+		pixels[51*96+position] = uint32(0x40DDEB)
+		pixels[position*96+45] = uint32(0x40DDEB)
+		pixels[position*96+51] = uint32(0x40DDEB)
+	}
+	// Reference downsampling can retain three faint center pixels from a
+	// visually hollow 4K ring. This stays well below the seven-pixel SOLID Gate.
+	for _, x := range []int{47, 48, 49} {
+		pixels[48*96+x] = uint32(0x40DDEB)
+	}
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := New(&compassBroker{pixels: pixels})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	target := result["target"].(map[string]any)
+	if target["presentation"] != "HOLLOW" || target["hemisphere"] != "REAR" || target["centerCyanPixelCount"] != float64(3) {
+		t.Fatalf("target=%#v", target)
+	}
+}
+
 func TestEliteCompassPackagePreprocessesDarkHollowRearMarker(t *testing.T) {
 	pixels := make([]any, 96*96)
 	for index := range pixels {

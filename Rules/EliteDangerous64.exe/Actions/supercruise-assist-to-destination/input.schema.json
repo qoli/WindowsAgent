@@ -10,7 +10,7 @@
     "supercruiseConfirmed": {"type": "boolean"},
     "assistRequestedConfirmed": {"type": "boolean"},
     "autoThrottleConfirmed": {"const": true},
-    "destinationMode": {"const": "DROP"}
+    "destinationMode": {"enum": ["DROP", "ORBIT_HANDOFF"]}
   },
   "oneOf": [
     {

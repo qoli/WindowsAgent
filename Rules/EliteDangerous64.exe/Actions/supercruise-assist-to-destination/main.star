@@ -234,14 +234,16 @@ def focus_and_open_target(target_name, sample):
         emit_update("LOCATING_TARGET", sample, target_name, panel_tab="NAVIGATION", last_command=observation["direction"], reason=observation["reason"])
         task.sleep(milliseconds=UI_SETTLE_MS)
 
-def inspect_assist_button(raw):
+def inspect_assist_button(raw, destination_mode):
     best = None
+    expected = "SUPERCRUISEASSISTANDORBIT" if destination_mode == "ORBIT_HANDOFF" else "SUPERCRUISEASSIST"
     for region in raw["regions"]:
         if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
             continue
         normalized = normalize_text(region["text"]).replace("<", "").replace(">", "")
-        score = similarity(normalized, "SUPERCRUISEASSIST")
-        if "ANDORBIT" in normalized:
+        score = similarity(normalized, expected)
+        is_orbit = "ANDORBIT" in normalized
+        if (destination_mode == "DROP" and is_orbit) or (destination_mode == "ORBIT_HANDOFF" and not is_orbit):
             score = 0.0
         candidate = {"region": region, "similarity": score, "score": score * region["recognitionConfidence"]}
         if best == None or candidate["score"] > best["score"]:
@@ -252,13 +254,14 @@ def inspect_assist_button(raw):
     # In the Navigation detail icon row the action label is contextual and is
     # rendered only for the focused icon. Its left context is outside the icon
     # fill, so it is retained as evidence but does not classify focus.
-    return {"state": "FOCUSED", "text": best["region"]["text"], "focusFillRatio": ratio, "reason": "ASSIST_CONTEXT_LABEL_CONFIRMED"}
+    reason = "ORBIT_ASSIST_CONTEXT_LABEL_CONFIRMED" if destination_mode == "ORBIT_HANDOFF" else "DROP_ASSIST_CONTEXT_LABEL_CONFIRMED"
+    return {"state": "FOCUSED", "text": best["region"]["text"], "focusFillRatio": ratio, "reason": reason}
 
-def observe_assist_button_stable(target_name, sample):
+def observe_assist_button_stable(target_name, sample, destination_mode):
     previous = None
     for attempt in range(STABLE_ATTEMPTS):
         raw = action.call(id="elite-dangerous/lock-destination-text-regions", inputs={})
-        observation = inspect_assist_button(raw)
+        observation = inspect_assist_button(raw, destination_mode)
         key = observation["state"] + ":" + str(observation["text"])
         emit_update("LOCATING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state=observation["state"], reason=observation["reason"])
         if observation["state"] != "UNKNOWN" and key == previous:
@@ -268,14 +271,14 @@ def observe_assist_button_stable(target_name, sample):
             task.sleep(milliseconds=POLL_MS)
     fail("Supercruise Assist button did not produce two consecutive known observations; the module may be absent or the detail layout is unsupported")
 
-def request_assist(target_name, sample):
+def request_assist(target_name, sample, destination_mode):
     # Detail action labels are contextual: with BACK focused the first action's
     # SUPERCRUISE ASSIST text is not rendered at all. Move focus exactly once,
     # then identify and validate the now-visible label before SELECT.
     action.call(id="elite-dangerous/ui-control", inputs={"control": "RIGHT"})
     emit_update("FOCUSING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state=None, last_command="RIGHT", reason="FOCUS_FIRST_DETAIL_ACTION_TO_REVEAL_LABEL")
     task.sleep(milliseconds=UI_SETTLE_MS)
-    observation = observe_assist_button_stable(target_name, sample)
+    observation = observe_assist_button_stable(target_name, sample, destination_mode)
     if observation["state"] != "FOCUSED":
         fail("RIGHT did not produce a focused Supercruise Assist button")
     action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
@@ -339,6 +342,7 @@ def preflight(target_name):
 
 def main(ctx):
     target_name = ctx.inputs["targetName"]
+    destination_mode = ctx.inputs["destinationMode"]
     normal_space_confirmed = ctx.inputs.get("normalSpaceConfirmed", False)
     supercruise_confirmed = ctx.inputs.get("supercruiseConfirmed", False)
     assist_requested_confirmed = ctx.inputs.get("assistRequestedConfirmed", False)
@@ -418,11 +422,11 @@ def main(ctx):
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("ENTERED", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
     if not assist_requested_confirmed:
-        action.on_failure(id="elite-dangerous/close-left-panel", inputs={})
+        action.on_failure(id="elite-dangerous/close-left-panel", inputs={}, timeout_milliseconds=10000)
         open_navigation(target_name, sample)
         focus_and_open_target(target_name, sample)
-        action.on_failure(id="elite-dangerous/close-navigation-detail", inputs={})
-        request_assist(target_name, sample)
+        action.on_failure(id="elite-dangerous/close-navigation-detail", inputs={}, timeout_milliseconds=10000)
+        request_assist(target_name, sample, destination_mode)
         close_panel(target_name, sample)
         action.clear_on_failure()
         action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
@@ -469,6 +473,25 @@ def main(ctx):
     if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
         fail("SUPERCRUISE ASSIST ACTIVE was not confirmed twice; Auto Throttle or Assist activation may not be active")
 
+    if destination_mode == "ORBIT_HANDOFF":
+        action.clear_on_failure()
+        stream.activity(message="Supercruise Assist and Orbit owns flight controls", level="info")
+        emit_update("ASSIST_ACTIVE", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, commanded_throttle=None, reason="ORBIT_ASSIST_HANDOFF_CONFIRMED")
+        return {
+            "schemaVersion": 1,
+            "task": "SUPERCRUISE_ASSIST_TO_DESTINATION",
+            "completed": True,
+            "finalPhase": "ASSIST_HANDOFF",
+            "targetName": target_name,
+            "destinationMode": destination_mode,
+            "assistActiveConfirmations": assist_active_confirmations,
+            "assistMissingSamples": 0,
+            "stoppedConfirmations": 0,
+            "agentFlightInputAfterAssistActive": False,
+            "finalSpeed": None,
+            "sampleCount": sample,
+        }
+
     stream.activity(message="Supercruise Assist owns flight controls", level="info")
     assist_missing_samples = 0
     stopped_confirmations = 0
@@ -502,7 +525,7 @@ def main(ctx):
                 "completed": True,
                 "finalPhase": "COMPLETED",
                 "targetName": target_name,
-                "destinationMode": "DROP",
+                "destinationMode": destination_mode,
                 "assistActiveConfirmations": assist_active_confirmations,
                 "assistMissingSamples": assist_missing_samples,
                 "stoppedConfirmations": stopped_confirmations,

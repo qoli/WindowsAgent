@@ -11,10 +11,11 @@ Preprocessing converts each pixel to a cyan chroma response that tolerates a
 darker hollow outline, then removes isolated response pixels without applying
 a closing operation that could fill the hole. The retained marker bounds
 establish a topology center independently from the brightness-weighted
-centroid used for position. A filled three-by-three center classifies a
-`SOLID` front marker. A sufficiently large marker with an empty three-by-three
-center classifies a `HOLLOW` rear marker. Partial or ambiguous shapes remain
-`UNKNOWN`. Candidate and retained pixel counts, the five-by-five core, and the
+centroid used for position. A center with at least seven retained pixels
+classifies a `SOLID` front marker. A sufficiently large marker with at most
+three retained center pixels classifies a `HOLLOW` rear marker; the three-pixel
+allowance is the reviewed 4K-to-reference antialiasing signature. Counts from
+four through six remain `UNKNOWN`. Candidate and retained pixel counts, the five-by-five core, and the
 marker bounds are returned as diagnostic evidence.
 
 This package is deliberately game-specific. Core maps the reference rectangle
