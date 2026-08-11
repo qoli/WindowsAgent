@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "moduleId": "elite-dangerous/evidence",
+  "kind": "evidence-recorder",
+  "runtime": "capture-evidence-v1",
+  "targetExecutable": "EliteDangerous64.exe",
+  "framesPerSecond": 1,
+  "captureProfile": "1080p-jpeg",
+  "captureTimeoutMs": 1500,
+  "maxRangeSeconds": 3600
+}

@@ -109,15 +109,24 @@ evidence recorder are asynchronous and samples may be dropped. Choose the
 padding from the actual task and observed sample spacing, not from an assumed
 fixed synchronization rule.
 
-Request the corresponding interval from the independent evidence layer and
-analyze those frames as the authority. If the visual log is empty, misleading,
-or unavailable, bypass it and request the full relevant evidence range.
+Request the corresponding interval from the independent evidence process:
 
-The independent 1 FPS evidence recorder and time-range evidence-download API
-are currently deferred in this repository. Until the current runtime or public
-API advertises that capability, report the evidence retrieval gap explicitly;
-do not invent an endpoint and do not claim that a visual-log inference capture
-is the complete evidence timeline.
+```text
+GET /v1/evidence/range?from=<UTC>&to=<UTC>
+```
+
+Use the evidence process Bearer token, not the visual-log or event token. The
+interval is half-open `[from,to)` and must fit the current Game config's
+`maxRangeSeconds`. Read `manifest.json` first, preserve every explicit gap and
+every `missingSlots` entry, and
+verify that each listed frame's byte length and SHA-256 match before analysis.
+The ZIP is the authority; a Gemma inference capture is not the complete
+evidence timeline.
+
+If the visual log is empty, misleading, or unavailable, bypass it and request
+the full relevant evidence range in bounded adjacent chunks. Never start,
+stop, pause, or delete the evidence recorder while doing so; no such API is
+part of its contract.
 
 ## Stop when no longer useful
 
@@ -149,5 +158,7 @@ completed. Use `sessionId` and current task context to establish ownership.
   before changing lifecycle, prompt, capture, or failure behavior.
 - Read the [event-stream contract](../../../docs/design/event-stream-runtime.md)
   before changing range filtering, cursor semantics, or journal durability.
+- Read the [evidence-recorder contract](../../../docs/design/evidence-recorder-runtime.md)
+  before changing slot cadence, storage, range export, or failure behavior.
 - Read the [repository runtime overview](../../../README.md) for current
   process flags, executable status, and public API surface.

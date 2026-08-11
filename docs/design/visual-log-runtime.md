@@ -117,7 +117,6 @@ acceptance journal.
 
 ## Deferred
 
-- independent 1 FPS evidence recorder and time-range evidence download;
-- installer/watchdog integration;
+- persistent installer/watchdog integration for visual log and evidence;
 - rollout of the current event-range endpoint to machines still running an
   older event-stream executable.

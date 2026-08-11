@@ -42,6 +42,10 @@ output_dir="$(cd "${output_dir}" && pwd)"
     go build -trimpath -ldflags "-H=windowsgui" \
     -o "${output_dir}/windows-visual-log.exe" \
     ./cmd/windows-visual-log
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath -ldflags "-H=windowsgui" \
+    -o "${output_dir}/windows-evidence-recorder.exe" \
+    ./cmd/windows-evidence-recorder
 )
 
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
@@ -56,3 +60,5 @@ python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-watchdog.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-visual-log.exe" --expect gui
+python3 "${script_dir}/verify-windows-pe-subsystem.py" \
+  "${output_dir}/windows-evidence-recorder.exe" --expect gui

@@ -331,6 +331,34 @@ Starting a run creates a new producer session and performs the configured
 warm-up before the process-owned description loop becomes active. Stopping the
 run leaves the independent process idle and has no path to the evidence layer.
 
+Run the evidence recorder as a separate always-recording process. The token is
+local operator configuration and the data directory contains private images:
+
+```powershell
+.\.build\windows-evidence-recorder.exe `
+  --config (Resolve-Path .\Rules\EliteDangerous64.exe\Evidence\config.json) `
+  --capture-base-url http://127.0.0.1:8787 `
+  --listen 127.0.0.1:8792 `
+  --data-dir (Join-Path $PWD "evidence-data") `
+  --token-file (Resolve-Path .\evidence.token)
+```
+
+The process immediately owns an asynchronous 1 FPS timeline. Each second is a
+verified 1080p JPEG or an explicit gap; capture failures do not terminate the
+recorder. It has no HTTP start, stop, pause, or delete route. Its loopback API
+is:
+
+```text
+GET http://127.0.0.1:8792/healthz
+GET http://127.0.0.1:8792/v1/evidence/status
+GET http://127.0.0.1:8792/v1/evidence/range?from=<UTC>&to=<UTC>
+```
+
+Status and range require the evidence Bearer token. A successful half-open UTC
+range returns a ZIP with `manifest.json`, explicit committed gaps,
+`missingSlots` for recorder downtime, and integrity-checked JPEG files. Gemma
+and the visual-log control API have no path to this process.
+
 The persistent installer launches the event service as an independent,
 interactive-user Scheduled Task. It creates the token only when absent and
 rejects an existing malformed token instead of replacing it. Append, replay,
