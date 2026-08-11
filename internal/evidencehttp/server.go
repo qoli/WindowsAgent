@@ -1,10 +1,12 @@
 package evidencehttp
 
 import (
+	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,7 +15,10 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/evidence"
+	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
+
+const maxContactSheetRequestBytes = 16 << 10
 
 type Status struct {
 	State            string     `json:"state"`
@@ -28,23 +33,99 @@ type Status struct {
 }
 type Server struct {
 	store    *evidence.Store
+	decoder  evidence.VideoFrameDecoder
 	token    string
 	maxRange time.Duration
 	status   func() Status
 	handler  http.Handler
 }
 
-func New(store *evidence.Store, token string, maxRange time.Duration, status func() Status) (*Server, error) {
-	if store == nil || len(token) < 32 || maxRange <= 0 || status == nil {
+func New(store *evidence.Store, decoder evidence.VideoFrameDecoder, token string, maxRange time.Duration, status func() Status) (*Server, error) {
+	if store == nil || decoder == nil || len(token) < 32 || maxRange <= 0 || status == nil {
 		return nil, errors.New("evidence HTTP dependencies are invalid")
 	}
-	s := &Server{store: store, token: token, maxRange: maxRange, status: status}
+	s := &Server{store: store, decoder: decoder, token: token, maxRange: maxRange, status: status}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/evidence/status", s.auth(s.getStatus))
 	mux.HandleFunc("GET /v1/evidence/range", s.auth(s.getRange))
+	mux.HandleFunc("POST /v1/evidence/contact-sheet", s.auth(s.postContactSheet))
 	s.handler = mux
 	return s, nil
+}
+
+type contactSheetRequest struct {
+	From            string `json:"from"`
+	Columns         uint32 `json:"columns"`
+	Rows            uint32 `json:"rows"`
+	IntervalSeconds uint32 `json:"intervalSeconds"`
+}
+
+func (s *Server) postContactSheet(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()) != 0 {
+		writeError(w, http.StatusBadRequest, "EVIDENCE_CONTACT_SHEET_INVALID", errors.New("query parameters are not accepted"))
+		return
+	}
+	request, err := decodeContactSheetRequest(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "EVIDENCE_CONTACT_SHEET_INVALID", err)
+		return
+	}
+	from, err := parseUTC(request.From)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "EVIDENCE_CONTACT_SHEET_INVALID", err)
+		return
+	}
+	sheet, err := s.store.CreateContactSheet(r.Context(), evidence.ContactSheetSpec{
+		From:            from,
+		Columns:         request.Columns,
+		Rows:            request.Rows,
+		IntervalSeconds: request.IntervalSeconds,
+	}, s.decoder)
+	switch {
+	case errors.Is(err, evidence.ErrContactSheetInvalid):
+		writeError(w, http.StatusBadRequest, "EVIDENCE_CONTACT_SHEET_INVALID", err)
+		return
+	case errors.Is(err, evidence.ErrContactSheetTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "EVIDENCE_CONTACT_SHEET_TOO_LARGE", err)
+		return
+	case errors.Is(err, evidence.ErrRangeNotCommitted):
+		writeError(w, http.StatusConflict, "EVIDENCE_RANGE_NOT_COMMITTED", err)
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "EVIDENCE_CONTACT_SHEET_FAILED", err)
+		return
+	}
+	w.Header().Set("Content-Type", sheet.ContentType)
+	w.Header().Set("Content-Disposition", "inline; filename="+strconv.Quote(sheet.Filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Evidence-Contact-Sheet-Schema", strconv.FormatUint(uint64(sheet.SchemaVersion), 10))
+	w.Header().Set("X-Evidence-From", sheet.From.Format(time.RFC3339))
+	w.Header().Set("X-Evidence-To", sheet.To.Format(time.RFC3339))
+	w.Header().Set("X-Evidence-Cells", strconv.FormatUint(uint64(sheet.CellCount), 10))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(sheet.Content)
+}
+
+func decodeContactSheetRequest(w http.ResponseWriter, r *http.Request) (contactSheetRequest, error) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		return contactSheetRequest{}, errors.New("Content-Type must equal application/json")
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxContactSheetRequestBytes)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return contactSheetRequest{}, fmt.Errorf("read contact sheet request: %w", err)
+	}
+	if err = strictjson.Validate(data); err != nil {
+		return contactSheetRequest{}, fmt.Errorf("contact sheet request must be strict JSON: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var request contactSheetRequest
+	if err = decoder.Decode(&request); err != nil {
+		return contactSheetRequest{}, fmt.Errorf("decode contact sheet request: %w", err)
+	}
+	return request, nil
 }
 func (s *Server) Handler() http.Handler { return s.handler }
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {

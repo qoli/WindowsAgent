@@ -94,7 +94,7 @@ func run() error {
 		return err
 	}
 	tracker := &statusTracker{value: evidencehttp.Status{State: "recording", StartedAt: time.Now().UTC()}}
-	api, err := evidencehttp.New(store, token, time.Duration(config.MaxRangeSeconds)*time.Second, tracker.snapshot)
+	api, err := evidencehttp.New(store, mfvideo.NewDecoder(), token, time.Duration(config.MaxRangeSeconds)*time.Second, tracker.snapshot)
 	if err != nil {
 		return err
 	}

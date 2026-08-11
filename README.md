@@ -351,6 +351,7 @@ has no HTTP start, stop, pause, or delete route. Its loopback API is:
 GET http://127.0.0.1:8792/healthz
 GET http://127.0.0.1:8792/v1/evidence/status
 GET http://127.0.0.1:8792/v1/evidence/range?from=<UTC>&to=<UTC>
+POST http://127.0.0.1:8792/v1/evidence/contact-sheet
 ```
 
 Every evidence route except health requires the Evidence Bearer token. A
@@ -359,6 +360,13 @@ range returns a ZIP with `manifest.json`, explicit committed gaps,
 `missingSlots` for recorder downtime, and integrity-checked overlapping MP4
 segments. Visual Log reads only the configured PC-local frame tap; it cannot
 control recording or download individual Evidence frames over HTTP.
+
+The authenticated contact-sheet route accepts strict JSON containing `from`,
+`columns`, `rows`, and `intervalSeconds`. The PC decodes exact timestamps from
+committed Evidence MP4 segments and returns one timestamped JPEG grid. It never
+captures the screen again or substitutes a nearby frame. Explicit Evidence
+gaps and missing slots appear as labelled cells. The grid is a bandwidth-light
+locator; retrieve the selected MP4 range before making an authoritative claim.
 
 The persistent installer launches the event service as an independent,
 interactive-user Scheduled Task. It creates the token only when absent and
@@ -829,6 +837,9 @@ internal/actioncheck/            offline Action package and dependency validatio
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
+internal/evidence/               authoritative video store, range archive, and contact-sheet renderer
+internal/evidencehttp/           authenticated Evidence read interface
+internal/mfvideo/                native Media Foundation Evidence encoder and decoder
 internal/visuallog/              strict Game config, evidence/model adapters, and producer loop
 internal/visualloghttp/          authenticated loopback visual-log control adapter
 internal/watchdog/               target probes, bounded recovery, atomic status

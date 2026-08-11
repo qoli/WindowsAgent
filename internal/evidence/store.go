@@ -110,6 +110,7 @@ type Store struct {
 	config     Config
 	factory    EncoderFactory
 	mu         sync.Mutex
+	contact    chan struct{}
 	current    *openSegment
 	lastSample time.Time
 	available  time.Time
@@ -132,7 +133,7 @@ func OpenStore(root string, config Config, factory EncoderFactory) (*Store, erro
 			return nil, fmt.Errorf("create evidence video directory: %w", err)
 		}
 	}
-	store := &Store{root: root, config: config, factory: factory}
+	store := &Store{root: root, config: config, factory: factory, contact: make(chan struct{}, 1)}
 	segments, err := store.listSegments(context.Background(), time.Time{}, time.Time{})
 	if err != nil {
 		return nil, fmt.Errorf("scan committed evidence segments: %w", err)
@@ -276,13 +277,9 @@ func (s *Store) CreateArchive(ctx context.Context, from, to time.Time) (Archive,
 	if from.IsZero() || to.IsZero() || !from.Before(to) {
 		return Archive{}, errors.New("evidence range requires from before to")
 	}
-	s.mu.Lock()
-	if s.current != nil && to.After(s.available) && from.Before(s.current.last.Add(time.Second)) {
-		available := s.available
-		s.mu.Unlock()
-		return Archive{}, fmt.Errorf("%w: availableThrough=%s", ErrRangeNotCommitted, available.Format(time.RFC3339))
+	if err := s.requireCommittedRange(from, to); err != nil {
+		return Archive{}, err
 	}
-	s.mu.Unlock()
 	segments, err := s.listSegments(ctx, from, to)
 	if err != nil {
 		return Archive{}, err
@@ -350,6 +347,17 @@ func (s *Store) CreateArchive(ctx context.Context, from, to time.Time) (Archive,
 	}
 	ok = true
 	return Archive{Path: path, Filename: fmt.Sprintf("evidence-video-%s-%s.zip", from.Format("20060102T150405Z"), to.Format("20060102T150405Z")), Manifest: manifest}, nil
+}
+
+func (s *Store) requireCommittedRange(from, to time.Time) error {
+	s.mu.Lock()
+	if s.current != nil && to.After(s.available) && from.Before(s.current.last.Add(time.Second)) {
+		available := s.available
+		s.mu.Unlock()
+		return fmt.Errorf("%w: availableThrough=%s", ErrRangeNotCommitted, available.Format(time.RFC3339))
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Store) listSegments(ctx context.Context, from, to time.Time) ([]SegmentManifest, error) {

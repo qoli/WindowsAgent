@@ -3,9 +3,9 @@
 ## Status
 
 **Partially landed.** Persistent WGC capture, 1 FPS sampling, native H.264 MP4
-segments, UTC manifests, authenticated range export, and a PC-local frame tap
-passed live Windows acceptance. Persistent installation and retention remain
-deferred.
+segments, UTC manifests, authenticated range export, exact-timestamp contact
+sheets, and a PC-local frame tap passed live Windows acceptance. Persistent
+installation and retention remain deferred.
 
 ## Recording contract
 
@@ -42,7 +42,7 @@ replace-in-place, non-authoritative index input. A tap publication failure is
 reported as `tapFailures` and `lastTapError` but does not stop or alter video
 recording. Only PC-local readers can open it; it is not an HTTP frame service.
 
-## Range API
+## Read interface
 
 The process listens only on an explicit loopback address:
 
@@ -50,6 +50,7 @@ The process listens only on an explicit loopback address:
 GET /healthz
 GET /v1/evidence/status
 GET /v1/evidence/range?from=<UTC>&to=<UTC>
+POST /v1/evidence/contact-sheet
 ```
 
 Every route except health requires the Evidence Bearer token. Ranges are
@@ -63,6 +64,39 @@ complete committed MP4 segment overlapping the range. The manifest counts
 in-range frames and gaps and explicitly enumerates `missingSlots`. Segments are
 not silently clipped or omitted. Their byte lengths and SHA-256 values are
 rechecked while building the ZIP; corruption fails the request.
+
+### Contact sheet
+
+The contact-sheet route accepts one strict JSON request:
+
+```json
+{
+  "from": "2026-08-12T12:00:00Z",
+  "columns": 4,
+  "rows": 4,
+  "intervalSeconds": 10
+}
+```
+
+`from` must be a whole UTC second. Cells are assigned in row-major order and
+cell `i` represents `from + i * intervalSeconds`. Columns and rows are each
+bounded to 1-8, the grid is bounded to 64 cells, and its total evidence span
+must fit `maxRangeSeconds`. A successful response is one `image/jpeg` with a
+480x270 thumbnail plus a 30-pixel timestamp footer per cell.
+
+The recorder resolves every cell through committed segment manifests, verifies
+the selected MP4 hashes, and decodes each selected segment from its beginning.
+Only a Media Foundation sample whose timestamp exactly equals the requested
+slot is accepted. A manifest `gap` or absent slot is rendered as a labelled
+`GAP` or `MISSING` cell. A missing declared frame, corrupt MP4, decode error,
+unexpected timestamp, or duplicate decoder output fails the whole request;
+nearby frames are never substituted.
+
+The JPEG is derived from authoritative Evidence but loses resolution and video
+continuity. Its purpose is hierarchical timeline location: request a coarse
+grid, request a finer grid around a candidate, then retrieve the exact MP4
+range for authoritative analysis. Contact-sheet work has no recording-control
+path and does not use WGC, the frame tap, Visual Log, or Gemma.
 
 ## Live acceptance
 
@@ -78,6 +112,17 @@ During the later frame-tap/Gemma integration run, Evidence advanced from 5 to
 9 frames with zero gaps and zero tap failures while Visual Log performed model
 inference. The pre-existing capture Agent and event stream retained their PIDs,
 proving this recorder did not depend on or disrupt screenshot requests.
+
+On 2026-08-12 the final contact-sheet artifact decoded eight consecutive
+committed Elite Dangerous samples into a labelled 4x2, 1920x600 JPEG in 997 ms.
+The decoder accepted Media Foundation's 1920x1088 H.264 storage surface only
+after validating its explicit 1920x1080 minimum display aperture; the rendered
+frames were visually checked for correct orientation and row-major UTC labels.
+An invalid grid returned HTTP 400 and a cell reaching the active segment
+returned HTTP 409. Evidence advanced from 14 to 17 frames during the bounded
+run with zero gaps and zero frame-tap failures. The isolated task, listener,
+token, and private video data were removed; the existing Capture and Event
+processes retained PIDs 15032 and 21072.
 
 No automatic retention or deletion policy exists. Runtime video, manifests,
 tokens, and logs are private operator data outside the public repository.

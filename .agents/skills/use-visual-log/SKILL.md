@@ -113,7 +113,31 @@ evidence recorder are asynchronous and samples may be dropped. Choose the
 padding from the actual task and observed sample spacing, not from an assumed
 fixed synchronization rule.
 
-Request the corresponding interval from the independent evidence process:
+For a broad candidate interval, first request a bandwidth-light Evidence
+contact sheet:
+
+```text
+POST /v1/evidence/contact-sheet
+Content-Type: application/json
+
+{"from":"<whole UTC second>","columns":4,"rows":4,"intervalSeconds":30}
+```
+
+The PC returns one `image/jpeg`. Cells are row-major: cell `i` is exactly
+`from + i * intervalSeconds`. Read the embedded UTC timestamp and state on
+every cell. `GAP` and `MISSING` are explicit Evidence states; never replace or
+interpret them as nearby frames. The server accepts at most 8 columns, 8 rows,
+64 cells, and a total span no greater than the Game Evidence config's
+`maxRangeSeconds`.
+
+Use coarse-to-fine queries when useful: first use a large interval to identify
+a region, then submit a smaller interval around that region. A contact sheet is
+decoded from committed MP4 data and never invokes WGC, but its reduced spatial
+resolution and absent motion continuity make it a locator rather than final
+proof.
+
+Request the selected authoritative interval from the independent evidence
+process:
 
 ```text
 GET /v1/evidence/range?from=<UTC>&to=<UTC>
@@ -131,6 +155,11 @@ If `to` reaches the active uncommitted segment, HTTP 409
 `EVIDENCE_RANGE_NOT_COMMITTED` is expected. Read `availableThrough` from
 Evidence status, shorten the request or wait for segment commit, and retry. Do
 not stop the recorder to force a commit.
+
+The same 409 applies when a contact-sheet cell reaches an active uncommitted
+segment. A corrupt MP4, declared frame that cannot be decoded at its exact
+timestamp, malformed grid, or excessive span is an explicit request failure;
+do not retry with a screenshot, frame tap, Gemma image, or neighbouring second.
 
 If the visual log is empty, misleading, or unavailable, bypass it and request
 the full relevant evidence range in bounded adjacent chunks. Never start,
