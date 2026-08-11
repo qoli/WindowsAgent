@@ -11,28 +11,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/frametap"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
 const (
-	RuntimeID      = "omlx-visual-log-v1"
-	SchemaVersion  = 1
+	RuntimeID      = "omlx-visual-log-v2"
+	SchemaVersion  = 2
 	MaxConfigBytes = 64 << 10
 )
 
 type Config struct {
-	SchemaVersion    uint32       `json:"schemaVersion"`
-	ModuleID         string       `json:"moduleId"`
-	Kind             string       `json:"kind"`
-	Runtime          string       `json:"runtime"`
-	TargetExecutable string       `json:"targetExecutable"`
-	IntervalMS       int64        `json:"intervalMs"`
-	WarmupCalls      uint32       `json:"warmupCalls"`
-	CaptureProfile   string       `json:"captureProfile"`
-	Prompt           string       `json:"prompt"`
-	Model            ModelConfig  `json:"model"`
-	Output           OutputConfig `json:"output"`
+	SchemaVersion    uint32         `json:"schemaVersion"`
+	ModuleID         string         `json:"moduleId"`
+	Kind             string         `json:"kind"`
+	Runtime          string         `json:"runtime"`
+	TargetExecutable string         `json:"targetExecutable"`
+	IntervalMS       int64          `json:"intervalMs"`
+	WarmupCalls      uint32         `json:"warmupCalls"`
+	Evidence         EvidenceConfig `json:"evidence"`
+	Prompt           string         `json:"prompt"`
+	Model            ModelConfig    `json:"model"`
+	Output           OutputConfig   `json:"output"`
 }
 
 type ModelConfig struct {
@@ -41,6 +41,12 @@ type ModelConfig struct {
 	Temperature float64 `json:"temperature"`
 	TopP        float64 `json:"topP"`
 	TopK        uint32  `json:"topK"`
+}
+
+type EvidenceConfig struct {
+	FrameTapName         string `json:"frameTapName"`
+	MaxFrameAgeMS        int64  `json:"maxFrameAgeMs"`
+	WarmupFrameTimeoutMS int64  `json:"warmupFrameTimeoutMs"`
 }
 
 type OutputConfig struct {
@@ -105,7 +111,6 @@ func (c Config) Validate() error {
 	for name, value := range map[string]string{
 		"moduleId":               c.ModuleID,
 		"targetExecutable":       c.TargetExecutable,
-		"captureProfile":         c.CaptureProfile,
 		"prompt":                 c.Prompt,
 		"model.id":               c.Model.ID,
 		"output.stream":          c.Output.Stream,
@@ -122,8 +127,14 @@ func (c Config) Validate() error {
 	if strings.ContainsAny(c.TargetExecutable, `/\\`) || !strings.HasSuffix(strings.ToLower(c.TargetExecutable), ".exe") {
 		return errors.New("visual log config targetExecutable must be one executable name ending in .exe")
 	}
-	if _, err := capture.ParseProfile(c.CaptureProfile); err != nil {
-		return fmt.Errorf("visual log config captureProfile: %w", err)
+	if c.Evidence.MaxFrameAgeMS < 1000 || c.Evidence.MaxFrameAgeMS > 60000 {
+		return errors.New("visual log config evidence.maxFrameAgeMs must be between 1000 and 60000")
+	}
+	if c.Evidence.WarmupFrameTimeoutMS < 1000 || c.Evidence.WarmupFrameTimeoutMS > 60000 {
+		return errors.New("visual log config evidence.warmupFrameTimeoutMs must be between 1000 and 60000")
+	}
+	if err := frametap.ValidateName(c.Evidence.FrameTapName); err != nil {
+		return fmt.Errorf("visual log config evidence.frameTapName: %w", err)
 	}
 	if c.IntervalMS < 250 || c.IntervalMS > int64((24*time.Hour)/time.Millisecond) {
 		return errors.New("visual log config intervalMs must be between 250 and 86400000")
@@ -151,4 +162,12 @@ func (c Config) Validate() error {
 
 func (c Config) Interval() time.Duration {
 	return time.Duration(c.IntervalMS) * time.Millisecond
+}
+
+func (c Config) MaxFrameAge() time.Duration {
+	return time.Duration(c.Evidence.MaxFrameAgeMS) * time.Millisecond
+}
+
+func (c Config) WarmupFrameTimeout() time.Duration {
+	return time.Duration(c.Evidence.WarmupFrameTimeoutMS) * time.Millisecond
 }

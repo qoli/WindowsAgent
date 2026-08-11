@@ -26,7 +26,8 @@ func TestParseConfigRejectsUnknownMissingAndInvalidState(t *testing.T) {
 	}{
 		{"unknown", strings.Replace(validConfigJSON(), `"warmupCalls":1`, `"warmupCalls":1,"fallbackModel":"other"`, 1), "unknown field"},
 		{"missing prompt", strings.Replace(validConfigJSON(), `"prompt":"Describe the directly visible physical scene in this single Elite Dangerous screenshot using 8-16 words. Mention the environment and large structures behind the cockpit overlay, not the gameplay situation. Ignore HUD text and do not infer actions or events."`, `"prompt":""`, 1), "prompt is required"},
-		{"bad profile", strings.Replace(validConfigJSON(), `"captureProfile":"1080p-jpeg"`, `"captureProfile":"png-or-whatever"`, 1), "unknown capture profile"},
+		{"stale bound", strings.Replace(validConfigJSON(), `"maxFrameAgeMs":3000`, `"maxFrameAgeMs":0`, 1), "maxFrameAgeMs"},
+		{"warmup bound", strings.Replace(validConfigJSON(), `"warmupFrameTimeoutMs":5000`, `"warmupFrameTimeoutMs":0`, 1), "warmupFrameTimeoutMs"},
 		{"no warmup", strings.Replace(validConfigJSON(), `"warmupCalls":1`, `"warmupCalls":0`, 1), "warmupCalls"},
 		{"duplicate", strings.Replace(validConfigJSON(), `"intervalMs":2000`, `"intervalMs":2000,"intervalMs":3000`, 1), "duplicate"},
 	}
@@ -42,14 +43,14 @@ func TestParseConfigRejectsUnknownMissingAndInvalidState(t *testing.T) {
 
 func validConfigJSON() string {
 	return `{
-  "schemaVersion":1,
+  "schemaVersion":2,
   "moduleId":"elite-dangerous/visual-log",
   "kind":"visual-log",
-  "runtime":"omlx-visual-log-v1",
+  "runtime":"omlx-visual-log-v2",
   "targetExecutable":"EliteDangerous64.exe",
   "intervalMs":2000,
   "warmupCalls":1,
-  "captureProfile":"1080p-jpeg",
+  "evidence":{"frameTapName":"Local\\WindowsAgent.Evidence.EliteDangerous.v1","maxFrameAgeMs":3000,"warmupFrameTimeoutMs":5000},
   "prompt":"Describe the directly visible physical scene in this single Elite Dangerous screenshot using 8-16 words. Mention the environment and large structures behind the cockpit overlay, not the gameplay situation. Ignore HUD text and do not infer actions or events.",
   "model":{"id":"gemma-4-e4b-it-8bit","maxTokens":64,"temperature":1.0,"topP":0.95,"topK":64},
   "output":{"stream":"visual-log","observationType":"visual-log.observation","failureType":"visual-log.failure","descriptionMinWords":8,"descriptionMaxWords":16}

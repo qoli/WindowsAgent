@@ -33,7 +33,7 @@ func (d *cancellationDescriber) Describe(ctx context.Context, _ Frame) (Descript
 func TestControllerStartsWarmRunRejectsDuplicateAndStopsOnlyVisualLog(t *testing.T) {
 	config, _ := ParseConfig([]byte(validConfigJSON()))
 	runner := Runner{
-		Config: config, Capture: &fakeCaptureSource{frame: testFrame()},
+		Config: config, Frames: &fakeFrameSource{frame: testFrame()},
 		Describer: &fakeDescriber{description: Description{
 			Text: "Vast illuminated station interior surrounds large curved industrial docking structures.", ModelID: config.Model.ID,
 		}},
@@ -66,7 +66,7 @@ func TestControllerStopDuringDescriptionEndsStoppedWithoutFailureEvent(t *testin
 	describer := &cancellationDescriber{entered: make(chan struct{})}
 	events := &fakeAppender{}
 	runner := Runner{
-		Config: config, Capture: &fakeCaptureSource{frame: testFrame()},
+		Config: config, Frames: &fakeFrameSource{frame: testFrame()},
 		Describer: describer, Events: events, SessionID: "bootstrap_session", InstanceID: "instance_1",
 	}
 	controller, err := NewController(context.Background(), runner)

@@ -1,11 +1,21 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 3,
   "moduleId": "elite-dangerous/evidence",
   "kind": "evidence-recorder",
-  "runtime": "capture-evidence-v1",
+  "runtime": "wgc-evidence-video-v1",
   "targetExecutable": "EliteDangerous64.exe",
-  "framesPerSecond": 1,
-  "captureProfile": "1080p-jpeg",
-  "captureTimeoutMs": 1500,
+  "recording": {
+    "width": 1920,
+    "height": 1080,
+    "framesPerSecond": 1,
+    "segmentSeconds": 10,
+    "codec": "h264",
+    "container": "mp4",
+    "bitrate": 4000000,
+    "includeCursor": false
+  },
+  "frameTap": {
+    "name": "Local\\WindowsAgent.Evidence.EliteDangerous.v1"
+  },
   "maxRangeSeconds": 3600
 }

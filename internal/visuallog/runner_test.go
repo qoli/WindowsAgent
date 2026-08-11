@@ -9,16 +9,30 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/eventstream"
-	"github.com/qoli/WindowsAgent/internal/foreground"
 )
 
-type fakeCaptureSource struct {
+type fakeFrameSource struct {
 	frame Frame
 	err   error
 	calls int
 }
 
-func (f *fakeCaptureSource) Capture(context.Context) (Frame, error) {
+type cursorFrameSource struct {
+	frames []Frame
+	after  []time.Time
+}
+
+func (f *cursorFrameSource) Latest(_ context.Context, after time.Time) (Frame, error) {
+	f.after = append(f.after, after)
+	if len(f.frames) == 0 {
+		return Frame{}, ErrNoNewEvidenceFrame
+	}
+	frame := f.frames[0]
+	f.frames = f.frames[1:]
+	return frame, nil
+}
+
+func (f *fakeFrameSource) Latest(context.Context, time.Time) (Frame, error) {
 	f.calls++
 	return f.frame, f.err
 }
@@ -53,18 +67,18 @@ func TestRunnerWarmsWithoutPublishingThenCommitsTimestampedDescription(t *testin
 		t.Fatal(err)
 	}
 	frame := testFrame()
-	captures := &fakeCaptureSource{frame: frame}
+	frames := &fakeFrameSource{frame: frame}
 	describer := &fakeDescriber{description: Description{
 		Text:    "Vast illuminated station interior surrounds large curved industrial structures.",
 		ModelID: config.Model.ID, Latency: 1500 * time.Millisecond,
 	}}
 	events := &fakeAppender{}
-	runner := Runner{Config: config, Capture: captures, Describer: describer, Events: events, SessionID: "session_1", InstanceID: "instance_1"}
+	runner := Runner{Config: config, Frames: frames, Describer: describer, Events: events, SessionID: "session_1", InstanceID: "instance_1"}
 	if err := runner.Warmup(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(events.requests) != 0 || captures.calls != 1 || describer.calls != 1 {
-		t.Fatalf("warmup captures=%d descriptions=%d events=%d", captures.calls, describer.calls, len(events.requests))
+	if len(events.requests) != 0 || frames.calls != 1 || describer.calls != 1 {
+		t.Fatalf("warmup frames=%d descriptions=%d events=%d", frames.calls, describer.calls, len(events.requests))
 	}
 	result, err := runner.Observe(context.Background())
 	if err != nil {
@@ -81,8 +95,36 @@ func TestRunnerWarmsWithoutPublishingThenCommitsTimestampedDescription(t *testin
 	if err := json.Unmarshal(request.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Timestamp != frame.ObservedAt || payload.Description != describer.description.Text || !payload.Untrusted || payload.Model.LatencyMS != 1500 {
+	if payload.Timestamp != frame.ObservedAt || payload.Evidence.CaptureID != frame.CaptureID || payload.Evidence.ScheduledAt != frame.ScheduledAt || payload.Description != describer.description.Text || !payload.Untrusted || payload.Model.LatencyMS != 1500 {
 		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestRunOnceAdvancesEvidenceCursorBetweenWarmupAndObservation(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	first := testFrame()
+	second := testFrame()
+	second.ScheduledAt = first.ScheduledAt.Add(time.Second)
+	second.ObservedAt = first.ObservedAt.Add(time.Second)
+	second.CaptureID = "cap_second"
+	source := &cursorFrameSource{frames: []Frame{first, second}}
+	events := &fakeAppender{}
+	runner := Runner{Config: config, Frames: source, Describer: &fakeDescriber{description: Description{Text: "Vast illuminated station interior surrounds large curved industrial docking structures.", ModelID: config.Model.ID}}, Events: events, SessionID: "session_1", InstanceID: "instance_1"}
+	if err := runner.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(source.after) != 2 || !source.after[0].IsZero() || source.after[1] != first.ScheduledAt {
+		t.Fatalf("cursors=%v", source.after)
+	}
+	if len(events.requests) != 1 {
+		t.Fatalf("events=%d", len(events.requests))
+	}
+	var payload ObservationPayload
+	if err := json.Unmarshal(events.requests[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Evidence.CaptureID != "cap_second" || payload.Evidence.ScheduledAt != second.ScheduledAt {
+		t.Fatalf("evidence=%+v", payload.Evidence)
 	}
 }
 
@@ -91,7 +133,7 @@ func TestRunnerModelFailurePublishesFailureDropsSampleAndContinues(t *testing.T)
 	cause := errors.New("model output violated description word bound")
 	events := &fakeAppender{}
 	runner := Runner{
-		Config: config, Capture: &fakeCaptureSource{frame: testFrame()}, Describer: &fakeDescriber{err: cause},
+		Config: config, Frames: &fakeFrameSource{frame: testFrame()}, Describer: &fakeDescriber{err: cause},
 		Events: events, SessionID: "session_1", InstanceID: "instance_1",
 	}
 	result, err := runner.Observe(context.Background())
@@ -126,18 +168,18 @@ func TestRunnerModelFailurePublishesFailureDropsSampleAndContinues(t *testing.T)
 	}
 }
 
-func TestRunnerCaptureFailureDropsSampleWithoutInventingForegroundFailureEvent(t *testing.T) {
+func TestRunnerEvidenceFailureDropsSampleWithoutInventingForegroundFailureEvent(t *testing.T) {
 	config, _ := ParseConfig([]byte(validConfigJSON()))
 	events := &fakeAppender{}
 	runner := Runner{
-		Config: config, Capture: &fakeCaptureSource{err: errors.New("capture unavailable")},
+		Config: config, Frames: &fakeFrameSource{err: ErrNoNewEvidenceFrame},
 		Describer: &fakeDescriber{}, Events: events, SessionID: "session_1", InstanceID: "instance_1",
 	}
 	result, err := runner.Observe(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Dropped == nil || result.Dropped.Stage != "capture" || !strings.Contains(result.Dropped.Cause.Error(), "capture unavailable") {
+	if result.Dropped == nil || result.Dropped.Stage != "evidence" || !strings.Contains(result.Dropped.Cause.Error(), "no new evidence frame") {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(events.requests) != 0 {
@@ -147,8 +189,7 @@ func TestRunnerCaptureFailureDropsSampleWithoutInventingForegroundFailureEvent(t
 
 func testFrame() Frame {
 	return Frame{
-		CaptureID: "cap_test", ObservedAt: time.Date(2026, 8, 11, 1, 2, 3, 0, time.UTC),
-		ContentType: "image/jpeg", Content: []byte("jpeg"), ForegroundRevision: 1,
-		Foreground: foreground.Info{ExecutableName: "EliteDangerous64.exe"},
+		ScheduledAt: time.Date(2026, 8, 11, 1, 2, 3, 0, time.UTC), CaptureID: "cap_test", ObservedAt: time.Date(2026, 8, 11, 1, 2, 3, 100000000, time.UTC),
+		ContentType: "image/jpeg", Content: []byte("jpeg"), ForegroundRevision: 1, ForegroundExecutable: "EliteDangerous64.exe",
 	}
 }

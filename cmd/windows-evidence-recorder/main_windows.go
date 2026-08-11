@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -20,9 +21,12 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/evidence"
 	"github.com/qoli/WindowsAgent/internal/evidencehttp"
+	"github.com/qoli/WindowsAgent/internal/frametap"
+	"github.com/qoli/WindowsAgent/internal/mfvideo"
+	"github.com/qoli/WindowsAgent/internal/wgc"
 )
 
-type options struct{ config, dataDir, captureURL, listen, tokenFile string }
+type options struct{ config, dataDir, listen, tokenFile string }
 type statusTracker struct {
 	mu    sync.Mutex
 	value evidencehttp.Status
@@ -46,6 +50,12 @@ func (t *statusTracker) commit(record evidence.Record) {
 		}
 	}
 }
+func (t *statusTracker) tapFailed(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.value.TapFailures++
+	t.value.LastTapError = err.Error()
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -66,11 +76,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	store, err := evidence.OpenStore(opts.dataDir)
+	encoderFactory := evidence.EncoderFactoryFunc(func(path string, format evidence.VideoFormat) (evidence.SegmentEncoder, error) {
+		return mfvideo.NewEncoder(path, mfvideo.Format{Width: format.Width, Height: format.Height, FramesPerSecond: format.FramesPerSecond, Bitrate: format.Bitrate})
+	})
+	store, err := evidence.OpenStore(opts.dataDir, config, encoderFactory)
 	if err != nil {
 		return err
 	}
-	client, err := evidence.NewCaptureClient(opts.captureURL, &http.Client{Timeout: config.CaptureTimeout()}, config.TargetExecutable)
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	tap, err := frametap.CreatePublisher(config.FrameTap.Name)
+	if err != nil {
+		return err
+	}
+	defer tap.Close()
+	capturer, err := wgc.New(logger)
 	if err != nil {
 		return err
 	}
@@ -87,7 +106,7 @@ func run() error {
 	server := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 10 * time.Minute, IdleTimeout: 60 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	recorder := evidence.Recorder{Config: config, Capture: client, Sink: store, OnCommitted: tracker.commit}
+	recorder := evidence.Recorder{Config: config, Stream: capturer, Sink: store, FrameTap: tap, OnCommitted: tracker.commit, OnTapFailed: tracker.tapFailed}
 	errorsChannel := make(chan error, 2)
 	go func() { errorsChannel <- recorder.Run(ctx) }()
 	go func() {
@@ -113,7 +132,6 @@ func parseFlags(args []string) (options, error) {
 	var o options
 	flags.StringVar(&o.config, "config", "", "absolute evidence config")
 	flags.StringVar(&o.dataDir, "data-dir", "", "absolute evidence data directory")
-	flags.StringVar(&o.captureURL, "capture-base-url", "http://127.0.0.1:8787", "loopback capture API origin")
 	flags.StringVar(&o.listen, "listen", "127.0.0.1:8792", "loopback evidence API listen address")
 	flags.StringVar(&o.tokenFile, "token-file", "", "absolute bearer token file")
 	if err := flags.Parse(args); err != nil {

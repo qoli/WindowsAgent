@@ -1,12 +1,16 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "moduleId": "elite-dangerous/visual-log",
   "kind": "visual-log",
-  "runtime": "omlx-visual-log-v1",
+  "runtime": "omlx-visual-log-v2",
   "targetExecutable": "EliteDangerous64.exe",
   "intervalMs": 2000,
   "warmupCalls": 1,
-  "captureProfile": "1080p-jpeg",
+  "evidence": {
+    "frameTapName": "Local\\WindowsAgent.Evidence.EliteDangerous.v1",
+    "maxFrameAgeMs": 3000,
+    "warmupFrameTimeoutMs": 5000
+  },
   "prompt": "Describe the directly visible physical scene in this single Elite Dangerous screenshot using 8-16 words. Mention the environment and large structures behind the cockpit overlay, not the gameplay situation. Ignore HUD text and do not infer actions or events.",
   "model": {
     "id": "gemma-4-e4b-it-8bit",

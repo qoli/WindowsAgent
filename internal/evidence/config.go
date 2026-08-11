@@ -9,27 +9,40 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
-	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/frametap"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
 const (
-	RuntimeID     = "capture-evidence-v1"
-	SchemaVersion = 1
+	RuntimeID     = "wgc-evidence-video-v1"
+	SchemaVersion = 3
 )
 
 type Config struct {
-	SchemaVersion    uint32 `json:"schemaVersion"`
-	ModuleID         string `json:"moduleId"`
-	Kind             string `json:"kind"`
-	Runtime          string `json:"runtime"`
-	TargetExecutable string `json:"targetExecutable"`
-	FramesPerSecond  uint32 `json:"framesPerSecond"`
-	CaptureProfile   string `json:"captureProfile"`
-	CaptureTimeoutMS int64  `json:"captureTimeoutMs"`
-	MaxRangeSeconds  uint32 `json:"maxRangeSeconds"`
+	SchemaVersion    uint32          `json:"schemaVersion"`
+	ModuleID         string          `json:"moduleId"`
+	Kind             string          `json:"kind"`
+	Runtime          string          `json:"runtime"`
+	TargetExecutable string          `json:"targetExecutable"`
+	Recording        RecordingConfig `json:"recording"`
+	FrameTap         FrameTapConfig  `json:"frameTap"`
+	MaxRangeSeconds  uint32          `json:"maxRangeSeconds"`
+}
+
+type FrameTapConfig struct {
+	Name string `json:"name"`
+}
+
+type RecordingConfig struct {
+	Width           uint32 `json:"width"`
+	Height          uint32 `json:"height"`
+	FramesPerSecond uint32 `json:"framesPerSecond"`
+	SegmentSeconds  uint32 `json:"segmentSeconds"`
+	Codec           string `json:"codec"`
+	Container       string `json:"container"`
+	Bitrate         uint32 `json:"bitrate"`
+	IncludeCursor   bool   `json:"includeCursor"`
 }
 
 func LoadConfig(name string) (Config, error) {
@@ -77,22 +90,26 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.TargetExecutable) != c.TargetExecutable || strings.ContainsAny(c.TargetExecutable, `/\\`) || !strings.HasSuffix(strings.ToLower(c.TargetExecutable), ".exe") {
 		return errors.New("evidence config targetExecutable must be one executable name ending in .exe")
 	}
-	profile, err := capture.ParseProfile(c.CaptureProfile)
-	if err != nil || profile != capture.Profile1080pJPEG {
-		return errors.New("evidence config captureProfile must equal 1080p-jpeg")
+	if c.Recording.Width != 1920 || c.Recording.Height != 1080 || c.Recording.FramesPerSecond != 1 {
+		return errors.New("evidence recording must equal 1920x1080 at 1 FPS")
 	}
-	if c.FramesPerSecond != 1 {
-		return errors.New("evidence config framesPerSecond must equal 1")
+	if c.Recording.SegmentSeconds < 2 || c.Recording.SegmentSeconds > 60 {
+		return errors.New("evidence recording segmentSeconds must be between 2 and 60")
 	}
-	if c.CaptureTimeoutMS < 250 || c.CaptureTimeoutMS > 5000 {
-		return errors.New("evidence config captureTimeoutMs must be between 250 and 5000")
+	if c.Recording.Codec != "h264" || c.Recording.Container != "mp4" {
+		return errors.New("evidence recording must use h264 in mp4")
+	}
+	if c.Recording.Bitrate < 1_000_000 || c.Recording.Bitrate > 20_000_000 {
+		return errors.New("evidence recording bitrate must be between 1000000 and 20000000")
+	}
+	if c.Recording.IncludeCursor {
+		return errors.New("evidence recording includeCursor must be false")
+	}
+	if err := frametap.ValidateName(c.FrameTap.Name); err != nil {
+		return fmt.Errorf("evidence config frameTap.name: %w", err)
 	}
 	if c.MaxRangeSeconds < 1 || c.MaxRangeSeconds > 86400 {
 		return errors.New("evidence config maxRangeSeconds must be between 1 and 86400")
 	}
 	return nil
-}
-
-func (c Config) CaptureTimeout() time.Duration {
-	return time.Duration(c.CaptureTimeoutMS) * time.Millisecond
 }

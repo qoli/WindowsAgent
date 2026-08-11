@@ -18,7 +18,7 @@ type EventAppender interface {
 
 type Runner struct {
 	Config      Config
-	Capture     CaptureSource
+	Frames      FrameSource
 	Describer   Describer
 	Events      EventAppender
 	SessionID   string
@@ -44,12 +44,13 @@ type ObservationPayload struct {
 	Timestamp     time.Time     `json:"timestamp"`
 	Description   string        `json:"description"`
 	Untrusted     bool          `json:"untrusted"`
-	Capture       CaptureRef    `json:"capture"`
+	Evidence      EvidenceRef   `json:"evidence"`
 	Model         ModelEvidence `json:"model"`
 }
 
-type CaptureRef struct {
-	ID string `json:"id"`
+type EvidenceRef struct {
+	CaptureID   string    `json:"captureId"`
+	ScheduledAt time.Time `json:"scheduledAt"`
 }
 
 type ModelEvidence struct {
@@ -79,8 +80,8 @@ func (r Runner) Validate() error {
 	if err := r.Config.Validate(); err != nil {
 		return err
 	}
-	if r.Capture == nil || r.Describer == nil || r.Events == nil {
-		return errors.New("visual log capture, describer, and event appender are required")
+	if r.Frames == nil || r.Describer == nil || r.Events == nil {
+		return errors.New("visual log evidence frames, describer, and event appender are required")
 	}
 	if r.SessionID == "" || r.InstanceID == "" {
 		return errors.New("visual log session and instance identities are required")
@@ -89,17 +90,35 @@ func (r Runner) Validate() error {
 }
 
 func (r Runner) Warmup(ctx context.Context) error {
+	var cursor time.Time
+	return r.warmup(ctx, &cursor)
+}
+
+func (r Runner) warmup(ctx context.Context, cursor *time.Time) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	frame, err := r.Capture.Capture(ctx)
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	warmupContext, cancel := context.WithTimeout(ctx, r.Config.WarmupFrameTimeout())
+	defer cancel()
+	var frame Frame
+	for {
+		var err error
+		frame, err = r.Frames.Latest(warmupContext, *cursor)
+		if err == nil {
+			break
 		}
-		r.drop(DroppedSample{Stage: "warmup_capture", Cause: err})
-		return nil
+		if !errors.Is(err, ErrNoNewEvidenceFrame) {
+			return fmt.Errorf("read warmup evidence frame: %w", err)
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-warmupContext.Done():
+			timer.Stop()
+			return fmt.Errorf("wait for warmup evidence frame: %w", warmupContext.Err())
+		case <-timer.C:
+		}
 	}
+	*cursor = frame.ScheduledAt
 	for call := uint32(1); call <= r.Config.WarmupCalls; call++ {
 		if _, err := r.Describer.Describe(ctx, frame); err != nil {
 			if ctx.Err() != nil {
@@ -112,18 +131,24 @@ func (r Runner) Warmup(ctx context.Context) error {
 }
 
 func (r Runner) Observe(ctx context.Context) (ObservationResult, error) {
+	var cursor time.Time
+	return r.observe(ctx, &cursor)
+}
+
+func (r Runner) observe(ctx context.Context, cursor *time.Time) (ObservationResult, error) {
 	if err := r.Validate(); err != nil {
 		return ObservationResult{}, err
 	}
-	frame, err := r.Capture.Capture(ctx)
+	frame, err := r.Frames.Latest(ctx, *cursor)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ObservationResult{}, ctx.Err()
 		}
-		dropped := DroppedSample{Stage: "capture", Cause: err}
+		dropped := DroppedSample{Stage: "evidence", Cause: err}
 		r.drop(dropped)
 		return ObservationResult{Dropped: &dropped}, nil
 	}
+	*cursor = frame.ScheduledAt
 	description, err := r.Describer.Describe(ctx, frame)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -141,7 +166,7 @@ func (r Runner) Observe(ctx context.Context) (ObservationResult, error) {
 		Timestamp:     frame.ObservedAt,
 		Description:   description.Text,
 		Untrusted:     true,
-		Capture:       CaptureRef{ID: frame.CaptureID},
+		Evidence:      EvidenceRef{CaptureID: frame.CaptureID, ScheduledAt: frame.ScheduledAt},
 		Model:         ModelEvidence{ID: description.ModelID, LatencyMS: description.Latency.Milliseconds()},
 	})
 	if err != nil {
@@ -161,7 +186,8 @@ func (r Runner) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("visual log context is required")
 	}
-	if err := r.Warmup(ctx); err != nil {
+	var cursor time.Time
+	if err := r.warmup(ctx, &cursor); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -170,7 +196,7 @@ func (r Runner) Run(ctx context.Context) error {
 	if r.OnWarmed != nil {
 		r.OnWarmed()
 	}
-	if _, err := r.Observe(ctx); err != nil {
+	if _, err := r.observe(ctx, &cursor); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -183,7 +209,7 @@ func (r Runner) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if _, err := r.Observe(ctx); err != nil {
+			if _, err := r.observe(ctx, &cursor); err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
@@ -191,6 +217,15 @@ func (r Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (r Runner) RunOnce(ctx context.Context) error {
+	var cursor time.Time
+	if err := r.warmup(ctx, &cursor); err != nil {
+		return err
+	}
+	_, err := r.observe(ctx, &cursor)
+	return err
 }
 
 func (r Runner) drop(sample DroppedSample) {
@@ -229,7 +264,7 @@ func (r Runner) request(frame Frame, eventType string, payload json.RawMessage) 
 			ModuleID: r.Config.ModuleID, InstanceID: r.InstanceID, Runtime: r.Config.Runtime,
 		},
 		Foreground: eventstream.Foreground{
-			ExecutableName: frame.Foreground.ExecutableName, Revision: frame.ForegroundRevision,
+			ExecutableName: frame.ForegroundExecutable, Revision: frame.ForegroundRevision,
 		},
 		Payload:   payload,
 		Artifacts: []eventstream.Artifact{{ID: frame.CaptureID, MediaType: frame.ContentType}},

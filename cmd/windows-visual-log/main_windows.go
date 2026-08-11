@@ -19,16 +19,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventclient"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/frametap"
 	"github.com/qoli/WindowsAgent/internal/visuallog"
 	"github.com/qoli/WindowsAgent/internal/visualloghttp"
 )
 
 type commandConfig struct {
 	ConfigFile       string
-	CaptureBaseURL   string
 	ModelBaseURL     string
 	ModelKeyFile     string
 	EventBaseURL     string
@@ -67,14 +66,6 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize event client: %w", err)
 	}
-	profile, err := capture.ParseProfile(manifest.CaptureProfile)
-	if err != nil {
-		return err
-	}
-	captureClient, err := visuallog.NewCaptureClient(cfg.CaptureBaseURL, boundedHTTPClient(10*time.Second), profile, manifest.TargetExecutable)
-	if err != nil {
-		return err
-	}
 	modelClient, err := visuallog.NewModelClient(cfg.ModelBaseURL, modelKey, boundedHTTPClient(cfg.ModelTimeout), manifest)
 	if err != nil {
 		return err
@@ -84,6 +75,15 @@ func run() (runErr error) {
 			return fmt.Errorf("read visual log control token: %w", err)
 		}
 		return nil
+	}
+	tap, err := frametap.OpenReader(manifest.Evidence.FrameTapName)
+	if err != nil {
+		return err
+	}
+	defer tap.Close()
+	frameSource, err := visuallog.NewFrameTapSource(tap, manifest.TargetExecutable, manifest.MaxFrameAge())
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(cfg.LogFile), 0o700); err != nil {
 		return fmt.Errorf("create visual log directory: %w", err)
@@ -115,7 +115,7 @@ func run() (runErr error) {
 		return err
 	}
 	runner := visuallog.Runner{
-		Config: manifest, Capture: captureClient, Describer: modelClient, Events: events,
+		Config: manifest, Frames: frameSource, Describer: modelClient, Events: events,
 		SessionID: sessionID, InstanceID: instanceID,
 		OnCommitted: func(event eventstream.Event) {
 			logger.Info("visual_log_observation_committed", "sequence", event.Sequence, "observed_at", event.ObservedAt)
@@ -133,10 +133,7 @@ func run() (runErr error) {
 		if err := visuallog.WriteJSONAtomic(cfg.StatusFile, status(manifest, "warming", sessionID, 0, "")); err != nil {
 			return err
 		}
-		if err := runner.Warmup(signalContext); err != nil {
-			return err
-		}
-		if _, err := runner.Observe(signalContext); err != nil {
+		if err := runner.RunOnce(signalContext); err != nil {
 			return err
 		}
 	} else {
@@ -194,8 +191,7 @@ func parseFlags(args []string) (commandConfig, error) {
 	flags.SetOutput(io.Discard)
 	var cfg commandConfig
 	flags.StringVar(&cfg.ConfigFile, "config", "", "absolute per-Game visual log config path")
-	flags.StringVar(&cfg.CaptureBaseURL, "capture-base-url", "http://127.0.0.1:8787", "loopback capture Agent origin")
-	flags.StringVar(&cfg.ModelBaseURL, "model-base-url", "http://127.0.0.1:8001/v1", "oMLX OpenAI-compatible base URL")
+	flags.StringVar(&cfg.ModelBaseURL, "model-base-url", "", "oMLX OpenAI-compatible LAN base URL")
 	flags.StringVar(&cfg.ModelKeyFile, "model-api-key-file", "", "absolute model API key file")
 	flags.StringVar(&cfg.EventBaseURL, "event-base-url", "http://127.0.0.1:8788", "loopback event API origin")
 	flags.StringVar(&cfg.EventTokenFile, "event-token-file", "", "absolute event API token file")

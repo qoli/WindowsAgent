@@ -16,12 +16,15 @@ import (
 )
 
 type Status struct {
-	State           string    `json:"state"`
-	StartedAt       time.Time `json:"startedAt"`
-	LastScheduledAt time.Time `json:"lastScheduledAt,omitempty"`
-	Frames          uint64    `json:"frames"`
-	Gaps            uint64    `json:"gaps"`
-	LastError       string    `json:"lastError,omitempty"`
+	State            string     `json:"state"`
+	StartedAt        time.Time  `json:"startedAt"`
+	LastScheduledAt  time.Time  `json:"lastScheduledAt,omitempty"`
+	AvailableThrough *time.Time `json:"availableThrough,omitempty"`
+	Frames           uint64     `json:"frames"`
+	Gaps             uint64     `json:"gaps"`
+	TapFailures      uint64     `json:"tapFailures"`
+	LastError        string     `json:"lastError,omitempty"`
+	LastTapError     string     `json:"lastTapError,omitempty"`
 }
 type Server struct {
 	store    *evidence.Store
@@ -48,7 +51,11 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 func (s *Server) getStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.status())
+	status := s.status()
+	if available := s.store.AvailableThrough(); !available.IsZero() {
+		status.AvailableThrough = &available
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 func (s *Server) getRange(w http.ResponseWriter, r *http.Request) {
 	if err := rejectUnknown(r.URL.Query(), "from", "to"); err != nil {
@@ -70,6 +77,10 @@ func (s *Server) getRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	archive, err := s.store.CreateArchive(r.Context(), from, to)
+	if errors.Is(err, evidence.ErrRangeNotCommitted) {
+		writeError(w, http.StatusConflict, "EVIDENCE_RANGE_NOT_COMMITTED", err)
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "EVIDENCE_ARCHIVE_FAILED", err)
 		return

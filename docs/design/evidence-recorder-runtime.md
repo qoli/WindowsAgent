@@ -2,35 +2,45 @@
 
 ## Status
 
-**Partially landed.** The independent process, strict per-game configuration,
-one-second slot scheduler, durable frame/gap records, authenticated status API,
-and integrity-checked range ZIP are implemented and passed bounded live Windows
-acceptance. Persistent installer and retention policy remain deferred.
+**Partially landed.** Persistent WGC capture, 1 FPS sampling, native H.264 MP4
+segments, UTC manifests, authenticated range export, and a PC-local frame tap
+passed live Windows acceptance. Persistent installation and retention remain
+deferred.
 
-## Contract
+## Recording contract
 
-`windows-evidence-recorder.exe` starts recording immediately and has no start,
-stop, pause, or delete HTTP route. It is independent of Gemma, the visual log,
-the event journal, and Actions. Those modules cannot determine whether this
-process remains alive.
+`windows-evidence-recorder.exe` is the recording owner. On process start it
+creates one persistent WGC session in the signed-in PC user's session, samples
+the newest frame at each whole UTC second, GPU-scales and tone-maps it to
+1920x1080, and writes H.264 MP4 segments through Media Foundation. It never
+calls the request-driven screenshot API.
 
-Each whole UTC second is one timeline slot. The process commits either:
+Each assigned second is exactly one of:
 
-- a verified 1920x1080 JPEG with capture identity, observation time, byte
-  length, and SHA-256; or
-- an explicit gap with the failed stage and bounded error.
+- a new frame accepted into the current video segment; or
+- an explicit gap containing the failed stage and bounded error.
 
-A capture timeout, busy capture Agent, foreground mismatch, or capture artifact
-failure commits only that slot as a gap and continues. It never retries into a
-later slot, reuses an older image, changes profile, or asks another provider.
-Failure to durably commit the frame or gap terminates the recorder because the
-timeline can no longer be asserted.
+It never reuses an old frame, changes capture backend, or synthesizes a frame
+for a gap. A frame-capture or foreground mismatch affects only that slot.
+Failure to encode or durably commit the authoritative segment is terminal.
 
-The capture scheduler is not synchronized with visual-log sampling. Sub-second
-completion lateness starts the next assigned slot immediately but never issues
-more than one capture for that slot. Once capture is a complete interval behind,
-the actually missed second is recorded as a `scheduler_overrun` gap; the
-recorder does not issue a multi-frame catch-up burst.
+The recorder is independent of Gemma, Visual Log, the event journal, Actions,
+and the high-level model. Those consumers cannot pause or terminate recording.
+
+## Storage and frame tap
+
+The recorder commits an MP4 and its JSON segment manifest atomically. The
+manifest records every second represented by the segment, including frame and
+gap entries, the half-open UTC bounds, Media Foundation format, byte length,
+and SHA-256. A crash may leave an unreferenced `.partial.mp4`; it is never
+treated as committed evidence.
+
+After an Evidence frame is accepted by the segment encoder, the recorder also
+publishes that newest 1080p BGRX frame to the configured
+`Local\\WindowsAgent.Evidence.*.v1` named shared-memory mapping. This tap is a
+replace-in-place, non-authoritative index input. A tap publication failure is
+reported as `tapFailures` and `lastTapError` but does not stop or alter video
+recording. Only PC-local readers can open it; it is not an HTTP frame service.
 
 ## Range API
 
@@ -42,52 +52,32 @@ GET /v1/evidence/status
 GET /v1/evidence/range?from=<UTC>&to=<UTC>
 ```
 
-Status and range require the exact Bearer token; health is unauthenticated.
-Ranges are half-open `[from,to)`, require RFC3339 UTC timestamps ending in
-`Z`, and must not exceed the configured `maxRangeSeconds`. A successful range
-is a ZIP containing `manifest.json` and `frames/*.jpg`. The manifest preserves
-every committed frame and gap in order and records `snapshotAt`, counts, and
-the requested bounds. `missingSlots` and `missingCount` explicitly enumerate
-whole-second slots for which no durable record exists, including recorder
-downtime; absence is never presented as a complete timeline. Empty ranges
-remain valid explicit manifests.
+Every route except health requires the Evidence Bearer token. Ranges are
+half-open `[from,to)`, use RFC3339 UTC timestamps ending in `Z`, and cannot
+exceed `maxRangeSeconds`. A request that reaches into the active uncommitted
+segment returns HTTP 409 `EVIDENCE_RANGE_NOT_COMMITTED`; the caller may retry
+using `availableThrough` from status.
 
-The server builds the complete ZIP and rechecks every JPEG byte length and
-SHA-256 before sending HTTP success. Missing, corrupted, duplicated, or
-malformed evidence fails the request explicitly; it is never silently omitted.
-
-## Storage and privacy
-
-Metadata files are the atomic visibility boundary. A JPEG is durably renamed
-before its matching JSON record appears. A crash can leave an unreferenced JPEG,
-but range reads ignore it rather than inventing a timeline entry.
-
-No automatic retention or deletion policy is implemented yet. The evidence
-directory contains private screenshots and must remain operator-owned runtime
-data outside the public repository.
+A successful request returns a ZIP containing `manifest.json` and every
+complete committed MP4 segment overlapping the range. The manifest counts
+in-range frames and gaps and explicitly enumerates `missingSlots`. Segments are
+not silently clipped or omitted. Their byte lengths and SHA-256 values are
+rechecked while building the ZIP; corruption fails the request.
 
 ## Live acceptance
 
-The 2026-08-11 acceptance ran the GUI-subsystem recorder in an isolated
-interactive-user Scheduled Task against a fresh matched
-`EliteDangerous64.exe` foreground. After correcting an initial console-window
-foreground violation and a sub-second scheduler-boundary error, the exact final
-artifact committed 17 frames across 17 assigned seconds with zero gaps.
+On 2026-08-11 the GUI-subsystem recorder ran in an isolated interactive-user
+Scheduled Task with `EliteDangerous64.exe` foreground on a 3840x2160 HDR
+display. The final persistent-WGC implementation recorded 24 consecutive
+samples with zero gaps. The downloaded range contained 6-frame and 10-frame
+H.264 segments; `ffprobe` verified 1920x1080, 1 FPS, and exact 6/10 second
+durations. A decoded frame verified orientation, GPU HDR tone mapping, and the
+actual Elite Dangerous scene.
 
-The authenticated range route returned a complete ZIP; an independent local
-read of the exact final artifact verified all 16 included JPEG byte lengths,
-SHA-256 values, and ZIP CRCs. Its deliberately padded range explicitly listed
-six pre-start recorder-downtime slots. An earlier cross-restart range preserved
-committed gaps and downtime separately. Missing authentication returned HTTP
-401 and a range above the configured hour returned HTTP 413.
+During the later frame-tap/Gemma integration run, Evidence advanced from 5 to
+9 frames with zero gaps and zero tap failures while Visual Log performed model
+inference. The pre-existing capture Agent and event stream retained their PIDs,
+proving this recorder did not depend on or disrupt screenshot requests.
 
-A separate bounded failure-injection process accumulated four capture gaps and
-remained `recording`. During a real capture-Agent outage the primary recorder
-also remained alive, committed the connection failures as gaps, and resumed
-frames after capture health returned. Recorder restart changed its PID and the
-same data directory remained range-readable across the downtime.
-
-The acceptance Tasks, private PC evidence, and token were removed after the
-verified ZIP was copied to ignored local diagnostics. The production capture
-Agent and event stream remained healthy; no persistent evidence installation
-was left behind because retention is not yet defined.
+No automatic retention or deletion policy exists. Runtime video, manifests,
+tokens, and logs are private operator data outside the public repository.

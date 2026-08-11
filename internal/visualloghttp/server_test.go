@@ -9,18 +9,18 @@ import (
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/eventstream"
-	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/visuallog"
 )
 
 const controlToken = "0123456789abcdef0123456789abcdef"
 
-type captureFixture struct{}
+type frameFixture struct{}
 
-func (captureFixture) Capture(context.Context) (visuallog.Frame, error) {
+func (frameFixture) Latest(context.Context, time.Time) (visuallog.Frame, error) {
+	now := time.Now().UTC()
 	return visuallog.Frame{
-		CaptureID: "cap_test", ObservedAt: time.Now().UTC(), ContentType: "image/jpeg", Content: []byte("jpeg"),
-		ForegroundRevision: 1, Foreground: foreground.Info{ExecutableName: "EliteDangerous64.exe"},
+		ScheduledAt: now.Truncate(time.Second), CaptureID: "cap_test", ObservedAt: now, ContentType: "image/jpeg", Content: []byte("jpeg"),
+		ForegroundRevision: 1, ForegroundExecutable: "EliteDangerous64.exe",
 	}, nil
 }
 
@@ -71,8 +71,8 @@ func TestAuthenticatedControlStartsAndStopsIndependentRun(t *testing.T) {
 func testController(t *testing.T) *visuallog.Controller {
 	t.Helper()
 	config := visuallog.Config{
-		SchemaVersion: 1, ModuleID: "elite-dangerous/visual-log", Kind: "visual-log", Runtime: visuallog.RuntimeID,
-		TargetExecutable: "EliteDangerous64.exe", IntervalMS: 2000, WarmupCalls: 1, CaptureProfile: "1080p-jpeg",
+		SchemaVersion: 2, ModuleID: "elite-dangerous/visual-log", Kind: "visual-log", Runtime: visuallog.RuntimeID,
+		TargetExecutable: "EliteDangerous64.exe", IntervalMS: 2000, WarmupCalls: 1, Evidence: visuallog.EvidenceConfig{FrameTapName: `Local\WindowsAgent.Evidence.EliteDangerous.v1`, MaxFrameAgeMS: 3000, WarmupFrameTimeoutMS: 5000},
 		Prompt: "Describe the directly visible physical scene in this single Elite Dangerous screenshot using 8-16 words.",
 		Model:  visuallog.ModelConfig{ID: "gemma-4-e4b-it-8bit", MaxTokens: 64, Temperature: 1, TopP: 0.95, TopK: 64},
 		Output: visuallog.OutputConfig{
@@ -81,7 +81,7 @@ func testController(t *testing.T) *visuallog.Controller {
 		},
 	}
 	runner := visuallog.Runner{
-		Config: config, Capture: captureFixture{}, Describer: describerFixture{}, Events: &eventFixture{},
+		Config: config, Frames: frameFixture{}, Describer: describerFixture{}, Events: &eventFixture{},
 		SessionID: "bootstrap_session", InstanceID: "instance_1",
 	}
 	controller, err := visuallog.NewController(context.Background(), runner)

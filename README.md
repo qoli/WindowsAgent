@@ -93,8 +93,9 @@ The Action runtime and registration refactor is partially landed:
 - `windows-event-stream.exe` owns a strict append-only JSONL journal and an
   authenticated loopback append/replay/time-range API;
 - `windows-visual-log.exe` is an optional independent producer that warms one
-  exactly configured oMLX model, captures one 1080p frame per own loop tick,
-  and appends an untrusted timestamped scene description. Invalid model output
+  exactly configured oMLX model, reads the newest frame from the Evidence
+  recorder's PC-local shared-memory tap on its own loop tick, and appends an
+  untrusted timestamped scene description. Invalid model output
   drops only that sample; it never controls evidence recording or substitutes
   another model, capture profile, or prior description;
 - `POST /v1/actions/invoke` gives every call an invocation ID. Finite Actions
@@ -301,14 +302,13 @@ $tokenRng.GetBytes($tokenBytes)
 ```
 
 Run the partially landed Elite Dangerous visual log as its own process after
-the capture Agent and event stream are healthy. The model key file is local
+the Evidence recorder and event stream are healthy. The model key file is local
 operator configuration and must not be stored in the Rule:
 
 ```powershell
 .\.build\windows-visual-log.exe `
   --config (Resolve-Path .\Rules\EliteDangerous64.exe\VisualLog\config.json) `
-  --capture-base-url http://127.0.0.1:8787 `
-  --model-base-url http://127.0.0.1:8001/v1 `
+  --model-base-url http://<oMLX-LAN-IP>:8001/v1 `
   --model-api-key-file (Resolve-Path .\omlx-api.key) `
   --event-base-url http://127.0.0.1:8788 `
   --event-token-file (Resolve-Path .\event-stream.token) `
@@ -331,22 +331,21 @@ Starting a run creates a new producer session and performs the configured
 warm-up before the process-owned description loop becomes active. Stopping the
 run leaves the independent process idle and has no path to the evidence layer.
 
-Run the evidence recorder as a separate always-recording process. The token is
-local operator configuration and the data directory contains private images:
+Run the evidence recorder as a separate always-recording PC process. The token
+is local operator configuration and the data directory contains private video:
 
 ```powershell
 .\.build\windows-evidence-recorder.exe `
   --config (Resolve-Path .\Rules\EliteDangerous64.exe\Evidence\config.json) `
-  --capture-base-url http://127.0.0.1:8787 `
   --listen 127.0.0.1:8792 `
   --data-dir (Join-Path $PWD "evidence-data") `
   --token-file (Resolve-Path .\evidence.token)
 ```
 
-The process immediately owns an asynchronous 1 FPS timeline. Each second is a
-verified 1080p JPEG or an explicit gap; capture failures do not terminate the
-recorder. It has no HTTP start, stop, pause, or delete route. Its loopback API
-is:
+The process owns one persistent WGC session, samples its newest frame at 1 FPS,
+and records 1080p H.264 MP4 segments. Each second is a video sample or an
+explicit gap; Visual Log and Gemma failures do not terminate the recorder. It
+has no HTTP start, stop, pause, or delete route. Its loopback API is:
 
 ```text
 GET http://127.0.0.1:8792/healthz
@@ -354,10 +353,12 @@ GET http://127.0.0.1:8792/v1/evidence/status
 GET http://127.0.0.1:8792/v1/evidence/range?from=<UTC>&to=<UTC>
 ```
 
-Status and range require the evidence Bearer token. A successful half-open UTC
+Every evidence route except health requires the Evidence Bearer token. A
+successful half-open UTC
 range returns a ZIP with `manifest.json`, explicit committed gaps,
-`missingSlots` for recorder downtime, and integrity-checked JPEG files. Gemma
-and the visual-log control API have no path to this process.
+`missingSlots` for recorder downtime, and integrity-checked overlapping MP4
+segments. Visual Log reads only the configured PC-local frame tap; it cannot
+control recording or download individual Evidence frames over HTTP.
 
 The persistent installer launches the event service as an independent,
 interactive-user Scheduled Task. It creates the token only when absent and
@@ -828,7 +829,7 @@ internal/actioncheck/            offline Action package and dependency validatio
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
-internal/visuallog/              strict Game config, capture/model adapters, and producer loop
+internal/visuallog/              strict Game config, evidence/model adapters, and producer loop
 internal/visualloghttp/          authenticated loopback visual-log control adapter
 internal/watchdog/               target probes, bounded recovery, atomic status
 internal/scenereducer/            cursor, scene delta, and append recovery

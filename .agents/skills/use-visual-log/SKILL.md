@@ -16,10 +16,12 @@ against the independent evidence layer before making a game-state claim.
 - Start or stop only the visual-log run through its control API. Never start,
   stop, pause, delete, or reschedule evidence recording as a side effect.
 - Do not synchronize the visual-log interval with the evidence recorder's 1 FPS
-  cadence. A visual-log tick requests its own single 1080p image.
+  cadence. Each visual-log tick reads the newest PC-local shared-memory frame
+  newer than its own cursor; it never requests a screenshot or downloads an
+  Evidence frame over HTTP.
 - Do not ask Gemma to compare frames, identify START or END, detect events,
   interpret HUD state, infer actions, or write a gameplay narrative.
-- Use the capture-provided `observedAt` or payload `timestamp`. Never use a
+- Use the Evidence-provided `observedAt` or payload `timestamp`. Never use a
   timestamp generated or repaired by the model.
 - Leave HUD interpretation and game semantics to the owning Action or
   authoritative evidence analysis.
@@ -27,11 +29,12 @@ against the independent evidence layer before making a game-state claim.
 ## Read current configuration before operating
 
 Read the matched game's `Rules/<Executable.exe>/VisualLog/config.json`. Obtain
-the stream name, target executable, interval, prompt, model ID, and output event
-types from that file; do not assume Elite Dangerous values for another game.
+the stream name, target executable, interval, frame-tap name, max-frame age,
+prompt, model ID, and output event types from that file; do not assume Elite
+Dangerous values for another game.
 
 For operation-only work, do not edit the prompt, sampling, model, interval, or
-capture profile. Those are game configuration and development decisions.
+Evidence max-frame age. Those are game configuration and development decisions.
 
 Use the operator-provided control and event Bearer tokens without printing,
 logging, committing, or copying them into the Rule. The default local surfaces
@@ -59,9 +62,9 @@ Treat configured or live values as authoritative when they differ.
    `lastDropStage`. State `active` proves only that warm-up ended and the loop
    is running; it does not prove that any useful description was committed.
 
-The model needs warm-up, but a warm-up capture or model failure drops that
+The model needs warm-up, but a warm-up frame-tap read or model failure drops that
 attempt and does not authorize a substitute model, old frame, prior
-description, or different capture profile.
+description, or direct screenshot request.
 
 ## Query a time range
 
@@ -87,9 +90,10 @@ Apply these rules:
 Separate event types:
 
 - `visual-log.observation`: read `payload.timestamp`,
-  `payload.description`, `payload.untrusted`, `payload.capture.id`, and model
+  `payload.description`, `payload.untrusted`,
+  `payload.evidence.captureId`, `payload.evidence.scheduledAt`, and model
   provenance. Require `untrusted: true`.
-- `visual-log.failure`: note the failed sample and its capture provenance, then
+- `visual-log.failure`: note the failed sample and its Evidence provenance, then
   continue reading later entries. Do not turn it into an observation.
 
 An invalid, missing, or poor Gemma answer means only that sample is absent. It
@@ -104,7 +108,7 @@ such as "approaching", "docking", "jumping", or HUD-derived claims into facts,
 even if the model emits them.
 
 Return one or more candidate UTC intervals with the supporting event sequences
-and capture timestamps. Add context on both sides because the visual log and
+and Evidence timestamps. Add context on both sides because the visual log and
 evidence recorder are asynchronous and samples may be dropped. Choose the
 padding from the actual task and observed sample spacing, not from an assumed
 fixed synchronization rule.
@@ -118,10 +122,15 @@ GET /v1/evidence/range?from=<UTC>&to=<UTC>
 Use the evidence process Bearer token, not the visual-log or event token. The
 interval is half-open `[from,to)` and must fit the current Game config's
 `maxRangeSeconds`. Read `manifest.json` first, preserve every explicit gap and
-every `missingSlots` entry, and
-verify that each listed frame's byte length and SHA-256 match before analysis.
-The ZIP is the authority; a Gemma inference capture is not the complete
-evidence timeline.
+every `missingSlots` entry, and verify each listed MP4 segment's byte length and
+SHA-256 before analysis. Segments may overlap the requested interval; use their
+manifest timestamps to select the relevant seconds. The ZIP is the authority;
+the replace-in-place Gemma frame tap is not an Evidence archive.
+
+If `to` reaches the active uncommitted segment, HTTP 409
+`EVIDENCE_RANGE_NOT_COMMITTED` is expected. Read `availableThrough` from
+Evidence status, shorten the request or wait for segment commit, and retry. Do
+not stop the recorder to force a commit.
 
 If the visual log is empty, misleading, or unavailable, bypass it and request
 the full relevant evidence range in bounded adjacent chunks. Never start,
@@ -148,7 +157,7 @@ completed. Use `sessionId` and current task context to establish ownership.
   process.
 - HTTP `409 event_cursor_ahead` means the requested cursor exceeds the current
   journal. Reconcile the stored cursor with `lastSequence`; do not guess data.
-- Authentication, process, capture, model, journal, domain interpretation, and
+- Authentication, process, frame-tap publication, model, journal, domain interpretation, and
   evidence verification are separate acceptance layers. Report each one
   separately.
 

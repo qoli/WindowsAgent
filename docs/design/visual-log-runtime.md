@@ -2,76 +2,40 @@
 
 ## Status
 
-**Partially landed.** The strict Game config, single-frame capture adapter,
-oMLX description adapter, warm-up, independent producer loop, dropped-sample
-behavior, durable event append, and authenticated resident on-demand control
-surface are implemented. A bounded live Windows acceptance passed against the
-signed-in Elite Dangerous session; persistent installation remains deferred.
+**Partially landed.** Per-game prompt configuration, PC-local frame-tap input,
+direct LAN oMLX requests, warm-up, independent control, failure isolation, and
+event append passed live Windows acceptance. Persistent installation remains
+deferred.
 
 ## Responsibility
 
-The visual log is an optional, independent process that writes an untrusted
-text index of individual game screenshots. Its only semantic job is to describe
-the directly visible physical scene so a high-level model can locate a likely
-time range. It does not compare frames, identify START or END, detect events,
-interpret HUD state, or write a gameplay narrative.
+Visual Log is an optional coarse timeline index. Gemma receives one current
+Evidence frame and describes the directly visible physical scene. The result
+helps a high-level model locate a likely recording interval; it is never
+authoritative evidence.
 
-The capture timestamp comes from capture metadata. Gemma does not generate or
-repair it. A committed observation payload has this logical form:
+The timestamp comes from the recorder's frame tap, not Gemma. Visual Log does
+not compare frames, identify START or END, detect events, interpret HUD state,
+infer actions, or write a gameplay narrative. Its logical entry remains:
 
 ```text
-timestamp <capture timestamp>
+timestamp <Evidence frame time>
 description <Gemma description>
 ```
 
-The event payload also marks the description `untrusted` and records model
-identity, inference latency, and the exact inference-input capture ID.
+The event marks the description `untrusted` and retains the model ID, latency,
+Evidence slot, and local capture identity.
 
-## Independent lifecycles
+## Independent data path and lifecycle
 
-Evidence recording, visual logging, and high-level analysis are separate
-lifecycles. Starting, stopping, dropping, or crashing the visual log must not
-start, stop, pause, or delete evidence recording. The visual logger requests
-its own single 1080p JPEG on its own interval; it does not consume or schedule
-the evidence recorder's 1 FPS timeline.
+Evidence and Visual Log own separate schedules. Evidence records continuously
+at 1 FPS. On each Visual Log interval, the PC process reads the newest frame
+newer than its own cursor from the configured named shared-memory tap, converts
+that local BGRX frame to a bounded JPEG for model input, and sends exactly one
+image to the configured oMLX LAN endpoint. It does not call the screenshot API,
+the Evidence range API, or an Evidence single-frame HTTP route.
 
-An invalid or low-quality Gemma response drops only that visual-log sample. The
-runtime emits a `visual-log.failure` diagnostic when the frame provenance is
-known, records the local drop, and continues at the next interval. It never
-substitutes a previous description, another model, another capture profile, or
-an inferred result. A capture failure without trustworthy frame provenance is
-recorded only in the process log and the next interval continues.
-
-Failure to append to the event journal terminates only the visual-log process,
-because it can no longer assert that its output is durable. It has no control
-path to the evidence recorder. The high-level model's worst-case recovery is
-to ignore the missing fast log and request the complete evidence range.
-
-Cancelling a run while capture, warm-up, or model inference is in flight is
-normal control flow. The run reaches `stopped` without inventing a failure
-event or a dropped sample for the cancelled operation.
-
-## Elite Dangerous prompt
-
-The Game config owns the exact prompt and sampling settings. The selected
-experimental baseline is:
-
-```text
-Describe the directly visible physical scene in this single Elite Dangerous screenshot using 8-16 words. Mention the environment and large structures behind the cockpit overlay, not the gameplay situation. Ignore HUD text and do not infer actions or events.
-```
-
-Each request contains exactly one image followed by `Describe this image.`.
-Thinking is disabled and strict JSON permits exactly one `description` string.
-
-## Current seam
-
-The deep module interface is `visuallog.Runner`: warm up, observe once, or own
-the timed loop. Capture, oMLX, and event append are internal adapters. The
-Windows command supplies credentials and endpoints through absolute paths and
-flags; no credential or private endpoint belongs to the public Game config.
-
-The process control adapter listens only on an explicit loopback IP. Its
-authenticated interface is intentionally small:
+The high-level model starts and stops only a Visual Log run:
 
 ```text
 GET    /v1/visual-log/status
@@ -79,44 +43,51 @@ POST   /v1/visual-log/runs
 DELETE /v1/visual-log/runs/current
 ```
 
-Starting a run creates a new producer session, warms the configured model, and
-then enters the module-owned loop. Stopping cancels only that run; the process
-returns to an idle state and has no evidence-recorder control interface.
+The control server is authenticated and loopback-only. Starting creates a new
+session and performs the configured warm-up. Stopping cancels only that run and
+leaves Evidence untouched.
+
+An absent, stale, mismatched, or changing tap frame drops that index sample. An
+invalid or low-quality Gemma answer records a Visual Log failure when
+provenance is available and drops only that sample. Neither path can terminate
+Evidence. No old frame, prior description, alternate model, screenshot call,
+or hidden provider is substituted. The high-level model can always bypass the
+index and request authoritative Evidence ranges.
+
+## Elite Dangerous prompt
+
+The executable config owns the prompt and sampling settings:
+
+```text
+Describe the directly visible physical scene in this single Elite Dangerous screenshot using 8-16 words. Mention the environment and large structures behind the cockpit overlay, not the gameplay situation. Ignore HUD text and do not infer actions or events.
+```
+
+Each request contains exactly one image followed by `Describe this image.`.
+Thinking is disabled. The response schema permits exactly one `description`
+string; an out-of-contract response is discarded without affecting Evidence.
+
+The oMLX endpoint is operator configuration supplied with
+`--model-base-url`; it is intentionally absent from public Rule config. The PC
+must reach the endpoint directly over the LAN. SSH tunnelling is not part of
+the runtime architecture.
 
 ## Live acceptance
 
-The 2026-08-11 Windows acceptance used a fresh matched
-`EliteDangerous64.exe` foreground, the installed capture Agent, the configured
-Gemma model on an operator-supplied oMLX endpoint, and an isolated current
-event-journal process so the active production journal did not need a restart.
+On 2026-08-11 the Evidence process exposed
+`Local\\WindowsAgent.Evidence.EliteDangerous.v1` while Visual Log ran as a
+separate GUI process. The PC called the operator oMLX LAN endpoint directly and
+Gemma committed this index entry in 1.301 seconds:
 
-- warm-up reached `active` in 2.391 seconds;
-- three observations committed with zero failures and zero dropped samples;
-- model latency was 1.265, 1.481, and 1.316 seconds;
-- the descriptions correctly located the inspected 1080p inputs as a deep-space
-  starfield viewed through the cockpit;
-- a range request with limit two paged the three events as two plus one while
-  preserving cursor order;
-- stop returned `stopping`, reached `stopped`, and produced no later sequence;
-- the installed capture and production event processes retained their process
-  identities throughout the run.
+```text
+timestamp 2026-08-11T15:13:18Z
+description Vast, industrial interior with metallic structures, massive support beams, and bright overhead lighting.
+```
 
-A separate controlled bad-output run required 63 through 64 words while
-leaving the normal 8 through 16 word prompt unchanged. Warm-up and two
-published attempts were dropped at the model boundary; two
-`visual-log.failure` events retained their capture IDs, no observation was
-committed, the producer remained active, and stop still reached `stopped`.
-This test configuration and its temporary Scheduled Task were removed after
-acceptance.
-
-The production event service was deliberately not upgraded during acceptance
-because a live Streaming Action was actively writing to it. Therefore the
-current machine's production `/v1/events/range` deployment remains an operator
-rollout step even though the endpoint implementation passed in the isolated
-acceptance journal.
+The event retained model `gemma-4-e4b-it-8bit` and Evidence slot sequence 7.
+During inference Evidence advanced independently from 5 to 9 frames with zero
+gaps and zero tap failures. The production capture Agent remained PID 15032.
 
 ## Deferred
 
-- persistent installer/watchdog integration for visual log and evidence;
-- rollout of the current event-range endpoint to machines still running an
-  older event-stream executable.
+- persistent installer/watchdog integration;
+- automatic retention policy for Evidence recordings.

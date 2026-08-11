@@ -20,6 +20,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/pixels"
+	"github.com/qoli/WindowsAgent/internal/videocapture"
 	"github.com/whiteboxsolutions/go-ole"
 	winapirt "github.com/whiteboxsolutions/winapi/winrt"
 	"golang.org/x/sys/windows"
@@ -324,6 +325,184 @@ func (c *Capturer) Capture(ctx context.Context, request capture.Request) (captur
 		return nil
 	})
 	return result, err
+}
+
+// Run owns one persistent WGC session and samples its newest available frame
+// at each whole UTC interval. It never enters the request-driven capture path.
+func (c *Capturer) Run(ctx context.Context, interval time.Duration, consume videocapture.Consumer) error {
+	if ctx == nil || consume == nil {
+		return errors.New("video stream context and consumer are required")
+	}
+	if interval != time.Second {
+		return errors.New("WGC evidence stream interval must equal one second")
+	}
+	select {
+	case c.captureGate <- struct{}{}:
+		defer func() { <-c.captureGate }()
+	case <-ctx.Done():
+		return nil
+	}
+	_, err := onWinRTThread(ctx, func() (struct{}, error) {
+		supported, err := graphicsCaptureSupported()
+		if err != nil {
+			return struct{}{}, capture.Failure("capture_support_check_failed", "failed to query Windows Graphics Capture support", err)
+		}
+		if !supported {
+			return struct{}{}, capture.Failure("capture_unsupported", "Windows Graphics Capture is not supported", nil)
+		}
+		target, err := findPrimaryDisplay()
+		if err != nil {
+			return struct{}{}, err
+		}
+		defer release(target.adapter)
+		monitor := monitorFromDesc(target.desc)
+		pixelFormat := uint32(dxgiFormatB8G8R8A8UNorm)
+		pixelFormatName := "B8G8R8A8_UNORM"
+		switch target.desc.ColorSpace {
+		case dxgiColorSpaceRGBFullG22NoneP709:
+		case dxgiColorSpaceRGBFullG2084NoneP2020:
+			if !finitePositiveAbove80(float64(target.desc.MaxLuminance)) {
+				return struct{}{}, capture.Failure("invalid_hdr_metadata", "HDR display metadata must provide finite maximum luminance above 80 nits", nil)
+			}
+			pixelFormat = dxgiFormatR16G16B16A16Float
+			pixelFormatName = "R16G16B16A16_FLOAT"
+		default:
+			return struct{}{}, capture.Failure("unsupported_color_space", fmt.Sprintf("unsupported primary-monitor color space: %s", colorSpaceName(target.desc.ColorSpace)), nil)
+		}
+		device, context3D, winRTDevice, err := createD3DDevice(target.adapter)
+		if err != nil {
+			return struct{}{}, capture.Failure("capture_device_failed", "failed to create the Direct3D 11 video-stream device", err)
+		}
+		defer release(device)
+		defer release(context3D)
+		defer release(winRTDevice)
+		item, size, err := createMonitorItem(target.desc.Monitor)
+		if err != nil {
+			return struct{}{}, capture.Failure("desktop_unavailable", "failed to create the persistent capture item", err)
+		}
+		defer release(item)
+		if size.Width < 1920 || size.Height < 1080 || int64(size.Width)*1080 != int64(size.Height)*1920 {
+			return struct{}{}, capture.Failure("capture_size_unsupported", fmt.Sprintf("persistent evidence capture requires a 16:9 display at least 1920x1080, got %dx%d", size.Width, size.Height), nil)
+		}
+		framePool, err := createFreeThreadedFramePoolWithBuffers(winRTDevice, int32(pixelFormat), size, 2)
+		if err != nil {
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to create the persistent WGC frame pool", err)
+		}
+		defer closeAndRelease(framePool)
+		session, err := createCaptureSession(framePool, item)
+		if err != nil {
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to create the persistent WGC session", err)
+		}
+		defer closeAndRelease(session)
+		if err = setCursorCapture(session, false); err != nil {
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to disable cursor capture for persistent evidence", err)
+		}
+		if err = callHRESULT(session, 6); err != nil {
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to start persistent WGC capture", err)
+		}
+		videoShader, err := createRegionComputeShader(device)
+		if err != nil {
+			return struct{}{}, capture.Failure("capture_region_shader_failed", "failed to create the persistent video sampling shader", err)
+		}
+		defer release(videoShader)
+		c.logCaptureLifecycle(ctx, "wgc_video_stream_started", "width", size.Width, "height", size.Height, "interval_ms", interval.Milliseconds())
+		defer c.logCaptureLifecycle(ctx, "wgc_video_stream_stopped")
+
+		next := time.Now().UTC().Truncate(interval).Add(interval)
+		sequence := uint64(0)
+		for {
+			if err = waitUntil(ctx, next); err != nil {
+				return struct{}{}, nil
+			}
+			slotContext, cancel := context.WithDeadline(ctx, next.Add(interval))
+			frame, frameErr := latestFrame(slotContext, framePool)
+			cancel()
+			if ctx.Err() != nil {
+				if frame != nil {
+					closeAndRelease(frame)
+				}
+				return struct{}{}, nil
+			}
+			if frameErr != nil {
+				if err = consume(ctx, videocapture.Sample{ScheduledAt: next, Stage: "wgc_frame", Err: frameErr}); err != nil {
+					return struct{}{}, err
+				}
+			} else {
+				captured := capturedFrame{frame: frame, device: device, context3D: context3D, pixelFormat: pixelFormat, pixelFormatName: pixelFormatName, display: target.desc, monitor: monitor, width: int(size.Width), height: int(size.Height)}
+				region := capture.PixelRegion{Left: 0, Top: 0, Width: int(size.Width), Height: int(size.Height)}
+				videoPixels, readErr := readRegionPixelsWithShader(captured, region, 1920, 1080, videoShader)
+				closeAndRelease(frame)
+				if readErr != nil {
+					if err = consume(ctx, videocapture.Sample{ScheduledAt: next, Stage: "wgc_readback", Err: readErr}); err != nil {
+						return struct{}{}, err
+					}
+				} else {
+					foregroundInfo, foregroundErr := foreground.Snapshot()
+					if foregroundErr != nil {
+						if err = consume(ctx, videocapture.Sample{ScheduledAt: next, Stage: "foreground", Err: foregroundErr}); err != nil {
+							return struct{}{}, err
+						}
+					} else {
+						bgrx, convertErr := pixels.RGB24WordsToBGRXBottomUp(videoPixels, 1920, 1080)
+						if convertErr != nil {
+							if err = consume(ctx, videocapture.Sample{ScheduledAt: next, Stage: "pixel_conversion", Err: convertErr}); err != nil {
+								return struct{}{}, err
+							}
+						} else {
+							sequence++
+							videoFrame := videocapture.Frame{Sequence: sequence, ScheduledAt: next, ObservedAt: foregroundInfo.ObservedAt.UTC(), ForegroundExecutable: foregroundInfo.ExecutableName, Width: 1920, Height: 1080, PixelFormat: videocapture.PixelFormatBGRX32BottomUp, Pixels: bgrx}
+							if err = consume(ctx, videocapture.Sample{ScheduledAt: next, Frame: &videoFrame}); err != nil {
+								return struct{}{}, err
+							}
+						}
+					}
+				}
+			}
+			next = next.Add(interval)
+			for !next.Add(interval).After(time.Now().UTC()) {
+				overrun := errors.New("persistent video processing did not finish before this one-second slot")
+				if err = consume(ctx, videocapture.Sample{ScheduledAt: next, Stage: "scheduler_overrun", Err: overrun}); err != nil {
+					return struct{}{}, err
+				}
+				next = next.Add(interval)
+			}
+		}
+	})
+	return err
+}
+
+func waitUntil(ctx context.Context, at time.Time) error {
+	delay := time.Until(at)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func latestFrame(ctx context.Context, framePool unsafe.Pointer) (unsafe.Pointer, error) {
+	frame, err := waitForFrame(ctx, framePool)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		var newer unsafe.Pointer
+		if err = callHRESULTWith(framePool, 7, uintptr(unsafe.Pointer(&newer))); err != nil {
+			closeAndRelease(frame)
+			return nil, capture.Failure("capture_frame_failed", "WGC failed while draining the persistent frame pool", err)
+		}
+		if newer == nil {
+			return frame, nil
+		}
+		closeAndRelease(frame)
+		frame = newer
+	}
 }
 
 func fitInside(width, height, maxWidth, maxHeight int) (int, int) {
@@ -790,8 +969,15 @@ func createMonitorItem(monitor uintptr) (unsafe.Pointer, winapirt.SizeInt32, err
 }
 
 func createFreeThreadedFramePool(device unsafe.Pointer, pixelFormat int32, size winapirt.SizeInt32) (unsafe.Pointer, error) {
+	return createFreeThreadedFramePoolWithBuffers(device, pixelFormat, size, 1)
+}
+
+func createFreeThreadedFramePoolWithBuffers(device unsafe.Pointer, pixelFormat int32, size winapirt.SizeInt32, buffers int) (unsafe.Pointer, error) {
 	if unsafe.Sizeof(uintptr(0)) != 8 {
 		return nil, errors.New("SizeInt32 ABI wrapper requires windows/amd64")
+	}
+	if buffers < 1 || buffers > 8 {
+		return nil, errors.New("WGC frame pool buffer count must be between 1 and 8")
 	}
 	packedSize := uint64(uint32(size.Width)) | uint64(uint32(size.Height))<<32
 	if err := pixels.ValidatePackedSize(size.Width, size.Height, packedSize); err != nil {
@@ -809,7 +995,7 @@ func createFreeThreadedFramePool(device unsafe.Pointer, pixelFormat int32, size 
 		6,
 		uintptr(device),
 		uintptr(pixelFormat),
-		1,
+		uintptr(buffers),
 		uintptr(packedSize),
 		uintptr(unsafe.Pointer(&framePool)),
 	); err != nil {
@@ -867,6 +1053,18 @@ func waitForFrame(ctx context.Context, framePool unsafe.Pointer) (unsafe.Pointer
 }
 
 func readRegionPixels(frame capturedFrame, physical capture.PixelRegion, outputWidth, outputHeight int) ([]uint32, error) {
+	shader, err := createRegionComputeShader(frame.device)
+	if err != nil {
+		return nil, capture.Failure("capture_region_shader_failed", "failed to create the region sampling shader", err)
+	}
+	defer release(shader)
+	return readRegionPixelsWithShader(frame, physical, outputWidth, outputHeight, shader)
+}
+
+func readRegionPixelsWithShader(frame capturedFrame, physical capture.PixelRegion, outputWidth, outputHeight int, shader unsafe.Pointer) ([]uint32, error) {
+	if shader == nil {
+		return nil, capture.Failure("capture_region_shader_failed", "region sampling shader is required", nil)
+	}
 	sourceTexture, sourceDesc, err := openFrameTexture(frame.frame, frame.pixelFormat)
 	if err != nil {
 		return nil, err
@@ -936,11 +1134,6 @@ func readRegionPixels(frame capturedFrame, physical capture.PixelRegion, outputW
 	}
 	defer release(outputView)
 
-	shader, err := createRegionComputeShader(frame.device)
-	if err != nil {
-		return nil, capture.Failure("capture_region_shader_failed", "failed to create the region sampling shader", err)
-	}
-	defer release(shader)
 	white := float32(1)
 	hdr := uint32(0)
 	if frame.monitor.HDR {
