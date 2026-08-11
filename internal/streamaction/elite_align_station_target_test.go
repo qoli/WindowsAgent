@@ -152,6 +152,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 		alignObservation("SOLID", 3, 0, 3, true),
 		alignObservation("SOLID", 2, 0, 2, true),
 		alignObservation("SOLID", 1, 0, 1, true),
+		alignObservation("SOLID", 1, 0, 1, true),
 	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
@@ -187,6 +188,7 @@ func TestEliteAlignStationTargetBrakesResidualTurnDuringPresentationTransition(t
 		alignObservation("UNKNOWN", -13, -7, 14.76, false),
 		alignObservation("SOLID", 3, 0, 3, true),
 		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
 		alignObservation("SOLID", 1, 0, 1, true),
 	}}
 	reporter := &fixtureReporter{}
@@ -309,6 +311,7 @@ func TestEliteAlignStationTargetUsesDominantFrontAxis(t *testing.T) {
 		alignObservation("SOLID", 0, 0, 0, true),
 		alignObservation("SOLID", 0, 0, 0, true),
 		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
 	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
@@ -332,6 +335,7 @@ func TestEliteAlignStationTargetUsesSustainedControlOutsideFineBand(t *testing.T
 		alignObservation("SOLID", 35, 0, 35, false),
 		alignObservation("SOLID", 3, 0, 3, true),
 		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
 		alignObservation("SOLID", 1, 0, 1, true),
 	}}
 	reporter := &fixtureReporter{}
@@ -364,6 +368,7 @@ func TestEliteAlignStationTargetUsesDiagonalSustainedControlForTwoFarAxes(t *tes
 		alignObservation("SOLID", 35, -15, 38.08, false),
 		alignObservation("SOLID", 3, 0, 3, true),
 		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
 		alignObservation("SOLID", 1, 0, 1, true),
 	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
@@ -451,15 +456,16 @@ func TestEliteAlignStationTargetBrakesSupercruiseSustainedRelease(t *testing.T) 
 	if strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "YAW_LEFT,YAW_LEFT" {
 		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
-	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 300 {
+	if len(caller.controls) != 1 || caller.controls[0] != "YAW_RIGHT" || caller.holds[0] != 80 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
-	if !contains(joinEventPhases(reporter.payloads), `"reason":"SUPERCRUISE_SUSTAINED_RELEASE_BRAKE"`) {
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"SUPERCRUISE_SUSTAINED_RELEASE_BRAKE"`) ||
+		!contains(joinEventPhases(reporter.payloads), `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
 		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
 	}
 }
 
-func TestEliteAlignStationTargetBrakesSupercruisePulseCenterEntry(t *testing.T) {
+func TestEliteAlignStationTargetDoesNotBrakeSupercruiseFinePulseCenterEntry(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", -28, 0, 28, false),
 		alignObservation("SOLID", -14, 0, 14, false),
@@ -473,10 +479,46 @@ func TestEliteAlignStationTargetBrakesSupercruisePulseCenterEntry(t *testing.T) 
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_RIGHT" || len(caller.holds) != 2 || caller.holds[0] != 80 || caller.holds[1] != 300 {
+	if strings.Join(caller.controls, ",") != "YAW_LEFT" || len(caller.holds) != 1 || caller.holds[0] != 80 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
-	if !contains(joinEventPhases(reporter.payloads), `"reason":"CENTER_ENTRY_BRAKE"`) {
+	if contains(joinEventPhases(reporter.payloads), `"reason":"CENTER_ENTRY_BRAKE"`) {
+		t.Fatalf("fine-band pulse must not be braked into an oscillation: %s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignStationTargetBrakesSupercruiseRecoveryCenterEntry(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -30, 0, 30, false),
+		alignObservation("SOLID", -30, 0, 30, false),
+		alignObservation("SOLID", -30, 0, 30, false),
+		alignObservation("SOLID", -12, 0, 12, false),
+		alignObservation("SOLID", -11, 0, 11, false),
+		alignObservation("SOLID", -10, 0, 10, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"controlProfile": "SUPERCRUISE_ASSIST"}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_LEFT,YAW_LEFT,YAW_RIGHT" {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	wantHolds := []int{80, 80, 1000, 80}
+	if len(caller.holds) != len(wantHolds) {
+		t.Fatalf("holds=%v", caller.holds)
+	}
+	for index := range wantHolds {
+		if caller.holds[index] != wantHolds[index] {
+			t.Fatalf("holds=%v", caller.holds)
+		}
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"RECOVERY_CENTER_ENTRY_BRAKE"`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
 		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
 	}
 }
@@ -537,6 +579,7 @@ func TestEliteAlignStationTargetKeepsRearTurnDirectionAcrossCenter(t *testing.T)
 func TestEliteAlignStationTargetPitchesUpForFrontMarkerAboveCenter(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", -2, -25, 25.08, false),
+		alignObservation("SOLID", 0, 0, 0, true),
 		alignObservation("SOLID", 0, 0, 0, true),
 		alignObservation("SOLID", 0, 0, 0, true),
 		alignObservation("SOLID", 0, 0, 0, true),
@@ -621,6 +664,7 @@ func TestEliteAlignStationTargetEscalatesMediumPulseAfterTwoNoMovementSamples(t 
 		alignObservation("SOLID", -23, 0, 23, false),
 		alignObservation("SOLID", 3, 0, 3, true),
 		alignObservation("SOLID", 2, 0, 2, true),
+		alignObservation("SOLID", 1, 0, 1, true),
 		alignObservation("SOLID", 1, 0, 1, true),
 	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(

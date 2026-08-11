@@ -56,7 +56,8 @@ charge remains active, the Action calls `escape-vector-visible-position`.
 `UNKNOWN` means the reticle is still outside or unresolved in the forward OCR
 ROI, so the charge is cancelled and one Compass-derived segment is allowed.
 Only `DETECTED` hands control to heat-protected `align-visible-target` with
-`positionSource=ESCAPE_VECTOR`. Successful visible alignment keeps the same
+`positionSource=ESCAPE_VECTOR` and its bounded `ESCAPE_VECTOR_CHARGE` heat
+policy. Successful visible alignment keeps the same
 safe Supercruise charge alive for entry; SOLID alone never enters this path.
 
 Once a probe reports a centered SOLID marker, the probe charge is still
@@ -78,8 +79,11 @@ waiting for Supercruise. Heat OCR may become UNKNOWN behind that transient heat
 wall, so UNKNOWN is logged but does not cancel during the already-aligned,
 bounded countdown. Every heat OCR return is followed by a fresh fast Status
 read; a confirmed Supercruise transition wins the race before any cancellation.
-Mass Lock and hyperspace-charge flags remain immediate failures. Before visible
-alignment, three consecutive UNKNOWN heat samples still fail closed. Failure
+Mass Lock and hyperspace-charge flags remain immediate failures. Before the
+visible ROI is acquired, three consecutive UNKNOWN heat samples still fail
+closed. During visible alignment, a last known heat no higher than 60% permits
+at most four seconds of UNKNOWN caused by the active charge animation; the 75%
+known ceiling remains unchanged and the grace is not renewed by UNKNOWN. Failure
 and cancellation own local STOP-hold, one charge-cancel command, and 0% throttle
 compensation.
 

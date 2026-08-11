@@ -322,7 +322,7 @@ def align_initial(target_name):
     emit_update("ALIGNING", compass_result["sampleCount"], target_name, last_command="ALIGN_STATION_TARGET", reason="SUPERVISED_COMPASS_ALIGNMENT_COMPLETED")
     visible_result = action.call(
         id="elite-dangerous/align-visible-target",
-        inputs={"targetName": target_name, "stopBeforeAlign": False},
+        inputs={"targetName": target_name, "stopBeforeAlign": False, "searchWhenUnknown": True},
     )
     sample_count = compass_result["sampleCount"] + visible_result["sampleCount"]
     emit_update("ALIGNING", sample_count, target_name, last_command="ALIGN_VISIBLE_TARGET", reason="SUPERVISED_VISIBLE_TARGET_ALIGNMENT_COMPLETED")

@@ -16,6 +16,11 @@ no-movement recovery pulse; visible-target alignment supplies the final
 screen-space proof. `supercruise-assist-to-destination` does not contain a
 third attitude-control loop.
 
+When nearby HUD contacts pollute Compass coarse evidence and the exact locked
+destination remains outside the OCR bands, the visible child is invoked with
+its bounded exact-name search enabled. The child may sweep yaw while throttle
+remains 0%, but it cannot accept another label or bypass its heat Gate.
+
 The runtime supervises this nested Streaming Action synchronously: its start,
 events, completion, and failure are wrapped in the parent stream with a child
 execution ID. Parent cancellation propagates through the shared context, and a

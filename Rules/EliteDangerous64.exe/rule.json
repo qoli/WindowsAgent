@@ -194,6 +194,15 @@
       },
       "registrableAs": []
     },
+    "elite-dangerous/supercruise-target-text-regions-lower-wide": {
+      "path": "Actions/supercruise-target-text-regions-lower-wide",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": []
+    },
     "elite-dangerous/supercruise-target-position": {
       "path": "Actions/supercruise-target-position",
       "runtime": "windows-composite-action-v1",

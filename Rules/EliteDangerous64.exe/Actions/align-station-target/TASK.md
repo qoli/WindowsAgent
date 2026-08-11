@@ -38,16 +38,34 @@ the wider observation zone can still leave the game requesting target
 alignment.
 
 The `SUPERCRUISE_ASSIST` profile instead uses a sixteen-reference-pixel entry
-radius with four pixels of verification hysteresis. Live keyboard control showed
+radius and accepts one current SOLID center contact before handing off to the
+required visible-target Action. It does not demand three one-second Compass
+confirmations: live Supercruise inertia repeatedly carried a correctly centered
+marker back outside the coarse Gate before that cadence, while the following
+screen-space Action is the owner of precise stable alignment. Live keyboard control showed
 that the minimum effective 80 ms Supercruise pulse moves the Compass marker
 roughly 11–17 reference pixels, followed by measured inertial drift from 3.6 to
 9.5 and 12.4 pixels in one run, and from 12.4 through 19.4 to 26.9 pixels in a
 rear-to-front run, so the normal-space Gate is unreachable without repeated
 overshoot. When a sustained Supercruise turn is released inside this Gate, the
-Action applies a 300 ms opposite-axis brake before stable verification. The
-same brake applies when a pulse or bounded no-response recovery first crosses
-from outside the fine band into the Supercruise Gate; it is not restricted to
-normal-space pulses, whose brake remains 100 ms. This
+Action applies an 80 ms opposite-axis brake and then requires a new Compass
+observation before stable verification. The pre-brake SOLID frame cannot
+complete the Action: live evidence showed that the former 300 ms release brake
+could cross the compass antipode and leave the next frame HOLLOW even though
+the sampled frame had been centered. A pulse
+is braked only when it began outside the active 40-pixel Supercruise fine band.
+Live evidence showed that braking an 80 ms pulse which began around 29–32
+pixels produced a repeating 12–13 to 29–33 pixel oscillation; such fine-band
+pulses now proceed directly to stable verification. If repeated ineffective
+fine pulses invoke the bounded 1000 ms recovery and that recovery crosses into
+the Gate, an 80 ms reverse brake counters its measured residual inertia. Every
+center-entry brake invalidates the pre-command Compass sample and requires a
+fresh post-brake observation before completion. Progress counters from a
+released sustained lease are cleared before sizing the first bounded pulse;
+otherwise old continuous-control evidence can incorrectly promote that pulse
+to the 1000 ms recovery strength.
+Normal-space entry braking retains its own 16-pixel fine-band boundary and
+100 ms duration. This
 profile remains limited to front-hemisphere coarse hyperspace/Supercruise
 alignment; the following visible-target Action still owns precise on-screen
 destination alignment before charging or travel. A live 32-pixel experiment was

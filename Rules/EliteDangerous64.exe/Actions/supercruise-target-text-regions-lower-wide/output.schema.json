@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {"point": {"type":"object","additionalProperties":false,"required":["x","y"],"properties":{"x":{"type":"number","minimum":0,"maximum":4096},"y":{"type":"number","minimum":0,"maximum":2160}}}},
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","regions","evidence","models","timing"],
+  "properties": {
+    "schemaVersion":{"const":1},
+    "regions":{"type":"array","maxItems":64,"items":{"type":"object","additionalProperties":false,"required":["points","referencePoints","detectionConfidence","text","recognitionConfidence","leftContext"],"properties":{
+      "points":{"type":"array","minItems":4,"maxItems":4,"items":{"$ref":"#/$defs/point"}},
+      "referencePoints":{"type":"array","minItems":4,"maxItems":4,"items":{"$ref":"#/$defs/point"}},
+      "detectionConfidence":{"type":"number","minimum":0,"maximum":1},
+      "text":{"type":"string","maxLength":256},
+      "recognitionConfidence":{"type":"number","minimum":0,"maximum":1},
+      "leftContext":{"type":"object","additionalProperties":false,"required":["x","y","w","h","pixels","referenceRegion"],"properties":{
+        "x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0},"w":{"type":"integer","minimum":0},"h":{"type":"integer","minimum":0},
+        "pixels":{"type":"array","maxItems":65536,"items":{"type":"integer","minimum":0,"maximum":16777215}},
+        "referenceRegion":{"type":"object","additionalProperties":false,"required":["x","y","w","h"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"w":{"type":"number","minimum":0},"h":{"type":"number","minimum":0}}}
+      }}
+    }}},
+    "evidence":{"type":"object"},"models":{"type":"object"},"timing":{"type":"object"}
+  }
+}

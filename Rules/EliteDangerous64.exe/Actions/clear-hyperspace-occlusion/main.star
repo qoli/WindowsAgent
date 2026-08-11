@@ -346,7 +346,7 @@ def main(ctx):
             visible_attempt = action.try_call(id="elite-dangerous/escape-vector-visible-position", inputs={})
             if visible_attempt["ok"] and visible_attempt["output"]["target"]["state"] == "DETECTED":
                 emit_update("ALIGNING_VISIBLE_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=None, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=True, supercruise=False, reason="VISIBLE_ESCAPE_VECTOR_ROI_DETECTED")
-                visible_result = action.call(id="elite-dangerous/align-visible-target", inputs={"targetName": "ESCAPE VECTOR", "stopBeforeAlign": False, "positionSource": "ESCAPE_VECTOR"})
+                visible_result = action.call(id="elite-dangerous/align-visible-target", inputs={"targetName": "ESCAPE VECTOR", "stopBeforeAlign": False, "positionSource": "ESCAPE_VECTOR", "heatPolicy": "ESCAPE_VECTOR_CHARGE"})
                 status = observe_status_flags()
                 if not status["fsdCharging"] or status["fsdHyperdriveCharging"] or status["overHeating"]:
                     fail("visible Escape Vector alignment lost its safe Supercruise charge context")

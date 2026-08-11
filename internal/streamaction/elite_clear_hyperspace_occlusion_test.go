@@ -74,6 +74,9 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 		}
 		return json.RawMessage(`{"schemaVersion":1,"target":{"state":"DETECTED","referenceX":960,"referenceY":540,"offsetX":0,"offsetY":0,"centerDistancePixels":0,"reason":"TEST","rawTexts":["ESCAPE","VECTOR"]},"timing":{}}`), nil
 	case "elite-dangerous/align-visible-target":
+		if inputs["heatPolicy"] != "ESCAPE_VECTOR_CHARGE" {
+			return nil, errors.New("escape-vector alignment did not request its bounded charge heat policy")
+		}
 		c.visibleAligned = true
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"targetName":"ESCAPE VECTOR","sampleCount":3,"commandCount":0,"stableConfirmations":3,"finalTarget":{"state":"DETECTED"}}`), nil
 	case "elite-dangerous/ship-attitude-control":

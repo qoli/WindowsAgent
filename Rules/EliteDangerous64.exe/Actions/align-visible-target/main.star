@@ -14,9 +14,15 @@ ESCAPE_VECTOR_COARSE_HOLD_MS = 500
 ESCAPE_VECTOR_MEDIUM_HOLD_MS = 300
 ESCAPE_VECTOR_FINE_HOLD_MS = 160
 TRANSIENT_UNKNOWN_LIMIT = 8
+SEARCH_UNKNOWN_LIMIT = 12
+SEARCH_PULSE_MS = 600
+SEARCH_LEFT_SAMPLES = 4
+SEARCH_HEAT_RETRY_SETTLE_MS = 500
 MAX_DEADLINE_ERRORS = 5
 MAX_HEAT_PERCENT = 75
 MAX_UNKNOWN_HEAT_SAMPLES = 3
+ESCAPE_CHARGE_LAST_KNOWN_MAX_PERCENT = 60
+ESCAPE_CHARGE_UNKNOWN_GRACE_MS = 4000
 
 def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None):
     stream.emit(
@@ -76,6 +82,10 @@ def main(ctx):
     target_name = ctx.inputs["targetName"]
     stop_before_align = ctx.inputs["stopBeforeAlign"] if "stopBeforeAlign" in ctx.inputs else True
     position_source = ctx.inputs["positionSource"] if "positionSource" in ctx.inputs else "DESTINATION"
+    search_when_unknown = ctx.inputs["searchWhenUnknown"] if "searchWhenUnknown" in ctx.inputs else False
+    heat_policy = ctx.inputs["heatPolicy"] if "heatPolicy" in ctx.inputs else "STRICT"
+    if heat_policy == "ESCAPE_VECTOR_CHARGE" and position_source != "ESCAPE_VECTOR":
+        fail("ESCAPE_VECTOR_CHARGE heat policy requires the Escape Vector position source")
     position_action = "elite-dangerous/escape-vector-visible-position" if position_source == "ESCAPE_VECTOR" else "elite-dangerous/supercruise-target-position"
     stable_confirmations_required = 2 if position_source == "ESCAPE_VECTOR" else STABLE_CONFIRMATIONS
     if stop_before_align:
@@ -87,20 +97,45 @@ def main(ctx):
     unknown_count = 0
     deadline_count = 0
     unknown_heat_count = 0
+    last_known_heat_percent = None
+    last_known_heat_ms = None
     final_target = None
     for sample in range(1, MAX_SAMPLES + 1):
         started_ms = task.elapsed_milliseconds()
         heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
         heat_state = heat["state"]
         heat_percent = heat["percent"]
+        if heat_state != "KNOWN" and search_when_unknown:
+            # Search pulses move the cockpit HUD enough to push the heat digits
+            # outside their inertia-tolerant ROI. Let flight assist damp the
+            # view and retry the same safety observation; do not weaken the
+            # three-UNKNOWN failure contract.
+            remaining_settle_ms = SEARCH_HEAT_RETRY_SETTLE_MS
+            while remaining_settle_ms > 0:
+                settle_step_ms = min(remaining_settle_ms, MAX_SLEEP_STEP_MS)
+                task.sleep(milliseconds=settle_step_ms)
+                remaining_settle_ms -= settle_step_ms
+            heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
+            heat_state = heat["state"]
+            heat_percent = heat["percent"]
         if heat_state == "KNOWN":
             unknown_heat_count = 0
+            last_known_heat_percent = heat_percent
+            last_known_heat_ms = task.elapsed_milliseconds()
             if heat_percent >= MAX_HEAT_PERCENT:
                 emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="MAX_HEAT_PERCENT_REACHED", heat_state=heat_state, heat_percent=heat_percent)
                 fail("visible target alignment crossed the 75 percent heat safety gate")
         else:
             unknown_heat_count += 1
-            if unknown_heat_count >= MAX_UNKNOWN_HEAT_SAMPLES:
+            charge_grace = (
+                heat_policy == "ESCAPE_VECTOR_CHARGE" and
+                last_known_heat_percent != None and
+                last_known_heat_percent <= ESCAPE_CHARGE_LAST_KNOWN_MAX_PERCENT and
+                task.elapsed_milliseconds() - last_known_heat_ms <= ESCAPE_CHARGE_UNKNOWN_GRACE_MS
+            )
+            if charge_grace:
+                emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HEAT_UNKNOWN_ESCAPE_CHARGE_GRACE:" + str(last_known_heat_percent), heat_state=heat_state, heat_percent=heat_percent)
+            elif unknown_heat_count >= MAX_UNKNOWN_HEAT_SAMPLES:
                 emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HEAT_UNKNOWN_LIMIT_REACHED", heat_state=heat_state, heat_percent=heat_percent)
                 fail("visible target alignment heat remained UNKNOWN for three consecutive samples")
         position_inputs = {} if position_source == "ESCAPE_VECTOR" else {"targetName": target_name}
@@ -123,9 +158,19 @@ def main(ctx):
         if target["state"] != "DETECTED":
             unknown_count += 1
             stable = 0
+            if search_when_unknown and position_source == "DESTINATION" and unknown_count <= SEARCH_UNKNOWN_LIMIT:
+                if command_count >= MAX_COMMANDS:
+                    fail("visible target search exhausted the bounded command limit")
+                search_control = "YAW_LEFT" if unknown_count <= SEARCH_LEFT_SAMPLES else "YAW_RIGHT"
+                search_result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": search_control, "holdMs": SEARCH_PULSE_MS})
+                command_count += 1
+                stream.activity(message=search_control + " bounded visible-target search pulse", level="info")
+                emit_update("SEARCHING", target_name, sample, command_count, target=target, stable=stable, command=search_control, hold_ms=SEARCH_PULSE_MS, reason="REQUESTED_TARGET_OUTSIDE_OCR_ROI:" + search_result["control"], heat_state=heat_state, heat_percent=heat_percent)
+                wait_for_cadence(started_ms, position_source)
+                continue
             emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent)
-            if unknown_count >= TRANSIENT_UNKNOWN_LIMIT:
-                fail("visible target was UNKNOWN for eight consecutive observations")
+            if unknown_count >= (SEARCH_UNKNOWN_LIMIT if search_when_unknown else TRANSIENT_UNKNOWN_LIMIT):
+                fail("visible target remained UNKNOWN after its bounded observation or search window")
             wait_for_cadence(started_ms, position_source)
             continue
         unknown_count = 0

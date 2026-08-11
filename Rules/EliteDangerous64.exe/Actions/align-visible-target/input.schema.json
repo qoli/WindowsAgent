@@ -6,6 +6,8 @@
   "properties": {
     "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
     "stopBeforeAlign": {"type": "boolean", "default": true},
-    "positionSource": {"enum": ["DESTINATION", "ESCAPE_VECTOR"], "default": "DESTINATION"}
+    "positionSource": {"enum": ["DESTINATION", "ESCAPE_VECTOR"], "default": "DESTINATION"},
+    "searchWhenUnknown": {"type": "boolean", "default": false},
+    "heatPolicy": {"enum": ["STRICT", "ESCAPE_VECTOR_CHARGE"], "default": "STRICT"}
   }
 }

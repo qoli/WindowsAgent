@@ -73,6 +73,7 @@ def main(ctx):
     bands = [
         action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
+        action.call(id="elite-dangerous/supercruise-target-text-regions-lower-wide", inputs={}),
     ]
     matches = []
     raw_texts = []
@@ -98,7 +99,7 @@ def main(ctx):
         return {
             "schemaVersion": 1,
             "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_UNIQUE", "rawTexts": raw_texts},
-            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"]]},
+            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"]]},
         }
     region = matches[0]
     box = bounds(region["referencePoints"])
@@ -118,5 +119,5 @@ def main(ctx):
             "reason": "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED",
             "rawTexts": raw_texts,
         },
-        "timing": {"bands": [bands[0]["timing"], bands[1]["timing"]]},
+        "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"]]},
     }

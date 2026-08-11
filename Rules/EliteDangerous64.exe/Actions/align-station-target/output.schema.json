@@ -9,7 +9,7 @@
     "mode": {"enum": ["ALIGN", "TRACK"]},
     "completed": {"const": true},
     "finalPhase": {"enum": ["COMPLETED", "TRACKING_WINDOW_COMPLETED"]},
-    "sampleCount": {"type": "integer", "minimum": 3, "maximum": 400},
+    "sampleCount": {"type": "integer", "minimum": 1, "maximum": 400},
     "commandCount": {"type": "integer", "minimum": 0, "maximum": 240},
     "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 240},
     "centerContactCount": {"type": "integer", "minimum": 0, "maximum": 240},

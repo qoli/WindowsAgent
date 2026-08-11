@@ -425,11 +425,14 @@ that the visible Escape Vector lies inside the OCR ROI. While the same probe
 charge is active, `escape-vector-visible-position` is the independent ROI
 Gate. `UNKNOWN` cancels the probe and permits one Compass-derived segment.
 Only `DETECTED` hands control to heat-protected `align-visible-target` with its
-faster Escape Vector profile. After two stable visible confirmations, the
+faster Escape Vector profile and bounded active-charge heat policy. After a
+known reading no higher than 60%, charge-obscured UNKNOWN heat is tolerated for
+at most four seconds while the visible Escape Vector remains the control
+source; known heat at 75% still fails immediately. After two stable visible confirmations, the
 Action preserves that charge, commands 100%, stops reading Compass and visible
 reticle evidence, and waits for the FSD entry countdown.
 
-Before visible alignment, known heat at 75% or three consecutive UNKNOWN heat
+Before the visible ROI is acquired, known heat at 75% or three consecutive UNKNOWN heat
 observations cancel formal charge. During the already-aligned countdown, the
 transient heat wall may hide OCR and reticle evidence, so UNKNOWN heat is
 logged without cancellation and only a known reading at 160% cancels. Every
