@@ -63,6 +63,46 @@ func TestClientAppendsAndStreamsAuthenticatedEvents(t *testing.T) {
 	}
 }
 
+func TestClientReadsAuthenticatedTimeRange(t *testing.T) {
+	const token = "0123456789abcdef0123456789abcdef"
+	store, err := eventstream.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	server, err := eventhttp.New(store, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(server.Handler())
+	defer httpServer.Close()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(httpServer.URL, tokenFile, httpServer.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 11, 1, 2, 3, 0, time.UTC)
+	request := eventstream.AppendRequest{
+		SessionID: "vlog_1", Stream: "visual-log", Type: "visual-log.observation", ObservedAt: base,
+		Source:     eventstream.Source{ModuleID: "game/visual-log", InstanceID: "vlog_1", Runtime: "omlx-visual-log-v1"},
+		Foreground: eventstream.Foreground{ExecutableName: "Game.exe", Revision: 1},
+		Payload:    json.RawMessage(`{"description":"stars"}`),
+	}
+	if _, err := client.Append(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.TimeRange(context.Background(), base.Add(-time.Second), base.Add(time.Second), "visual-log", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || result.Events[0].ObservedAt != base || !result.Complete {
+		t.Fatalf("range result = %+v", result)
+	}
+}
+
 func TestClientRejectsNonLoopbackAndMalformedToken(t *testing.T) {
 	client := &http.Client{}
 	if _, err := New("http://192.0.2.1:8788", filepath.Join(t.TempDir(), "missing"), client); err == nil {

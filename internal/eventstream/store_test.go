@@ -124,6 +124,40 @@ func TestReadRejectsCursorAhead(t *testing.T) {
 	}
 }
 
+func TestReadTimeRangeFiltersByObservedAtAndStreamWithCursorPagination(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	base := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
+	for index := 0; index < 5; index++ {
+		store.random = strings.NewReader("0123456789abcdef")
+		request := testAppendRequest()
+		request.ObservedAt = base.Add(time.Duration(index) * time.Second)
+		if index == 2 {
+			request.Stream = "actions"
+		}
+		if _, err := store.Append(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.ReadTimeRange(context.Background(), 0, base.Add(time.Second), base.Add(5*time.Second), "screen/ui", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Events) != 2 || first.Events[0].Sequence != 2 || first.Events[1].Sequence != 4 || first.Complete || first.NextCursor != 4 {
+		t.Fatalf("first range = %+v", first)
+	}
+	second, err := store.ReadTimeRange(context.Background(), first.NextCursor, base.Add(time.Second), base.Add(5*time.Second), "screen/ui", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Events) != 1 || second.Events[0].Sequence != 5 || !second.Complete || second.NextCursor != 5 {
+		t.Fatalf("second range = %+v", second)
+	}
+}
+
 func TestWaitAfterUnblocksOnCommittedEvent(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {

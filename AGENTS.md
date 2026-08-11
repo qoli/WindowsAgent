@@ -61,7 +61,10 @@ inventories:
 - `docs/script-development-contract.md` owns authoring and review rules for
   `windows-observation-v1` packages;
 - `.agents/skills/operate-windowsagent/SKILL.md` owns the operator workflow for
-  invoking a live WindowsAgent Rule.
+  invoking a live WindowsAgent Rule;
+- `.agents/skills/use-visual-log/SKILL.md` owns the supervising-model workflow
+  for operating the on-demand visual log and using it to locate evidence time
+  ranges.
 
 Do not copy a complete Action catalog into this file. Read the current Rule and
 package on disk, or the live catalog when operating the installed Agent.

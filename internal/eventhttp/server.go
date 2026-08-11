@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
@@ -37,6 +38,13 @@ type replayResponse struct {
 	Events       []eventstream.Event `json:"events"`
 	NextCursor   uint64              `json:"nextCursor"`
 	LastSequence uint64              `json:"lastSequence"`
+}
+
+type timeRangeResponse struct {
+	Events       []eventstream.Event `json:"events"`
+	NextCursor   uint64              `json:"nextCursor"`
+	LastSequence uint64              `json:"lastSequence"`
+	Complete     bool                `json:"complete"`
 }
 
 func New(store *eventstream.Store, token string) (*Server, error) {
@@ -87,9 +95,73 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleStream(w, r)
+	case "/v1/events/range":
+		if !s.authorized(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeError(w, http.StatusUnauthorized, "unauthorized", "a valid local event API token is required")
+			return
+		}
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+		s.handleTimeRange(w, r)
 	default:
 		writeError(w, http.StatusNotFound, "route_not_found", "route not found")
 	}
+}
+
+func (s *Server) handleTimeRange(w http.ResponseWriter, r *http.Request) {
+	if unknown := unknownQuery(r, "from", "to", "stream", "after", "limit"); unknown != "" {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", "unknown query parameter: "+unknown)
+		return
+	}
+	from, err := parseUTCQuery(r, "from")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", err.Error())
+		return
+	}
+	to, err := parseUTCQuery(r, "to")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", err.Error())
+		return
+	}
+	streamValues := r.URL.Query()["stream"]
+	if len(streamValues) != 1 || streamValues[0] == "" {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", "stream must appear exactly once and be non-empty")
+		return
+	}
+	after, err := parseUintQuery(r, "after", false)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", err.Error())
+		return
+	}
+	limitValue, err := parseUintQuery(r, "limit", false)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", err.Error())
+		return
+	}
+	limit := eventstream.DefaultReplayLimit
+	if _, specified := r.URL.Query()["limit"]; specified {
+		if limitValue == 0 || limitValue > eventstream.MaxReplayLimit {
+			writeError(w, http.StatusBadRequest, "invalid_time_range_request", fmt.Sprintf("limit must be between 1 and %d", eventstream.MaxReplayLimit))
+			return
+		}
+		limit = int(limitValue)
+	}
+	result, err := s.store.ReadTimeRange(r.Context(), after, from, to, streamValues[0], limit)
+	if errors.Is(err, eventstream.ErrCursorAhead) {
+		writeError(w, http.StatusConflict, "event_cursor_ahead", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_time_range_request", err.Error())
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, timeRangeResponse{
+		Events: result.Events, NextCursor: result.NextCursor, LastSequence: result.LastSequence, Complete: result.Complete,
+	})
 }
 
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
@@ -256,6 +328,18 @@ func parseUintQuery(r *http.Request, name string, required bool) (uint64, error)
 	value, err := strconv.ParseUint(values[0], 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an unsigned integer", name)
+	}
+	return value, nil
+}
+
+func parseUTCQuery(r *http.Request, name string) (time.Time, error) {
+	values := r.URL.Query()[name]
+	if len(values) != 1 || values[0] == "" {
+		return time.Time{}, fmt.Errorf("%s must appear exactly once and be non-empty", name)
+	}
+	value, err := time.Parse(time.RFC3339Nano, values[0])
+	if err != nil || value.Location() != time.UTC {
+		return time.Time{}, fmt.Errorf("%s must be an RFC3339 UTC timestamp", name)
 	}
 	return value, nil
 }

@@ -11,6 +11,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Windows observer protocol](observation-worker-protocol.md) | Landed | Unify finite read-only memory, file, and reference/native sampled screen-region calls behind framed process boundaries. |
 | [Script Runner native-library FFI](native-library-ffi.md) | Landed | Load package-owned DLL aliases and execute package-owned ABIs through a provider-neutral Windows amd64 FFI. |
 | [Event stream runtime](event-stream-runtime.md) | Partially landed | Persist strict ordered events and expose authenticated local append/replay for independent modules. |
+| [Visual log runtime](visual-log-runtime.md) | Partially landed | Run an optional single-frame Gemma description loop as an untrusted timeline index without controlling evidence recording. |
 | [Action registration model](action-registration-model.md) | Partially landed | Declare executable Actions and separately register selected Actions as timer-driven Monitors or event-driven Reactions. |
 | [Streaming Action runtime](streaming-action-runtime.md) | Landed | Invoke one Action through return or durable stream completion; the shipped Elite departure workflow demonstrates supervised linear orchestration. |
 | [Ephemeral Action Sequence](ephemeral-action-sequence.md) | Landed | Preflight and immediately execute an immutable Rule-allowlisted sequence of at most twenty existing Actions without persisting a workflow definition. |

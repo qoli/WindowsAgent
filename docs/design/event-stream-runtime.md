@@ -5,7 +5,7 @@
 **Partially landed.**
 
 The repository now contains a strict append-only journal, authenticated local
-append/replay/live-stream HTTP surface, `windows-event-stream.exe`, and an
+append/replay/time-range/live-stream HTTP surface, `windows-event-stream.exe`, and an
 interactive-user Scheduled Task installation path. Module lifecycle and
 segment rotation are not yet implemented.
 
@@ -42,6 +42,12 @@ repairs them automatically.
 `GET /v1/events/stream?after=<sequence>` replays any committed events after the
 cursor and then waits for newly committed records as NDJSON. It does not emit
 invented heartbeat or summary events.
+
+`GET /v1/events/range?from=<UTC>&to=<UTC>&stream=<name>&after=<cursor>&limit=<count>`
+returns events whose producer `observedAt` is in the half-open interval
+`[from,to)`. The stream selector is required. Results retain global sequence
+order and cursor pagination; timestamps filter but never replace the durable
+cursor. `complete=false` means the caller must continue from `nextCursor`.
 
 Each successful append is flushed and synchronized before it is acknowledged.
 A write or sync failure poisons the writer instance so later operations cannot

@@ -77,6 +77,13 @@ type Event struct {
 	Artifacts     []Artifact      `json:"artifacts,omitempty"`
 }
 
+type TimeRangeResult struct {
+	Events       []Event
+	NextCursor   uint64
+	LastSequence uint64
+	Complete     bool
+}
+
 type Store struct {
 	mu           sync.Mutex
 	root         string
@@ -296,6 +303,64 @@ func (s *Store) ReadAfter(ctx context.Context, after uint64, limit int) ([]Event
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+// ReadTimeRange returns events whose producer observation time is in [from, to).
+// The cursor remains the durable pagination authority; timestamps only filter.
+func (s *Store) ReadTimeRange(ctx context.Context, after uint64, from, to time.Time, stream string, limit int) (TimeRangeResult, error) {
+	if s == nil {
+		return TimeRangeResult{}, errors.New("event journal store is required")
+	}
+	if ctx == nil {
+		return TimeRangeResult{}, errors.New("context is required")
+	}
+	if from.IsZero() || to.IsZero() || from.Location() != time.UTC || to.Location() != time.UTC || !from.Before(to) {
+		return TimeRangeResult{}, errors.New("event time range requires non-zero UTC from before to")
+	}
+	if err := validateIdentifier("stream", stream, true); err != nil {
+		return TimeRangeResult{}, err
+	}
+	if limit < 1 || limit > MaxReplayLimit {
+		return TimeRangeResult{}, fmt.Errorf("event time range limit must be between 1 and %d", MaxReplayLimit)
+	}
+	last, err := s.LastSequence()
+	if err != nil {
+		return TimeRangeResult{}, err
+	}
+	if after > last {
+		return TimeRangeResult{}, fmt.Errorf("%w: cursor=%d lastSequence=%d", ErrCursorAhead, after, last)
+	}
+	result := TimeRangeResult{Events: make([]Event, 0, limit), NextCursor: after, LastSequence: last, Complete: true}
+	cursor := after
+	for cursor < last {
+		batchLimit := DefaultReplayLimit
+		if remaining := int(last - cursor); remaining < batchLimit {
+			batchLimit = remaining
+		}
+		batch, err := s.ReadAfter(ctx, cursor, batchLimit)
+		if err != nil {
+			return TimeRangeResult{}, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, event := range batch {
+			cursor = event.Sequence
+			if event.Stream != stream || event.ObservedAt.Before(from) || !event.ObservedAt.Before(to) {
+				continue
+			}
+			if len(result.Events) == limit {
+				result.Complete = false
+				return result, nil
+			}
+			result.Events = append(result.Events, event)
+			result.NextCursor = event.Sequence
+		}
+	}
+	if len(result.Events) == 0 {
+		result.NextCursor = last
+	}
+	return result, nil
 }
 
 func (s *Store) Close() error {

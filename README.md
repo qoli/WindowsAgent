@@ -91,7 +91,12 @@ The Action runtime and registration refactor is partially landed:
   profiles, and separately registers selected Actions as timer-driven Monitors
   or event-driven Reactions;
 - `windows-event-stream.exe` owns a strict append-only JSONL journal and an
-  authenticated loopback append/replay API;
+  authenticated loopback append/replay/time-range API;
+- `windows-visual-log.exe` is an optional independent producer that warms one
+  exactly configured oMLX model, captures one 1080p frame per own loop tick,
+  and appends an untrusted timestamped scene description. Invalid model output
+  drops only that sample; it never controls evidence recording or substitutes
+  another model, capture profile, or prior description;
 - `POST /v1/actions/invoke` gives every call an invocation ID. Finite Actions
   return terminal output directly; streaming Actions first commit a durable
   start event and immediately return a callback URL, optional stop URL, and
@@ -205,8 +210,8 @@ cp -R Rules .build/
 The build script also emits `windows-capture-agent-console.exe` for interactive
 terminal diagnostics, `windows-action-check.exe` for offline Rule validation,
 `windows-action-osd.exe` for the display-only Action overlay, and the optional
-`windows-watchdog.exe`. It verifies the expected PE subsystem for every emitted
-executable.
+`windows-watchdog.exe` and independent `windows-visual-log.exe`. It verifies
+the expected PE subsystem for every emitted executable.
 
 ### Offline Action dependency check
 
@@ -294,6 +299,37 @@ $tokenRng.GetBytes($tokenBytes)
   --token-file (Join-Path $PWD "event-stream.token") `
   --log-file (Join-Path $PWD "event-stream.jsonl")
 ```
+
+Run the partially landed Elite Dangerous visual log as its own process after
+the capture Agent and event stream are healthy. The model key file is local
+operator configuration and must not be stored in the Rule:
+
+```powershell
+.\.build\windows-visual-log.exe `
+  --config (Resolve-Path .\Rules\EliteDangerous64.exe\VisualLog\config.json) `
+  --capture-base-url http://127.0.0.1:8787 `
+  --model-base-url http://127.0.0.1:8001/v1 `
+  --model-api-key-file (Resolve-Path .\omlx-api.key) `
+  --event-base-url http://127.0.0.1:8788 `
+  --event-token-file (Resolve-Path .\event-stream.token) `
+  --control-listen 127.0.0.1:8789 `
+  --control-token-file (Resolve-Path .\visual-log-control.token) `
+  --log-file (Join-Path $PWD "visual-log.jsonl") `
+  --status-file (Join-Path $PWD "visual-log-status.json")
+```
+
+The independent process starts idle. A high-level model may request and stop
+one logging run through its authenticated loopback control interface:
+
+```text
+GET    http://127.0.0.1:8789/v1/visual-log/status
+POST   http://127.0.0.1:8789/v1/visual-log/runs       body: {}
+DELETE http://127.0.0.1:8789/v1/visual-log/runs/current
+```
+
+Starting a run creates a new producer session and performs the configured
+warm-up before the process-owned description loop becomes active. Stopping the
+run leaves the independent process idle and has no path to the evidence layer.
 
 The persistent installer launches the event service as an independent,
 interactive-user Scheduled Task. It creates the token only when absent and
@@ -745,6 +781,7 @@ cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
 cmd/windows-event-stream/        authenticated local event journal service
+cmd/windows-visual-log/          optional independent oMLX scene-description producer
 cmd/windows-watchdog/            external one-way process observer and recovery
 cmd/windows-screen-scene-reducer/ retired raw-screen reducer reference
 docs/design/                     maintained design registry
@@ -763,6 +800,8 @@ internal/actioncheck/            offline Action package and dependency validatio
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
+internal/visuallog/              strict Game config, capture/model adapters, and producer loop
+internal/visualloghttp/          authenticated loopback visual-log control adapter
 internal/watchdog/               target probes, bounded recovery, atomic status
 internal/scenereducer/            cursor, scene delta, and append recovery
 internal/foreground/             foreground process observation

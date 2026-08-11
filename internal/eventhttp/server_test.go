@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,52 @@ func TestEventAPIRejectsExplicitZeroReplayLimit(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte("limit must be positive")) {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestEventAPIReturnsAuthenticatedTimeRange(t *testing.T) {
+	server := testServer(t)
+	for index := 0; index < 3; index++ {
+		request := testRequest()
+		request.Stream = "visual-log"
+		request.Type = "visual-log.observation"
+		request.ObservedAt = time.Date(2026, 8, 11, 1, 2, index, 0, time.UTC)
+		body, _ := json.Marshal(request)
+		httpRequest := httptest.NewRequest(http.MethodPost, "/v1/events", bytes.NewReader(body))
+		httpRequest.Header.Set("Content-Type", "application/json")
+		httpRequest.Header.Set("Authorization", "Bearer "+testToken)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httpRequest)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("append status = %d body=%s", response.Code, response.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet,
+		"/v1/events/range?from=2026-08-11T01%3A02%3A00Z&to=2026-08-11T01%3A02%3A03Z&stream=visual-log&limit=2", nil)
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("range status = %d body=%s", response.Code, response.Body.String())
+	}
+	var result timeRangeResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 2 || result.Complete || result.NextCursor != 2 || result.LastSequence != 3 {
+		t.Fatalf("range result = %+v", result)
+	}
+}
+
+func TestEventAPIRejectsNonUTCTimeRange(t *testing.T) {
+	server := testServer(t)
+	request := httptest.NewRequest(http.MethodGet,
+		"/v1/events/range?from=2026-08-11T09%3A00%3A00%2B08%3A00&to=2026-08-11T10%3A00%3A00%2B08%3A00&stream=visual-log", nil)
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "UTC") {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
 	}
 }
 

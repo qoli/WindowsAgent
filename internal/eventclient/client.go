@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
@@ -30,6 +31,13 @@ type replayResponse struct {
 	Events       []eventstream.Event `json:"events"`
 	NextCursor   uint64              `json:"nextCursor"`
 	LastSequence uint64              `json:"lastSequence"`
+}
+
+type TimeRangeResponse struct {
+	Events       []eventstream.Event `json:"events"`
+	NextCursor   uint64              `json:"nextCursor"`
+	LastSequence uint64              `json:"lastSequence"`
+	Complete     bool                `json:"complete"`
 }
 
 func (c *Client) Health(ctx context.Context) error {
@@ -187,6 +195,63 @@ func (c *Client) Replay(ctx context.Context, after uint64, limit int) ([]eventst
 		return nil, 0, 0, fmt.Errorf("decode event replay response: %w", err)
 	}
 	return replay.Events, replay.NextCursor, replay.LastSequence, nil
+}
+
+func (c *Client) TimeRange(ctx context.Context, from, to time.Time, stream string, after uint64, limit int) (TimeRangeResponse, error) {
+	if c == nil || ctx == nil {
+		return TimeRangeResponse{}, errors.New("event client and context are required")
+	}
+	if from.IsZero() || to.IsZero() || from.Location() != time.UTC || to.Location() != time.UTC || !from.Before(to) {
+		return TimeRangeResponse{}, errors.New("event time range requires non-zero UTC from before to")
+	}
+	if strings.TrimSpace(stream) == "" || strings.TrimSpace(stream) != stream {
+		return TimeRangeResponse{}, errors.New("event time range stream is required and canonical")
+	}
+	if limit < 1 || limit > eventstream.MaxReplayLimit {
+		return TimeRangeResponse{}, fmt.Errorf("event time range limit must be between 1 and %d", eventstream.MaxReplayLimit)
+	}
+	query := url.Values{}
+	query.Set("from", from.Format(time.RFC3339Nano))
+	query.Set("to", to.Format(time.RFC3339Nano))
+	query.Set("stream", stream)
+	query.Set("after", strconv.FormatUint(after, 10))
+	query.Set("limit", strconv.Itoa(limit))
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/events/range?"+query.Encode(), nil)
+	if err != nil {
+		return TimeRangeResponse{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	response, err := c.http.Do(request)
+	if err != nil {
+		return TimeRangeResponse{}, fmt.Errorf("read event time range: %w", err)
+	}
+	defer response.Body.Close()
+	maxResponseBytes := int64(eventstream.MaxEventBytes)*int64(limit) + 1
+	data, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes))
+	if err != nil {
+		return TimeRangeResponse{}, fmt.Errorf("read event time range response: %w", err)
+	}
+	if int64(len(data)) >= maxResponseBytes {
+		return TimeRangeResponse{}, errors.New("event time range response exceeds bound")
+	}
+	if response.StatusCode != http.StatusOK {
+		return TimeRangeResponse{}, fmt.Errorf("event time range returned HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
+	}
+	var result TimeRangeResponse
+	if err := decodeStrict(data, &result); err != nil {
+		return TimeRangeResponse{}, fmt.Errorf("decode event time range response: %w", err)
+	}
+	cursor := after
+	for _, event := range result.Events {
+		if event.Sequence <= cursor || event.Stream != stream || event.ObservedAt.Before(from) || !event.ObservedAt.Before(to) {
+			return TimeRangeResponse{}, errors.New("event time range response violates requested order or filter")
+		}
+		cursor = event.Sequence
+	}
+	if result.NextCursor < cursor || result.LastSequence < result.NextCursor {
+		return TimeRangeResponse{}, errors.New("event time range response cursor is invalid")
+	}
+	return result, nil
 }
 
 func (c *Client) Stream(ctx context.Context, after uint64, visit func(eventstream.Event) error) error {

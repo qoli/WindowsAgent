@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Visual Log"
+  short_description: "Locate game timeline ranges with the untrusted visual index"
+  default_prompt: "Use $use-visual-log to start the independent visual log when useful, query a UTC time range, and identify the evidence interval that still needs verification."
