@@ -5,6 +5,7 @@
   "required": ["targetName"],
   "properties": {
     "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
-    "stopBeforeAlign": {"type": "boolean", "default": true}
+    "stopBeforeAlign": {"type": "boolean", "default": true},
+    "positionSource": {"enum": ["DESTINATION", "ESCAPE_VECTOR"], "default": "DESTINATION"}
   }
 }

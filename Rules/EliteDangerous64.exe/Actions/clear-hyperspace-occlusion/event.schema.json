@@ -2,220 +2,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "type",
-    "payload"
-  ],
+  "required": ["type", "payload"],
   "properties": {
-    "type": {
-      "const": "action.clear-hyperspace-occlusion.update"
-    },
+    "type": {"const": "action.clear-hyperspace-occlusion.update"},
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "phase",
-        "targetName",
-        "sample",
-        "turnCount",
-        "occlusionState",
-        "stellarCoverageRatio",
-        "centerCoverageRatio",
-        "directionConfidence",
-        "recommendedControl",
-        "selectedControl",
-        "probeDelta",
-        "clearConfirmations",
-        "stableHeadingConfirmations",
-        "commandedThrottle",
-        "massLock",
-        "heatPercent",
-        "fsdCharging",
-        "fsdHyperdriveCharging",
-        "fsdCooldown",
-        "overHeating",
-        "supercruise",
-        "elapsedMs",
-        "reason"
-      ],
+      "required": ["phase", "targetName", "sample", "turnCount", "occlusionState", "stellarCoverageRatio", "centerCoverageRatio", "maximumCellCoverageRatio", "safeToCharge", "directionConfidence", "recommendedControl", "selectedControl", "commandHoldMs", "probeDelta", "stableHeadingConfirmations", "escapeVectorDetected", "escapeVectorPresentation", "escapeVectorOffsetX", "escapeVectorOffsetY", "escapeVectorCenterDistancePixels", "escapeVectorInsideCenterZone", "escapeVectorEvidenceState", "escapeVectorAlignmentConfirmations", "commandedThrottle", "massLock", "heatPercent", "fsdCharging", "fsdHyperdriveCharging", "fsdCooldown", "overHeating", "supercruise", "elapsedMs", "reason"],
       "properties": {
-        "phase": {
-          "enum": [
-            "VERIFYING_OBSTRUCTION",
-            "PROBING_DIRECTION",
-            "TURNING_AWAY",
-            "STABILIZING_HEADING",
-            "WAITING_CURRENT_STATUS",
-            "NORMAL_ESCAPE",
-            "NORMAL_STELLAR_ESCAPE",
-            "RESUMING_AFTER_STELLAR_ESCAPE",
-            "COOLING_BEFORE_CHARGE",
-            "ENTERING_SUPERCRUISE",
-            "CANCELLING_CHARGE",
-            "SUPERCRUISE_ESCAPE",
-            "STOPPING",
-            "COMPLETED"
-          ]
-        },
-        "targetName": {
-          "type": "string"
-        },
-        "sample": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "turnCount": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 14
-        },
-        "occlusionState": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "CLEAR",
-            "PARTIAL",
-            "BLOCKING",
-            "UNKNOWN",
-            null
-          ]
-        },
-        "stellarCoverageRatio": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "centerCoverageRatio": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "directionConfidence": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 1
-        },
-        "recommendedControl": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "PITCH_UP",
-            "PITCH_DOWN",
-            "YAW_LEFT",
-            "YAW_RIGHT",
-            null
-          ]
-        },
-        "selectedControl": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "PITCH_UP",
-            "PITCH_DOWN",
-            "YAW_LEFT",
-            "YAW_RIGHT",
-            null
-          ]
-        },
-        "probeDelta": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "minimum": -1,
-          "maximum": 1
-        },
-        "clearConfirmations": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
-        },
-        "stableHeadingConfirmations": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
-        },
-        "commandedThrottle": {
-          "enum": [
-            0,
-            100
-          ]
-        },
-        "massLock": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "ON",
-            "OFF",
-            null
-          ]
-        },
-        "heatPercent": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0,
-          "maximum": 250
-        },
-        "fsdCharging": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "fsdHyperdriveCharging": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "fsdCooldown": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "overHeating": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "supercruise": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "elapsedMs": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 120000
-        },
-        "reason": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
+        "phase": {"enum": ["VERIFYING_OBSTRUCTION", "OBSERVING_FORWARD_VIEW", "PROBING_DIRECTION", "TURNING_AWAY", "STABILIZING_HEADING", "WAITING_CURRENT_STATUS", "COOLING_BEFORE_CHARGE", "PROBING_ESCAPE_VECTOR", "PREALIGNING_ESCAPE_VECTOR", "OBSERVING_POST_PULSE_VIEW", "ALIGNING_VISIBLE_ESCAPE_VECTOR", "WAITING_ESCAPE_VECTOR", "WAITING_FSD_COUNTDOWN", "CHECKING_CHARGE_HEAT", "CHECKING_COUNTDOWN_HEAT", "ALIGNING_ESCAPE_VECTOR", "VERIFYING_ESCAPE_VECTOR_ALIGNMENT", "CANCELLING_CHARGE", "SUPERCRUISE_ESCAPE", "COMPLETED"]},
+        "targetName": {"type": "string"},
+        "sample": {"type": "integer", "minimum": 0},
+        "turnCount": {"type": "integer", "minimum": 0, "maximum": 30},
+        "occlusionState": {"type": ["string", "null"], "enum": ["CLEAR", "PARTIAL", "BLOCKING", "UNKNOWN", null]},
+        "stellarCoverageRatio": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "centerCoverageRatio": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "maximumCellCoverageRatio": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "safeToCharge": {"type": ["boolean", "null"]},
+        "directionConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "recommendedControl": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
+        "selectedControl": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
+        "commandHoldMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 5000},
+        "probeDelta": {"type": ["number", "null"], "minimum": -1, "maximum": 1},
+        "stableHeadingConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
+        "escapeVectorDetected": {"type": ["boolean", "null"]},
+        "escapeVectorPresentation": {"type": ["string", "null"], "enum": ["SOLID", "HOLLOW", "UNKNOWN", null]},
+        "escapeVectorOffsetX": {"type": ["integer", "null"], "minimum": -96, "maximum": 96},
+        "escapeVectorOffsetY": {"type": ["integer", "null"], "minimum": -96, "maximum": 96},
+        "escapeVectorCenterDistancePixels": {"type": ["number", "null"], "minimum": 0, "maximum": 136},
+        "escapeVectorInsideCenterZone": {"type": ["boolean", "null"]},
+        "escapeVectorEvidenceState": {"enum": ["NONE", "LIVE_CHARGE", "CACHED_ONE_SHOT", "EXPIRED"]},
+        "escapeVectorAlignmentConfirmations": {"type": "integer", "minimum": 0, "maximum": 60},
+        "commandedThrottle": {"enum": [0, 100]},
+        "massLock": {"type": ["string", "null"], "enum": ["ON", "OFF", null]},
+        "heatPercent": {"type": ["integer", "null"], "minimum": 0, "maximum": 250},
+        "fsdCharging": {"type": ["boolean", "null"]},
+        "fsdHyperdriveCharging": {"type": ["boolean", "null"]},
+        "fsdCooldown": {"type": ["boolean", "null"]},
+        "overHeating": {"type": ["boolean", "null"]},
+        "supercruise": {"type": ["boolean", "null"]},
+        "elapsedMs": {"type": "integer", "minimum": 0, "maximum": 120000},
+        "reason": {"type": ["string", "null"]}
       }
     }
   }

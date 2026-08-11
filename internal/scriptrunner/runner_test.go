@@ -370,6 +370,7 @@ func TestEliteFlightStatusPackageClassifiesFivePassCalibrationCorpus(t *testing.
 		{13, "PRESSTO ABORT", 0.92825, "FSD_CHARGING"},
 		{14, "ALIGN WITH TARGET DESTINATION", 0.990222, "FSD_ALIGNMENT_REQUIRED"},
 		{15, "ALIGN WITH TARGET DESTINATION", 0.987779, "FSD_ALIGNMENT_REQUIRED"},
+		{15, "ALIGN WITH ESCAPE VECTOR", 0.987779, "FSD_ESCAPE_VECTOR_REQUIRED"},
 		{16, "の", 0.147477, "UNKNOWN"},
 		{17, "", 0, "UNKNOWN"},
 		{18, "arbour and a series of services to pilots granted", 0.976558, "UNKNOWN"},
@@ -865,6 +866,21 @@ func TestEliteShipHeatClassifierRequiresConstrainedTwoOrThreeDigitReading(t *tes
 	unknown := runShipHeatClassifier(t, shipHeatClassifierInput("S4", 0.74, "54", 0.58, 0.16))["heat"].(map[string]any)
 	if unknown["state"] != "UNKNOWN" || unknown["percent"] != nil {
 		t.Fatalf("unknown heat=%#v", unknown)
+	}
+}
+
+func TestEliteShipHeatClassifierAcceptsHighConfidenceRawPercentFormat(t *testing.T) {
+	heat := runShipHeatClassifier(t, shipHeatClassifierInput("53%", 0.995, "538", 0.668, 0.328))["heat"].(map[string]any)
+	if heat["state"] != "KNOWN" || heat["percent"] != float64(53) {
+		t.Fatalf("raw percent heat=%#v", heat)
+	}
+	evidence := heat["evidence"].(map[string]any)
+	if evidence["reason"] != "RAW_PERCENT_TEXT_CONFIRMED" {
+		t.Fatalf("raw percent evidence=%#v", evidence)
+	}
+	unknown := runShipHeatClassifier(t, shipHeatClassifierInput("53%", 0.79, "538", 0.668, 0.328))["heat"].(map[string]any)
+	if unknown["state"] != "UNKNOWN" {
+		t.Fatalf("low-confidence raw percent heat=%#v", unknown)
 	}
 }
 
@@ -1638,6 +1654,7 @@ func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *test
 		paint       func(map[int64][]any)
 		wantState   string
 		wantControl any
+		wantSafe    bool
 	}{
 		{
 			name: "full stellar disc has no invented direction",
@@ -1648,29 +1665,39 @@ func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *test
 					}
 				}
 			},
-			wantState: "BLOCKING", wantControl: nil,
+			wantState: "BLOCKING", wantControl: nil, wantSafe: false,
 		},
 		{
 			name: "lower stellar disc recommends pitch up",
 			paint: func(strips map[int64][]any) {
-				pixels := strips[780]
+				pixels := strips[580]
 				for index := range pixels {
 					pixels[index] = uint32(0xFFB020)
 				}
 			},
-			wantState: "BLOCKING", wantControl: "PITCH_UP",
+			wantState: "BLOCKING", wantControl: "PITCH_UP", wantSafe: false,
+		},
+		{
+			name: "top canopy stellar disc clamps public centroid and recommends pitch down",
+			paint: func(strips map[int64][]any) {
+				pixels := strips[20]
+				for index := range pixels {
+					pixels[index] = uint32(0xFFB020)
+				}
+			},
+			wantState: "BLOCKING", wantControl: "PITCH_DOWN", wantSafe: false,
 		},
 		{
 			name: "empty starfield is clear",
 			paint: func(map[int64][]any) {
 			},
-			wantState: "CLEAR", wantControl: nil,
+			wantState: "CLEAR", wantControl: nil, wantSafe: true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			strips := map[int64][]any{}
-			for _, y := range []int64{300, 540, 780} {
-				strips[y] = make([]any, 1680*12)
+			for _, y := range []int64{20, 160, 300, 440, 580} {
+				strips[y] = make([]any, 1680*7)
 				for index := range strips[y] {
 					strips[y][index] = uint32(0)
 				}
@@ -1690,14 +1717,17 @@ func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *test
 				t.Fatal(err)
 			}
 			occlusion := result["occlusion"].(map[string]any)
-			if occlusion["state"] != test.wantState || occlusion["recommendedControl"] != test.wantControl {
+			if occlusion["state"] != test.wantState || occlusion["recommendedControl"] != test.wantControl || occlusion["safeToCharge"] != test.wantSafe {
 				t.Fatalf("occlusion=%#v", occlusion)
 			}
-			if occlusion["sampledPixelCount"] != float64(60480) || len(occlusion["gridCoverageRatios"].([]any)) != 15 {
+			if occlusion["sampledPixelCount"] != float64(58800) || len(occlusion["gridCoverageRatios"].([]any)) != 25 {
 				t.Fatalf("sampling evidence=%#v", occlusion)
 			}
-			wantArguments := map[string]any{"x": int64(120), "y": int64(300), "w": int64(1680), "h": int64(12), "sampling": "reference"}
-			if len(broker.calls) != 3 || !reflect.DeepEqual(broker.calls[0].arguments, wantArguments) {
+			if occlusion["centroidY"] != nil && (occlusion["centroidY"].(float64) < 0 || occlusion["centroidY"].(float64) > 899) {
+				t.Fatalf("centroidY outside public ROI coordinates: %#v", occlusion["centroidY"])
+			}
+			wantArguments := map[string]any{"x": int64(120), "y": int64(20), "w": int64(1680), "h": int64(7), "sampling": "reference"}
+			if len(broker.calls) != 5 || !reflect.DeepEqual(broker.calls[0].arguments, wantArguments) {
 				t.Fatalf("calls=%#v", broker.calls)
 			}
 		})

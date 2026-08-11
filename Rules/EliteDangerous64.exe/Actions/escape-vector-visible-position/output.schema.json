@@ -1,0 +1,11 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,
+  "required":["schemaVersion","target","timing"],"properties":{
+    "schemaVersion":{"const":1},"target":{"type":"object","additionalProperties":false,
+      "required":["state","referenceX","referenceY","offsetX","offsetY","centerDistancePixels","reason","rawTexts"],"properties":{
+        "state":{"enum":["DETECTED","UNKNOWN"]},"referenceX":{"type":["number","null"]},"referenceY":{"type":["number","null"]},
+        "offsetX":{"type":["number","null"]},"offsetY":{"type":["number","null"]},"centerDistancePixels":{"type":["number","null"],"minimum":0},
+        "reason":{"type":"string"},"rawTexts":{"type":"array","items":{"type":"string"}}
+      }},"timing":{"type":"object"}
+  }
+}

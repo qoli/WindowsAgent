@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
-  "version": 3,
-  "title": "Measure wide-field stellar presence and escape direction",
+  "version": 6,
+  "title": "Measure wide-field stellar presence, charge-safe heading, and escape direction",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json"],
-  "permissions": {"memory": null, "file": null, "screen": {"operations": ["readRegion"], "maxCalls": 3, "maxPixels": 60480}},
+  "permissions": {"memory": null, "file": null, "screen": {"operations": ["readRegion"], "maxCalls": 5, "maxPixels": 58800}},
   "limits": {"wallTimeMs": 10000, "maxSteps": 20000000, "maxResultBytes": 8192, "maxLogBytes": 1024}
 }

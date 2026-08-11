@@ -1,1 +1,25 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":false,"required":["schemaVersion","task","completed","targetName","turnCount","stableHeadingConfirmations","selectedControl","maximumChargeStartHeatPercent","chargeStartHeatPercent","normalSpaceEscapePerformed","supercruiseEntryPerformed","supercruiseEscapeDurationMs","finalOcclusionState","finalStellarCoverageRatio","finalSupercruiseConfirmed","finalCommandedThrottle"],"properties":{"schemaVersion":{"const":4},"task":{"const":"CLEAR_HYPERSPACE_OCCLUSION"},"completed":{"const":true},"targetName":{"type":"string"},"turnCount":{"type":"integer","minimum":0,"maximum":14},"stableHeadingConfirmations":{"const":3},"selectedControl":{"enum":["PITCH_UP","PITCH_DOWN","YAW_LEFT","YAW_RIGHT"]},"maximumChargeStartHeatPercent":{"const":60},"chargeStartHeatPercent":{"type":"integer","minimum":0,"maximum":60},"normalSpaceEscapePerformed":{"type":"boolean"},"supercruiseEntryPerformed":{"type":"boolean"},"supercruiseEscapeDurationMs":{"const":30000},"finalOcclusionState":{"const":"CLEAR"},"finalStellarCoverageRatio":{"type":"number","minimum":0,"maximum":0.12},"finalSupercruiseConfirmed":{"const":true},"finalCommandedThrottle":{"const":0}}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "targetName", "initialTurnCount", "stableInitialHeadingConfirmations", "maximumChargeStartHeatPercent", "chargeStartHeatPercent", "escapeVectorDetected", "escapeVectorAlignmentConfirmations", "escapeVectorAlignmentCommands", "supercruiseEscapeDurationMs", "finalOcclusionState", "finalStellarCoverageRatio", "finalSupercruiseConfirmed", "restoreHyperspaceDestinationRequired", "finalCommandedThrottle"],
+  "properties": {
+    "schemaVersion": {"const": 6},
+    "task": {"const": "CLEAR_HYPERSPACE_OCCLUSION"},
+    "completed": {"const": true},
+    "targetName": {"type": "string"},
+    "initialTurnCount": {"const": 0},
+    "stableInitialHeadingConfirmations": {"const": 0},
+    "maximumChargeStartHeatPercent": {"const": 60},
+    "chargeStartHeatPercent": {"type": "integer", "minimum": 0, "maximum": 60},
+    "escapeVectorDetected": {"const": true},
+    "escapeVectorAlignmentConfirmations": {"type": "integer", "minimum": 1, "maximum": 60},
+    "escapeVectorAlignmentCommands": {"type": "integer", "minimum": 0, "maximum": 60},
+    "supercruiseEscapeDurationMs": {"const": 30000},
+    "finalOcclusionState": {"const": "CLEAR"},
+    "finalStellarCoverageRatio": {"type": "number", "minimum": 0, "maximum": 0.12},
+    "finalSupercruiseConfirmed": {"const": true},
+    "restoreHyperspaceDestinationRequired": {"const": true},
+    "finalCommandedThrottle": {"const": 0}
+  }
+}

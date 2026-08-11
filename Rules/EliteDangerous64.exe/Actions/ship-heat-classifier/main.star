@@ -1,5 +1,6 @@
 MIN_CONSTRAINED_CONFIDENCE = 0.55
 MAX_RAW_CONSTRAINT_MARGIN = 0.12
+MIN_RAW_PERCENT_CONFIDENCE = 0.80
 
 def is_digits(text):
     if len(text) < 2 or len(text) > 3:
@@ -17,6 +18,18 @@ def decimal_value(text):
         value = value * 10 + "0123456789".find(character)
     return value
 
+def raw_percent_digits(text):
+    digits = ""
+    for index in range(len(text)):
+        character = text[index]
+        if character in "0123456789":
+            digits += character
+        else:
+            if character == "%" and len(digits) >= 2 and len(digits) <= 3:
+                return digits
+            return ""
+    return ""
+
 def main(ctx):
     raw = ctx.inputs
     decoding = raw["decoding"]
@@ -26,7 +39,16 @@ def main(ctx):
     state = "UNKNOWN"
     percent = None
     reason = "DIGIT_TEXT_INVALID"
-    if decoding["characterConstraint"] != "digits":
+    raw_digits = raw_percent_digits(decoding["rawText"])
+    if raw_digits != "" and decoding["rawConfidence"] >= MIN_RAW_PERCENT_CONFIDENCE:
+        candidate = decimal_value(raw_digits)
+        if candidate <= 250:
+            state = "KNOWN"
+            percent = candidate
+            reason = "RAW_PERCENT_TEXT_CONFIRMED"
+        else:
+            reason = "HEAT_PERCENT_OUT_OF_RANGE"
+    elif decoding["characterConstraint"] != "digits":
         reason = "DIGIT_CONSTRAINT_NOT_APPLIED"
     elif not is_digits(text):
         reason = "DIGIT_TEXT_INVALID"
@@ -56,6 +78,7 @@ def main(ctx):
                 "rawConstraintMargin": margin,
                 "minimumConstrainedConfidence": MIN_CONSTRAINED_CONFIDENCE,
                 "maximumRawConstraintMargin": MAX_RAW_CONSTRAINT_MARGIN,
+                "minimumRawPercentConfidence": MIN_RAW_PERCENT_CONFIDENCE,
             },
         },
         "profile": {"width": raw["evidence"]["frame"]["width"], "height": raw["evidence"]["frame"]["height"], "capturedAt": raw["evidence"]["capturedAt"]},

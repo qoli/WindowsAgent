@@ -205,6 +205,12 @@
         "reaction"
       ]
     },
+    "elite-dangerous/escape-vector-visible-position": {
+      "path": "Actions/escape-vector-visible-position",
+      "runtime": "windows-composite-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/request-docking-availability-classifier": {
       "path": "Actions/request-docking-availability-classifier",
       "runtime": "windows-observation-v1",

@@ -4,13 +4,16 @@ ROI_X = 120
 ROI_Y = 80
 ROI_WIDTH = 1680
 ROI_HEIGHT = 900
-STRIP_HEIGHT = 12
-STRIP_Y = [300, 540, 780]
+STRIP_HEIGHT = 7
+STRIP_Y = [20, 160, 300, 440, 580]
+SAMPLED_CENTER_Y = 230.0
 GRID_COLUMNS = 5
-GRID_ROWS = 3
+GRID_ROWS = 5
 CLEAR_RATIO = 0.015
 BLOCKING_CENTER_RATIO = 0.25
 BLOCKING_TOTAL_RATIO = 0.12
+SAFE_CHARGE_TOTAL_RATIO = 0.005
+SAFE_CHARGE_MAX_CELL_RATIO = 0.02
 MIN_DIRECTION_MAGNITUDE = 0.08
 
 def rounded(value):
@@ -74,7 +77,11 @@ def main(ctx):
     bright_ratio = rounded(float(bright_count) / float(sampled_count))
     warm_ratio = rounded(float(warm_count) / float(sampled_count))
     stellar_ratio = rounded(float(stellar_count) / float(sampled_count))
-    center_ratio = grid_ratios[7]
+    center_ratio = grid_ratios[12]
+    max_cell_ratio = 0.0
+    for cell_ratio in grid_ratios:
+        max_cell_ratio = max(max_cell_ratio, cell_ratio)
+    safe_to_charge = stellar_ratio <= SAFE_CHARGE_TOTAL_RATIO and max_cell_ratio <= SAFE_CHARGE_MAX_CELL_RATIO
     state = "CLEAR"
     if center_ratio >= BLOCKING_CENTER_RATIO or stellar_ratio >= BLOCKING_TOTAL_RATIO:
         state = "BLOCKING"
@@ -89,9 +96,15 @@ def main(ctx):
     recommended_control = None
     if stellar_count > 0:
         centroid_x = rounded(float(stellar_x_total) / float(stellar_count))
-        centroid_y = rounded(float(stellar_y_total) / float(stellar_count))
+        # The top sampling strip starts above ROI_Y so it can cover the
+        # canopy-edge blind spot. Keep the public centroid ROI-relative and
+        # schema-valid while retaining the top-edge direction in escape_y.
+        raw_centroid_y = rounded(float(stellar_y_total) / float(stellar_count))
+        centroid_y = max(0.0, min(float(ROI_HEIGHT - 1), raw_centroid_y))
         escape_x = rounded((centroid_x - float(ROI_WIDTH) / 2.0) / (float(ROI_WIDTH) / 2.0))
-        escape_y = rounded((centroid_y - float(ROI_HEIGHT) / 2.0) / (float(ROI_HEIGHT) / 2.0))
+        # The sparse strips intentionally exclude the lower cockpit. Their
+        # vertical mean, not the full ROI midpoint, is the neutral centroid.
+        escape_y = rounded((raw_centroid_y - SAMPLED_CENTER_Y) / (float(ROI_HEIGHT) / 2.0))
         magnitude = math.sqrt(escape_x * escape_x + escape_y * escape_y)
         direction_confidence = rounded(min(1.0, magnitude / 0.5))
         if magnitude >= MIN_DIRECTION_MAGNITUDE:
@@ -101,7 +114,7 @@ def main(ctx):
                 recommended_control = "YAW_LEFT" if escape_x > 0 else "YAW_RIGHT"
 
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "occlusion": {
             "state": state,
             "brightPixelCount": bright_count,
@@ -112,6 +125,10 @@ def main(ctx):
             "warmOrangeRatio": warm_ratio,
             "stellarCoverageRatio": stellar_ratio,
             "centerCoverageRatio": center_ratio,
+            "maximumCellCoverageRatio": max_cell_ratio,
+            "safeToCharge": safe_to_charge,
+            "safeChargeTotalRatio": SAFE_CHARGE_TOTAL_RATIO,
+            "safeChargeMaximumCellRatio": SAFE_CHARGE_MAX_CELL_RATIO,
             "clearRatio": CLEAR_RATIO,
             "blockingCenterRatio": BLOCKING_CENTER_RATIO,
             "blockingTotalRatio": BLOCKING_TOTAL_RATIO,

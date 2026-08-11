@@ -8,9 +8,9 @@
     "task": {"const": "ALIGN_VISIBLE_TARGET"},
     "completed": {"const": true},
     "targetName": {"type": "string"},
-    "sampleCount": {"type": "integer", "minimum": 3, "maximum": 120},
+    "sampleCount": {"type": "integer", "minimum": 2, "maximum": 120},
     "commandCount": {"type": "integer", "minimum": 0, "maximum": 80},
-    "stableConfirmations": {"type": "integer", "minimum": 3, "maximum": 120},
+    "stableConfirmations": {"type": "integer", "minimum": 2, "maximum": 120},
     "finalTarget": {"type": "object"}
   }
 }

@@ -388,52 +388,69 @@ Supercruise HUD evidence then complete the child at
 `ARRIVED_IN_SUPERCRUISE`. It does not read a route, choose another hop, or
 enter the Station workflow.
 
-`elite-dangerous/hyperspace-target-occlusion` is the finite directional CV
-Gate over a wide 1680 by 900 forward-view reference region. It uses sparse
-high-luminance pixels for a 5 by 3 stellar occupancy grid, total coverage, and
-centroid direction; warm-orange pixels remain diagnostic because Elite's HUD
-and cockpit trim are orange. `CLEAR` means the nearby star has left the broad
-forward field, not merely the old central crop. `PARTIAL` and `BLOCKING` are
-current-frame states. A symmetric or full-frame body returns no recommended
-control rather than inventing a direction.
+`elite-dangerous/hyperspace-target-occlusion` is the finite directional CV Gate
+over five sparse horizontal strips in the upper 1680 by 900 forward view. The
+5 by 5 stellar occupancy grid excludes the lower cockpit reflection while
+retaining upper-screen stellar obstruction. `safeToCharge` is stricter than
+`CLEAR`: total sampled stellar coverage must be at most 0.5%, and every cell at
+most 2%. A symmetric or full-frame body returns no recommended control rather
+than inventing a direction.
 
 `elite-dangerous/clear-hyperspace-occlusion` is its interruptible streaming
-owner. It stops first, measures every turn, and uses a bounded Pitch Up probe
-when the finite Gate has no reliable direction. Coverage improvement preserves
-the probe direction; worsening coverage reverses it. Once a turn first reaches
-`CLEAR`, attitude input ends. The Action waits 1.5 seconds and requires three
-current no-input `CLEAR` observations, so an in-motion frame cannot authorize
-FSD charging. Landing Gear and Cargo Scoop must then be visually OFF, current
-`Status.json` must show no FSD charge, cooldown, Mass Lock, or overheat. It
-preserves the verified away-from-star heading for a 120-second normal-space escape,
-requires at least two current visual `ship-speed` non-zero confirmations among
-four samples at five through eight seconds, and aborts
-that escape if known heat reaches 75%. After stopping, `ship-heat` must return
-three known readings at or below 60%. Only then does it
-invoke the dedicated `Supercruise` binding. Each Status observation permits at
-most three bounded launcher attempts and never substitutes stale evidence.
-Only a supervising model holding a prior durable 120-second escape, 0%
-compensation, and safe-heat checkpoint may explicitly resume with
-`normalSpaceSeparationConfirmed=true`; omission always performs the escape.
-After charging begins, it never
-aligns and never waits on slow HUD OCR: current Status flags exclusively decide
-Supercruise entry, timeout, cancellation, or unsafe overheat/charge state. It
-allows up to fifteen seconds for the already-aligned, low-heat charge to enter
-Supercruise, sampling visual heat each second and cancelling at 90%; a still-
-charging timeout is also actively cancelled and confirmed. It
-travels tangentially for 30 seconds and completes at 0% with current `CLEAR`
-and Supercruise evidence. It never aligns the destination or sends the
-hyperspace control itself.
+owner and owns the complete local realtime escape loop. It stops first,
+records forward-view CV only as diagnostic context, and never uses CV to
+calculate the escape angle. Landing Gear and Cargo Scoop must be visually OFF;
+the latest AVAILABLE `Status.json` baseline must show normal-space idle with
+Mass Lock OFF; and `ship-heat` must return three known readings at or below 60%
+before activation. Since Status is persistent event state rather than a
+heartbeat, a newer source timestamp is mandatory after the Supercruise command
+before its flags may advance the workflow.
+It uses at most eight short 0%-throttle Supercruise probes to discover and
+prealign the Escape Vector. Up to sixteen charging Compass samples at 137 ms
+cadence deliberately walk across the flashing marker; two consistent SOLID or
+HOLLOW observations are required. An absent-to-detected transition,
+presentation change, or at least eight pixels of Manhattan offset movement
+confirms charge ownership. OCR-confirmed `ALIGN WITH ESCAPE VECTOR` is optional
+strong evidence because live prompts often remain `CHARGING`.
+
+Each cancelled probe yields one Action-local snapshot that authorizes exactly
+one attitude segment and then expires. HOLLOW is only a rear-hemisphere
+topology signal, so it uses a fixed 3000 ms `PITCH_UP` segment rather than its
+unreliable signed offset. SOLID uses 3000/1800/700/200 ms distance bands and
+reverses a repeated control when a fresh probe proves the distance worsened.
+Heat must cool to three readings at or below 60% before another probe.
+
+SOLID proves only that the target is in the front hemisphere; it never proves
+that the visible Escape Vector lies inside the OCR ROI. While the same probe
+charge is active, `escape-vector-visible-position` is the independent ROI
+Gate. `UNKNOWN` cancels the probe and permits one Compass-derived segment.
+Only `DETECTED` hands control to heat-protected `align-visible-target` with its
+faster Escape Vector profile. After two stable visible confirmations, the
+Action preserves that charge, commands 100%, stops reading Compass and visible
+reticle evidence, and waits for the FSD entry countdown.
+
+Before visible alignment, known heat at 75% or three consecutive UNKNOWN heat
+observations cancel formal charge. During the already-aligned countdown, the
+transient heat wall may hide OCR and reticle evidence, so UNKNOWN heat is
+logged without cancellation and only a known reading at 160% cancels. Every
+slow heat OCR return is followed by a fresh Status read; a confirmed
+Supercruise transition wins the race before cancellation. Mass Lock and
+hyperspace-charge flags remain immediate failures. Failure or cancellation
+owns STOP-hold, one verified Supercruise-toggle cancellation, and 0% throttle
+compensation locally. After current Status confirms Supercruise, toggle
+compensation is removed; the Action follows the aligned escape for 30 seconds
+and completes at 0% with current `CLEAR` and Supercruise evidence. The parent
+must then restore the original hyperspace destination.
 
 `elite-dangerous/ship-heat` is the finite visual charge-start Gate. Its OCR
-front end reads the fixed two- or three-digit cockpit heat percentage with a
-digits-only decoder; the pure classifier returns `KNOWN` only for a sufficiently
+front end reads the fixed two- or three-digit cockpit heat percentage with
+bounded vertical/right margin for HUD inertia while excluding the animated red
+heat icon to the left. Its digits-only decoder and pure classifier return
+`KNOWN` only for a sufficiently
 confident value from 0 through 250 whose constrained and raw readings do not
-materially disagree. `UNKNOWN` must delay or reject initial charging. During
-charging, the Action retains the last known value across an `UNKNOWN` sample
-and cancels when a new known visual value reaches the declared safety limit,
-because Elite's ship heat is not exposed as a live numeric field in
-`Status.json`.
+materially disagree. `UNKNOWN` must delay or reject initial charging. After
+capture optimization, live evidence measured complete heat calls at about
+0.25 seconds, so the stellar escape Action uses it on every Compass cycle.
 
 `elite-dangerous/nav-route-plan` is the pure semantic boundary over the RAW
 `filesystem/nav-route` result. It validates every plotted System entry, the

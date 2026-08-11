@@ -23,7 +23,10 @@ is classified as `SAFE_DISENGAGE_READY`; a flight workflow must still require
 multi-frame confirmation before sending the FSD command. `SUPERCRUISE ASSIST
 ACTIVE` is a separate `SUPERCRUISE_ASSIST_ACTIVE` state rather than ordinary
 `SUPERCRUISE`, allowing an owning workflow to stop issuing attitude and
-throttle inputs after the game computer takes control. Missing, unrelated, ambiguous, or
+throttle inputs after the game computer takes control. `ALIGN WITH ESCAPE
+VECTOR` is classified separately as `FSD_ESCAPE_VECTOR_REQUIRED`; a workflow
+must not infer that Compass ownership changed from `FSD_CHARGING` alone.
+Missing, unrelated, ambiguous, or
 low-confidence content remains `UNKNOWN`; never choose a status merely because
 it is the closest catalog phrase.
 

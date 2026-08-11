@@ -19,6 +19,7 @@
             "SLOW_DOWN_FOR_AUTO_DOCK",
             "FSD_CHARGING",
             "FSD_ALIGNMENT_REQUIRED",
+            "FSD_ESCAPE_VECTOR_REQUIRED",
             "SAFE_DISENGAGE_READY",
             "AUTO_DOCK",
             "UNKNOWN"
@@ -27,7 +28,7 @@
         "known": {"type": "boolean"}
       },
       "oneOf": [
-        {"properties": {"state": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK"]}, "known": {"const": true}}},
+        {"properties": {"state": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK"]}, "known": {"const": true}}},
         {"properties": {"state": {"const": "UNKNOWN"}, "known": {"const": false}}}
       ]
     },
@@ -52,10 +53,10 @@
         "margin": {"type": "number", "minimum": 0, "maximum": 1},
         "marginThreshold": {"const": 0.1},
         "similarityThreshold": {"const": 0.6},
-        "candidateState": {"type": ["string", "null"], "enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", null]},
+        "candidateState": {"type": ["string", "null"], "enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", null]},
         "candidateAlias": {"type": ["string", "null"], "maxLength": 64},
         "textSimilarity": {"type": "number", "minimum": 0, "maximum": 1},
-        "runnerUpState": {"type": ["string", "null"], "enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", null]},
+        "runnerUpState": {"type": ["string", "null"], "enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", null]},
         "runnerUpConfidence": {"type": "number", "minimum": 0, "maximum": 1}
       }
     }

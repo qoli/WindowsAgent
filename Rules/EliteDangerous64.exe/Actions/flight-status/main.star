@@ -32,6 +32,10 @@ STATUS_RULES = [
         "aliases": ["ALIGN WITH TARGET DESTINATION"],
     },
     {
+        "state": "FSD_ESCAPE_VECTOR_REQUIRED",
+        "aliases": ["ALIGN WITH ESCAPE VECTOR"],
+    },
+    {
         "state": "SAFE_DISENGAGE_READY",
         "aliases": ["SAFE DISENGAGE READY"],
     },
