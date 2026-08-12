@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,7 +56,13 @@ func loadEliteAlignVisibleTargetPackage(t *testing.T) *Package {
 }
 
 func visibleHeat(state string, percent any) json.RawMessage {
-	value, _ := json.Marshal(map[string]any{"heat": map[string]any{"state": state, "percent": percent}})
+	reason := "RAW_PERCENT_TEXT_CONFIRMED"
+	if state == "UNKNOWN" {
+		reason = "RAW_PERCENT_TEXT_NOT_CONFIRMED"
+	}
+	value, _ := json.Marshal(map[string]any{"heat": map[string]any{
+		"state": state, "percent": percent, "evidence": map[string]any{"reason": reason},
+	}})
 	return value
 }
 
@@ -121,6 +128,143 @@ func TestEliteAlignVisibleTargetUsesRaisedMidFineDestinationPulse(t *testing.T) 
 	}
 	if !contains(joinEventPhases(reporter.payloads), `"commandHoldMs":120`) {
 		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignVisibleTargetUsesRaisedNearDestinationYawPulse(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(15, 6, 16.2),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"command":"YAW_RIGHT"`) || !contains(events, `"commandHoldMs":120`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetObservesDestinationBoundaryJitterWithoutSteering(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(15, 6, 16.2),
+			visiblePosition(8, 6, 10),
+			visiblePosition(11, 7, 13.1),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 1 {
+		t.Fatalf("boundary jitter authorized controls: %v", caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `CENTER_BOUNDARY_JITTER_TOLERATED`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetAllowsTwoBoundarySamplesOnlyAfterEnteringGate(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(15, 6, 16.2),
+			visiblePosition(8, 6, 10),
+			visiblePosition(11, 7, 13.1),
+			visiblePosition(10, 8, 12.8),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 1 {
+		t.Fatalf("two post-Gate boundary samples authorized controls: %v", caller.controls)
+	}
+	if strings.Count(joinEventPhases(reporter.payloads), `CENTER_BOUNDARY_JITTER_TOLERATED`) != 2 {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignVisibleTargetDoesNotTolerateBoundaryBeforeEnteringGate(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(11, 7, 13.1),
+			visiblePosition(10, 8, 12.8),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 2 {
+		t.Fatalf("pre-Gate boundary samples were tolerated: %v", caller.controls)
+	}
+	if contains(joinEventPhases(reporter.payloads), `CENTER_BOUNDARY_JITTER_TOLERATED`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteAlignVisibleTargetRecoversAfterFiveUnknownDestinationHeatSamples(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{
+			visibleHeat("UNKNOWN", nil),
+			visibleHeat("UNKNOWN", nil),
+			visibleHeat("UNKNOWN", nil),
+			visibleHeat("UNKNOWN", nil),
+			visibleHeat("UNKNOWN", nil),
+			visibleHeat("KNOWN", 23),
+		},
+		positions: []json.RawMessage{
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+			visiblePosition(8, 6, 10),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if strings.Count(events, `STRICT_HEAT_CHECKPOINT_UNKNOWN`) != 5 || !contains(events, `"heatReason":"RAW_PERCENT_TEXT_NOT_CONFIRMED"`) {
+		t.Fatalf("events=%s", events)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("UNKNOWN checkpoint authorized controls: %v", caller.controls)
 	}
 }
 

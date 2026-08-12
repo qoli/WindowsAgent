@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 3,
+  "version": 4,
   "title": "Locate the selected Elite Dangerous target in the Supercruise forward HUD",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

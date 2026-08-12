@@ -5,6 +5,8 @@ MAX_SAMPLES = 120
 MAX_COMMANDS = 80
 STABLE_CONFIRMATIONS = 3
 CENTER_RADIUS_PIXELS = 12.0
+DESTINATION_VERIFY_JITTER_RADIUS_PIXELS = 14.0
+DESTINATION_VERIFY_JITTER_SAMPLES = 2
 COARSE_DISTANCE_PIXELS = 120.0
 FINE_DISTANCE_PIXELS = 40.0
 NEAR_DISTANCE_PIXELS = 20.0
@@ -12,6 +14,7 @@ COARSE_HOLD_MS = 300
 MEDIUM_HOLD_MS = 160
 FINE_HOLD_MS = 120
 NEAR_HOLD_MS = 80
+DESTINATION_NEAR_YAW_HOLD_MS = 120
 ESCAPE_VECTOR_COARSE_HOLD_MS = 500
 ESCAPE_VECTOR_MEDIUM_HOLD_MS = 300
 ESCAPE_VECTOR_FINE_HOLD_MS = 160
@@ -20,11 +23,13 @@ MAX_DEADLINE_ERRORS = 5
 MAX_HEAT_PERCENT = 75
 HIGH_HEAT_CONFIRMATIONS = 2
 MAX_UNKNOWN_HEAT_SAMPLES = 3
+DESTINATION_HEAT_CHECKPOINT_SAMPLES = 8
+DESTINATION_HEAT_UNKNOWN_RETRY_MS = 250
 DESTINATION_HEAT_CHECKPOINT_INTERVAL = 8
 ESCAPE_CHARGE_LAST_KNOWN_MAX_PERCENT = 60
 ESCAPE_CHARGE_UNKNOWN_GRACE_MS = 4000
 
-def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None):
+def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None):
     stream.emit(
         type="action.align-visible-target.update",
         payload={
@@ -41,6 +46,7 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
             "commandHoldMs": hold_ms,
             "heatState": heat_state,
             "heatPercent": heat_percent,
+            "heatReason": heat_reason,
             "reason": reason,
             "observationErrorCode": error_code,
             "observationError": error,
@@ -74,6 +80,8 @@ def choose_command(target, position_source):
     elif distance <= NEAR_DISTANCE_PIXELS:
         hold_ms = NEAR_HOLD_MS
     if abs(offset_x) >= abs(offset_y) and offset_x != 0:
+        if position_source == "DESTINATION" and distance <= NEAR_DISTANCE_PIXELS:
+            hold_ms = DESTINATION_NEAR_YAW_HOLD_MS
         return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", hold_ms]
     if offset_y != 0:
         # Reference Y grows downward; Pitch Down moves a visible front target upward.
@@ -82,23 +90,26 @@ def choose_command(target, position_source):
 
 def observe_destination_heat_checkpoint(target_name, sample, command_count, stable):
     high_heat_count = 0
-    for _ in range(MAX_UNKNOWN_HEAT_SAMPLES):
+    for checkpoint_sample in range(DESTINATION_HEAT_CHECKPOINT_SAMPLES):
         heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
         heat_state = heat["state"]
         heat_percent = heat["percent"]
+        heat_reason = heat["evidence"]["reason"]
         if heat_state != "KNOWN":
-            emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="STRICT_HEAT_CHECKPOINT_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent)
+            emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="STRICT_HEAT_CHECKPOINT_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, heat_reason=heat_reason)
+            if checkpoint_sample + 1 < DESTINATION_HEAT_CHECKPOINT_SAMPLES:
+                task.sleep(milliseconds=DESTINATION_HEAT_UNKNOWN_RETRY_MS)
             continue
         if heat_percent >= MAX_HEAT_PERCENT:
             high_heat_count += 1
             if high_heat_count >= HIGH_HEAT_CONFIRMATIONS:
-                emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="MAX_HEAT_PERCENT_CONFIRMED", heat_state=heat_state, heat_percent=heat_percent)
+                emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="MAX_HEAT_PERCENT_CONFIRMED", heat_state=heat_state, heat_percent=heat_percent, heat_reason=heat_reason)
                 fail("visible target alignment crossed the confirmed 75 percent heat safety gate")
-            emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HIGH_HEAT_AWAITING_CONFIRMATION", heat_state=heat_state, heat_percent=heat_percent)
+            emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HIGH_HEAT_AWAITING_CONFIRMATION", heat_state=heat_state, heat_percent=heat_percent, heat_reason=heat_reason)
             continue
-        emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="STRICT_HEAT_CHECKPOINT_ACCEPTED", heat_state=heat_state, heat_percent=heat_percent)
+        emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="STRICT_HEAT_CHECKPOINT_ACCEPTED", heat_state=heat_state, heat_percent=heat_percent, heat_reason=heat_reason)
         return heat
-    fail("visible target alignment did not obtain a safe strict heat checkpoint")
+    fail("visible target alignment did not obtain a safe strict heat checkpoint after eight samples")
 
 def main(ctx):
     target_name = ctx.inputs["targetName"]
@@ -113,6 +124,8 @@ def main(ctx):
         emit_update("STOPPING", target_name, 0, 0, command="SET_THROTTLE_0", reason=throttle["control"])
 
     stable = 0
+    entered_center_gate = False
+    boundary_jitter_samples = 0
     command_count = 0
     unknown_count = 0
     deadline_count = 0
@@ -187,6 +200,8 @@ def main(ctx):
         if target["state"] != "DETECTED":
             unknown_count += 1
             stable = 0
+            entered_center_gate = False
+            boundary_jitter_samples = 0
             emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent)
             if unknown_count >= TRANSIENT_UNKNOWN_LIMIT:
                 fail("visible target remained UNKNOWN after its bounded observation window")
@@ -195,6 +210,8 @@ def main(ctx):
         unknown_count = 0
 
         if target["centerDistancePixels"] <= CENTER_RADIUS_PIXELS:
+            entered_center_gate = True
+            boundary_jitter_samples = 0
             stable += 1
             emit_update("VERIFYING_CENTER", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_CENTER_CANDIDATE", heat_state=heat_state, heat_percent=heat_percent)
             if stable >= stable_confirmations_required:
@@ -213,7 +230,16 @@ def main(ctx):
             wait_for_cadence(started_ms, position_source)
             continue
 
+        if position_source == "DESTINATION" and entered_center_gate and boundary_jitter_samples < DESTINATION_VERIFY_JITTER_SAMPLES and target["centerDistancePixels"] <= DESTINATION_VERIFY_JITTER_RADIUS_PIXELS:
+            stable = 0
+            boundary_jitter_samples += 1
+            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="CENTER_BOUNDARY_JITTER_TOLERATED", heat_state=heat_state, heat_percent=heat_percent)
+            wait_for_cadence(started_ms, position_source)
+            continue
+
         stable = 0
+        entered_center_gate = False
+        boundary_jitter_samples = 0
         if command_count >= MAX_COMMANDS:
             fail("visible target alignment exhausted the bounded command limit")
         pulse = choose_command(target, position_source)

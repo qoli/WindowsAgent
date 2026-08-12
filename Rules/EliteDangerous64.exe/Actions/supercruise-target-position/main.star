@@ -3,7 +3,9 @@ MIN_RECOGNITION_CONFIDENCE = 0.75
 SCREEN_CENTER_X = 960.0
 SCREEN_CENTER_Y = 540.0
 LABEL_TO_MARKER_X = 30.0
-LABEL_TO_MARKER_Y = 8.0
+# The destination ring is below the OCR label centre. The subtraction at the
+# call sites therefore uses a negative offset to move the derived point down.
+LABEL_TO_MARKER_Y = -12.5
 DUPLICATE_BOX_TOLERANCE_PIXELS = 16.0
 MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS = 32.0
 

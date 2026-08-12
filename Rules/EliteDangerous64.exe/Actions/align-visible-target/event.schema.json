@@ -8,7 +8,7 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "targetName", "sample", "commandCount", "targetState", "offsetX", "offsetY", "centerDistancePixels", "stableConfirmations", "command", "commandHoldMs", "heatState", "heatPercent", "reason", "observationErrorCode", "observationError"],
+      "required": ["phase", "targetName", "sample", "commandCount", "targetState", "offsetX", "offsetY", "centerDistancePixels", "stableConfirmations", "command", "commandHoldMs", "heatState", "heatPercent", "heatReason", "reason", "observationErrorCode", "observationError"],
       "properties": {
         "phase": {"enum": ["STOPPING", "OBSERVING", "ALIGNING", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR", "SAFETY_GATE"]},
         "targetName": {"type": "string", "maxLength": 96},
@@ -23,6 +23,7 @@
         "commandHoldMs": {"type": ["integer", "null"], "minimum": 40, "maximum": 600},
         "heatState": {"type": ["string", "null"], "enum": ["KNOWN", "UNKNOWN", null]},
         "heatPercent": {"type": ["integer", "null"], "minimum": 0, "maximum": 250},
+        "heatReason": {"type": ["string", "null"], "maxLength": 256},
         "reason": {"type": ["string", "null"], "maxLength": 256},
         "observationErrorCode": {"type": ["string", "null"], "maxLength": 96},
         "observationError": {"type": ["string", "null"], "maxLength": 512}

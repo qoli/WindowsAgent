@@ -1,6 +1,6 @@
 MIN_CONSTRAINED_CONFIDENCE = 0.55
 MAX_RAW_CONSTRAINT_MARGIN = 0.12
-MIN_RAW_PERCENT_CONFIDENCE = 0.80
+MIN_RAW_PERCENT_CONFIDENCE = 0.75
 
 def is_digits(text):
     if len(text) < 2 or len(text) > 3:
@@ -40,30 +40,29 @@ def main(ctx):
     percent = None
     reason = "DIGIT_TEXT_INVALID"
     raw_digits = raw_percent_digits(decoding["rawText"])
-    if raw_digits != "" and decoding["rawConfidence"] >= MIN_RAW_PERCENT_CONFIDENCE:
-        candidate = decimal_value(raw_digits)
-        if candidate <= 250:
-            state = "KNOWN"
-            percent = candidate
-            reason = "RAW_PERCENT_TEXT_CONFIRMED"
+    if raw_digits != "":
+        if decoding["rawConfidence"] < MIN_RAW_PERCENT_CONFIDENCE:
+            # An explicit but low-confidence percent-form reading conflicts with
+            # a digits-only candidate such as 23% -> 238. Preserve UNKNOWN
+            # instead of letting the constrained decoder invent a high heat.
+            reason = "RAW_PERCENT_CONFIDENCE_LOW"
         else:
-            reason = "HEAT_PERCENT_OUT_OF_RANGE"
+            candidate = decimal_value(raw_digits)
+            if candidate <= 250:
+                state = "KNOWN"
+                percent = candidate
+                reason = "RAW_PERCENT_TEXT_CONFIRMED"
+            else:
+                reason = "HEAT_PERCENT_OUT_OF_RANGE"
     elif decoding["characterConstraint"] != "digits":
         reason = "DIGIT_CONSTRAINT_NOT_APPLIED"
-    elif not is_digits(text):
-        reason = "DIGIT_TEXT_INVALID"
-    elif confidence < MIN_CONSTRAINED_CONFIDENCE:
-        reason = "CONSTRAINED_CONFIDENCE_LOW"
-    elif margin > MAX_RAW_CONSTRAINT_MARGIN:
-        reason = "RAW_CONSTRAINT_DISAGREEMENT_HIGH"
     else:
-        candidate = decimal_value(text)
-        if candidate > 250:
-            reason = "HEAT_PERCENT_OUT_OF_RANGE"
-        else:
-            state = "KNOWN"
-            percent = candidate
-            reason = "HEAT_PERCENT_CONFIRMED"
+        # The constrained path can turn the visible percent sign into a
+        # trailing 8 (23% -> 238), and the unconstrained path sometimes makes
+        # the same substitution. Without an explicit raw percent terminator,
+        # there is no honest way to distinguish that from a real three-digit
+        # heat value. Retain both decodings as evidence but classify UNKNOWN.
+        reason = "RAW_PERCENT_FORMAT_MISSING"
     return {
         "schemaVersion": 1,
         "heat": {

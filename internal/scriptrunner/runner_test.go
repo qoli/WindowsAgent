@@ -869,10 +869,13 @@ func runShipHeatClassifier(t *testing.T, input map[string]any) map[string]any {
 	return result
 }
 
-func TestEliteShipHeatClassifierRequiresConstrainedTwoOrThreeDigitReading(t *testing.T) {
-	known := runShipHeatClassifier(t, shipHeatClassifierInput("054", 0.91, "054", 0.94, 0.03))["heat"].(map[string]any)
-	if known["state"] != "KNOWN" || known["percent"] != float64(54) {
-		t.Fatalf("known heat=%#v", known)
+func TestEliteShipHeatClassifierRejectsDigitsWithoutRawPercentTerminator(t *testing.T) {
+	constrained := runShipHeatClassifier(t, shipHeatClassifierInput("054", 0.91, "054", 0.94, 0.03))["heat"].(map[string]any)
+	if constrained["state"] != "UNKNOWN" || constrained["percent"] != nil {
+		t.Fatalf("digits-only heat=%#v", constrained)
+	}
+	if constrained["evidence"].(map[string]any)["reason"] != "RAW_PERCENT_FORMAT_MISSING" {
+		t.Fatalf("digits-only heat evidence=%#v", constrained["evidence"])
 	}
 	unknown := runShipHeatClassifier(t, shipHeatClassifierInput("S4", 0.74, "54", 0.58, 0.16))["heat"].(map[string]any)
 	if unknown["state"] != "UNKNOWN" || unknown["percent"] != nil {
@@ -889,9 +892,25 @@ func TestEliteShipHeatClassifierAcceptsHighConfidenceRawPercentFormat(t *testing
 	if evidence["reason"] != "RAW_PERCENT_TEXT_CONFIRMED" {
 		t.Fatalf("raw percent evidence=%#v", evidence)
 	}
-	unknown := runShipHeatClassifier(t, shipHeatClassifierInput("53%", 0.79, "538", 0.668, 0.328))["heat"].(map[string]any)
+	unknown := runShipHeatClassifier(t, shipHeatClassifierInput("53%", 0.74, "538", 0.668, 0.328))["heat"].(map[string]any)
 	if unknown["state"] != "UNKNOWN" {
 		t.Fatalf("low-confidence raw percent heat=%#v", unknown)
+	}
+	contradictory := runShipHeatClassifier(t, shipHeatClassifierInput("23%", 0.74, "238", 0.74, 0.04))["heat"].(map[string]any)
+	if contradictory["state"] != "UNKNOWN" || contradictory["percent"] != nil {
+		t.Fatalf("low-confidence contradictory raw percent heat=%#v", contradictory)
+	}
+	evidence = contradictory["evidence"].(map[string]any)
+	if evidence["reason"] != "RAW_PERCENT_CONFIDENCE_LOW" {
+		t.Fatalf("low-confidence contradictory evidence=%#v", evidence)
+	}
+	calibrated := runShipHeatClassifier(t, shipHeatClassifierInput("23%", 0.79, "238", 0.74, 0.04))["heat"].(map[string]any)
+	if calibrated["state"] != "KNOWN" || calibrated["percent"] != float64(23) {
+		t.Fatalf("calibrated raw percent heat=%#v", calibrated)
+	}
+	high := runShipHeatClassifier(t, shipHeatClassifierInput("238%", 0.82, "238", 0.91, 0.09))["heat"].(map[string]any)
+	if high["state"] != "KNOWN" || high["percent"] != float64(238) {
+		t.Fatalf("three-digit raw percent heat=%#v", high)
 	}
 }
 

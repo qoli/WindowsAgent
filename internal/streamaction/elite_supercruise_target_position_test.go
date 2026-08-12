@@ -58,7 +58,7 @@ func supercruiseTargetPositionBands(first, second, third json.RawMessage) map[st
 
 func TestEliteSupercruiseTargetPositionSelectsForwardDuplicate(t *testing.T) {
 	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
-		targetPositionRegions("LTT 11244 A 2", 1030, 578),
+		targetPositionRegions("LTT 11244 A 2", 1030, 557.5),
 		targetPositionRegions("LTT 11244 A 2", 230, 908),
 		targetPositionRegions("", 0, 0),
 	)}
@@ -68,6 +68,22 @@ func TestEliteSupercruiseTargetPositionSelectsForwardDuplicate(t *testing.T) {
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
 		!contains(string(output), `"reason":"NEAREST_FORWARD_TARGET_LABEL_SELECTED"`) ||
 		!contains(string(output), `"centerDistancePixels":50`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionUsesMeasuredMarkerBelowLabel(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("LTT 11244 A 2", 988.73, 537.5),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"referenceX":958.73`) ||
+		!contains(string(output), `"referenceY":550`) ||
+		!contains(string(output), `"offsetY":10`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
