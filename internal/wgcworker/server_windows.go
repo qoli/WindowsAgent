@@ -42,7 +42,13 @@ func Serve(reader io.Reader, writer io.Writer, logger *slog.Logger) error {
 		_ = writeRPCError(conn, first.ID, -32602, "invalid initialize params", err)
 		return err
 	}
-	capturer, err := wgc.NewPersistent(logger)
+	initializationContext, initializationCancel, err := initializationCallContext(params.Deadline)
+	if err != nil {
+		_ = writeRPCError(conn, first.ID, -32602, "invalid initialize deadline", err)
+		return err
+	}
+	defer initializationCancel()
+	capturer, err := wgc.NewPersistent(initializationContext, logger)
 	if err != nil {
 		_ = writeCaptureError(conn, first.ID, "initialize persistent WGC", err)
 		return err
@@ -54,12 +60,19 @@ func Serve(reader io.Reader, writer io.Writer, logger *slog.Logger) error {
 		_ = writeCaptureError(conn, first.ID, "read persistent WGC status", err)
 		return err
 	}
+	persistentStatus, err := capturer.PersistentStatus()
+	if err != nil {
+		_ = writeCaptureError(conn, first.ID, "read persistent WGC initialization status", err)
+		return err
+	}
 	if err := writeResult(conn, first.ID, initializeResult{
-		ProtocolVersion: ProtocolVersion,
-		ProcessID:       os.Getpid(),
-		Backend:         "windows-graphics-capture",
-		Persistent:      true,
-		Status:          status,
+		ProtocolVersion:  ProtocolVersion,
+		ProcessID:        os.Getpid(),
+		Backend:          "windows-graphics-capture",
+		Persistent:       true,
+		BorderlessAccess: persistentStatus.BorderlessAccess,
+		BorderRequired:   persistentStatus.BorderRequired,
+		Status:           status,
 	}); err != nil {
 		return err
 	}
@@ -177,6 +190,18 @@ func callContext(deadline time.Time) (context.Context, context.CancelFunc, error
 	}
 	if deadline.After(now.Add(MaxCallDuration)) {
 		return nil, nil, fmt.Errorf("deadline cannot exceed %s", MaxCallDuration)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	return ctx, cancel, nil
+}
+
+func initializationCallContext(deadline time.Time) (context.Context, context.CancelFunc, error) {
+	now := time.Now()
+	if deadline.IsZero() || !deadline.After(now) {
+		return nil, nil, errors.New("initialization deadline must be in the future")
+	}
+	if deadline.After(now.Add(MaxInitializationDuration)) {
+		return nil, nil, fmt.Errorf("initialization deadline cannot exceed %s", MaxInitializationDuration)
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	return ctx, cancel, nil

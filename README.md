@@ -203,8 +203,8 @@ The build script also emits `windows-capture-agent-console.exe` for interactive
 terminal diagnostics, `windows-wgc-worker.exe` for the Agent-owned persistent
 and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
 validation,
-`windows-action-osd.exe` for the display-only Action and Evidence-recording
-overlay, and the optional `windows-watchdog.exe` and independent
+`windows-action-osd.exe` for the display-only capture, Action, and
+Evidence-recording overlay, and the optional `windows-watchdog.exe` and independent
 `windows-evidence-recorder.exe` and `windows-visual-log.exe`. It also emits the
 Event Stream and all three observation runtimes required by the persistent
 installer. It verifies the expected PE subsystem for every emitted executable.
@@ -294,7 +294,10 @@ last durable cursor owned by the retired contract. The installed OSD skips only
 history at or before that boundary; later events remain subject to normal
 startup replay and strict validation.
 
-The independent interactive-user task shows a fixed yellow dot while an
+The independent interactive-user task shows a fixed cyan dot for at least
+500 ms after the Capture Agent accepts a full or region capture request.
+Consecutive captures extend the same pulse; it is an activity disclosure, not
+a claim that capture succeeded. It also shows a fixed yellow dot while an
 Evidence Recorder holds the session-local
 `Local\WindowsAgent.Evidence.Recording.v1` signal; the dot disappears within
 one polling interval after the finite run stops or the recorder exits. While an Action is
@@ -891,6 +894,7 @@ internal/observer/               permission-bounded memory/file backends
 internal/scriptrunner/           Starlark runtime and generic Windows native FFI
 internal/artifact/               artifact transactions and retention
 internal/capture/                screenshot capability contracts
+internal/captureindicator/       session-local recent-capture activity signal
 internal/config/                 process configuration
 internal/actionrun/              finite and streaming invocation lifecycle
 internal/actionsequence/         bounded ephemeral sequence and strict model schema

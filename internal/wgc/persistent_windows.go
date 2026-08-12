@@ -40,8 +40,17 @@ type persistentResponse struct {
 }
 
 type persistentInitialization struct {
-	status capture.Status
+	status PersistentStatus
 	err    error
+}
+
+// PersistentStatus is the initialization contract for one live WGC session.
+// BorderlessAccess is "allowed" only after Windows grants the borderless
+// capability and IsBorderRequired has been set and read back as false.
+type PersistentStatus struct {
+	Capture          capture.Status
+	BorderlessAccess string
+	BorderRequired   bool
 }
 
 // PersistentCapturer owns one WGC session, D3D11 device/context, and region
@@ -53,7 +62,7 @@ type PersistentCapturer struct {
 	requests chan persistentRequest
 	cancel   context.CancelFunc
 	done     chan struct{}
-	status   capture.Status
+	status   PersistentStatus
 	close    sync.Once
 	errMu    sync.Mutex
 	runErr   error
@@ -61,7 +70,10 @@ type PersistentCapturer struct {
 	sequence atomic.Uint64
 }
 
-func NewPersistent(logger *slog.Logger) (*PersistentCapturer, error) {
+func NewPersistent(initializationContext context.Context, logger *slog.Logger) (*PersistentCapturer, error) {
+	if initializationContext == nil {
+		return nil, errors.New("persistent WGC initialization context is required")
+	}
 	if logger == nil {
 		return nil, errors.New("persistent WGC logger is required")
 	}
@@ -72,7 +84,7 @@ func NewPersistent(logger *slog.Logger) (*PersistentCapturer, error) {
 	capturer := &PersistentCapturer{logger: logger, requests: requests, cancel: cancel, done: done}
 	go func() {
 		capturer.errMu.Lock()
-		capturer.runErr = runPersistentSession(ctx, logger, requests, initialized)
+		capturer.runErr = runPersistentSession(ctx, initializationContext, logger, requests, initialized)
 		capturer.errMu.Unlock()
 		close(done)
 	}()
@@ -89,6 +101,13 @@ func NewPersistent(logger *slog.Logger) (*PersistentCapturer, error) {
 func (c *PersistentCapturer) Status(context.Context) (capture.Status, error) {
 	if c == nil {
 		return capture.Status{}, errors.New("persistent WGC capturer is required")
+	}
+	return c.status.Capture, nil
+}
+
+func (c *PersistentCapturer) PersistentStatus() (PersistentStatus, error) {
+	if c == nil {
+		return PersistentStatus{}, errors.New("persistent WGC capturer is required")
 	}
 	return c.status, nil
 }
@@ -203,6 +222,7 @@ func (c *PersistentCapturer) sessionError() error {
 
 func runPersistentSession(
 	ctx context.Context,
+	initializationContext context.Context,
 	logger *slog.Logger,
 	requests <-chan persistentRequest,
 	initialized chan<- persistentInitialization,
@@ -298,6 +318,16 @@ func runPersistentSession(
 		initialized <- persistentInitialization{err: err}
 		return err
 	}
+	if err = requestBorderlessCapture(initializationContext); err != nil {
+		err = capture.Failure("capture_borderless_access_failed", "failed to obtain borderless persistent WGC capture", err)
+		initialized <- persistentInitialization{err: err}
+		return err
+	}
+	if err = setBorderRequired(session, false); err != nil {
+		err = capture.Failure("capture_session_failed", "failed to disable the persistent WGC capture border", err)
+		initialized <- persistentInitialization{err: err}
+		return err
+	}
 	if err = callHRESULT(session, 6); err != nil {
 		err = capture.Failure("capture_session_failed", "failed to start persistent WGC capture", err)
 		initialized <- persistentInitialization{err: err}
@@ -310,9 +340,14 @@ func runPersistentSession(
 		return err
 	}
 	defer release(shader)
-	status := capture.Status{Supported: true, Monitor: monitor}
+	status := PersistentStatus{
+		Capture:          capture.Status{Supported: true, Monitor: monitor},
+		BorderlessAccess: "allowed",
+		BorderRequired:   false,
+	}
 	initialized <- persistentInitialization{status: status}
-	logger.Info("persistent_wgc_session_started", "width", size.Width, "height", size.Height, "pixel_format", pixelFormatName)
+	logger.Info("persistent_wgc_session_started", "width", size.Width, "height", size.Height, "pixel_format", pixelFormatName,
+		"borderless_access", status.BorderlessAccess, "border_required", status.BorderRequired)
 	defer logger.Info("persistent_wgc_session_stopped")
 
 	includeCursor := false

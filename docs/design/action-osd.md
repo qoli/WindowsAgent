@@ -8,14 +8,19 @@ reconstruction, installer, lifecycle expiry, and live event client are
 implemented and tested. Real-device acceptance used
 `elite-dangerous/select-contacts-panel` over a live 4K HDR game. The installed
 production task excludes the OSD from capture. The original card presentation
-was subsequently replaced by the landed compact viewfinder presentation.
+was subsequently replaced by the landed compact viewfinder presentation. The
+recent-capture indicator was accepted in the signed-in session: one real
+capture kept its signal active through 497 ms, the cyan indicator window was
+visible with full alpha during that interval, it automatically hid afterward,
+and display affinity 17 excluded it from the committed WGC image.
 
 ## Responsibility
 
 The Action OSD is a display-only projection of the existing `action.runs`
-stream and the PC-local Evidence recording-presence signal. It never invokes,
-stops, retries, or changes an Action or Evidence Recorder. A missing or failed
-OSD alters neither process.
+stream, the PC-local Evidence recording-presence signal, and the PC-local
+recent-capture signal. It never invokes, stops, retries, or changes an Action,
+Evidence Recorder, or capture request. A missing or failed OSD alters none of
+those processes.
 
 The Host owns lifecycle presentation from `action.started`,
 `action.completed`, `action.failed`, and `action.cancelled`. A Streaming Action
@@ -44,10 +49,17 @@ events fail the OSD stream explicitly.
 
 The overlay occupies a compact transparent region at the top-left of the
 foreground monitor. It has no panel, card, border, status label, elapsed time,
-or per-record timestamps. A fixed yellow dot is visible while at least one
+or per-record timestamps. A fixed cyan dot is visible while the Capture Agent's
+session-local `Local\WindowsAgent.Capture.Recent.v1` signal reports a full or
+region capture accepted within the last 500 ms. Consecutive captures extend
+the same visible interval rather than accumulating or replaying flashes. The
+signal does not claim capture success and is not written to the durable event
+journal.
+
+A fixed yellow dot is visible while at least one
 Evidence Recorder owns the signaled session-local named event
 `Local\WindowsAgent.Evidence.Recording.v1`. The OSD opens and closes a fresh
-observer handle on every one-second poll; it never keeps the kernel object
+observer handle on every polling interval; it never keeps the kernel object
 alive after the finite run stops or the Recorder exits. An absent event means
 recording is stopped. An
 unexpected open or wait failure is fatal rather than rendered as a guessed
@@ -72,15 +84,16 @@ Actions remain for three seconds; failed Actions remain for eight seconds. The
 compact presentation does not render those status words: a static green, grey,
 or red dot communicates the respective terminal state until expiry.
 
-The window is topmost, layered, click-through, tool-only, and non-activating.
-It follows the foreground monitor and is excluded from capture by default.
+All windows are topmost, layered, click-through, tool-only, and non-activating.
+They follow the foreground monitor and are excluded from capture by default.
 
 ## Process boundary
 
 `windows-action-osd.exe` is an independent GUI-subsystem companion in the
 signed-in interactive session. It reads the authenticated loopback event API.
-The recording signal is read-only, session-local, unauthenticated, and carries
-no frame, recording control, game identity, or authoritative Evidence state.
+The recording and recent-capture signals are read-only, session-local,
+unauthenticated, and carry no frame, request data, control, game identity, or
+authoritative success state.
 It starts from the journal's current durable cursor, so historical completed
 Actions do not replay onto the desktop. An event-stream disconnect or invalid
 activity is fatal and visible in the OSD process log; no alternate log or event

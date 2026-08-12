@@ -34,7 +34,7 @@ type processClient struct {
 	closed  bool
 }
 
-func startWorkerProcess(executable string, trace bool, logger *slog.Logger) (workerClient, error) {
+func startWorkerProcess(ctx context.Context, executable string, trace bool, logger *slog.Logger) (workerClient, error) {
 	command := exec.Command(executable, "--parent-pid", strconv.Itoa(os.Getpid()))
 	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
 	stdin, err := command.StdinPipe()
@@ -60,25 +60,32 @@ func startWorkerProcess(executable string, trace bool, logger *slog.Logger) (wor
 		return nil, err
 	}
 	client := &processClient{command: command, stdin: stdin, stdout: stdout, conn: conn, stderr: stderr, pid: command.Process.Pid}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	deadline, err := effectiveInitializationDeadline(ctx)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, err
+	}
+	callContext, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	var initialized initializeResult
-	if err := client.call(ctx, methodInitialize, initializeParams{ProtocolVersion: ProtocolVersion, Trace: trace}, &initialized); err != nil {
+	if err := client.call(callContext, methodInitialize, initializeParams{ProtocolVersion: ProtocolVersion, Trace: trace, Deadline: deadline}, &initialized); err != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
 		return nil, fmt.Errorf("initialize WGC worker: %w: %s", err, stderr.String())
 	}
-	if initialized.ProtocolVersion != ProtocolVersion || initialized.ProcessID != client.pid ||
-		initialized.Backend != "windows-graphics-capture" || !initialized.Persistent || !initialized.Status.Supported {
+	if err := validateInitializeResult(initialized, client.pid); err != nil {
 		_ = command.Process.Kill()
 		_ = command.Wait()
-		return nil, errors.New("WGC worker initialize response does not match the persistent capture contract")
+		return nil, err
 	}
 	logger.Info("wgc_worker_initialized",
 		"process_id", initialized.ProcessID,
 		"protocol_version", initialized.ProtocolVersion,
 		"backend", initialized.Backend,
 		"persistent", initialized.Persistent,
+		"borderless_access", initialized.BorderlessAccess,
+		"border_required", initialized.BorderRequired,
 		"monitor", initialized.Status.Monitor.DeviceName,
 	)
 	return client, nil

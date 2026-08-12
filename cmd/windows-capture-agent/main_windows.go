@@ -20,6 +20,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/actionlaunch"
 	"github.com/qoli/WindowsAgent/internal/actionrun"
 	"github.com/qoli/WindowsAgent/internal/artifact"
+	"github.com/qoli/WindowsAgent/internal/captureindicator"
 	"github.com/qoli/WindowsAgent/internal/config"
 	"github.com/qoli/WindowsAgent/internal/eventclient"
 	"github.com/qoli/WindowsAgent/internal/foreground"
@@ -82,10 +83,27 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
+	workerInitializationContext, workerInitializationCancel := context.WithTimeout(context.Background(), wgcworker.MaxInitializationDuration)
+	defer workerInitializationCancel()
+	captureIndicator, err := captureindicator.NewPublisher()
+	var captureNotifier captureindicator.Notifier
+	if err != nil {
+		logger.Warn("capture_indicator_unavailable", "error", err)
+		captureNotifier = captureindicator.Unavailable(err)
+	} else {
+		captureNotifier = captureIndicator
+		defer func() {
+			if err := captureIndicator.Close(); err != nil {
+				logger.Error("capture_indicator_shutdown_failed", "error", err)
+			}
+		}()
+	}
 	capturer, err := wgcworker.New(
+		workerInitializationContext,
 		filepath.Join(filepath.Dir(executable), "windows-wgc-worker.exe"),
 		cfg.CaptureTimeout,
 		cfg.WGCTrace,
+		captureNotifier,
 		logger,
 	)
 	if err != nil {

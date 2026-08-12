@@ -23,6 +23,16 @@ type fakeWorkerClient struct {
 	fullErr     error
 }
 
+type fakeCaptureNotifier struct {
+	pulses int
+	err    error
+}
+
+func (n *fakeCaptureNotifier) Pulse() error {
+	n.pulses++
+	return n.err
+}
+
 func (c *fakeWorkerClient) PID() int { return c.pid }
 
 func (c *fakeWorkerClient) Status(context.Context, time.Time) (capture.Status, error) {
@@ -59,9 +69,10 @@ func workerFixture(t *testing.T) string {
 
 func TestCapturerReusesOneHealthyWorkerGeneration(t *testing.T) {
 	client := &fakeWorkerClient{pid: 41}
+	notifier := &fakeCaptureNotifier{}
 	starts := 0
-	capturer, err := newWithStarter(workerFixture(t), time.Second, true, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(string, bool, *slog.Logger) (workerClient, error) {
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, true, notifier, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
 			starts++
 			return client, nil
 		})
@@ -77,7 +88,7 @@ func TestCapturerReusesOneHealthyWorkerGeneration(t *testing.T) {
 	if _, err := capturer.CaptureRegion(context.Background(), capture.RegionRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	if starts != 1 || client.statusCalls != 1 || client.fullCalls != 1 || client.regionCalls != 1 {
+	if starts != 1 || client.statusCalls != 1 || client.fullCalls != 1 || client.regionCalls != 1 || notifier.pulses != 2 {
 		t.Fatalf("starts=%d status=%d full=%d region=%d", starts, client.statusCalls, client.fullCalls, client.regionCalls)
 	}
 	if err := capturer.Close(); err != nil {
@@ -94,8 +105,8 @@ func TestCapturerDoesNotReplayFailedRequestAndStartsNextGenerationLater(t *testi
 	clients := []workerClient{first, second}
 	var mu sync.Mutex
 	starts := 0
-	capturer, err := newWithStarter(workerFixture(t), time.Second, false, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(string, bool, *slog.Logger) (workerClient, error) {
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			client := clients[starts]
@@ -122,9 +133,27 @@ func TestCapturerDoesNotReplayFailedRequestAndStartsNextGenerationLater(t *testi
 }
 
 func TestCapturerRejectsInvalidTimeout(t *testing.T) {
-	_, err := newWithStarter(workerFixture(t), MaxCallDuration+time.Second, false, slog.New(slog.NewTextHandler(io.Discard, nil)),
-		func(string, bool, *slog.Logger) (workerClient, error) { return &fakeWorkerClient{}, nil })
+	_, err := newWithStarter(context.Background(), workerFixture(t), MaxCallDuration+time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			return &fakeWorkerClient{}, nil
+		})
 	if err == nil {
 		t.Fatal("expected invalid timeout failure")
+	}
+}
+
+func TestCapturerNotificationFailureDoesNotChangeCapture(t *testing.T) {
+	client := &fakeWorkerClient{pid: 41}
+	notifier := &fakeCaptureNotifier{err: errors.New("indicator unavailable")}
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, notifier, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) { return client, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := capturer.Capture(context.Background(), capture.Request{}); err != nil {
+		t.Fatalf("capture failed because its optional notification failed: %v", err)
+	}
+	if notifier.pulses != 1 || client.fullCalls != 1 {
+		t.Fatalf("pulses=%d full=%d", notifier.pulses, client.fullCalls)
 	}
 }

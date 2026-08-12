@@ -2,11 +2,14 @@
 
 ## Status
 
-**Partially landed.** The versioned worker protocol, Agent-side generation
-owner, persistent WGC/D3D11 runtime, build/install/update integration, and
-non-replay tests are implemented. Signed-in Windows acceptance under the
-previously crashing alternating region-capture workload remains required
-before this design can be marked Landed.
+**Landed.** The versioned worker protocol, Agent-side generation
+owner, borderless persistent WGC/D3D11 runtime, build/install/update
+integration, capture-activity projection, and non-replay tests are
+implemented and accepted in the signed-in Windows session. Acceptance verified
+`borderlessAccess=allowed`, `borderRequired=false`, no yellow capture border,
+a 500 ms capture pulse with capture exclusion, sixty alternating region/OCR
+calls on one generation, one deliberately failed in-flight capture without
+Agent restart or request replay, and a healthy borderless second generation.
 
 ## Responsibility
 
@@ -23,6 +26,14 @@ parent-process waiter terminates the worker if the Agent exits even while the
 WGC thread is blocked inside native code, so an Agent crash cannot leave an
 orphaned capture session. The independent Evidence recorder and finite
 Observer jobs retain their own capture lifecycles.
+
+The Agent starts and negotiates the initial worker generation during Agent
+startup with a bounded two-minute initialization deadline. The worker requests
+Windows borderless-capture access, sets `IsBorderRequired=false`, reads the
+property back, and only then starts capture. The initialize response reports
+`borderlessAccess=allowed` and `borderRequired=false`; the Agent verifies both.
+A denied permission, unsupported interface, deadline, or property mismatch
+fails initialization explicitly. There is no bordered-capture fallback.
 
 ## Failure contract
 
@@ -41,10 +52,17 @@ runtime logs remain private operator data.
 ## Protocol and lifecycle
 
 The first message must negotiate the exact protocol version and return the
-worker PID, WGC backend, persistence flag, and current monitor support. Every
-later call carries a bounded absolute deadline. Unknown JSON fields, trailing
-values, mismatched response identifiers, oversized frames, and unsupported
-methods fail explicitly.
+worker PID, WGC backend, persistence flag, verified border state, and current
+monitor support. Initialization and every later call carry distinct bounded
+absolute deadlines. Unknown JSON fields, trailing values, mismatched response
+identifiers, oversized frames, and unsupported methods fail explicitly.
+
+After accepting a full or region capture request, the Agent publishes a
+session-local recent-capture pulse. The pulse contains no frame, request data,
+foreground identity, or success claim and stays active for at least 500 ms
+after the latest accepted request. Notification failure is logged once and
+does not change capture execution. The OSD is an optional observer; it cannot
+invoke, cancel, retry, or make a capture succeed.
 
 The adapter exposes the existing generic `capture.Capturer` and
 `capture.RegionCapturer` interfaces. Worker construction, restart policy, RPC,
@@ -67,4 +85,7 @@ session and record:
 4. current foreground identity and domain postconditions independently from
    transport and process health;
 5. absence of fallback, request replay, stale-frame substitution, orphaned
-   workers, and unbounded crash artifacts.
+   workers, and unbounded crash artifacts;
+6. Windows reports borderless access allowed and `IsBorderRequired=false`, no
+   yellow capture border remains, and the capture pulse appears without being
+   included in captured output or stealing focus.

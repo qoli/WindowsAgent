@@ -6,7 +6,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | Design | Status | Responsibility |
 | --- | --- | --- |
 | [Capture JSON rule navigation](capture-json-rule-navigation.md) | Landed | Load an external executable-scoped Rule plugin for each capture and navigate to its current guidance. |
-| [Persistent WGC worker runtime](persistent-wgc-worker-runtime.md) | Partially landed | Reuse one WGC/D3D11 session across Agent captures while isolating native capture faults in an Agent-owned worker generation. |
+| [Persistent WGC worker runtime](persistent-wgc-worker-runtime.md) | Landed | Reuse one borderless WGC/D3D11 session across Agent captures while isolating native capture faults in an Agent-owned worker generation. |
 | [Scripted observation job model](observation-job-model.md) | Landed | Resolve any registered windows-observation-v1 capability and bind one package, runner, observer, owning Rule process, Host resources, and terminal result. |
 | [Observation script package](observation-script-package.md) | Landed | Validate external Starlark logic, task documentation, input/output schemas, Observer permissions, native DLL artifacts, and limits. |
 | [Windows observer protocol](observation-worker-protocol.md) | Landed | Unify finite read-only memory, file, and reference/native sampled screen-region calls behind framed process boundaries. |
@@ -17,7 +17,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Action registration model](action-registration-model.md) | Partially landed | Declare executable Actions and separately register selected Actions as timer-driven Monitors or event-driven Reactions. |
 | [Streaming Action runtime](streaming-action-runtime.md) | Landed | Invoke one Action through return or durable stream completion; the shipped Elite departure workflow demonstrates supervised linear orchestration. |
 | [Ephemeral Action Sequence](ephemeral-action-sequence.md) | Landed | Preflight and immediately execute an immutable Rule-allowlisted sequence of at most twenty existing Actions without persisting a workflow definition. |
-| [Action OSD](action-osd.md) | Landed | Project Evidence recording presence plus the current Streaming Action or active Ephemeral Action Sequence child into a non-activating Windows overlay. |
+| [Action OSD](action-osd.md) | Landed | Project recent capture activity, Evidence recording presence, and the current Streaming Action or active Ephemeral Action Sequence child into a non-activating Windows overlay. |
 | [Game module registry v2](game-module-registry-v2.md) | Retired | Historical classified-module model, replaced by Action declarations and explicit registrations. |
 | [ScreenParser Action](screenparser-action.md) | Partially landed | Run the pinned ScreenParser v2 detector Action once for an explicitly supplied, hash-pinned RGB24 frame. |
 | [PP-OCR DirectML runtime](ppocr-directml-runtime.md) | Landed | Keep a Rule-declared DirectML worker resident while its game is active and expose one finite raw-text Action for a fixed-aspect native-density ROI. |

@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/capture"
+	"github.com/qoli/WindowsAgent/internal/captureindicator"
 )
 
 type workerClient interface {
@@ -21,28 +23,33 @@ type workerClient interface {
 	Close() error
 }
 
-type workerStarter func(string, bool, *slog.Logger) (workerClient, error)
+type workerStarter func(context.Context, string, bool, *slog.Logger) (workerClient, error)
 
 // Capturer is the Agent-side adapter for one crash-isolated persistent WGC
 // worker generation. A failed call retires that generation without replaying
 // the request. A later independent call may start a new generation.
 type Capturer struct {
-	mu          sync.Mutex
-	executable  string
-	callTimeout time.Duration
-	logger      *slog.Logger
-	trace       bool
-	start       workerStarter
-	client      workerClient
-	generation  uint64
-	closed      bool
+	mu           sync.Mutex
+	executable   string
+	callTimeout  time.Duration
+	logger       *slog.Logger
+	trace        bool
+	notifier     captureindicator.Notifier
+	start        workerStarter
+	client       workerClient
+	generation   uint64
+	closed       bool
+	notifyFailed atomic.Bool
 }
 
-func New(executable string, callTimeout time.Duration, trace bool, logger *slog.Logger) (*Capturer, error) {
-	return newWithStarter(executable, callTimeout, trace, logger, startWorkerProcess)
+func New(ctx context.Context, executable string, callTimeout time.Duration, trace bool, notifier captureindicator.Notifier, logger *slog.Logger) (*Capturer, error) {
+	return newWithStarter(ctx, executable, callTimeout, trace, notifier, logger, startWorkerProcess)
 }
 
-func newWithStarter(executable string, callTimeout time.Duration, trace bool, logger *slog.Logger, start workerStarter) (*Capturer, error) {
+func newWithStarter(ctx context.Context, executable string, callTimeout time.Duration, trace bool, notifier captureindicator.Notifier, logger *slog.Logger, start workerStarter) (*Capturer, error) {
+	if ctx == nil {
+		return nil, errors.New("WGC worker initialization context is required")
+	}
 	if executable == "" || !filepath.IsAbs(executable) {
 		return nil, errors.New("WGC worker executable must be an absolute path")
 	}
@@ -59,10 +66,23 @@ func newWithStarter(executable string, callTimeout time.Duration, trace bool, lo
 	if logger == nil {
 		return nil, errors.New("WGC worker logger is required")
 	}
+	if notifier == nil {
+		return nil, errors.New("capture activity notifier is required")
+	}
 	if start == nil {
 		return nil, errors.New("WGC worker process starter is required")
 	}
-	return &Capturer{executable: executable, callTimeout: callTimeout, trace: trace, logger: logger, start: start}, nil
+	capturer := &Capturer{executable: executable, callTimeout: callTimeout, trace: trace, notifier: notifier, logger: logger, start: start}
+	deadline, err := effectiveInitializationDeadline(ctx)
+	if err != nil {
+		return nil, err
+	}
+	startContext, cancel := context.WithDeadline(ctx, deadline)
+	defer cancel()
+	if _, err := capturer.clientLocked(startContext); err != nil {
+		return nil, err
+	}
+	return capturer, nil
 }
 
 func (c *Capturer) Status(ctx context.Context) (capture.Status, error) {
@@ -72,7 +92,7 @@ func (c *Capturer) Status(ctx context.Context) (capture.Status, error) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	client, err := c.clientLocked()
+	client, err := c.clientLocked(ctx)
 	if err != nil {
 		return capture.Status{}, err
 	}
@@ -91,10 +111,11 @@ func (c *Capturer) Capture(ctx context.Context, request capture.Request) (captur
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	client, err := c.clientLocked()
+	client, err := c.clientLocked(ctx)
 	if err != nil {
 		return capture.Result{}, err
 	}
+	c.notifyCapture("full")
 	result, err := client.Capture(ctx, deadline, request)
 	if err != nil {
 		c.retireLocked("capture_failed", err)
@@ -110,10 +131,11 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	client, err := c.clientLocked()
+	client, err := c.clientLocked(ctx)
 	if err != nil {
 		return capture.RegionResult{}, err
 	}
+	c.notifyCapture("region")
 	result, err := client.CaptureRegion(ctx, deadline, request)
 	if err != nil {
 		c.retireLocked("region_failed", err)
@@ -122,14 +144,20 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 	return result, nil
 }
 
-func (c *Capturer) clientLocked() (workerClient, error) {
+func (c *Capturer) notifyCapture(kind string) {
+	if err := c.notifier.Pulse(); err != nil && c.notifyFailed.CompareAndSwap(false, true) {
+		c.logger.Warn("capture_indicator_pulse_failed", "capture_kind", kind, "error", err)
+	}
+}
+
+func (c *Capturer) clientLocked(ctx context.Context) (workerClient, error) {
 	if c.closed {
 		return nil, errors.New("persistent WGC worker adapter is closed")
 	}
 	if c.client != nil {
 		return c.client, nil
 	}
-	client, err := c.start(c.executable, c.trace, c.logger)
+	client, err := c.start(ctx, c.executable, c.trace, c.logger)
 	if err != nil {
 		return nil, fmt.Errorf("start persistent WGC worker: %w", err)
 	}
