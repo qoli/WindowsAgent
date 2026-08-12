@@ -10,6 +10,7 @@ DROP_CONFIRMATION_LIMIT = 40
 APPROACH_SAMPLE_LIMIT = 240
 APPROACH_UNKNOWN_LIMIT = 8
 GRAVITY_CANDIDATE_CONFIRMATIONS_REQUIRED = 3
+MAX_INCREASING_DISTANCE_SAMPLES = 3
 GRAVITY_CANDIDATE_DISTANCE_METERS = 20000000.0
 GRAVITY_CANDIDATE_SPEED_METERS_PER_SECOND = 20000.0
 MAX_START_HEAT_PERCENT = 60
@@ -222,8 +223,8 @@ def preflight(target_name):
     action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     set_safe_failure_compensation()
     status = observe_status()
-    if status["supercruise"] or status["fsdCharging"] or status["fsdHyperdriveCharging"]:
-        fail("enter-planet-gravity-well requires normal-space idle")
+    if status["fsdCharging"] or status["fsdHyperdriveCharging"]:
+        fail("enter-planet-gravity-well requires an idle FSD")
     if status["destination"] != target_name:
         fail("Status.json Destination does not match targetName: " + str(status["destination"]))
     if status["massLock"]:
@@ -239,7 +240,8 @@ def preflight(target_name):
         else:
             confirmations = 0
         if confirmations >= SHIP_STATUS_CONFIRMATIONS:
-            emit_update("PREFLIGHT", target_name, 0, status=status, heat_percent=heat["percent"], reason="NORMAL_SPACE_TARGET_AND_SHIP_STATUS_CONFIRMED")
+            reason = "SUPERCRUISE_TARGET_AND_SHIP_STATUS_CONFIRMED" if status["supercruise"] else "NORMAL_SPACE_TARGET_AND_SHIP_STATUS_CONFIRMED"
+            emit_update("PREFLIGHT", target_name, 0, status=status, heat_percent=heat["percent"], reason=reason)
             return status, heat["percent"]
         task.sleep(milliseconds=POLL_MS)
     fail("visual ship-status preflight did not produce two consecutive all-OFF samples")
@@ -266,45 +268,52 @@ def completed_output(target_name, entry_mode, probe, approach_samples, target_di
 def main(ctx):
     target_name = ctx.inputs["targetName"]
     status, heat_percent = preflight(target_name)
-    stream.activity(message="Probing current position for Escape Vector evidence", level="info")
-    initial_probe = probe_escape_vector(target_name, 0, "PROBING_CURRENT_POSITION")
-    if initial_probe["detected"]:
-        stream.activity(message="Gravity well was already present; owned FSD probe cancelled", level="info")
-        return completed_output(target_name, "ALREADY_IN_GRAVITY_WELL", initial_probe, 0, None, None)
+    sample = 0
+    entry_mode = "SUPERCRUISE_HANDOFF_APPROACHED_AND_VERIFIED" if status["supercruise"] else "APPROACHED_AND_VERIFIED"
+    if status["supercruise"]:
+        stream.activity(message="Taking over the confirmed Supercruise approach", level="info")
+        emit_update("APPROACHING", target_name, sample, status=status, heat_percent=heat_percent, reason="ALREADY_IN_SUPERCRUISE_APPROACH")
+    else:
+        stream.activity(message="Probing current position for Escape Vector evidence", level="info")
+        initial_probe = probe_escape_vector(target_name, 0, "PROBING_CURRENT_POSITION")
+        if initial_probe["detected"]:
+            stream.activity(message="Gravity well was already present; owned FSD probe cancelled", level="info")
+            return completed_output(target_name, "ALREADY_IN_GRAVITY_WELL", initial_probe, 0, None, None)
 
-    stream.activity(message="Aligning locked planetary destination", level="info")
-    emit_update("ALIGNING", target_name, initial_probe["sample"], status=initial_probe["status"], heat_percent=heat_percent, reason="ESCAPE_VECTOR_NOT_PRESENT_AT_CURRENT_POSITION")
-    action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "targetMotion": "STATIC", "trackingSamples": 120, "stopBeforeAlign": True, "controlProfile": "NORMAL_SPACE"})
-    visible_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_name, "stopBeforeAlign": False, "positionSource": "DESTINATION", "searchWhenUnknown": True, "heatPolicy": "STRICT"})
-    visible_reason = "VISIBLE_TARGET_ALIGNMENT_COMPLETED" if visible_attempt["ok"] else "VISIBLE_TARGET_ALIGNMENT_UNAVAILABLE: " + visible_attempt["error"]
-    emit_update("ALIGNING", target_name, initial_probe["sample"], status=initial_probe["status"], heat_percent=heat_percent, reason=visible_reason)
+        stream.activity(message="Aligning locked planetary destination", level="info")
+        emit_update("ALIGNING", target_name, initial_probe["sample"], status=initial_probe["status"], heat_percent=heat_percent, reason="ESCAPE_VECTOR_NOT_PRESENT_AT_CURRENT_POSITION")
+        action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "targetMotion": "STATIC", "trackingSamples": 120, "stopBeforeAlign": True, "controlProfile": "NORMAL_SPACE"})
+        visible_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_name, "stopBeforeAlign": False, "positionSource": "DESTINATION", "heatPolicy": "STRICT"})
+        visible_reason = "VISIBLE_TARGET_ALIGNMENT_COMPLETED" if visible_attempt["ok"] else "VISIBLE_TARGET_ALIGNMENT_UNAVAILABLE: " + visible_attempt["error"]
+        emit_update("ALIGNING", target_name, initial_probe["sample"], status=initial_probe["status"], heat_percent=heat_percent, reason=visible_reason)
 
-    set_probe_failure_compensation()
-    action.call(id="elite-dangerous/supercruise-control", inputs={"command": "TOGGLE"})
-    action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
-    sample = initial_probe["sample"]
-    entered = False
-    for _ in range(ENTER_SUPERCRUISE_LIMIT):
-        sample += 1
-        status = observe_status()
-        flight = observe_flight_status()
-        emit_update("ENTERING_SUPERCRUISE", target_name, sample, commanded_throttle=100, flight_status=flight["state"], status=status, reason=flight["reason"])
-        if status["supercruise"]:
-            entered = True
-            set_safe_failure_compensation()
-            break
-        if flight["state"] == "FSD_ESCAPE_VECTOR_REQUIRED":
-            probe = cancel_owned_charge(target_name, sample, flight["state"], status, ESCAPE_VECTOR_CONFIRMATIONS_REQUIRED, "ENTERING_SUPERCRUISE")
-            result = {"detected": True, "sample": sample, "confirmations": ESCAPE_VECTOR_CONFIRMATIONS_REQUIRED, "status": probe, "flightStatus": flight["state"]}
-            return completed_output(target_name, "ALREADY_IN_GRAVITY_WELL", result, 0, None, None)
-        task.sleep(milliseconds=500)
-    if not entered:
-        fail("manual Supercruise entry was not confirmed")
+        set_probe_failure_compensation()
+        action.call(id="elite-dangerous/supercruise-control", inputs={"command": "TOGGLE"})
+        action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
+        sample = initial_probe["sample"]
+        entered = False
+        for _ in range(ENTER_SUPERCRUISE_LIMIT):
+            sample += 1
+            status = observe_status()
+            flight = observe_flight_status()
+            emit_update("ENTERING_SUPERCRUISE", target_name, sample, commanded_throttle=100, flight_status=flight["state"], status=status, reason=flight["reason"])
+            if status["supercruise"]:
+                entered = True
+                set_safe_failure_compensation()
+                break
+            if flight["state"] == "FSD_ESCAPE_VECTOR_REQUIRED":
+                probe = cancel_owned_charge(target_name, sample, flight["state"], status, ESCAPE_VECTOR_CONFIRMATIONS_REQUIRED, "ENTERING_SUPERCRUISE")
+                result = {"detected": True, "sample": sample, "confirmations": ESCAPE_VECTOR_CONFIRMATIONS_REQUIRED, "status": probe, "flightStatus": flight["state"]}
+                return completed_output(target_name, "ALREADY_IN_GRAVITY_WELL", result, 0, None, None)
+            task.sleep(milliseconds=500)
+        if not entered:
+            fail("manual Supercruise entry was not confirmed")
 
     stream.activity(message="Approaching locked body until gravity-influence candidate telemetry is stable", level="info")
     action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
     previous_distance = None
     candidate_confirmations = 0
+    increasing_confirmations = 0
     unknown_count = 0
     final_distance = None
     final_speed = None
@@ -343,11 +352,19 @@ def main(ctx):
                 trend = "INCREASING"
             else:
                 trend = "STABLE"
+        if trend == "INCREASING":
+            increasing_confirmations += 1
+        else:
+            increasing_confirmations = 0
         candidate = final_distance <= GRAVITY_CANDIDATE_DISTANCE_METERS and final_speed <= GRAVITY_CANDIDATE_SPEED_METERS_PER_SECOND and trend != "INCREASING"
         candidate_confirmations = candidate_confirmations + 1 if candidate else 0
         display_trend = "CANDIDATE" if candidate_confirmations > 0 else trend
         emit_update("APPROACHING", target_name, sample, commanded_throttle=100, status=current_status, target_distance=final_distance, speed=final_speed, trend=display_trend, candidate_confirmations=candidate_confirmations, reason="GRAVITY_CANDIDATE_TELEMETRY")
         previous_distance = final_distance
+        if increasing_confirmations >= MAX_INCREASING_DISTANCE_SAMPLES:
+            action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+            emit_update("APPROACHING", target_name, sample, commanded_throttle=0, status=current_status, target_distance=final_distance, speed=final_speed, trend="INCREASING", candidate_confirmations=0, reason="TARGET_DISTANCE_INCREASING_LIMIT_REACHED")
+            fail("locked target distance increased for three consecutive approach samples")
         if candidate_confirmations >= GRAVITY_CANDIDATE_CONFIRMATIONS_REQUIRED:
             break
         task.sleep(milliseconds=APPROACH_POLL_MS)
@@ -372,4 +389,4 @@ def main(ctx):
     final_probe = probe_escape_vector(target_name, sample, "VERIFYING_GRAVITY_WELL")
     if not final_probe["detected"]:
         fail("candidate approach did not produce Escape Vector proof after returning to normal space")
-    return completed_output(target_name, "APPROACHED_AND_VERIFIED", final_probe, approach_samples, final_distance, final_speed)
+    return completed_output(target_name, entry_mode, final_probe, approach_samples, final_distance, final_speed)

@@ -116,11 +116,10 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 	case "elite-dangerous/align-visible-target":
 		c.visibleAlignmentCalls++
 		c.visibleAlignmentInputs = append(c.visibleAlignmentInputs, map[string]any{
-			"targetName":        inputs["targetName"],
-			"stopBeforeAlign":   inputs["stopBeforeAlign"],
-			"positionSource":    inputs["positionSource"],
-			"searchWhenUnknown": inputs["searchWhenUnknown"],
-			"heatPolicy":        inputs["heatPolicy"],
+			"targetName":      inputs["targetName"],
+			"stopBeforeAlign": inputs["stopBeforeAlign"],
+			"positionSource":  inputs["positionSource"],
+			"heatPolicy":      inputs["heatPolicy"],
 		})
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"sampleCount":4}`), nil
 	case "elite-dangerous/supercruise-control":
@@ -305,7 +304,6 @@ func TestEliteSupercruiseAssistUsesVisibleAlignmentWhenAssistRequiresAlignment(t
 		caller.visibleAlignmentInputs[0]["targetName"] != "NAV BEACON" ||
 		caller.visibleAlignmentInputs[0]["stopBeforeAlign"] != false ||
 		caller.visibleAlignmentInputs[0]["positionSource"] != "DESTINATION" ||
-		caller.visibleAlignmentInputs[0]["searchWhenUnknown"] != false ||
 		caller.visibleAlignmentInputs[0]["heatPolicy"] != "STRICT" {
 		t.Fatalf("visible alignment inputs=%v", caller.visibleAlignmentInputs)
 	}

@@ -1,7 +1,11 @@
 # Elite Dangerous Supercruise target position
 
-This finite composite Action uses two adjacent forward-HUD PP-OCR bands to
-find exactly one current-frame label matching `targetName`. A candidate must
+This finite composite Action uses one tall central and two lower forward-HUD
+PP-OCR bands to find exactly one current-frame label matching `targetName`.
+The central band covers reference `y=80..400`: live Supercruise evidence placed
+an already Compass-aligned planetary marker around `y=185`, above the retired
+`y=240..400` strip. Its 800 by 320 shape retains the same 256k reference-pixel
+budget. A candidate must
 pass both OCR confidence Gates and then match the normalized requested name
 exactly or by one substitution, insertion, or deletion. This bounded tolerance
 handles live repeated-character loss such as `LT 11244` for `LTT 11244`; short

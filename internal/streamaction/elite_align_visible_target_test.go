@@ -11,6 +11,7 @@ import (
 type alignVisibleTargetCaller struct {
 	heats     []json.RawMessage
 	positions []json.RawMessage
+	controls  []string
 	heatIndex int
 	posIndex  int
 }
@@ -24,7 +25,7 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		value := c.heats[c.heatIndex]
 		c.heatIndex++
 		return value, nil
-	case "elite-dangerous/escape-vector-visible-position":
+	case "elite-dangerous/escape-vector-visible-position", "elite-dangerous/supercruise-target-position":
 		if c.posIndex >= len(c.positions) {
 			return nil, errors.New("unexpected position observation")
 		}
@@ -33,6 +34,7 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		return value, nil
 	case "elite-dangerous/ship-attitude-control":
 		control := inputs["control"].(string)
+		c.controls = append(c.controls, control)
 		return json.Marshal(map[string]any{"control": control})
 	default:
 		return nil, errors.New("unexpected align-visible-target child Action: " + id)
@@ -64,6 +66,62 @@ func visiblePosition(x, y, distance float64) json.RawMessage {
 		"reason": "TEST", "rawTexts": []string{"ESCAPE", "VECTOR"},
 	}, "timing": map[string]any{}})
 	return value
+}
+
+func unknownVisiblePosition() json.RawMessage {
+	value, _ := json.Marshal(map[string]any{"schemaVersion": 1, "target": map[string]any{
+		"state": "UNKNOWN", "referenceX": nil, "referenceY": nil,
+		"offsetX": nil, "offsetY": nil, "centerDistancePixels": nil,
+		"reason": "TARGET_TEXT_NOT_FOUND", "rawTexts": []string{},
+	}, "timing": map[string]any{}})
+	return value
+}
+
+func TestEliteAlignVisibleTargetDoesNotSteerFromUnknownDestination(t *testing.T) {
+	caller := &alignVisibleTargetCaller{}
+	for index := 0; index < 8; index++ {
+		caller.heats = append(caller.heats, visibleHeat("KNOWN", 23))
+		caller.positions = append(caller.positions, unknownVisiblePosition())
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err == nil || !contains(err.Error(), "bounded observation window") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("UNKNOWN target authorized controls: %v", caller.controls)
+	}
+	if caller.heatIndex != 1 {
+		t.Fatalf("destination UNKNOWN window used %d heat calls, want one checkpoint", caller.heatIndex)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if contains(events, `"phase":"SEARCHING"`) || contains(events, `"command":"YAW_`) {
+		t.Fatalf("UNKNOWN target emitted a search command: %s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetUsesRaisedMidFineDestinationPulse(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(0, -30, 30),
+			visiblePosition(0, -10, 10),
+			visiblePosition(0, -9, 9),
+			visiblePosition(0, -8, 8),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LTT 11244 A 2", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"commandHoldMs":120`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
 }
 
 func TestEliteAlignVisibleTargetAllowsBoundedUnknownHeatDuringEscapeCharge(t *testing.T) {

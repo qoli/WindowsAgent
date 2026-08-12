@@ -343,7 +343,6 @@ def align_visible_destination(target_name):
             "targetName": target_name,
             "stopBeforeAlign": False,
             "positionSource": "DESTINATION",
-            "searchWhenUnknown": False,
             "heatPolicy": "STRICT",
         },
     )

@@ -8,7 +8,7 @@
     "task": {"const": "ENTER_PLANET_GRAVITY_WELL"},
     "completed": {"const": true},
     "finalPhase": {"const": "COMPLETED"},
-    "entryMode": {"enum": ["ALREADY_IN_GRAVITY_WELL", "APPROACHED_AND_VERIFIED"]},
+    "entryMode": {"enum": ["ALREADY_IN_GRAVITY_WELL", "APPROACHED_AND_VERIFIED", "SUPERCRUISE_HANDOFF_APPROACHED_AND_VERIFIED"]},
     "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
     "escapeVectorConfirmations": {"type": "integer", "minimum": 2, "maximum": 16},
     "approachSampleCount": {"type": "integer", "minimum": 0, "maximum": 240},

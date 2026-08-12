@@ -14,7 +14,7 @@ coarse and initial alignment feedback source and must complete while throttle
 is 0% before acceleration is permitted. Once the game explicitly emits
 `FSD_ALIGNMENT_REQUIRED` after Assist selection, the destination is expected
 in the forward HUD and the workflow switches to `align-visible-target` with
-exact target identity, `searchWhenUnknown=false`, and the strict heat Gate.
+exact target identity and the strict heat Gate.
 This avoids a measured loop where Compass remained within 3-5 pixels while the
 visible destination stayed off-centre and the game continued to reject Assist
 ownership. Missing visible-target evidence fails; it never authorizes a blind

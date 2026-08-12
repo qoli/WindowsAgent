@@ -192,6 +192,69 @@ func TestEliteEnterPlanetGravityWellApproachesDropsAndRequiresSecondEscapeVector
 	}
 }
 
+func TestEliteEnterPlanetGravityWellTakesOverExistingSupercruiseApproach(t *testing.T) {
+	caller := &enterPlanetGravityWellCaller{
+		targetName:   "LTT 11244 A 2",
+		supercruise:  true,
+		escapeProbes: []bool{true},
+		distances:    []float64{19_000_000, 18_500_000, 18_000_000},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteEnterPlanetGravityWellPackage(t), map[string]any{"targetName": caller.targetName}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("%v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	for _, expected := range []string{`"entryMode":"SUPERCRUISE_HANDOFF_APPROACHED_AND_VERIFIED"`, `"approachSampleCount":3`, `"escapeVectorConfirmations":2`} {
+		if !contains(string(output), expected) {
+			t.Fatalf("missing %s output=%s", expected, output)
+		}
+	}
+	if caller.alignCompass != 0 || caller.alignVisible != 0 {
+		t.Fatalf("Supercruise handoff must not repeat alignment, compass=%d visible=%d", caller.alignCompass, caller.alignVisible)
+	}
+	if caller.toggles != 3 {
+		t.Fatalf("toggles=%d, want only manual drop and final probe start/cancel", caller.toggles)
+	}
+	if caller.flightCalls != 2 {
+		t.Fatalf("flight OCR calls=%d, want only final Escape Vector confirmations", caller.flightCalls)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"reason":"SUPERCRUISE_TARGET_AND_SHIP_STATUS_CONFIRMED"`) ||
+		!contains(joined, `"reason":"ALREADY_IN_SUPERCRUISE_APPROACH"`) ||
+		contains(joined, `"phase":"PROBING_CURRENT_POSITION"`) ||
+		contains(joined, `"phase":"ALIGNING"`) ||
+		contains(joined, `"phase":"ENTERING_SUPERCRUISE"`) {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteEnterPlanetGravityWellStopsWhenTargetDistanceKeepsIncreasing(t *testing.T) {
+	caller := &enterPlanetGravityWellCaller{
+		targetName:  "LTT 11244 A 2",
+		supercruise: true,
+		distances:   []float64{20_000_000, 21_000_000, 22_000_000, 23_000_000},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteEnterPlanetGravityWellPackage(t), map[string]any{"targetName": caller.targetName}, caller, reporter,
+	)
+	if err == nil || !contains(err.Error(), "distance increased for three consecutive") {
+		t.Fatalf("err=%v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	if caller.throttle != 0 {
+		t.Fatalf("wrong-direction failure left throttle=%d", caller.throttle)
+	}
+	if caller.toggles != 0 || caller.alignCompass != 0 || caller.alignVisible != 0 {
+		t.Fatalf("wrong-direction handoff must stop without toggles or alignment: toggles=%d compass=%d visible=%d", caller.toggles, caller.alignCompass, caller.alignVisible)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"commandedThrottle":0`) || !contains(joined, `"reason":"TARGET_DISTANCE_INCREASING_LIMIT_REACHED"`) {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
 func TestEliteEnterPlanetGravityWellRejectsMismatchedStatusDestinationBeforeProbe(t *testing.T) {
 	caller := &enterPlanetGravityWellCaller{targetName: "Different Body"}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
