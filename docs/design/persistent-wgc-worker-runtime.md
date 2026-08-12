@@ -34,8 +34,9 @@ current. A later independent request may create a new generation explicitly
 visible through generation and process identifiers in lifecycle logs.
 
 Worker stderr is bounded and forwarded into the Agent's runtime diagnostics.
-The installer configures process-scoped Windows Error Reporting full dumps for
-both the Agent and worker. Dumps and runtime logs remain private operator data.
+The installer and complete binary deployment path configure process-scoped
+Windows Error Reporting full dumps for both the Agent and worker. Dumps and
+runtime logs remain private operator data.
 
 ## Protocol and lifecycle
 

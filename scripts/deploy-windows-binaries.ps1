@@ -104,6 +104,16 @@ try {
         $actual = (Get-FileHash -LiteralPath $destinations[$name] -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -cne $hashes[$name]) { throw "installed hash mismatch: $name" }
     }
+
+    $dumpDir = Join-Path $root "dumps"
+    New-Item -ItemType Directory -Path $dumpDir -Force | Out-Null
+    foreach ($processName in @("windows-capture-agent.exe", "windows-wgc-worker.exe")) {
+        $dumpRegistryPath = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\$processName"
+        New-Item -Path $dumpRegistryPath -Force | Out-Null
+        New-ItemProperty -Path $dumpRegistryPath -Name "DumpFolder" -PropertyType ExpandString -Value $dumpDir -Force | Out-Null
+        New-ItemProperty -Path $dumpRegistryPath -Name "DumpType" -PropertyType DWord -Value 2 -Force | Out-Null
+        New-ItemProperty -Path $dumpRegistryPath -Name "DumpCount" -PropertyType DWord -Value 5 -Force | Out-Null
+    }
 } catch {
     $deploymentError = $_
 } finally {
