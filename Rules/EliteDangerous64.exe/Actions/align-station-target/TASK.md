@@ -50,9 +50,13 @@ Station/Supercruise-entry handoff: live testing showed the selected Station
 marker repeatedly settling between roughly 8 and 13 reference pixels while
 120 ms pulses continued to perturb the already useful direction. It enters a
 12-pixel Gate and then uses two pixels of verification hysteresis, still
-requiring three current SOLID observations. It does not apply the ordinary
-normal-space center-entry brake after the first contact because that open-loop
-reverse pulse would invalidate this already stable Station handoff. System-jump precision alignment
+requiring three current SOLID observations. When a 300 ms medium-band pulse
+first enters that Gate, it applies the existing 100 ms opposite-axis brake,
+discards the pre-brake contact, and requires three fresh SOLID observations.
+Live 1 FPS Evidence showed the previous unbraked law repeatedly entering at
+roughly 9–11 pixels, retaining angular velocity, and drifting back to 16–19
+pixels; it needed 60 samples and 43 commands before three contacts happened to
+survive. Near-band 120 ms pulses do not trigger this brake. System-jump precision alignment
 does not request `STATIC` and retains the four-pixel Gate. This is a declared
 control law, not a fallback to OCR or a visible-target search.
 

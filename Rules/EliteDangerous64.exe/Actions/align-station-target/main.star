@@ -598,8 +598,7 @@ def main(ctx):
             (
                 commanded_target["centerDistancePixels"] > fine_distance or
                 (supercruise_profile and target_motion == "STATIC")
-            ) and
-            not (control_profile == "NORMAL_SPACE" and target_motion == "STATIC")
+            )
         )
         if should_brake_center_entry:
             brake_control = opposite_control(commanded_control)

@@ -84,7 +84,11 @@ The 240 ms no-movement recovery is not reverse-braked inside the 16px Gate:
 live evidence showed the retired 80 ms recovery brake repeatedly moved a
 14–16px result back to 24–25px.
 The first pulse-driven alignment-center entry applies a 100 ms
-opposite-axis brake before stable verification. Events expose
+opposite-axis brake before stable verification. Normal-space STATIC alignment
+also applies that brake when a 300 ms medium-band pulse first enters its 12px
+Gate; live Evidence showed the former unbraked handoff retaining angular
+velocity and cycling from 9–11px back to 16–19px. The pre-brake sample is
+discarded and only fresh post-brake observations can complete. Events expose
 control mode, lease state, sample timing, requested
 pulse duration, observed marker movement, distance delta, moving-away trend,
 and consecutive no-movement count. Four stationary samples

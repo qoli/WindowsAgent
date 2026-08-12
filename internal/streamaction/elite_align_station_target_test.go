@@ -289,7 +289,8 @@ func TestEliteAlignStationTargetStaticNormalSpaceUsesStableStationHandoffGate(t 
 		alignObservation("SOLID", 14, -8, 16.125, false),
 		alignObservation("SOLID", 5, 9, 10.296, false),
 		alignObservation("SOLID", 10, -4, 10.770, false),
-		alignObservation("SOLID", 12, -6, 13.416, false),
+		alignObservation("SOLID", 9, -4, 9.849, false),
+		alignObservation("SOLID", 8, -4, 8.944, false),
 	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
@@ -300,17 +301,48 @@ func TestEliteAlignStationTargetStaticNormalSpaceUsesStableStationHandoffGate(t 
 		t.Fatal(err)
 	}
 	if !contains(string(output), `"completed":true`) ||
-		!contains(string(output), `"sampleCount":4`) ||
+		!contains(string(output), `"sampleCount":5`) ||
 		!contains(string(output), `"stableConfirmations":3`) ||
 		!contains(string(output), `"targetMotion":"STATIC"`) {
 		t.Fatalf("output=%s", output)
 	}
-	if strings.Join(caller.holdOps, ",") != "START,STOP" ||
-		strings.Join(caller.holdControls, ",") != "PITCH_UP_YAW_RIGHT,PITCH_UP_YAW_RIGHT" {
+	if strings.Join(caller.holdOps, ",") != "START,STOP,START,STOP" ||
+		strings.Join(caller.holdControls, ",") != "PITCH_UP_YAW_RIGHT,PITCH_UP_YAW_RIGHT,PITCH_DOWN_YAW_LEFT,PITCH_DOWN_YAW_LEFT" {
 		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
 	if len(caller.controls) != 0 {
-		t.Fatalf("static handoff must stop perturbing the centered Station marker: controls=%v holds=%v", caller.controls, caller.holds)
+		t.Fatalf("static handoff vector brake must stay under the paired-key lease: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetStaticNormalSpaceBrakesMediumPitchEntry(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -11, 11, false),
+		alignObservation("SOLID", 0, -10, 10, false),
+		alignObservation("SOLID", 0, -9, 9, false),
+		alignObservation("SOLID", 0, -8, 8, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":5`) {
+		t.Fatalf("output=%s", output)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_DOWN" ||
+		len(caller.holds) != 2 || caller.holds[0] != 300 || caller.holds[1] != 100 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"reason":"CENTER_ENTRY_BRAKE"`) ||
+		!contains(joined, `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
+		t.Fatalf("events=%s", joined)
 	}
 }
 
