@@ -18,11 +18,11 @@ and tone-maps it to 1920x1080, and writes H.264 MP4 segments through Media
 Foundation. It never calls the request-driven screenshot API.
 
 Every run is finite. `durationSeconds` is optional; omission selects 1200
-seconds, and an explicit value must be an integer from 1 through 1200. The
-default and hard maximum are both 20 minutes. The deadline begins when the
-start request is accepted, so the interface can return the immutable `endsAt`
-immediately. There is no renewal, extension, pause, manual-stop, or delete
-operation. When the deadline expires, the recorder releases WGC, finalizes the
+seconds, and an explicit value must be an integer from 1 through 3600. The
+default is 20 minutes and the hard maximum is one hour. The deadline begins
+when the start request is accepted, so the interface can return the immutable
+`endsAt` immediately. There is no renewal, extension, pause, manual-stop, or
+delete operation. When the deadline expires, the recorder releases WGC, finalizes the
 open segment, publishes terminal status, and returns to an idle process ready
 to accept a new run.
 
@@ -111,7 +111,7 @@ finite contract instead of requiring callers to infer it from documentation:
   "runId": "evr_...",
   "finite": true,
   "defaultDurationSeconds": 1200,
-  "maxDurationSeconds": 1200,
+  "maxDurationSeconds": 3600,
   "durationSeconds": 1200,
   "requestedAt": "2026-08-12T10:00:00Z",
   "endsAt": "2026-08-12T10:20:00Z"
@@ -127,7 +127,7 @@ for recent runs. `GET /v1/evidence/status` returns the latest run status plus
 returns `finite:true`, `defaultDurationSeconds`, and `maxDurationSeconds` so a
 caller can discover the finite constraint before starting.
 
-Zero, negative, fractional, null, unknown-field, and over-1200 duration inputs
+Zero, negative, fractional, null, unknown-field, and over-3600 duration inputs
 return HTTP 400. A second start while state is `starting` or `recording`
 returns HTTP 409 `EVIDENCE_RUN_ACTIVE` and includes `activeRun` with its
 `runId` and `endsAt`; it never extends or replaces that run.
@@ -213,9 +213,10 @@ tasks, token, binaries, and private recordings were then removed; the installed
 Capture Agent, Event Stream, and production OSD retained their original
 processes.
 
-The subsequent finite-run refactor was accepted on the same Windows build with
-the game foreground. Process startup returned `idle`, `finite:true`, and both
-duration limits at 1200 without opening WGC or showing the OSD dot. An explicit
+The initial finite-run refactor was accepted on the same Windows build with
+the game foreground. At that version, process startup returned `idle`,
+`finite:true`, and both duration limits at 1200 without opening WGC or showing
+the OSD dot. An explicit
 15-second run returned HTTP 202 with an immutable 15-second deadline, moved
 from `starting` to `recording`, rejected a concurrent start with HTTP 409, and
 completed 28 milliseconds after its deadline while the control process and
@@ -227,6 +228,17 @@ over-limit request returned HTTP 400, and a later `{}` start returned an exact
 1200-second deadline. The isolated tasks, listener, token, binaries, and
 private recordings were removed; the pre-existing Capture Agent, Event Stream,
 and production OSD retained their original processes.
+
+The one-hour limit update was then accepted with the final Recorder artifact in
+another isolated interactive-user task. Idle status advertised a 1200-second
+default and 3600-second maximum. An omitted duration produced an exact
+1200-second deadline, an explicit 3600 produced an exact 3600-second deadline,
+and 3601 returned HTTP 400. Both accepted starts entered `recording`; the first
+then committed explicit foreground-mismatch gaps because the target game was
+not foreground, so no valid video frame is claimed by this API-boundary test.
+The isolated task used its own frame tap and was removed with its token,
+binaries, and private data. The pre-existing production Recorder retained its
+process and listener throughout.
 
 No automatic retention or deletion policy exists. Runtime video, manifests,
 tokens, and logs are private operator data outside the public repository.

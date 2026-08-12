@@ -14,7 +14,7 @@ import (
 
 const (
 	DefaultRunDurationSeconds uint32 = 20 * 60
-	MaxRunDurationSeconds     uint32 = 20 * 60
+	MaxRunDurationSeconds     uint32 = 60 * 60
 	maxRetainedRunStatuses           = 64
 
 	RunIdle      = "idle"
@@ -27,7 +27,7 @@ const (
 var (
 	ErrRunActive       = errors.New("evidence recording run is already active")
 	ErrRunNotFound     = errors.New("evidence recording run was not found")
-	ErrDurationInvalid = errors.New("evidence recording durationSeconds must be an integer between 1 and 1200")
+	ErrDurationInvalid = errors.New("evidence recording durationSeconds must be an integer between 1 and 3600")
 )
 
 type RunRequest struct {

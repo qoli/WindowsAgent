@@ -52,7 +52,7 @@ func TestRunControllerDefaultsToFiniteTwentyMinuteRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != RunStarting || status.RunID != "evr_test" || !status.Finite || status.DurationSeconds != 1200 || status.DefaultDurationSeconds != 1200 || status.MaxDurationSeconds != 1200 {
+	if status.State != RunStarting || status.RunID != "evr_test" || !status.Finite || status.DurationSeconds != 1200 || status.DefaultDurationSeconds != 1200 || status.MaxDurationSeconds != 3600 {
 		t.Fatalf("unexpected start status: %+v", status)
 	}
 	if status.RequestedAt == nil || status.EndsAt == nil || status.EndsAt.Sub(*status.RequestedAt) != 20*time.Minute {
@@ -93,13 +93,26 @@ func TestRunControllerUsesExplicitDurationAndCompletesAtDeadline(t *testing.T) {
 func TestRunControllerRejectsDurationsOutsideHardLimit(t *testing.T) {
 	controller, _ := newBlockingController(t)
 	defer controller.Close()
-	for _, duration := range []uint32{0, 1201} {
+	for _, duration := range []uint32{0, 3601} {
 		if _, err := controller.Start(RunRequest{DurationSeconds: &duration}); !errors.Is(err, ErrDurationInvalid) {
 			t.Fatalf("duration=%d error=%v", duration, err)
 		}
 	}
-	if status := controller.Status(); status.State != RunIdle || !status.Finite || status.MaxDurationSeconds != 1200 {
+	if status := controller.Status(); status.State != RunIdle || !status.Finite || status.MaxDurationSeconds != 3600 {
 		t.Fatalf("idle status=%+v", status)
+	}
+}
+
+func TestRunControllerAcceptsOneHourHardLimit(t *testing.T) {
+	controller, _ := newBlockingController(t)
+	defer controller.Close()
+	duration := uint32(3600)
+	status, err := controller.Start(RunRequest{DurationSeconds: &duration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.DurationSeconds != 3600 || status.RequestedAt == nil || status.EndsAt == nil || status.EndsAt.Sub(*status.RequestedAt) != time.Hour {
+		t.Fatalf("unexpected one-hour duration: %+v", status)
 	}
 }
 

@@ -53,7 +53,8 @@ Treat configured or live values as authoritative when they differ.
 ## Request a finite Evidence run
 
 Evidence recording is on demand. The process may be healthy while no WGC
-session exists and no recording dot is visible.
+session exists and no recording dot is visible. The default duration is 20
+minutes; the hard maximum is one hour.
 
 1. Check `GET /healthz` on the Evidence process.
 2. Send authenticated `GET /v1/evidence/status` and read `state`, `finite`,
@@ -63,7 +64,7 @@ session exists and no recording dot is visible.
    sufficient.
 4. Otherwise, send authenticated `POST /v1/evidence/runs` with
    `Content-Type: application/json`. Use `{}` for the default 1200-second run,
-   or `{"durationSeconds":N}` for an explicit integer from 1 through 1200.
+   or `{"durationSeconds":N}` for an explicit integer from 1 through 3600.
 5. Expect HTTP 202. Require `finite:true`, a non-empty `runId`, the accepted
    `durationSeconds`, and immutable `requestedAt` and `endsAt`. Do not proceed
    on an ambiguous or unbounded response.
@@ -83,7 +84,7 @@ if later Evidence is required; never assume continuous coverage between runs.
 
 HTTP 409 `EVIDENCE_RUN_ACTIVE` includes `activeRun`. Use that run's `runId` and
 deadline; do not retry in a loop or treat the conflict as an extension. Invalid
-or over-1200 duration input is a caller error and must be corrected rather than
+or over-3600 duration input is a caller error and must be corrected rather than
 clamped.
 
 ## Start the on-demand Visual Log run

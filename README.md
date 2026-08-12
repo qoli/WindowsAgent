@@ -372,10 +372,10 @@ GET http://127.0.0.1:8792/v1/evidence/range?from=<UTC>&to=<UTC>
 POST http://127.0.0.1:8792/v1/evidence/contact-sheet
 ```
 
-Start a default 20-minute run with `{}`, or request a shorter run with strict
-JSON such as `{"durationSeconds":300}`. `durationSeconds` is optional but, when
-present, must be an integer from 1 through 1200. Twenty minutes is both the
-default and the hard maximum. A successful start returns HTTP 202 with
+Start a default 20-minute run with `{}`, or request a different duration with
+strict JSON such as `{"durationSeconds":300}`. `durationSeconds` is optional
+but, when present, must be an integer from 1 through 3600. Twenty minutes is
+the default; one hour is the hard maximum. A successful start returns HTTP 202 with
 `finite:true`, `runId`, `durationSeconds`, `requestedAt`, and `endsAt`; the
 deadline starts when the request is accepted. State advances from `starting`
 to `recording` only after WGC and the recording indicator have started, then to

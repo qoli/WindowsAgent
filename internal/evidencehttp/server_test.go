@@ -37,7 +37,7 @@ type fakeRunControl struct {
 
 func newFakeRunControl() *fakeRunControl {
 	return &fakeRunControl{
-		status: evidence.RunStatus{State: evidence.RunIdle, Finite: true, DefaultDurationSeconds: 1200, MaxDurationSeconds: 1200},
+		status: evidence.RunStatus{State: evidence.RunIdle, Finite: true, DefaultDurationSeconds: 1200, MaxDurationSeconds: 3600},
 		runs:   make(map[string]evidence.RunStatus),
 	}
 }
@@ -53,7 +53,7 @@ func (c *fakeRunControl) Start(request evidence.RunRequest) (evidence.RunStatus,
 	if c.start.RunID == "" {
 		requestedAt := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
 		endsAt := requestedAt.Add(20 * time.Minute)
-		c.start = evidence.RunStatus{State: evidence.RunStarting, RunID: "evr_test", Finite: true, DefaultDurationSeconds: 1200, MaxDurationSeconds: 1200, DurationSeconds: 1200, RequestedAt: &requestedAt, EndsAt: &endsAt}
+		c.start = evidence.RunStatus{State: evidence.RunStarting, RunID: "evr_test", Finite: true, DefaultDurationSeconds: 1200, MaxDurationSeconds: 3600, DurationSeconds: 1200, RequestedAt: &requestedAt, EndsAt: &endsAt}
 	}
 	c.status = c.start
 	c.runs[c.start.RunID] = c.start
@@ -74,7 +74,7 @@ func TestFiniteRunAPIUsesDefaultDurationAndReturnsAddressableStatus(t *testing.T
 	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/v1/evidence/runs/evr_test" {
 		t.Fatalf("status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
 	}
-	if !strings.Contains(response.Body.String(), `"finite":true`) || !strings.Contains(response.Body.String(), `"durationSeconds":1200`) || !strings.Contains(response.Body.String(), `"endsAt":`) {
+	if !strings.Contains(response.Body.String(), `"finite":true`) || !strings.Contains(response.Body.String(), `"durationSeconds":1200`) || !strings.Contains(response.Body.String(), `"maxDurationSeconds":3600`) || !strings.Contains(response.Body.String(), `"endsAt":`) {
 		t.Fatalf("finite contract missing: %s", response.Body.String())
 	}
 	if control.request.DurationSeconds != nil {
@@ -96,9 +96,9 @@ func TestFiniteRunAPIAcceptsOnlyOptionalBoundedIntegerDuration(t *testing.T) {
 		body string
 		code int
 	}{
-		{name: "explicit duration", body: `{"durationSeconds":37}`, code: http.StatusAccepted},
+		{name: "one hour maximum", body: `{"durationSeconds":3600}`, code: http.StatusAccepted},
 		{name: "zero", body: `{"durationSeconds":0}`, code: http.StatusBadRequest},
-		{name: "over maximum", body: `{"durationSeconds":1201}`, code: http.StatusBadRequest},
+		{name: "over maximum", body: `{"durationSeconds":3601}`, code: http.StatusBadRequest},
 		{name: "fraction", body: `{"durationSeconds":1.5}`, code: http.StatusBadRequest},
 		{name: "null", body: `{"durationSeconds":null}`, code: http.StatusBadRequest},
 		{name: "unknown", body: `{"durationSeconds":20,"extend":true}`, code: http.StatusBadRequest},
@@ -114,7 +114,7 @@ func TestFiniteRunAPIAcceptsOnlyOptionalBoundedIntegerDuration(t *testing.T) {
 			if response.Code != test.code {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
-			if test.code == http.StatusAccepted && (control.request.DurationSeconds == nil || *control.request.DurationSeconds != 37) {
+			if test.code == http.StatusAccepted && (control.request.DurationSeconds == nil || *control.request.DurationSeconds != 3600) {
 				t.Fatalf("request=%+v", control.request)
 			}
 		})
