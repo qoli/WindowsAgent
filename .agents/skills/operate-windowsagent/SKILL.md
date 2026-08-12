@@ -1,6 +1,6 @@
 ---
 name: operate-windowsagent
-description: "Discover, invoke, observe, test, troubleshoot, and extend the live WindowsAgent capabilities owned by the foreground executable's matched Rule. Use when Codex must capture the current Windows screen, decide whether an interaction belongs in a new finite or streaming Action, identify an Action capability gap, read Rule guidance and Action catalogs, invoke Actions, compose a bounded ephemeral Action Sequence, follow invocation events, validate a real game or app outcome, or repair an Action exposed by live evidence. Do not use Monitor or Reaction as executable or verified capabilities; their scheduler and dispatcher remain unvalidated and outside this v1 skill."
+description: "Discover, invoke, observe, test, troubleshoot, and extend the live WindowsAgent capabilities owned by the foreground executable's matched Rule. Use when Codex must capture the current Windows screen, decide whether an interaction belongs in a new finite or streaming Action, identify an Action capability gap, read Rule guidance and Action catalogs, invoke Actions, compose a bounded ephemeral Action Sequence, follow invocation events, diagnose Action timing or control behavior with Visual Log and authoritative Evidence, validate a real game or app outcome, or repair an Action exposed by live evidence. Do not use Monitor or Reaction as executable or verified capabilities; their scheduler and dispatcher remain unvalidated and outside this v1 skill."
 ---
 
 # Operate WindowsAgent
@@ -196,6 +196,91 @@ When current visual confirmation is required, capture after the UI or game has
 settled. Do not associate a frame with an input that completed after the frame
 was acquired, and do not use artifact encoding time as the acquisition time.
 
+## Diagnose temporal Action behavior
+
+Use the independent Visual Log and Evidence processes when Action correctness
+depends on motion, transition order, control-mode changes, visual transitions
+missed by sparse ad hoc captures, or behavior between supervising-model turns.
+Read [`use-visual-log`](../use-visual-log/SKILL.md) before operating those
+processes; it owns their lifecycle, authentication, range, and verification
+rules.
+
+Keep the three evidence roles distinct:
+
+- Action events are authoritative for the controller's declared phase,
+  measurement, command, Gate result, and reason.
+- Visual Log descriptions are an untrusted timeline index for locating a
+  candidate interval. Never feed Gemma descriptions back into a control loop
+  or use them to claim a HUD state, angle, target identity, or Action success.
+- Evidence MP4 and its manifest are the authoritative visual record. Use them
+  to verify motion, application response, phase transitions, and the external
+  goal while preserving every declared gap and missing slot.
+
+Check the configured sampling cadences before relying on this method. Absence
+from a 1 FPS recording or a slower Visual Log proves nothing about a visual
+state that may last less than one sample interval; put time-critical detection
+inside an OCR, CV, or other owning Action loop.
+
+For a bounded diagnostic run:
+
+1. Request a finite Evidence run long enough to cover setup, Action execution,
+   and postcondition observation. Preserve its `runId`, immutable end time,
+   frame count, gaps, and tap failures.
+2. Wait for Evidence to reach `recording` and publish at least one current
+   frame before starting Visual Log. `recording` may precede the first fresh
+   frame-tap publication. If Visual Log warm-up rejects a stale frame, retain
+   that failure, wait for a current frame, and retry only Visual Log; do not
+   restart or extend Evidence.
+3. Immediately before invoking the Action, record UTC time and the starting
+   event cursor. Preserve the Action invocation ID and every event timestamp.
+4. Follow the Action watch independently. Do not delay a safety compensation
+   or terminal-state check while waiting for model descriptions or Evidence
+   export.
+5. Query Visual Log for the Action interval and use scene changes only to
+   narrow candidate ranges. Add context on both sides according to actual
+   sample spacing and drops.
+6. Inspect a contact sheet for coarse localization, then retrieve and verify
+   the authoritative Evidence range before diagnosing control behavior or
+   claiming the game outcome.
+7. Stop only the Visual Log session owned by the task when it no longer adds
+   value. A finite Evidence run completes on its immutable deadline.
+
+For alignment, steering, docking, launch, or other feedback Actions, correlate
+the timelines to distinguish:
+
+- no application response after an issued command;
+- response on the wrong axis or in the wrong direction;
+- control-law overshoot or oscillation;
+- a continuous-to-pulse mode switch that happened too early or too late;
+- a visual-target, compass, OCR, speed, heat, or other Gate that changed on a
+  different frame than the Action assumed; and
+- correct domain progress followed by runtime interruption.
+
+Do not ask the supervising model to repair timing by issuing ad hoc primitives
+between turns. Use the timeline to repair the owning Action's observations,
+telemetry, control law, timeout, or compensation. A calibration-capable
+Streaming Action should emit enough structured events to reconstruct at least
+`phase`, `measurement`, `command`, `gate`, and `reason`; visual prose is not a
+substitute for those fields.
+
+If Visual Log remains active after its finite Evidence producer completes,
+evidence-stage drops are expected and do not invalidate earlier committed
+Evidence. Report the covered interval and later drops separately. If a
+watchdog, deployment, or process update overlaps the run, treat it as a
+possible environment cause only after correlating process identity, service
+lifecycle records, Action terminal events, and Evidence gaps. Temporal
+coincidence alone is not root-cause proof.
+
+An Action may fail at runtime after the game visibly advances or even reaches
+the intended scene. Report runtime `FAILED` and the independently observed
+domain progress separately; never promote visual completion into Action
+`COMPLETED`.
+
+Likewise, preserve a structured observation Action's domain `UNKNOWN` even if
+Evidence appears human-readable. Report the disagreement as classifier or ROI
+evidence and repair the owning Action; do not replace its output with a visual
+guess or the last commanded value.
+
 ## Handle failure without bypassing the architecture
 
 On failure, preserve the smallest complete evidence set:
@@ -205,6 +290,8 @@ On failure, preserve the smallest complete evidence set:
 - invocation ID and last valid cursor;
 - relevant domain events and structured error code;
 - fresh visual or observation evidence;
+- Visual Log session ID, relevant untrusted event sequences, and the verified
+  Evidence run/range when temporal behavior is material;
 - whether any input lease or compensating Action remains active.
 
 Classify the failure before changing code:
@@ -227,6 +314,13 @@ workflow appear successful.
 
 If the task is operation-only, do not infer permission to edit or deploy. Stop
 at the explicit failure with evidence and a concrete repair boundary.
+
+If Agent restart is blocked by a named incomplete capture staging transaction,
+preserve the exact error and validate the exact staging path. Do not delete it
+or clear the artifact store broadly. When operational recovery is authorized,
+quarantine only that validated transaction recoverably, restart the installed
+Agent through its documented owner, and require fresh health, foreground,
+matched Rule, and catalog evidence before continuing.
 
 ## Report completion
 
@@ -252,5 +346,8 @@ Never describe Monitor or Reaction as validated in this v1 report.
   before changing or diagnosing sequence behavior.
 - Read the [Event Stream contract](../../../docs/design/event-stream-runtime.md)
   when investigating durable journal or cursor behavior.
+- Read [`use-visual-log`](../use-visual-log/SKILL.md) before requesting finite
+  Evidence, operating Visual Log, querying time ranges, or retrieving MP4
+  evidence.
 - Treat the foreground Rule document returned by `rule.agents.url` as the
   authority for game- or application-specific semantics.
