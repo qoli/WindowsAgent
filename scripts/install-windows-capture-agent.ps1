@@ -283,6 +283,25 @@ if ($eventListeners.Count -ne 0) {
     throw "EventListen port $eventListenPort is already occupied by PID(s) $owners"
 }
 
+if ($requiresOCRRuntime) {
+    $installedOCRExecutable = Join-Path $installedOCRRuntime "PpOcr.DirectML.exe"
+    $residentOCRProcesses = @(Get-Process -Name "PpOcr.DirectML" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $installedOCRExecutable })
+    foreach ($residentOCRProcess in $residentOCRProcesses) {
+        Stop-Process -Id $residentOCRProcess.Id -Force -ErrorAction Stop
+    }
+    $ocrStopDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $residentOCRProcesses = @(Get-Process -Name "PpOcr.DirectML" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -eq $installedOCRExecutable })
+        if ($residentOCRProcesses.Count -eq 0) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $ocrStopDeadline)
+    if ($residentOCRProcesses.Count -ne 0) {
+        throw "resident OCR runtime did not stop before installation: $installedOCRExecutable"
+    }
+}
+
 $captureArchive = $null
 if ($incompatibleCaptureMetadata.Count -ne 0) {
     $captureArchive = Join-Path $resolvedDataDir (

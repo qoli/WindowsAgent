@@ -49,3 +49,21 @@ func TestModuleInstallersDefaultToWatchdogManagedTasks(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureInstallerStopsExactResidentOCRRuntimeBeforeCopy(t *testing.T) {
+	data, err := os.ReadFile("../../scripts/install-windows-capture-agent.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`$installedOCRExecutable = Join-Path $installedOCRRuntime "PpOcr.DirectML.exe"`,
+		`Where-Object { $_.Path -eq $installedOCRExecutable }`,
+		`Stop-Process -Id $residentOCRProcess.Id -Force -ErrorAction Stop`,
+		`resident OCR runtime did not stop before installation`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("capture installer is missing exact resident OCR shutdown contract %q", required)
+		}
+	}
+}
