@@ -221,7 +221,9 @@ Watchdog and waits for its existing target set to become healthy.
 It reads the installed Watchdog configuration and Scheduled Task actions as the
 only deployment map. It does not ship a Watchdog configuration, register or
 change Tasks, choose triggers or restart policy, or start an Evidence or Visual
-Log run.
+Log run. After replacement it verifies that every target Task's description,
+executable, and complete argument string are byte-for-byte unchanged; this
+includes the Visual Log model endpoint.
 
 ```bash
 ./scripts/deploy-windows-agent.sh --host Ronnie-PC
@@ -429,6 +431,13 @@ does not start an Evidence recording or Visual Log inference run:
   -VisualLogExecutablePath .\.build\windows-visual-log.exe `
   -VisualLogModelBaseURL http://model-host:8001/v1
 ```
+
+The first installation requires `VisualLogModelBaseURL` and verifies
+`/models` from the Windows host before changing either Task. Later
+reinstallations preserve the URL from the owned Visual Log Task when the
+parameter is omitted. Changing an installed endpoint requires both an explicit
+new value and `-AllowVisualLogModelBaseURLChange`; the replacement endpoint is
+verified before the resident processes are stopped.
 
 Add exact `evidence-recorder` and `visual-log` targets to the Watchdog
 configuration. The executables remain independent processes and expose

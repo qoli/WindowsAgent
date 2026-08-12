@@ -19,6 +19,10 @@ func TestObservationProcessInstallerCreatesWatchdogOwnedResidentTasks(t *testing
 		`$visualLogDescription = "gameGuide independent resident Visual Log control service; interactive-user session required"`,
 		`-PreviousDescriptions @("gameGuide independent finite Evidence recorder; interactive-user session required")`,
 		`-PreviousDescriptions @("gameGuide independent on-demand Visual Log; interactive-user session required")`,
+		`VisualLogModelBaseURL is required for the first installation`,
+		`-AllowVisualLogModelBaseURLChange to change it explicitly`,
+		`Assert-VisualLogModelEndpoint -BaseURL $resolvedModelBaseURL`,
+		`model_base_url_source = $modelBaseURLResolution.Source`,
 		`watchdog_managed = $true`,
 	} {
 		if !strings.Contains(script, required) {

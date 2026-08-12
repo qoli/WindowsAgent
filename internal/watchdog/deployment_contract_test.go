@@ -19,6 +19,8 @@ func TestBinaryDeploymentUsesExactInstalledWatchdogTargets(t *testing.T) {
 		`Invoke-WebRequest -Uri ([string]$probe.url)`,
 		`target Scheduled Task ownership mismatch`,
 		`installed Watchdog tasks do not map the complete binary set`,
+		`binary deployment changed Scheduled Task configuration`,
+		`task_actions_preserved = $true`,
 	} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("deployment coordinator is missing Watchdog target contract %q", required)

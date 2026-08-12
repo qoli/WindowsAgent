@@ -69,6 +69,7 @@ if ($targets.Count -eq 0) { throw "installed Watchdog config has no targets" }
 
 $destinations = @{"windows-watchdog.exe" = $watchdogPath}
 $targetTasks = @()
+$targetTaskActions = @{}
 foreach ($target in $targets) {
     $taskName = [string]$target.recovery.scheduledTaskName
     $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
@@ -80,6 +81,11 @@ foreach ($target in $targets) {
     if ($destinations.ContainsKey($name)) { throw "duplicate installed executable: $name" }
     $destinations[$name] = $execute
     $targetTasks += $taskName
+    $targetTaskActions[$taskName] = [ordered]@{
+        description = [string]$task.Description
+        execute = [string]$task.Actions[0].Execute
+        arguments = [string]$task.Actions[0].Arguments
+    }
 }
 
 $capturePath = $destinations["windows-capture-agent.exe"]
@@ -166,8 +172,20 @@ if (-not $allHealthy) {
     throw "Watchdog did not restore all configured targets before the deadline"
 }
 
+foreach ($taskName in $targetTasks) {
+    $before = $targetTaskActions[$taskName]
+    $after = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    if (@($after.Actions).Count -ne 1 -or
+        [string]$after.Description -cne $before.description -or
+        [string]$after.Actions[0].Execute -cne $before.execute -or
+        [string]$after.Actions[0].Arguments -cne $before.arguments) {
+        throw "binary deployment changed Scheduled Task configuration: $taskName"
+    }
+}
+
 [ordered]@{
     watchdog_pid = $watchdogProcess.Id
+    task_actions_preserved = $true
     targets = @($targets | ForEach-Object {
         [ordered]@{id=$_.id; state=$targetStates[[string]$_.id]}
     })

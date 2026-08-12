@@ -7,8 +7,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$VisualLogExecutablePath,
 
-    [Parameter(Mandatory = $true)]
     [uri]$VisualLogModelBaseURL,
+
+    [switch]$AllowVisualLogModelBaseURLChange,
 
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA "gameGuide\windows-capture-agent"),
     [string]$EvidenceTaskName = "gameGuide Windows Evidence Recorder",
@@ -69,6 +70,81 @@ function Assert-RegularTokenFile {
     $item = Get-Item -LiteralPath $Path -Force
     if ($item.PSIsContainer -or $item.Length -lt 1 -or $item.Length -gt 4096) {
         throw "$Label must be a regular file between 1 and 4096 bytes: $Path"
+    }
+}
+
+function Get-TaskArgumentValue {
+    param(
+        [Parameter(Mandatory = $true)][string]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+    $pattern = '(?:^|\s)' + [regex]::Escape($Name) + '(?:\s+)(?:"([^"]+)"|(\S+))'
+    $matches = [regex]::Matches($Arguments, $pattern)
+    if ($matches.Count -ne 1) {
+        throw "scheduled task arguments must contain exactly one $Name value"
+    }
+    if ($matches[0].Groups[1].Success) { return $matches[0].Groups[1].Value }
+    return $matches[0].Groups[2].Value
+}
+
+function Resolve-VisualLogModelBaseURL {
+    param(
+        [uri]$Requested,
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][string]$Description,
+        [string[]]$PreviousDescriptions = @(),
+        [Parameter(Mandatory = $true)][bool]$AllowChange
+    )
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $existing = $null
+    if ($task) {
+        if (($task.Description -ne $Description -and $task.Description -notin $PreviousDescriptions) -or
+            @($task.Actions).Count -ne 1) {
+            throw "scheduled task '$TaskName' is not owned by the expected process"
+        }
+        $existingValue = Get-TaskArgumentValue -Arguments ([string]$task.Actions[0].Arguments) `
+            -Name "--model-base-url"
+        try { $existing = [uri]$existingValue } catch {
+            throw "scheduled task '$TaskName' has an invalid --model-base-url value"
+        }
+    }
+
+    if ($null -eq $Requested) {
+        if ($null -eq $existing) {
+            throw "VisualLogModelBaseURL is required for the first installation"
+        }
+        return [ordered]@{ URL = $existing; Source = "preserved" }
+    }
+
+    if ($existing -and $Requested.AbsoluteUri.TrimEnd('/') -ne $existing.AbsoluteUri.TrimEnd('/') -and -not $AllowChange) {
+        throw "VisualLogModelBaseURL differs from the installed Task; pass -AllowVisualLogModelBaseURLChange to change it explicitly"
+    }
+    $source = if ($existing -and $Requested.AbsoluteUri.TrimEnd('/') -eq $existing.AbsoluteUri.TrimEnd('/')) {
+        "unchanged"
+    } elseif ($existing) {
+        "changed"
+    } else {
+        "initial"
+    }
+    return [ordered]@{ URL = $Requested; Source = $source }
+}
+
+function Assert-VisualLogModelEndpoint {
+    param(
+        [Parameter(Mandatory = $true)][uri]$BaseURL,
+        [Parameter(Mandatory = $true)][string]$APIKeyPath
+    )
+    $key = [IO.File]::ReadAllText($APIKeyPath).Trim()
+    if (-not $key) { throw "model API key is empty" }
+    $modelsURI = [uri]($BaseURL.AbsoluteUri.TrimEnd('/') + "/models")
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $modelsURI `
+            -Headers @{ Authorization = "Bearer $key" } -TimeoutSec 5
+    } catch {
+        throw "Visual Log model endpoint is not reachable from Windows at ${modelsURI}: $($_.Exception.Message)"
+    }
+    if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+        throw "Visual Log model endpoint returned HTTP $($response.StatusCode) at $modelsURI"
     }
 }
 
@@ -136,10 +212,6 @@ $visualLogPort = Assert-LoopbackListen -Value $VisualLogListen -Label "VisualLog
 if ($evidencePort -eq $visualLogPort) {
     throw "EvidenceListen and VisualLogListen must use different ports"
 }
-if ($VisualLogModelBaseURL.Scheme -notin @("http", "https") -or -not $VisualLogModelBaseURL.Host) {
-    throw "VisualLogModelBaseURL must be an absolute HTTP or HTTPS URL"
-}
-
 $sourceEvidence = [IO.Path]::GetFullPath($EvidenceExecutablePath)
 $sourceVisualLog = [IO.Path]::GetFullPath($VisualLogExecutablePath)
 foreach ($source in @($sourceEvidence, $sourceVisualLog)) {
@@ -169,6 +241,18 @@ Assert-RegularTokenFile -Path $evidenceToken -Label "Evidence token"
 Assert-RegularTokenFile -Path $visualLogToken -Label "Visual Log control token"
 Assert-RegularTokenFile -Path $eventToken -Label "event stream token"
 Assert-RegularTokenFile -Path $modelToken -Label "model API key"
+
+$modelBaseURLResolution = Resolve-VisualLogModelBaseURL `
+    -Requested $VisualLogModelBaseURL `
+    -TaskName $VisualLogTaskName `
+    -Description $visualLogDescription `
+    -PreviousDescriptions @("gameGuide independent on-demand Visual Log; interactive-user session required") `
+    -AllowChange $AllowVisualLogModelBaseURLChange.IsPresent
+$resolvedModelBaseURL = [uri]$modelBaseURLResolution.URL
+if ($resolvedModelBaseURL.Scheme -notin @("http", "https") -or -not $resolvedModelBaseURL.Host) {
+    throw "VisualLogModelBaseURL must be an absolute HTTP or HTTPS URL"
+}
+Assert-VisualLogModelEndpoint -BaseURL $resolvedModelBaseURL -APIKeyPath $modelToken
 
 Stop-OwnedTaskProcess -TaskName $VisualLogTaskName -Description $visualLogDescription `
     -PreviousDescriptions @("gameGuide independent on-demand Visual Log; interactive-user session required") `
@@ -216,7 +300,7 @@ Register-ScheduledTask -TaskName $EvidenceTaskName -InputObject $evidenceTask -F
 
 $visualLogArguments = @(
     "--config", (ConvertTo-NativeQuotedArgument $visualLogConfig),
-    "--model-base-url", $VisualLogModelBaseURL.AbsoluteUri.TrimEnd('/'),
+    "--model-base-url", $resolvedModelBaseURL.AbsoluteUri.TrimEnd('/'),
     "--model-api-key-file", (ConvertTo-NativeQuotedArgument $modelToken),
     "--event-base-url", "http://127.0.0.1:8788",
     "--event-token-file", (ConvertTo-NativeQuotedArgument $eventToken),
@@ -265,7 +349,8 @@ $visualLogProcess = Wait-HealthyProcess `
         process_id = $visualLogProcess.Id
         session_id = $visualLogProcess.SessionId
         health = "ok"
-        model_base_url = $VisualLogModelBaseURL.AbsoluteUri.TrimEnd('/')
+        model_base_url = $resolvedModelBaseURL.AbsoluteUri.TrimEnd('/')
+        model_base_url_source = $modelBaseURLResolution.Source
     }
     lifecycle_owner = "independent"
     watchdog_managed = $true
