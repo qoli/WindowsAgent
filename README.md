@@ -188,22 +188,6 @@ mkdir -p .build
 go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
 ./scripts/build-windows-capture-agent.sh
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath \
-  -o .build/windows-observer.exe \
-  ./cmd/windows-observer
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath \
-  -o .build/windows-observation-script-runner.exe \
-  ./cmd/windows-observation-script-runner
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath \
-  -o .build/windows-observation-job.exe \
-  ./cmd/windows-observation-job
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-  go build -trimpath -ldflags "-H=windowsgui" \
-  -o .build/windows-event-stream.exe \
-  ./cmd/windows-event-stream
 cp -R Rules .build/
 ```
 
@@ -212,8 +196,30 @@ The build script also emits `windows-capture-agent-console.exe` for interactive
 terminal diagnostics, `windows-action-check.exe` for offline Rule validation,
 `windows-action-osd.exe` for the display-only Action and Evidence-recording
 overlay, and the optional `windows-watchdog.exe` and independent
-`windows-visual-log.exe`. It verifies
-the expected PE subsystem for every emitted executable.
+`windows-evidence-recorder.exe` and `windows-visual-log.exe`. It also emits the
+Event Stream and all three observation runtimes required by the persistent
+installer. It verifies the expected PE subsystem for every emitted executable.
+
+## Deploy from macOS
+
+`scripts/deploy-windows-agent.sh` is the single macOS interface for a complete
+binary update. It validates source, builds and hashes all nine deployed
+executables, uploads one ZIP over SSH, stops the installed Watchdog and its
+currently configured targets, replaces only their binaries, then restarts the
+Watchdog and waits for its existing target set to become healthy.
+
+It reads the installed Watchdog configuration and Scheduled Task actions as the
+only deployment map. It does not ship a Watchdog configuration, register or
+change Tasks, choose triggers or restart policy, or start an Evidence or Visual
+Log run.
+
+```bash
+./scripts/deploy-windows-agent.sh --host Ronnie-PC
+```
+
+`Ronnie-PC` is the default host, so `--host` may be omitted. A dirty worktree is
+rejected unless `--allow-dirty` is explicitly supplied. Failed remote staging
+is retained for diagnosis.
 
 ### Offline Action dependency check
 
