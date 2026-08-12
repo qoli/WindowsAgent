@@ -353,6 +353,80 @@ func TestEliteClearHyperspaceOcclusionUsesFixedCoarseDirectionForHollowProbe(t *
 	}
 }
 
+func TestEliteClearHyperspaceOcclusionDoesNotRepeatFullCoarseHollowSegment(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: clearThenCruiseOcclusions(),
+		compassTargets: repeatCompassTargets(
+			escapeVectorTarget("HOLLOW", 8, 20, 21.5),
+			escapeVectorTarget("HOLLOW", 8, 6, 10),
+			escapeVectorTarget("SOLID", 0, 0, 0),
+		),
+		heatPercents:              []int64{23, 23, 23, 25, 27, 29, 31, 33, 35},
+		heatUnknownAt:             map[int]bool{},
+		entryRequiresFullThrottle: true,
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("%v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+
+	holds := []int64{}
+	reasons := []string{}
+	for _, payload := range reporter.payloads {
+		var event map[string]any
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["phase"] != "PREALIGNING_ESCAPE_VECTOR" {
+			continue
+		}
+		holds = append(holds, int64(event["commandHoldMs"].(float64)))
+		reasons = append(reasons, event["reason"].(string))
+	}
+	if !equalInt64s(holds, []int64{3000, 700}) {
+		t.Fatalf("prealignment holds=%v, want one coarse segment then one bounded HOLLOW follow-up", holds)
+	}
+	if reasons[1] != "HOLLOW_FOLLOWUP_BOUNDED_SEGMENT" {
+		t.Fatalf("prealignment reasons=%v", reasons)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionRetriesOneFullyMissedFlashingProbe(t *testing.T) {
+	unavailable := map[int]bool{}
+	for index := range 16 {
+		unavailable[index] = true
+	}
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: clearThenCruiseOcclusions(),
+		compassTargets: repeatCompassTargets(
+			escapeVectorTarget("SOLID", 5, -4, 6.403),
+			escapeVectorTarget("SOLID", 0, 0, 0),
+		),
+		compassUnavailableAt:      unavailable,
+		heatPercents:              []int64{23, 23, 23, 25, 27, 29, 31, 33, 35, 37},
+		heatUnknownAt:             map[int]bool{},
+		entryRequiresFullThrottle: true,
+		visiblePositionUnknown:    true,
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatalf("one fully missed flashing probe must consume bounded budget and recover: %v events=%s", err, joinEventPhases(reporter.payloads))
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"reason":"PREALIGN_OWNERSHIP_NOT_CONFIRMED_RETRY"`) {
+		t.Fatalf("missing explicit missed-probe retry evidence: %s", joined)
+	}
+	if !contains(joined, `"phase":"PREALIGNING_ESCAPE_VECTOR"`) || !contains(joined, `"commandHoldMs":300`) {
+		t.Fatalf("a 6.4-pixel SOLID correction must use the fine 300 ms segment: %s", joined)
+	}
+}
+
 func TestEliteClearHyperspaceOcclusionFallsBackWhenVisibleHandoffTurnsUnknown(t *testing.T) {
 	caller := &clearHyperspaceOcclusionCaller{
 		occlusions: clearThenCruiseOcclusions(),
@@ -591,11 +665,11 @@ func TestEliteClearHyperspaceOcclusionFailsClosedWhenEscapeVectorNeverAppears(t 
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "Aldebaran"}, caller, reporter,
 	)
-	if err == nil || !contains(err.Error(), "could not confirm Compass ownership") {
+	if err == nil || !contains(err.Error(), "did not become a centered front marker within bounded short-charge probes") {
 		t.Fatalf("error=%v", err)
 	}
-	if caller.supercruiseToggle != 2 {
-		t.Fatalf("Supercruise toggles=%d, want explicit cancellation", caller.supercruiseToggle)
+	if caller.supercruiseToggle != 16 {
+		t.Fatalf("Supercruise toggles=%d, want eight bounded probes with explicit cancellation", caller.supercruiseToggle)
 	}
 }
 

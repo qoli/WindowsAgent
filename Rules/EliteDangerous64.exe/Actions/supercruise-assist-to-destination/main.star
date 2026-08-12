@@ -336,6 +336,26 @@ def align_compass(target_name, control_profile):
     )
     return compass_result["sampleCount"]
 
+def align_visible_destination(target_name):
+    visible_result = action.call(
+        id="elite-dangerous/align-visible-target",
+        inputs={
+            "targetName": target_name,
+            "stopBeforeAlign": False,
+            "positionSource": "DESTINATION",
+            "searchWhenUnknown": False,
+            "heatPolicy": "STRICT",
+        },
+    )
+    emit_update(
+        "ALIGNING",
+        visible_result["sampleCount"],
+        target_name,
+        last_command="ALIGN_VISIBLE_TARGET",
+        reason="VISIBLE_DESTINATION_ALIGNMENT_COMPLETED",
+    )
+    return visible_result["sampleCount"]
+
 def preflight(target_name):
     ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
     mass_lock = ship["massLock"]["state"]
@@ -467,9 +487,9 @@ def main(ctx):
             if alignment_required_samples > BLUE_ZONE_GRACE_SAMPLES:
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
                 emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
-                alignment_sample_count = align_compass(target_name, "SUPERCRUISE_ASSIST")
+                alignment_sample_count = align_visible_destination(target_name)
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
-                command = "ALIGN_TARGETS:" + str(alignment_sample_count) + "+SET_THROTTLE_75"
+                command = "ALIGN_VISIBLE_TARGET:" + str(alignment_sample_count) + "+SET_THROTTLE_75"
                 alignment_required_samples = 0
                 phase = "ALIGNING_FOR_ENTRY"
         elif last_flight_status in ["SUPERCRUISE", "SAFE_DISENGAGE_READY", "UNKNOWN"]:

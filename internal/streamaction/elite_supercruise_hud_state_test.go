@@ -56,6 +56,28 @@ func TestEliteSupercruiseHUDStateAcceptsSupercruiseSpeedUnitBeforeAssist(t *test
 	}
 }
 
+func TestEliteSupercruiseHUDStateAcceptsSlashElidedSupercruiseSpeedUnit(t *testing.T) {
+	caller := &supercruiseHUDCaller{
+		dashboard: ocrRegions("LTT 11244 A 2", 0.9, 0.9),
+		speed:     ocrRegions("30.0kms", 0.687, 0.974),
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteSupercruiseHUDStatePackage(t), map[string]any{}, caller, &fixtureReporter{})
+	if err != nil || !contains(string(output), `"state":"ACTIVE"`) || !contains(string(output), `"supercruiseSpeedUnit":"KM/S"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseHUDStateAcceptsSlashAsDigitSupercruiseSpeedUnit(t *testing.T) {
+	caller := &supercruiseHUDCaller{
+		dashboard: ocrRegions("LTT 11244 A 2", 0.9, 0.9),
+		speed:     ocrRegions("30.0km7s", 0.687, 0.974),
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteSupercruiseHUDStatePackage(t), map[string]any{}, caller, &fixtureReporter{})
+	if err != nil || !contains(string(output), `"state":"ACTIVE"`) || !contains(string(output), `"supercruiseSpeedUnit":"KM/S"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
 func TestEliteSupercruiseHUDStateRejectsPlainNormalSpaceSpeed(t *testing.T) {
 	caller := &supercruiseHUDCaller{
 		dashboard: ocrRegions("JAGDBADGER'S REST", 0.9, 0.9),

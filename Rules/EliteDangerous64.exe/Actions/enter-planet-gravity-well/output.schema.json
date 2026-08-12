@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "finalPhase", "entryMode", "targetName", "escapeVectorConfirmations", "approachSampleCount", "finalTargetDistanceMeters", "finalSupercruiseSpeedMetersPerSecond", "normalSpaceConfirmed", "finalCommandedThrottle"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "ENTER_PLANET_GRAVITY_WELL"},
+    "completed": {"const": true},
+    "finalPhase": {"const": "COMPLETED"},
+    "entryMode": {"enum": ["ALREADY_IN_GRAVITY_WELL", "APPROACHED_AND_VERIFIED"]},
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "escapeVectorConfirmations": {"type": "integer", "minimum": 2, "maximum": 16},
+    "approachSampleCount": {"type": "integer", "minimum": 0, "maximum": 240},
+    "finalTargetDistanceMeters": {"type": ["number", "null"], "minimum": 0},
+    "finalSupercruiseSpeedMetersPerSecond": {"type": ["number", "null"], "minimum": 0},
+    "normalSpaceConfirmed": {"const": true},
+    "finalCommandedThrottle": {"const": 0}
+  }
+}

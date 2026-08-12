@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.enter-planet-gravity-well.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "targetName", "sample", "commandedThrottle", "flightStatus", "supercruise", "fsdCharging", "heatPercent", "targetDistanceMeters", "supercruiseSpeedMetersPerSecond", "distanceTrend", "candidateConfirmations", "escapeVectorConfirmations", "reason"],
+      "properties": {
+        "phase": {"enum": ["PREFLIGHT", "PROBING_CURRENT_POSITION", "CANCELLING_PROBE", "ALIGNING", "ENTERING_SUPERCRUISE", "APPROACHING", "DROPPING", "VERIFYING_GRAVITY_WELL", "COMPLETED"]},
+        "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "commandedThrottle": {"enum": [0, 100]},
+        "flightStatus": {"type": ["string", "null"]},
+        "supercruise": {"type": ["boolean", "null"]},
+        "fsdCharging": {"type": ["boolean", "null"]},
+        "heatPercent": {"type": ["integer", "null"], "minimum": 0, "maximum": 250},
+        "targetDistanceMeters": {"type": ["number", "null"], "minimum": 0},
+        "supercruiseSpeedMetersPerSecond": {"type": ["number", "null"], "minimum": 0},
+        "distanceTrend": {"enum": ["UNKNOWN", "BASELINE", "DECREASING", "STABLE", "INCREASING", "CANDIDATE"]},
+        "candidateConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
+        "escapeVectorConfirmations": {"type": "integer", "minimum": 0, "maximum": 16},
+        "reason": {"type": ["string", "null"], "maxLength": 512}
+      }
+    }
+  }
+}

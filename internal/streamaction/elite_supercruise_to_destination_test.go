@@ -12,6 +12,9 @@ type supercruiseDestinationCaller struct {
 	flightStates    []string
 	flightIndex     int
 	compassCalls    int
+	compassStates   []string
+	compassResults  []json.RawMessage
+	attitudeInputs  []map[string]any
 	speedCalls      int
 	throttles       []int
 	supercruiseKeys int
@@ -31,8 +34,19 @@ func (c *supercruiseDestinationCaller) Call(_ context.Context, id string, inputs
 		return json.Marshal(map[string]any{"control": map[int64]string{-100: "SetSpeedMinus100", 0: "SetSpeedZero", 75: "SetSpeed75", 100: "SetSpeed100"}[percent]})
 	case "elite-dangerous/compass":
 		c.compassCalls++
+		if len(c.compassResults) > 0 {
+			result := c.compassResults[0]
+			c.compassResults = c.compassResults[1:]
+			return result, nil
+		}
+		if len(c.compassStates) > 0 {
+			state := c.compassStates[0]
+			c.compassStates = c.compassStates[1:]
+			return alignObservation(state, 1, 1, 1.414, true), nil
+		}
 		return alignObservation("SOLID", 1, 1, 1.414, true), nil
 	case "elite-dangerous/ship-attitude-control":
+		c.attitudeInputs = append(c.attitudeInputs, inputs)
 		return json.RawMessage(`{"schemaVersion":1}`), nil
 	case "elite-dangerous/supercruise-control":
 		c.supercruiseKeys++
@@ -54,6 +68,58 @@ func (c *supercruiseDestinationCaller) Call(_ context.Context, id string, inputs
 		return json.RawMessage(`{"speed":{"state":"STOPPED","displayValue":0,"rawCandidate":0}}`), nil
 	default:
 		return nil, errors.New("unexpected supercruise child Action: " + id)
+	}
+}
+
+func TestEliteSupercruiseToDestinationRetriesTransientUnknownCompassPresentation(t *testing.T) {
+	caller := &supercruiseDestinationCaller{
+		compassStates: []string{"UNKNOWN", "SOLID"},
+		flightStates: []string{
+			"FSD_CHARGING", "SUPERCRUISE", "SAFE_DISENGAGE_READY", "SAFE_DISENGAGE_READY",
+		},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseToDestinationPackage(t),
+		map[string]any{"targetName": "LTT 11244 A 2", "targetLocked": true, "normalSpaceConfirmed": true}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.compassCalls < 2 {
+		t.Fatalf("compassCalls=%d", caller.compassCalls)
+	}
+	joined := ""
+	for _, payload := range reporter.payloads {
+		joined += string(payload)
+	}
+	if !contains(joined, "Compass target presentation is UNKNOWN; retrying sample 1/12") {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteSupercruiseToDestinationUsesFineYawPulseNearCenter(t *testing.T) {
+	caller := &supercruiseDestinationCaller{
+		compassResults: []json.RawMessage{
+			alignObservation("SOLID", 20, 0, 20, false),
+			alignObservation("SOLID", 1, 1, 1.414, true),
+		},
+		flightStates: []string{
+			"FSD_CHARGING", "SUPERCRUISE", "SAFE_DISENGAGE_READY", "SAFE_DISENGAGE_READY",
+		},
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseToDestinationPackage(t),
+		map[string]any{"targetName": "LTT 11244 A 2", "targetLocked": true, "normalSpaceConfirmed": true}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.attitudeInputs) == 0 {
+		t.Fatal("expected a near-center yaw correction")
+	}
+	if caller.attitudeInputs[0]["control"] != "YAW_RIGHT" || caller.attitudeInputs[0]["holdMs"] != int64(120) {
+		t.Fatalf("first attitude input=%v", caller.attitudeInputs[0])
 	}
 }
 

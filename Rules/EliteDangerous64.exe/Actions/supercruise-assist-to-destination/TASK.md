@@ -10,15 +10,17 @@ Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, then
 invokes `align-station-target` with `targetMotion=STATIC`. Before Supercruise
 entry it uses the strict `NORMAL_SPACE` Compass profile; after a confirmed
 Supercruise entry it uses `SUPERCRUISE_ASSIST`. The Compass child remains the
-sole alignment feedback source and must complete while throttle is 0% before
-acceleration is permitted.
+coarse and initial alignment feedback source and must complete while throttle
+is 0% before acceleration is permitted. Once the game explicitly emits
+`FSD_ALIGNMENT_REQUIRED` after Assist selection, the destination is expected
+in the forward HUD and the workflow switches to `align-visible-target` with
+exact target identity, `searchWhenUnknown=false`, and the strict heat Gate.
+This avoids a measured loop where Compass remained within 3-5 pixels while the
+visible destination stayed off-centre and the game continued to reject Assist
+ownership. Missing visible-target evidence fails; it never authorizes a blind
+sweep or a different label.
 
-This workflow does not invoke `align-visible-target`. A selected Station label
-outside the OCR bands is not permission to replace current Compass feedback
-with a blind search. Destination OCR remains responsible for Navigation UI
-identity and Assist-button interaction, not flight alignment.
-
-The runtime supervises the nested Compass Streaming Action synchronously: its start,
+The runtime supervises each nested alignment Streaming Action synchronously: its start,
 events, completion, and failure are wrapped in the parent stream with a child
 execution ID. Parent cancellation propagates through the shared context, and a
 child failure fails the parent without a manual alignment fallback. The child
@@ -43,7 +45,7 @@ before `SELECT`. Missing or ambiguous text, focus, module, target
 lock, or panel state fails explicitly. After the panel closes, the Action may
 command 75% into the Supercruise blue zone. It gives the game three prompt
 observations to react. If alignment remains required, it returns to 0%,
-completes the same supervised target-alignment child, and only then restores
+completes the supervised visible-target alignment child, and only then restores
 75%; attitude control never runs at blue-zone throttle. `SUPERCRUISE ASSIST
 ACTIVE` must be classified twice
 before the game computer owns flight.

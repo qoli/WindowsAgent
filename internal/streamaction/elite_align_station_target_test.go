@@ -315,6 +315,28 @@ func TestEliteAlignStationTargetStaticNormalSpaceUsesStableStationHandoffGate(t 
 	}
 }
 
+func TestEliteAlignStationTargetStaticNormalSpaceAcceptsQuantizedPlanetEquilibrium(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -3, -14, 14.318, false),
+		alignObservation("SOLID", -2, -19, 19.105, false),
+		alignObservation("SOLID", -3, -14, 14.318, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":3`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.controls) != 0 || len(caller.holdOps) != 0 {
+		t.Fatalf("quantized centered equilibrium must not be perturbed: controls=%v holds=%v holdOps=%v", caller.controls, caller.holds, caller.holdOps)
+	}
+}
+
 func TestEliteAlignStationTargetStaticNormalSpaceBrakesMediumPitchEntry(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 0, -17, 17, false),
@@ -363,12 +385,63 @@ func TestEliteAlignStationTargetStaticSupercruiseAlignUsesPrecisionGate(t *testi
 		t.Fatal(err)
 	}
 	if !contains(string(output), `"completed":true`) ||
-		!contains(string(output), `"sampleCount":5`) ||
+		!contains(string(output), `"sampleCount":4`) ||
 		!contains(string(output), `"stableConfirmations":2`) {
 		t.Fatalf("output=%s", output)
 	}
-	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_UP,PITCH_DOWN" ||
-		len(caller.holds) != 3 || caller.holds[0] != 160 || caller.holds[1] != 80 || caller.holds[2] != 80 {
+	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_DOWN" ||
+		len(caller.holds) != 2 || caller.holds[0] != 160 || caller.holds[1] != 80 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetStaticSupercruiseAlignEscalatesQuantizedFinePulse(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -9, 0, 9, false),
+		alignObservation("SOLID", -9, 0, 9, false),
+		alignObservation("SOLID", -9, 0, 9, false),
+		alignObservation("SOLID", -3, 0, 3, true),
+		alignObservation("SOLID", -3, 0, 3, true),
+		alignObservation("SOLID", -3, 0, 3, true),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	want := []int{80, 80, 160, 80}
+	if len(caller.holds) != len(want) {
+		t.Fatalf("holds=%v want=%v", caller.holds, want)
+	}
+	for index := range want {
+		if caller.holds[index] != want[index] {
+			t.Fatalf("holds=%v want=%v", caller.holds, want)
+		}
+	}
+}
+
+func TestEliteAlignStationTargetStaticSupercruiseAlignAcceptsQuantizedCenterEquilibrium(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -9, 0, 9, false),
+		alignObservation("SOLID", -5, -3, 5.831, false),
+		alignObservation("SOLID", -5, -3, 5.831, false),
+		alignObservation("SOLID", -5, -3, 5.831, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"stableConfirmations":2`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_RIGHT" || len(caller.holds) != 2 || caller.holds[0] != 80 || caller.holds[1] != 80 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }

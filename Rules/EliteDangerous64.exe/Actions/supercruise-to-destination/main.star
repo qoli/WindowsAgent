@@ -10,7 +10,8 @@ APPROACH_CENTER_PIXELS = 16
 COARSE_DISTANCE_PIXELS = 40
 COARSE_HOLD_MS = 800
 MEDIUM_HOLD_MS = 300
-FINE_HOLD_MS = 250
+FINE_HOLD_MS = 120
+AMBIGUOUS_PRESENTATION_LIMIT = 12
 
 def emit_update(phase, sample, target_name, flight_status="UNKNOWN", prompt_text=None, mass_lock=None, landing_gear=None, cargo_scoop=None, target=None, safe_confirmations=0, stopped_confirmations=0, commanded_throttle=None, last_command=None, reason=None):
     stream.emit(
@@ -47,13 +48,20 @@ def observe_flight():
     }
 
 def observe_compass_target():
-    observation = action.call(id="elite-dangerous/compass", inputs={})
-    target = observation["target"]
-    if not target["detected"]:
-        fail("Compass target is absent; targetLocked=true did not match current visual evidence")
-    if target["presentation"] == "UNKNOWN":
-        fail("Compass target presentation is UNKNOWN")
-    return target
+    for attempt in range(1, AMBIGUOUS_PRESENTATION_LIMIT + 1):
+        observation = action.call(id="elite-dangerous/compass", inputs={})
+        target = observation["target"]
+        if not target["detected"]:
+            fail("Compass target is absent; targetLocked=true did not match current visual evidence")
+        if target["presentation"] != "UNKNOWN":
+            return target
+        stream.activity(
+            message="Compass target presentation is UNKNOWN; retrying sample " + str(attempt) + "/" + str(AMBIGUOUS_PRESENTATION_LIMIT),
+            level="warning",
+        )
+        if attempt < AMBIGUOUS_PRESENTATION_LIMIT:
+            task.sleep(milliseconds=POLL_MS)
+    fail("Compass target presentation remained UNKNOWN for " + str(AMBIGUOUS_PRESENTATION_LIMIT) + " consecutive observations")
 
 def choose_alignment_command(target):
     if target["presentation"] == "HOLLOW":
@@ -69,7 +77,7 @@ def choose_alignment_command(target):
     offset_x = target["offsetX"]
     offset_y = target["offsetY"]
     if abs(offset_x) >= abs(offset_y) and offset_x != 0:
-        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", COARSE_HOLD_MS]
+        return ["YAW_RIGHT" if offset_x > 0 else "YAW_LEFT", hold_ms]
     if offset_y != 0:
         return ["PITCH_DOWN" if offset_y > 0 else "PITCH_UP", hold_ms]
     return None

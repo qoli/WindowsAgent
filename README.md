@@ -35,12 +35,17 @@ The screenshot capability is available today:
 - capture-time foreground rule resolution with a navigable Codex `AGENTS.md`
 - SHA-256 verified artifacts and bounded retention
 - strict JSON errors with no GDI or hidden provider fallback; one capture may
-  rebuild its WGC item/session up to three times for explicitly classified
+  rebuild its WGC item/session up to five times for explicitly classified
   transient WGC failures before returning the preserved capture error
 - optional hidden startup through an interactive-user Scheduled Task
 
 The generic Starlark launcher and finite Script capabilities are available
 today:
+
+- a Script `screen.readRegion` whose Observer transport exits with the exact
+  broker EOF signature may restart its isolated launch up to five times, with
+  a bounded delay between attempts; unrelated and exhausted failures remain
+  explicit and terminal
 
 - `crimson-desert/inventory` performs a finite memory attempt and, only when
   that attempt cannot produce a valid inventory, discovers and decodes the

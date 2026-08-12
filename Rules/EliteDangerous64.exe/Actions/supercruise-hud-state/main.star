@@ -26,11 +26,12 @@ def supercruise_speed_unit(raw):
         if region["detectionConfidence"] < MIN_SPEED_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
             continue
         text = normalize_speed(region["text"])
-        if "KM/S" in text:
+        unit_letters = normalize(region["text"])
+        if unit_letters == "KMS":
             return "KM/S"
-        if "MM/S" in text:
+        if unit_letters == "MMS":
             return "MM/S"
-        if len(text) >= 2 and text[len(text) - 1] == "C":
+        if unit_letters == "C" and len(text) >= 2:
             return "C"
     return None
 

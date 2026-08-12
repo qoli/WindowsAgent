@@ -4,6 +4,8 @@ SCREEN_CENTER_X = 960.0
 SCREEN_CENTER_Y = 540.0
 LABEL_TO_MARKER_X = 30.0
 LABEL_TO_MARKER_Y = 8.0
+DUPLICATE_BOX_TOLERANCE_PIXELS = 16.0
+MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS = 32.0
 
 def normalize(text):
     result = ""
@@ -67,6 +69,14 @@ def square_root(value):
         guess = (guess + value / guess) / 2.0
     return guess
 
+def marker_distance(region):
+    box = bounds(region["referencePoints"])
+    reference_x = box["left"] - LABEL_TO_MARKER_X
+    reference_y = box["centerY"] - LABEL_TO_MARKER_Y
+    offset_x = reference_x - SCREEN_CENTER_X
+    offset_y = reference_y - SCREEN_CENTER_Y
+    return square_root(offset_x * offset_x + offset_y * offset_y)
+
 def main(ctx):
     target_name = ctx.inputs["targetName"]
     expected = normalize(target_name)
@@ -88,20 +98,39 @@ def main(ctx):
             duplicate_index = None
             for index in range(len(matches)):
                 existing_box = bounds(matches[index]["referencePoints"])
-                if abs(candidate_box["left"] - existing_box["left"]) <= 8.0 and abs(candidate_box["centerY"] - existing_box["centerY"]) <= 8.0:
+                if abs(candidate_box["left"] - existing_box["left"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS and abs(candidate_box["centerY"] - existing_box["centerY"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS:
                     duplicate_index = index
                     break
             if duplicate_index == None:
                 matches.append(region)
             elif region["recognitionConfidence"] > matches[duplicate_index]["recognitionConfidence"]:
                 matches[duplicate_index] = region
-    if len(matches) != 1:
+    if len(matches) == 0:
         return {
             "schemaVersion": 1,
-            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_UNIQUE", "rawTexts": raw_texts},
+            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_FOUND", "rawTexts": raw_texts},
             "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"]]},
         }
     region = matches[0]
+    reason = "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED"
+    if len(matches) > 1:
+        closest_distance = marker_distance(matches[0])
+        second_distance = None
+        for index in range(1, len(matches)):
+            distance = marker_distance(matches[index])
+            if distance < closest_distance:
+                second_distance = closest_distance
+                closest_distance = distance
+                region = matches[index]
+            elif second_distance == None or distance < second_distance:
+                second_distance = distance
+        if second_distance == None or second_distance - closest_distance < MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS:
+            return {
+                "schemaVersion": 1,
+                "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_CANDIDATES_AMBIGUOUS", "rawTexts": raw_texts},
+                "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"]]},
+            }
+        reason = "NEAREST_FORWARD_TARGET_LABEL_SELECTED"
     box = bounds(region["referencePoints"])
     reference_x = box["left"] - LABEL_TO_MARKER_X
     reference_y = box["centerY"] - LABEL_TO_MARKER_Y
@@ -116,7 +145,7 @@ def main(ctx):
             "offsetX": offset_x,
             "offsetY": offset_y,
             "centerDistancePixels": square_root(offset_x * offset_x + offset_y * offset_y),
-            "reason": "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED",
+            "reason": reason,
             "rawTexts": raw_texts,
         },
         "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"]]},

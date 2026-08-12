@@ -25,6 +25,7 @@ type supercruiseAssistDestinationCaller struct {
 	alignmentCalls         int
 	alignmentInputs        []map[string]any
 	visibleAlignmentCalls  int
+	visibleAlignmentInputs []map[string]any
 	assistOwnershipActive  bool
 	flightInputAfterAssist []string
 	supercruiseHUDStates   []string
@@ -114,7 +115,14 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_STATION_TARGET","completed":true,"sampleCount":3}`), nil
 	case "elite-dangerous/align-visible-target":
 		c.visibleAlignmentCalls++
-		return nil, errors.New("supercruise Assist must not replace Compass feedback with visible-target search")
+		c.visibleAlignmentInputs = append(c.visibleAlignmentInputs, map[string]any{
+			"targetName":        inputs["targetName"],
+			"stopBeforeAlign":   inputs["stopBeforeAlign"],
+			"positionSource":    inputs["positionSource"],
+			"searchWhenUnknown": inputs["searchWhenUnknown"],
+			"heatPolicy":        inputs["heatPolicy"],
+		})
+		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"sampleCount":4}`), nil
 	case "elite-dangerous/supercruise-control":
 		c.supercruiseKeys++
 		c.recordFlightInput("FSD")
@@ -265,7 +273,7 @@ func TestEliteSupercruiseAssistWaitsForNavigationBracketsAfterPanelOpen(t *testi
 	}
 }
 
-func TestEliteSupercruiseAssistReusesAlignmentActionWhenAssistRequiresAlignment(t *testing.T) {
+func TestEliteSupercruiseAssistUsesVisibleAlignmentWhenAssistRequiresAlignment(t *testing.T) {
 	caller := successfulSupercruiseAssistCaller()
 	caller.flightStates = []string{
 		"FSD_CHARGING", "SUPERCRUISE",
@@ -282,18 +290,24 @@ func TestEliteSupercruiseAssistReusesAlignmentActionWhenAssistRequiresAlignment(
 	if !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s", output)
 	}
-	if caller.alignmentCalls != 2 {
-		t.Fatalf("expected initial and Assist-required alignment calls, got %d", caller.alignmentCalls)
+	if caller.alignmentCalls != 1 {
+		t.Fatalf("expected only the initial Compass alignment call, got %d", caller.alignmentCalls)
 	}
-	if caller.visibleAlignmentCalls != 0 {
-		t.Fatalf("visible-target search replaced Compass feedback %d times", caller.visibleAlignmentCalls)
+	if caller.visibleAlignmentCalls != 1 {
+		t.Fatalf("expected one Assist-required visible alignment call, got %d", caller.visibleAlignmentCalls)
 	}
-	if len(caller.alignmentInputs) != 2 ||
+	if len(caller.alignmentInputs) != 1 ||
 		caller.alignmentInputs[0]["targetMotion"] != "STATIC" ||
-		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" ||
-		caller.alignmentInputs[1]["targetMotion"] != "STATIC" ||
-		caller.alignmentInputs[1]["controlProfile"] != "SUPERCRUISE_ASSIST" {
+		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" {
 		t.Fatalf("alignment inputs=%v", caller.alignmentInputs)
+	}
+	if len(caller.visibleAlignmentInputs) != 1 ||
+		caller.visibleAlignmentInputs[0]["targetName"] != "NAV BEACON" ||
+		caller.visibleAlignmentInputs[0]["stopBeforeAlign"] != false ||
+		caller.visibleAlignmentInputs[0]["positionSource"] != "DESTINATION" ||
+		caller.visibleAlignmentInputs[0]["searchWhenUnknown"] != false ||
+		caller.visibleAlignmentInputs[0]["heatPolicy"] != "STRICT" {
+		t.Fatalf("visible alignment inputs=%v", caller.visibleAlignmentInputs)
 	}
 	wantThrottles := []int{0, 100, 0, 75, 0, 75}
 	if len(caller.throttles) != len(wantThrottles) {

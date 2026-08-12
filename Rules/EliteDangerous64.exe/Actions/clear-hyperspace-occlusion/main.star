@@ -33,6 +33,7 @@ PREALIGN_COMPASS_SAMPLE_INTERVAL_MS = 137
 PREALIGN_HEAT_CANCEL_PERCENT = 70
 PREALIGN_COMPASS_SWITCH_PIXELS = 8.0
 HOLLOW_PREALIGN_HOLD_MS = 3000
+HOLLOW_FOLLOWUP_PREALIGN_HOLD_MS = 700
 PREALIGN_FAR_HOLD_MS = 3000
 PREALIGN_MEDIUM_HOLD_MS = 1800
 PREALIGN_NEAR_HOLD_MS = 700
@@ -162,19 +163,24 @@ def choose_alignment_hold(target):
         return MEDIUM_ALIGNMENT_HOLD_MS
     return FINE_ALIGNMENT_HOLD_MS
 
-def choose_prealignment_hold(target):
+def choose_prealignment_hold(target, hollow_coarse_segment_consumed):
     # A HOLLOW marker is an antipodal projection: its small signed offset does
     # not describe a trustworthy screen-space correction.  Reuse the proven
     # align-station-target topology rule and make a bounded coarse turn in one
     # fixed direction until the marker becomes SOLID.
     if target["presentation"] == "HOLLOW":
-        return HOLLOW_PREALIGN_HOLD_MS
+        # Live gravity-well evidence showed that replaying a full three-second
+        # segment after the first useful topology-changing turn can carry the
+        # ship back across the planet.  A later HOLLOW sample is fresh evidence
+        # that more travel is needed, but not evidence that another complete
+        # coarse segment is safe.
+        return HOLLOW_FOLLOWUP_PREALIGN_HOLD_MS if hollow_coarse_segment_consumed else HOLLOW_PREALIGN_HOLD_MS
     distance = target["centerDistancePixels"]
     if distance > 40:
         return PREALIGN_FAR_HOLD_MS
     if distance > 16:
         return PREALIGN_MEDIUM_HOLD_MS
-    if distance > 6:
+    if distance > 8:
         return PREALIGN_NEAR_HOLD_MS
     return PREALIGN_FINE_HOLD_MS
 
@@ -328,6 +334,7 @@ def main(ctx):
     visible_alignment_confirmations = 0
     final_target = empty_target()
     prealign_hollow_control = None
+    hollow_coarse_segment_consumed = False
     prealign_previous_presentation = None
     prealign_previous_distance = None
     prealign_last_control = None
@@ -407,8 +414,11 @@ def main(ctx):
             cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_HEAT_OR_STATUS_GATE", probe_status["sourceTimestamp"])
             fail("Supercruise prealignment burst crossed its local heat or Status safety gate")
         if not ownership_confirmed:
-            cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_OWNERSHIP_NOT_CONFIRMED", probe_status["sourceTimestamp"])
-            fail("Supercruise prealignment could not confirm Compass ownership from flight-status or pre/post-charge differential")
+            sample = cancel_supercruise_charge(target_name, sample, turn_count, final_observation, final_target, selected_control, "PREALIGN_OWNERSHIP_NOT_CONFIRMED_RETRY", probe_status["sourceTimestamp"])["sample"]
+            status = observe_status_flags()
+            heat_result = wait_for_safe_heat(target_name, sample, turn_count, final_observation, selected_control, stable_heading_confirmations)
+            sample = heat_result["sample"]
+            continue
         escape_vector_ownership_confirmed = True
         if solid_votes >= 2:
             final_target = solid_target
@@ -466,7 +476,7 @@ def main(ctx):
                 selected_control = opposite(selected_control)
         if selected_control == None:
             fail("Supercruise prealignment probe returned no usable Escape Vector direction")
-        prealign_hold_ms = choose_prealignment_hold(final_target)
+        prealign_hold_ms = choose_prealignment_hold(final_target, hollow_coarse_segment_consumed)
         prealign_stagnated = (
             final_target["presentation"] == "SOLID" and
             prealign_previous_presentation == "SOLID" and
@@ -476,9 +486,12 @@ def main(ctx):
         )
         if prealign_stagnated:
             prealign_hold_ms = choose_stagnation_recovery_hold(final_target, prealign_hold_ms)
-        segment_reason = "DISTANCE_STAGNATION_RECOVERY_SEGMENT" if prealign_stagnated else ("DISTANCE_TREND_REVERSAL_SEGMENT" if prealign_worsened else "TURN_SEGMENT_FROM_CACHED_ONE_SHOT_SNAPSHOT")
+        hollow_followup = final_target["presentation"] == "HOLLOW" and hollow_coarse_segment_consumed
+        segment_reason = "HOLLOW_FOLLOWUP_BOUNDED_SEGMENT" if hollow_followup else ("DISTANCE_STAGNATION_RECOVERY_SEGMENT" if prealign_stagnated else ("DISTANCE_TREND_REVERSAL_SEGMENT" if prealign_worsened else "TURN_SEGMENT_FROM_CACHED_ONE_SHOT_SNAPSHOT"))
         emit_update("PREALIGNING_ESCAPE_VECTOR", target_name, sample, turn_count, observation=final_observation, target=final_target, selected_control=selected_control, command_hold_ms=prealign_hold_ms, stable_heading_confirmations=stable_heading_confirmations, throttle=0, mass_lock="OFF", fsd_charging=False, supercruise=False, reason=segment_reason, escape_vector_evidence_state="CACHED_ONE_SHOT")
         run_prealignment_segment(selected_control, prealign_hold_ms)
+        if final_target["presentation"] == "HOLLOW":
+            hollow_coarse_segment_consumed = True
         prealignment_turn_count += 1
         prealign_previous_presentation = final_target["presentation"]
         prealign_previous_distance = final_target["centerDistancePixels"]

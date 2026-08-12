@@ -48,8 +48,11 @@ SOLID samples within the Compass Action's calibrated four-pixel `centerZone`.
 `targetMotion=STATIC` also affects normal-space ALIGN. This combination is the
 Station/Supercruise-entry handoff: live testing showed the selected Station
 marker repeatedly settling between roughly 8 and 13 reference pixels while
-120 ms pulses continued to perturb the already useful direction. It enters a
-12-pixel Gate and then uses two pixels of verification hysteresis, still
+120 ms pulses continued to perturb the already useful direction. Later live
+planet-target testing reproduced the same quantized equilibrium at 14–19
+pixels: a 120 ms pitch pulse alternated indefinitely between the two sides of
+an already FSD-usable heading. It enters a 16-pixel Gate and then uses four
+pixels of verification hysteresis, still
 requiring three current SOLID observations. When a 300 ms medium-band pulse
 first enters that Gate, it applies the existing 100 ms opposite-axis brake,
 discards the pre-brake contact, and requires three fresh SOLID observations.
@@ -63,8 +66,18 @@ control law, not a fallback to OCR or a visible-target search.
 The `SUPERCRUISE_ASSIST` profile with the default `MOVING` target instead uses
 a sixteen-reference-pixel entry radius and requires two current SOLID center
 contacts before returning control to its owning workflow. `STATIC` ALIGN uses
-the same four-pixel entry and six-pixel verification hysteresis as STATIC TRACK,
-with 80 ms pulses inside ten pixels and 160 ms pulses through thirty pixels.
+an eight-pixel entry and ten-pixel verification hysteresis, with 80 ms pulses
+inside ten pixels and 160 ms pulses through thirty pixels. This accepts the
+observed 4.472-5.831-pixel integer-marker equilibria without relaxing STATIC
+TRACK's four-pixel entry and six-pixel hysteresis. The owning Supercruise
+Assist workflow now performs its collision-course refinement from the visible
+destination after the game emits `FSD_ALIGNMENT_REQUIRED`, so this Compass
+Gate is deliberately only the front/coarse handoff.
+When two consecutive 80 ms `STATIC` ALIGN pulses inside ten pixels produce no
+measurable Compass displacement, the next pulse is promoted only to the
+existing bounded 160 ms mid-band duration. This handles quantized one-pixel
+Compass sampling without invoking the rejected 240 ms recovery. `STATIC` TRACK
+retains its fixed 80/160 ms law and stricter four-pixel completion Gate.
 Live Station Assist evidence showed that the former 16/20px ALIGN Gate repeatedly
 returned completed at 9.8-16.7px while the game continued to display `ALIGN WITH
 TARGET DESTINATION`; the owning workflow then re-entered the same ineffective

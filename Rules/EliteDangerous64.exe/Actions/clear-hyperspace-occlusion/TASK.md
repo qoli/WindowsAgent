@@ -47,16 +47,26 @@ phase; a fixed 100 ms interval reproduced alternating and then fully
 phase-locked `COMPASS_NOT_VISIBLE` bursts. Sixteen samples also cover the
 observed delayed HUD presentation after a later probe charge.
 
+An entire probe can still coincide with a period where both the flashing
+Compass and the short OCR prompt are absent. That single window is not a
+durable domain conclusion: the Action cancels charge, verifies the newer idle
+Status, cools, and consumes another one of the existing eight bounded probes.
+Only exhaustion of the total probe budget fails prealignment.
+
 A HOLLOW marker is an antipodal rear projection. Its small signed offset is
 not treated as a reliable screen-space angle. The Action reuses the proven
-topology rule: it applies a fixed 1000 ms `PITCH_UP` pulse on the ship's faster
-primary turning axis until a later short-charge probe becomes SOLID. Turning
-uses an interruptible key lease rather than a one-second finite key cap. A
-HOLLOW snapshot authorizes one 3000 ms segment. A SOLID marker uses its current
-offset with 3000/1800/700/200 ms segments at greater-than 40/16/6/4 pixel
-distance bands. A worsening fresh SOLID distance reverses the prior direction.
-Up to eight probe/segment cycles are bounded by the local heat gates. Every
-segment consumes exactly one snapshot; the next segment requires a new probe.
+topology rule and initially applies a fixed 3000 ms `PITCH_UP` segment on the
+ship's faster primary turning axis. Turning uses an interruptible key lease
+rather than a one-second finite key cap. That coarse HOLLOW segment may occur
+only once per invocation. If a later fresh probe remains HOLLOW, it authorizes
+only a 700 ms follow-up segment in the same great-circle direction. This
+prevents the repeated three-second overrun observed live after the first turn
+had already reduced center obstruction from about 0.86 to 0.02. A SOLID marker
+uses its current offset with 3000/1800/700/300 ms segments at greater-than
+40/16/8/4 pixel distance bands. A worsening fresh SOLID distance reverses the
+prior direction. Up to eight probe/segment cycles are bounded by the local
+heat gates. Every segment consumes exactly one snapshot; the next segment
+requires a new probe.
 
 A SOLID Compass observation is only a front-hemisphere Gate. While the probe
 charge remains active, the Action calls `escape-vector-visible-position`.

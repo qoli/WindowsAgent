@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/rules"
@@ -22,7 +23,8 @@ import (
 )
 
 const maxLauncherOutputBytes = 1 << 20
-const maxWGCTransportAttempts = 2
+const maxWGCTransportAttempts = 5
+const wgcTransportRetryDelay = 100 * time.Millisecond
 
 type LocalExecutor struct {
 	launcher string
@@ -118,6 +120,15 @@ func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.Ra
 			"max_attempts", maxWGCTransportAttempts,
 			"error", err,
 		)
+		timer := time.NewTimer(wgcTransportRetryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return nil, errors.New("unreachable Script transport retry state")
 }

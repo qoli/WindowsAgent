@@ -15,6 +15,15 @@ The workflow requires current visual `MASS LOCK`, `LANDING GEAR`, and
 invokes the dedicated Frontier `Supercruise` binding; and requires an observed
 FSD charging state followed by visual `SUPERCRUISE` confirmation. It then selects the bound 75% throttle control and
 keeps the solid Compass marker within a 16-reference-pixel approach zone.
+Both yaw and pitch use the same distance-sensitive pulse duration: 800 ms when
+coarse, 300 ms at medium range, and 120 ms inside 32 reference pixels. This
+prevents a near-center horizontal correction from accidentally retaining the
+coarse 800 ms pulse and oscillating across the destination.
+An isolated `UNKNOWN` marker presentation is treated as ambiguous domain
+evidence rather than a terminal result: the workflow takes up to twelve fresh
+500 ms Compass observations, emits each retry, and fails without commanding a
+turn if all twelve remain ambiguous. A missing marker is still terminal because
+it contradicts the caller's confirmed destination lock.
 
 Disengage occurs only after two consecutive OCR classifications of
 `SAFE DISENGAGE READY`. After the dedicated Supercruise toggle, the workflow

@@ -417,6 +417,12 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/enter-planet-gravity-well": {
+      "path": "Actions/enter-planet-gravity-well",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion":"stream","lifecycle":"linear","interruptible":true},
+      "registrableAs": []
+    },
     "elite-dangerous/clear-hyperspace-occlusion": {
       "path": "Actions/clear-hyperspace-occlusion",
       "runtime": "windows-streaming-action-v1",
