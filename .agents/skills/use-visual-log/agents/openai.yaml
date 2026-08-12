@@ -1,4 +1,4 @@
 interface:
   display_name: "Use Visual Log"
-  short_description: "Locate game timeline ranges with the untrusted visual index"
-  default_prompt: "Use $use-visual-log to start the independent visual log when useful, query a UTC time range, and identify the evidence interval that still needs verification."
+  short_description: "Locate and verify recorded WindowsAgent evidence"
+  default_prompt: "Use $use-visual-log to correlate the Action timeline with the untrusted visual index, then retrieve and verify the authoritative Evidence range."

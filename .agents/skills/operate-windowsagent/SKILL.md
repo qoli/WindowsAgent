@@ -125,6 +125,14 @@ Prefer the highest-level existing Action whose documented postcondition owns
 the requested outcome. Do not reconstruct a workflow through individual key
 presses when a verified composite or Streaming Action already owns it.
 
+Treat a composite Action as a dependency graph, not one opaque capability. If
+it fails, locate the lowest child whose declared postcondition was not met and
+invoke that child independently against the same current scene when doing so is
+safe. A finite observation returning `UNKNOWN` while a fresh frame appears
+human-readable is evidence of a classifier, ROI, or localization gap in that
+child. Repair and accept the child first; do not widen the parent timeout,
+weaken the parent Gate, or manually finish the workflow around it.
+
 Examples:
 
 - Prefer a name-driven select-and-lock workflow over manually moving UI focus.
@@ -188,6 +196,16 @@ bounded command, then probe again. Do not keep the risky mode active while the
 supervising model reasons. Prefer a deliberately non-harmonic sampling cadence
 when a flashing HUD can phase-lock a fixed loop into repeated false absence.
 
+For OCR- or CV-derived target localization, bind identity and geometry to the
+same captured frame. Prefer an exact normalized match. If the UI can occlude or
+split a known target label, allow a relaxed match only when all of these remain
+bounded: the expected target was supplied explicitly, fragments come from the
+same frame and intended ROI or band, their spatial ordering and separation are
+plausible, and every fragment satisfies a documented prefix or confidence
+rule. Return the raw fragments, bounds or reference point, match reason, and
+timing. Never turn arbitrary fuzzy text similarity across unrelated boxes or
+frames into control authority.
+
 ### Ephemeral Action Sequence
 
 Fetch `/v3/rules/{rule-id}/action-sequence-tool` immediately before composing
@@ -242,6 +260,15 @@ or guessed result.
 When current visual confirmation is required, capture after the UI or game has
 settled. Do not associate a frame with an input that completed after the frame
 was acquired, and do not use artifact encoding time as the acquisition time.
+
+`COMPLETED` may legitimately end at a declared
+`VISUAL_CONFIRMATION_REQUIRED` handoff. In that contract, runtime completion
+means the Action reached its safe autonomous boundary; it does not mean the
+Action visually proved the user's final goal. Preserve fields such as
+`visualConfirmed: false`, require a fresh supervising-model capture for the
+goal layer, and report runtime and goal evidence separately. Use this handoff
+only after the time-critical controller, input lease, cleanup, and compensation
+responsibilities are finished.
 
 ## Diagnose temporal Action behavior
 
@@ -302,6 +329,15 @@ the timelines to distinguish:
 - a visual-target, compass, OCR, speed, heat, or other Gate that changed on a
   different frame than the Action assumed; and
 - correct domain progress followed by runtime interruption.
+
+Prefer a coarse-to-fine correction loop when one sensor is robust over a wide
+range and another is accurate only inside a smaller visible region. Use the
+coarse observation to enter the fine sensor's valid domain, use the fine
+observation to converge, then re-read the original application Gate on fresh
+frames with its declared debounce. Do not treat either child Action's
+`COMPLETED` as proof that the original Gate cleared. Bound the number of full
+correction cycles and fail with a stable persistent-Gate reason if the prompt
+or condition remains.
 
 For heat-, collision-, or resource-limited Actions, also reconstruct the
 safety timeline. Emit the safety measurement, its freshness, the active phase,
@@ -380,6 +416,15 @@ or binary, refresh the live catalogs, and repeat the failed acceptance path.
 Do not finish the task through high-level manual UI operations while leaving a
 known Action defect unresolved. Do not add a hidden fallback to make the
 workflow appear successful.
+
+Choose the narrowest deployment boundary. For Rule-owned Starlark, schemas,
+manifests, coordinates, or game semantics, synchronize the changed Rule
+without restarting or replacing unrelated Agent binaries. For a generic
+runtime or executable change, build and deploy the owning binary through its
+documented installer or updater. In both cases, verify the installed artifact
+or manifest version, request a fresh capture, re-read the live Action catalog,
+and rerun the exact previously failing path before claiming acceptance. A
+successful copy or hot sync is deployment evidence, not behavioral evidence.
 
 If the task is operation-only, do not infer permission to edit or deploy. Stop
 at the explicit failure with evidence and a concrete repair boundary.

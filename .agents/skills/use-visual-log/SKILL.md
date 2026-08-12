@@ -1,6 +1,6 @@
 ---
 name: use-visual-log
-description: Operate WindowsAgent's independent finite Evidence recordings and visual-log process, and interpret Gemma output only as an untrusted timeline index. Use when a supervising model needs to request a bounded Evidence run, start or stop on-demand Gemma scene descriptions, check run or producer status, retrieve visual-log events for a UTC time range, locate a likely recorded interval, or decide which Evidence range still needs authoritative review.
+description: Operate WindowsAgent's independent finite Evidence recordings and visual-log process, and interpret Gemma output only as an untrusted timeline index. Use when a supervising model needs to request a bounded Evidence run, start or stop on-demand Gemma scene descriptions, correlate Action timestamps with recorded motion, retrieve or page visual-log events for a UTC range, locate a likely interval with a contact sheet, verify an Evidence ZIP and its MP4 manifest, or decide which recorded range still needs authoritative review.
 ---
 
 # Use Visual Log
@@ -76,6 +76,11 @@ minutes; the hard maximum is one hour.
 7. Preserve `runId`, `requestedAt`, `startedAt`, `endsAt`, `frames`, `gaps`,
    `tapFailures`, and terminal state with the task evidence.
 
+Before starting the high-level task, compare its plausible duration with the
+immutable `endsAt`. If the remaining window is insufficient, state the coverage
+limit before proceeding. Do not treat a later Visual Log observation, Action
+event, or fresh screenshot as Evidence coverage beyond that deadline.
+
 The run stops automatically at `endsAt` and finalizes its open MP4 segment.
 State `completed` means finalization returned successfully; it does not prove
 that every slot was a frame, so inspect `frames`, `gaps`, and the range
@@ -126,6 +131,15 @@ Apply these rules:
   range again with `after=<nextCursor>` and continue until `complete` is true.
 - Do not treat `lastSequence` as a visual-log sample count; it is the journal's
   global durable sequence.
+- When Action events already provide authoritative start, phase, or terminal
+  timestamps, use those as the first range anchors. Visual Log then narrows the
+  physical scene transition inside that bounded interval; it does not replace
+  the Action timeline.
+- Keep event queries narrow and paginate them. Project only sequence, type,
+  timestamp, untrusted description, Evidence provenance, and model provenance
+  for inspection. A terminal or shell tool truncating a large response is not
+  proof that later events are absent; continue from the returned cursor or
+  re-query a smaller interval.
 
 Separate event types:
 
@@ -152,6 +166,12 @@ and Evidence timestamps. Add context on both sides because the visual log and
 evidence recorder are asynchronous and samples may be dropped. Choose the
 padding from the actual task and observed sample spacing, not from an assumed
 fixed synchronization rule.
+
+When the Action event stream already identifies distinct phases, export small
+adjacent Evidence ranges for those phases instead of one oversized recording.
+For example, keep correction, transition, and terminal verification in
+separate ranges when that makes the causal order clearer. Preserve their exact
+half-open UTC boundaries so the ranges can be compared with Action cursors.
 
 For a broad candidate interval, first request a bandwidth-light Evidence
 contact sheet:
@@ -191,6 +211,24 @@ SHA-256 before analysis. Segments may overlap the requested interval; use their
 manifest timestamps to select the relevant seconds. The ZIP is the authority;
 the replace-in-place Gemma frame tap is not an Evidence archive.
 
+Validate the exported package structurally before viewing it:
+
+1. Require the manifest's `from` and `to` to equal the requested half-open
+   interval, and retain `frameCount`, `gapCount`, and `missingCount`.
+2. For each segment, read the nested video descriptor defined by the current
+   manifest schema. Resolve exactly one packaged MP4 for its declared filename;
+   archive paths may add a stable ordering prefix, so do not assume the manifest
+   filename is a direct path. Reject zero or multiple matches.
+3. Verify that MP4's declared byte length and SHA-256 before decoding it.
+4. Use each segment record's `scheduledAt` to select frames inside the requested
+   interval; overlapping segment boundaries are not extra requested coverage.
+   Preserve foreground identity and every explicit `gap` or `missing` record.
+
+Do not infer a clean timeline merely because the ZIP downloaded, every hash
+matched, or aggregate `gapCount` is zero. Those prove package integrity and
+declared slot coverage; inspect the relevant MP4 motion and terminal frame for
+the domain claim.
+
 If `to` reaches the active uncommitted segment, HTTP 409
 `EVIDENCE_RANGE_NOT_COMMITTED` is expected. Read `availableThrough` from
 Evidence status, shorten the request or wait for segment commit, and retry. Do
@@ -217,10 +255,19 @@ needed. Stopping the run affects only the visual logger.
 Do not stop a run owned by another active task merely because one range query
 completed. Use `sessionId` and current task context to establish ownership.
 
+When a finite Evidence run reaches `completed` while its owned Visual Log is
+still active, stop that Visual Log once no later index entry can help. New
+`lastDropStage: evidence` samples after the immutable Evidence `endsAt` normally
+mean there is no newer frame-tap source. Report them as an uncovered tail; do
+not reinterpret them as gaps in the already committed Evidence interval.
+
 ## Diagnose without architectural bypasses
 
 - Rising `droppedSamples` or a recent `lastDropStage` indicates missing index
   entries, not lost evidence.
+- Compare every drop timestamp or status change with Evidence `endsAt` and
+  `availableThrough`. Evidence-stage drops after completion do not retroactively
+  invalidate earlier manifest-declared frames, gaps, or verified MP4 hashes.
 - Evidence `starting` without transition to `recording` is a WGC startup or
   permission problem, not proof that frames exist. Inspect terminal
   `lastError` and do not substitute request-driven screenshots.
