@@ -23,8 +23,8 @@ removing a target changes only this watchdog-owned file. Target executables,
 Rule packages, runtime manifests, HTTP contracts, and build outputs remain
 unchanged.
 
-The watchdog is also the only runtime AtLogOn entrypoint. Monitored Scheduled
-Tasks are registered without triggers and with a zero restart count. On its
+The watchdog is the AtLogOn entrypoint for watchdog-managed modules. Their
+Scheduled Tasks are registered without triggers and with a zero restart count. On its
 first cycle, the watchdog reconciles every explicit `desiredState: "running"`
 target in dependency order. An absent or unhealthy bootstrap target is acted on
 immediately rather than waiting for the steady-state failure threshold. A
@@ -32,6 +32,11 @@ dependent target remains `BLOCKED` until every target in its
 `startAfterHealthy` list is observed healthy. Dependencies affect bootstrap
 only; they do not turn healthy independent processes into a shared failure
 domain after startup.
+
+Independent resident control processes, including Evidence and Visual Log, may
+be explicit targets in that graph so their authenticated control APIs remain
+available. Process recovery never starts a recording or inference run; those
+capabilities remain explicitly on demand.
 
 The watchdog understands only two generic probe types:
 
@@ -117,11 +122,14 @@ A typical installed graph is:
 | Target | `startAfterHealthy` |
 |---|---|
 | `event-stream` | `[]` |
+| `evidence-recorder` | `[]` |
 | `capture-agent` | `["event-stream"]` |
 | `action-osd` | `["event-stream"]` |
+| `visual-log` | `["event-stream", "evidence-recorder"]` |
 
-This ordering is watchdog-owned configuration only. None of the three target
-executables reads or references it.
+This ordering is watchdog-owned configuration only. None of the five target
+executables reads or references it. Evidence Recorder and Visual Log remain
+independent executables even when this graph supervises their availability.
 
 ## Local evidence
 
@@ -155,9 +163,12 @@ self-recovery.
 
 The Capture Agent/Event Stream and Action OSD installers default to
 `WatchdogManaged`: they register on-demand Tasks with no triggers and a zero
-restart count, then start them once for installation acceptance. A developer
-who deliberately needs the old independent startup behavior must pass
-`-StartupMode Standalone`; it is never selected automatically.
+restart count, then start them once for installation acceptance. The Evidence
+Recorder/Visual Log installer registers independent triggerless Tasks with zero
+task-level restart; their Watchdog targets keep the resident services available.
+A developer who deliberately needs the old
+independent startup behavior for Capture/Event/OSD must pass `-StartupMode
+Standalone`; it is never selected automatically.
 
 ## Acceptance
 

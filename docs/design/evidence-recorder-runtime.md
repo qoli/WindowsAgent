@@ -5,8 +5,8 @@
 **Partially landed.** Persistent WGC capture, 1 FPS sampling, native H.264 MP4
 segments, UTC manifests, authenticated range export, exact-timestamp contact
 sheets, and a PC-local frame tap passed live Windows acceptance. Finite run
-control also passed isolated live Windows acceptance. Persistent installation
-and retention remain deferred.
+control and independent resident control-process installation also passed live
+Windows acceptance. Retention remains deferred.
 
 ## Recording contract
 
@@ -25,6 +25,11 @@ immediately. There is no renewal, extension, pause, manual-stop, or delete
 operation. When the deadline expires, the recorder releases WGC, finalizes the
 open segment, publishes terminal status, and returns to an idle process ready
 to accept a new run.
+
+The independent executable is installed as an interactive-user Scheduled Task
+without its own trigger or restart policy. The external Watchdog keeps that
+control process available. Process start or recovery is not recording activity:
+only an authenticated finite-run request starts WGC and evidence capture.
 
 Before starting the session, the process requests Windows borderless-capture
 access and requires `IsBorderRequired=false` to read back exactly. Unsupported,

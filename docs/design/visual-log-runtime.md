@@ -4,8 +4,9 @@
 
 **Partially landed.** Per-game prompt configuration, PC-local frame-tap input,
 direct LAN oMLX requests, warm-up, independent control, failure isolation, and
-event append passed live Windows acceptance. Persistent installation remains
-deferred.
+event append passed live Windows acceptance. The idle control service is
+installed as an independent process supervised by the external Watchdog,
+without starting a Visual Log inference run.
 
 ## Responsibility
 
@@ -46,6 +47,10 @@ DELETE /v1/visual-log/runs/current
 The control server is authenticated and loopback-only. Starting creates a new
 session and performs the configured warm-up. Stopping cancels only that run and
 leaves Evidence untouched.
+
+The resident control process is kept available in the interactive-user session
+and remains ready to accept those requests. Process startup or Watchdog recovery
+never starts inference; the Visual Log run is still explicitly on demand.
 
 An absent, stale, mismatched, or changing tap frame drops that index sample. An
 invalid or low-quality Gemma answer records a Visual Log failure when
@@ -89,5 +94,4 @@ gaps and zero tap failures. The production capture Agent remained PID 15032.
 
 ## Deferred
 
-- persistent installer/watchdog integration;
 - automatic retention policy for Evidence recordings.

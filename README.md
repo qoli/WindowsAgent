@@ -404,9 +404,28 @@ rejects an existing malformed token instead of replacing it. Append, replay,
 and NDJSON live-stream requests require the exact token; `/healthz` is the only
 unauthenticated route.
 
-Install the external watchdog after the module installers have created their
-watchdog-managed on-demand Tasks and after authoring an exact local target
-configuration:
+Install the Evidence Recorder and Visual Log control processes independently.
+The installer creates independent interactive-user Tasks without their own
+trigger or restart policy and starts each resident control service for health
+acceptance. The Watchdog keeps those processes available; service availability
+does not start an Evidence recording or Visual Log inference run:
+
+```powershell
+.\scripts\install-windows-observation-processes.ps1 `
+  -EvidenceExecutablePath .\.build\windows-evidence-recorder.exe `
+  -VisualLogExecutablePath .\.build\windows-visual-log.exe `
+  -VisualLogModelBaseURL http://model-host:8001/v1
+```
+
+Add exact `evidence-recorder` and `visual-log` targets to the Watchdog
+configuration. The executables remain independent processes and expose
+authenticated run-control APIs, while the Watchdog owns only process
+availability. Neither process starts a run as a side effect of installation or
+recovery.
+
+After all module installers have created their watchdog-managed Tasks, author
+an exact local configuration containing all five targets and install the
+external Watchdog:
 
 ```powershell
 .\scripts\install-windows-watchdog.ps1 `
@@ -418,8 +437,8 @@ The watchdog has [one-way coupling and no automatic self-recovery](docs/design/w
 Monitored modules do not register with or depend on it. Its AtLogOn Scheduled
 Task has a zero restart count; if the watchdog crashes, other modules continue
 and the watchdog remains stopped for explicit operator diagnosis. It is the
-only default runtime AtLogOn entrypoint and bootstraps module Tasks in the
-dependency order declared by its own configuration.
+AtLogOn entrypoint for watchdog-managed resident processes and bootstraps their
+Tasks in the dependency order declared by its own configuration.
 
 Follow the installed stream from macOS through an SSH tunnel without exposing
 the loopback-only event API on the Windows network interface:
