@@ -28,6 +28,8 @@ SUPERCRUISE_TRACK_NEAR_HOLD_MS = 120
 SUPERCRUISE_STATIC_TRACK_FINE_DISTANCE_PIXELS = 10
 SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS = 80
 SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS = 160
+SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS = 12
+SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS = 40
 CENTER_ENTRY_BRAKE_MS = 100
 SUPERCRUISE_CENTER_ENTRY_BRAKE_MS = 300
 SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS = 160
@@ -598,7 +600,12 @@ def main(ctx):
             commanded_control != None and
             (
                 commanded_target["centerDistancePixels"] > fine_distance or
-                (supercruise_profile and target_motion == "STATIC")
+                (
+                    supercruise_profile and
+                    target_motion == "STATIC" and
+                    commanded_hold_ms != None and
+                    commanded_hold_ms > SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS
+                )
             )
         )
         if should_brake_center_entry:
@@ -763,11 +770,17 @@ def main(ctx):
                     target["centerDistancePixels"] <= SUPERCRUISE_TRACK_NEAR_DISTANCE_PIXELS and
                     pulse != None
                 ):
+                    static_ultra_fine_pulse = (
+                        mode == "ALIGN" and
+                        target["centerDistancePixels"] <= SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS and
+                        no_movement_count < 2
+                    )
                     static_fine_pulse = (
+                        not static_ultra_fine_pulse and
                         target["centerDistancePixels"] <= SUPERCRUISE_STATIC_TRACK_FINE_DISTANCE_PIXELS and
                         not (mode == "ALIGN" and no_movement_count >= 2)
                     )
-                    static_hold_ms = SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS if static_fine_pulse else SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS
+                    static_hold_ms = SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS if static_ultra_fine_pulse else (SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS if static_fine_pulse else SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS)
                     pulse = [pulse[0], static_hold_ms]
         if pulse == None:
             commanded_target = None

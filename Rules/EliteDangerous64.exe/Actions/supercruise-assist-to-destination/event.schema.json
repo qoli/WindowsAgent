@@ -10,11 +10,11 @@
       "additionalProperties": false,
       "required": ["phase", "sample", "targetName", "panelTab", "assistButtonState", "flightStatus", "flightPromptText", "massLock", "landingGear", "cargoScoop", "targetDetected", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "assistActiveConfirmations", "assistMissingSamples", "stoppedConfirmations", "commandedThrottle", "lastCommand", "reason"],
       "properties": {
-        "phase": {"enum": ["PREFLIGHT", "OPENING_NAVIGATION", "LOCATING_TARGET", "OPENING_DETAIL", "LOCATING_ASSIST", "FOCUSING_ASSIST", "REQUESTING_ASSIST", "CLOSING_PANEL", "ALIGNING", "CHARGING", "ALIGNING_FOR_ENTRY", "ENTERED", "WAITING_FOR_ASSIST", "ASSIST_ACTIVE", "GAME_CONTROLLED_APPROACH", "VERIFYING_STOP", "COMPLETED"]},
+        "phase": {"enum": ["PREFLIGHT", "OPENING_NAVIGATION", "LOCATING_TARGET", "OPENING_DETAIL", "LOCATING_ASSIST", "FOCUSING_ASSIST", "REQUESTING_ASSIST", "CLOSING_PANEL", "ALIGNING", "CHARGING", "ALIGNING_FOR_ENTRY", "CORRECTING_ASSIST_ALIGNMENT", "VERIFYING_ASSIST_ALIGNMENT", "ENTERED", "WAITING_FOR_ASSIST", "ASSIST_ACTIVE", "GAME_CONTROLLED_APPROACH", "VERIFYING_STOP", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 3000},
         "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
         "panelTab": {"type": ["string", "null"], "enum": ["ABSENT", "SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS", "UNKNOWN", null]},
-        "assistButtonState": {"type": ["string", "null"], "enum": ["AVAILABLE", "FOCUSED", "UNKNOWN", null]},
+        "assistButtonState": {"type": ["string", "null"], "enum": ["AVAILABLE", "FOCUSED", "ACTIVE", "UNKNOWN", null]},
         "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_THROTTLE_UP_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN"]},
         "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},

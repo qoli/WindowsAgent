@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 6,
-  "title": "Elite Dangerous select and lock Navigation destination",
+  "version": 4,
+  "title": "Elite Dangerous plot exact Galaxy Map route",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {"maxSteps": 5000000, "maxOutputBytes": 16384, "maxEventBytes": 16384, "maxSleepMs": 1000}
+  "limits": {"maxSteps": 100000000, "maxOutputBytes": 16384, "maxEventBytes": 16384, "maxSleepMs": 1000}
 }

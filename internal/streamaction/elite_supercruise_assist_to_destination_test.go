@@ -180,13 +180,42 @@ func successfulSupercruiseAssistCaller() *supercruiseAssistDestinationCaller {
 			textRegionRaw("<NAV BEACON>", 400, true), textRegionRaw("<NAV BEACON>", 400, true),
 		},
 		assistRegions: []json.RawMessage{
-			textRegionRaw("SUPERCRUISE ASSIST", 720, true), textRegionRaw("SUPERCRUISE ASSIST", 720, true),
+			textRegionRaw("ACTIVATE SUPERCRUISE ASSIST", 720, true), textRegionRaw("ACTIVATE SUPERCRUISE ASSIST", 720, true),
 		},
 		flightStates: []string{
 			"FSD_CHARGING", "SUPERCRUISE", "SUPERCRUISE", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 			"UNKNOWN", "UNKNOWN", "UNKNOWN",
 		},
 		speedStates: []string{"STOPPED", "STOPPED", "STOPPED"},
+	}
+}
+
+func TestEliteSupercruiseAssistDoesNotSelectAlreadyActiveContextAction(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.assistRegions = []json.RawMessage{
+		textRegionRaw("DEACTIVATE SUPERCRUISE ASSIST", 720, true),
+		textRegionRaw("DEACTIVATE SUPERCRUISE ASSIST", 720, true),
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	selects := 0
+	for _, control := range caller.controls {
+		if control == "SELECT" {
+			selects++
+		}
+	}
+	if selects != 1 {
+		t.Fatalf("already-active Assist must only select the Navigation row: controls=%v", caller.controls)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"assistButtonState":"ACTIVE"`) ||
+		!contains(joined, `"reason":"ASSIST_ALREADY_ACTIVE_NO_SELECT"`) {
+		t.Fatalf("events=%s", joined)
 	}
 }
 
@@ -272,11 +301,12 @@ func TestEliteSupercruiseAssistWaitsForNavigationBracketsAfterPanelOpen(t *testi
 	}
 }
 
-func TestEliteSupercruiseAssistUsesVisibleAlignmentWhenAssistRequiresAlignment(t *testing.T) {
+func TestEliteSupercruiseAssistRequiresCompassVisibleAndPromptClearBeforeRestoringThrottle(t *testing.T) {
 	caller := successfulSupercruiseAssistCaller()
 	caller.flightStates = []string{
 		"FSD_CHARGING", "SUPERCRUISE",
 		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
+		"UNKNOWN", "UNKNOWN",
 		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 		"UNKNOWN", "UNKNOWN", "UNKNOWN",
 	}
@@ -289,15 +319,17 @@ func TestEliteSupercruiseAssistUsesVisibleAlignmentWhenAssistRequiresAlignment(t
 	if !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s", output)
 	}
-	if caller.alignmentCalls != 1 {
-		t.Fatalf("expected only the initial Compass alignment call, got %d", caller.alignmentCalls)
+	if caller.alignmentCalls != 2 {
+		t.Fatalf("expected initial and Assist-required Compass alignment calls, got %d", caller.alignmentCalls)
 	}
 	if caller.visibleAlignmentCalls != 1 {
-		t.Fatalf("expected one Assist-required visible alignment call, got %d", caller.visibleAlignmentCalls)
+		t.Fatalf("expected one Assist-required visible-target alignment call, got %d", caller.visibleAlignmentCalls)
 	}
-	if len(caller.alignmentInputs) != 1 ||
+	if len(caller.alignmentInputs) != 2 ||
 		caller.alignmentInputs[0]["targetMotion"] != "STATIC" ||
-		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" {
+		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" ||
+		caller.alignmentInputs[1]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[1]["controlProfile"] != "SUPERCRUISE_ASSIST" {
 		t.Fatalf("alignment inputs=%v", caller.alignmentInputs)
 	}
 	if len(caller.visibleAlignmentInputs) != 1 ||
@@ -315,6 +347,73 @@ func TestEliteSupercruiseAssistUsesVisibleAlignmentWhenAssistRequiresAlignment(t
 		if caller.throttles[index] != wantThrottles[index] {
 			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
 		}
+	}
+}
+
+func TestEliteSupercruiseAssistRepeatsBothAlignmentsWhilePromptPersists(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = []string{
+		"FSD_CHARGING", "SUPERCRUISE",
+		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
+		"FSD_ALIGNMENT_REQUIRED",
+		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if caller.alignmentCalls != 3 || caller.visibleAlignmentCalls != 2 {
+		t.Fatalf("expected initial Compass plus two complete correction cycles, compass=%d visible=%d", caller.alignmentCalls, caller.visibleAlignmentCalls)
+	}
+	wantThrottles := []int{0, 100, 0, 75, 0, 75}
+	if len(caller.throttles) != len(wantThrottles) {
+		t.Fatalf("prompt-persistent cycle restored throttle early: throttles=%v", caller.throttles)
+	}
+	for index := range wantThrottles {
+		if caller.throttles[index] != wantThrottles[index] {
+			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+		}
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"reason":"ALIGNMENT_PROMPT_STILL_PRESENT_AFTER_CYCLE:1"`) ||
+		!contains(joined, `"reason":"ALIGNMENT_PROMPT_CLEAR_2_OF_2:CYCLE_2"`) {
+		t.Fatalf("alignment Gate evidence missing from events=%s", joined)
+	}
+}
+
+func TestEliteSupercruiseAssistPersistentAlignmentPromptFailsStopped(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = []string{
+		"FSD_CHARGING", "SUPERCRUISE",
+		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
+		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
+		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "ALIGNMENT_PROMPT_PERSISTED") {
+		t.Fatalf("error=%v", err)
+	}
+	if caller.alignmentCalls != 7 || caller.visibleAlignmentCalls != 6 {
+		t.Fatalf("bounded cycles compass=%d visible=%d", caller.alignmentCalls, caller.visibleAlignmentCalls)
+	}
+	seventyFiveCommands := 0
+	for _, throttle := range caller.throttles {
+		if throttle == 75 {
+			seventyFiveCommands++
+		}
+	}
+	if seventyFiveCommands != 1 || caller.throttles[len(caller.throttles)-1] != 0 {
+		t.Fatalf("persistent prompt must not restore 75%% after correction starts and must compensate to 0%%: throttles=%v", caller.throttles)
 	}
 }
 

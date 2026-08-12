@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["holdMs"],
+  "properties": {
+    "holdMs": {"type": "integer", "minimum": 250, "maximum": 1000}
+  }
+}

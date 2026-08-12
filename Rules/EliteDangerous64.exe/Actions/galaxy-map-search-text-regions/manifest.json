@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous Galaxy Map search text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 680, "y": 20, "w": 640, "h": 220},
+  "sampling": "reference",
+  "maxPixels": 140800,
+  "leftContextWidth": 1,
+  "verticalPadding": 4
+}

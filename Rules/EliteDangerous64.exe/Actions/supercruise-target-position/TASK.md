@@ -24,3 +24,15 @@ selects the label whose derived marker is nearest the forward-screen centre
 only if it leads the next candidate by at least 32 reference pixels. Closer
 candidates remain explicitly ambiguous. Missing, ambiguous, or low-confidence
 labels return `UNKNOWN`; Compass evidence is not reused.
+
+Some Station labels near the lower cockpit edge are split into two lines and
+partly occluded by the dashboard. For an exact two-word `targetName`, the
+Action also accepts one same-frame two-line candidate only when both OCR boxes
+pass the normal confidence Gates, their left edges differ by at most 16
+reference pixels, their vertical centres are 12 to 36 pixels apart in
+top-to-bottom order, and each normalized line contains at least four characters
+matching the corresponding requested word prefix with at most one edit. This
+recognizes reviewed `CREL` / `STAN` evidence for `CREON'S STANDING` without
+accepting arbitrary partial text or dropping target identity. The combined
+two-line box, not either fragment alone, owns marker geometry. Other word
+counts and unmatched fragments remain `UNKNOWN`.

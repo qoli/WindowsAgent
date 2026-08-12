@@ -29,6 +29,13 @@ must not infer that Compass ownership changed from `FSD_CHARGING` alone.
 The live `THROTTLE UP TO ENGAGE` prompt is
 `FSD_THROTTLE_UP_REQUIRED`: it proves the FSD reached its charged throttle
 handoff, but does not prove that Supercruise entry occurred.
+`ALIGN WITH TARGET DESTINATION` maps to the historically named
+`FSD_ALIGNMENT_REQUIRED`, but the prompt is not proof that an FSD charge is in
+progress. Elite Dangerous also displays it after Supercruise Assist has been
+selected while the destination is not aligned. Owning workflows must interpret
+this current-frame target-alignment Gate in their own phase and must verify the
+prompt disappears after correction; this finite classifier performs neither
+alignment nor multi-frame disappearance confirmation.
 Missing, unrelated, ambiguous, or
 low-confidence content remains `UNKNOWN`; never choose a status merely because
 it is the closest catalog phrase.

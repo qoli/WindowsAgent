@@ -19,9 +19,11 @@ type interSystemTransitCaller struct {
 	targetCalls        int
 	alignProfiles      []string
 	jumpStartModes     []string
+	jumpTargetLocks    []bool
 	failJump           bool
 	journalCalls       int
 	journalArrival     bool
+	resumeJournal      bool
 	hyperspaceControls int
 	occlusionStates    []string
 	occlusionIndex     int
@@ -31,12 +33,18 @@ type interSystemTransitCaller struct {
 func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	c.calls = append(c.calls, id)
 	switch id {
+	case "elite-dangerous/plot-route-to-system":
+		if inputs["targetSystem"] != "NLTT 8084" || inputs["maxJumps"] != int64(1) {
+			return nil, errors.New("unexpected one-hop route request")
+		}
+		return json.RawMessage(`{"completed":true,"result":"PLOTTED","routeId":"2026-08-12T00:00:00Z:123:1","jumpCount":1}`), nil
 	case "elite-dangerous/hyperspace-jump-to-system":
 		c.jumpStartModes = append(c.jumpStartModes, inputs["startMode"].(string))
+		c.jumpTargetLocks = append(c.jumpTargetLocks, inputs["targetLockConfirmed"].(bool))
 		if c.failJump {
 			return nil, errors.New("FSD charging followed by stable hyperspace cockpit absence was not confirmed")
 		}
-		return json.RawMessage(`{"completed":true,"finalPhase":"ARRIVED_IN_SUPERCRUISE","arrivalBrakeSent":true,"hyperspaceChargingConfirmed":true,"hyperspaceTransitConfirmed":true,"cockpitReturnConfirmations":2,"supercruiseHudConfirmations":2,"initialAlignment":{"coarseSamples":3,"fineSamples":3},"recoveryAlignment":null,"sampleCount":7}`), nil
+		return json.RawMessage(`{"completed":true,"finalPhase":"ARRIVED_IN_SUPERCRUISE","arrivalEvidence":"JOURNAL_FSDJUMP","arrivalBrakeSent":true,"hyperspaceChargingConfirmed":true,"hyperspaceTransitConfirmed":true,"cockpitReturnConfirmations":2,"supercruiseHudConfirmations":2,"initialAlignment":{"coarseSamples":3,"fineSamples":3},"recoveryAlignment":null,"sampleCount":7}`), nil
 	case "elite-dangerous/select-and-lock-destination":
 		c.systemLocks++
 		return json.RawMessage(`{"targetLocked":true,"result":"ACQUIRED"}`), nil
@@ -78,6 +86,9 @@ func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		return json.RawMessage(`{"supercruiseHud":{"state":"ACTIVE"}}`), nil
 	case "elite-dangerous/filesystem/journal-navigation-tail":
 		c.journalCalls++
+		if c.resumeJournal {
+			return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-12T07:56:44Z","event":"FSDJump","StarSystem":"NLTT 8084","SystemAddress":123,"JumpType":null,"RemainingJumpsInRoute":null}]}`), nil
+		}
 		if c.journalArrival && c.journalCalls > 1 {
 			return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-10T11:03:03Z","event":"FSDJump","StarSystem":"Acihaut","SystemAddress":123,"JumpType":null,"RemainingJumpsInRoute":null}]}`), nil
 		}
@@ -154,6 +165,9 @@ func TestEliteInterSystemTransitAcceptsExplicitSupercruiseStart(t *testing.T) {
 	if len(caller.jumpStartModes) != 1 || caller.jumpStartModes[0] != "SUPERCRUISE" {
 		t.Fatalf("jumpStartModes=%v", caller.jumpStartModes)
 	}
+	if len(caller.jumpTargetLocks) != 1 || !caller.jumpTargetLocks[0] {
+		t.Fatalf("jumpTargetLocks=%v", caller.jumpTargetLocks)
+	}
 }
 
 func TestEliteInterSystemTransitComposesVisualSingleHopAndDocking(t *testing.T) {
@@ -174,19 +188,50 @@ func TestEliteInterSystemTransitComposesVisualSingleHopAndDocking(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
+		!contains(string(output), `"routeId":"2026-08-12T00:00:00Z:123:1"`) ||
 		!contains(string(output), `"destinationSystem":"NLTT 8084"`) ||
 		!contains(string(output), `"destinationStation":"SURAYEV HUB"`) ||
-		caller.systemLocks != 1 || caller.hudCalls != 0 || caller.targetCalls != 2 {
+		caller.systemLocks != 1 || caller.hudCalls != 0 || caller.targetCalls != 0 {
 		t.Fatalf("output=%s locks=%d hud=%d target=%d", output, caller.systemLocks, caller.hudCalls, caller.targetCalls)
 	}
 	if len(caller.throttles) != 0 {
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
 	joined := joinEventPhases(reporter.payloads)
-	for _, phase := range []string{"SYSTEM_LOCKED", "FSD_CHARGING", "HYPERSPACE_TRANSIT", "DESTINATION_SYSTEM_CONFIRMED", "STATION_LOCKED", "SUPERCRUISE_TO_STATION", "DOCKING", "VISUAL_CONFIRMATION_REQUIRED"} {
+	for _, phase := range []string{"PLOTTING_ROUTE", "ROUTE_READY", "SYSTEM_LOCKED", "FSD_CHARGING", "HYPERSPACE_TRANSIT", "DESTINATION_SYSTEM_CONFIRMED", "STATION_LOCKED", "SUPERCRUISE_TO_STATION", "DOCKING", "VISUAL_CONFIRMATION_REQUIRED"} {
 		if !contains(joined, phase) {
 			t.Fatalf("missing phase %s in %s", phase, joined)
 		}
+	}
+}
+
+func TestEliteInterSystemTransitResumesAfterExactDestinationFSDJump(t *testing.T) {
+	pkg, err := Load(interSystemTransitPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &interSystemTransitCaller{resumeJournal: true}
+	inputs := interSystemInputs()
+	inputs["startMode"] = "ARRIVED_SUPERCRUISE"
+	inputs["normalSpaceConfirmed"] = false
+	inputs["supercruiseConfirmed"] = true
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, inputs, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"destinationSystemArrivalEvidence":"JOURNAL_FSDJUMP_RESUME"`) ||
+		!contains(string(output), `"routeId":"RESUME:2026-08-12T07:56:44Z"`) {
+		t.Fatalf("output=%s", output)
+	}
+	for _, id := range caller.calls {
+		if id == "elite-dangerous/plot-route-to-system" || id == "elite-dangerous/hyperspace-jump-to-system" {
+			t.Fatalf("resume repeated completed inter-System phase: %s", id)
+		}
+	}
+	if caller.systemLocks != 1 || caller.hudCalls != 2 {
+		t.Fatalf("station locks=%d hudCalls=%d", caller.systemLocks, caller.hudCalls)
 	}
 }
 
@@ -206,7 +251,7 @@ func TestEliteInterSystemTransitFailsWithoutChargingAndUsesOnlyZeroCompensation(
 		t.Fatalf("failure compensation throttles=%v", caller.throttles)
 	}
 	for _, id := range caller.calls {
-		if id == "elite-dangerous/supercruise-control" || id == "elite-dangerous/filesystem/status" || id == "elite-dangerous/filesystem/nav-route" {
+		if id == "elite-dangerous/supercruise-control" || id == "elite-dangerous/filesystem/status" {
 			t.Fatalf("forbidden fallback Action called: %s", id)
 		}
 	}

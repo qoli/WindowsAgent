@@ -8,6 +8,10 @@ LABEL_TO_MARKER_X = 30.0
 LABEL_TO_MARKER_Y = -12.5
 DUPLICATE_BOX_TOLERANCE_PIXELS = 16.0
 MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS = 32.0
+MIN_OCCLUDED_WORD_PREFIX = 4
+MULTILINE_LEFT_TOLERANCE_PIXELS = 16.0
+MULTILINE_MIN_CENTER_GAP_PIXELS = 12.0
+MULTILINE_MAX_CENTER_GAP_PIXELS = 36.0
 
 def normalize(text):
     result = ""
@@ -17,6 +21,21 @@ def normalize(text):
         if character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
             result += character
     return result
+
+def normalized_words(text):
+    words = []
+    current = ""
+    upper = text.upper()
+    for index in range(len(upper)):
+        character = upper[index]
+        if character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
+            current += character
+        elif character == " " and len(current) > 0:
+            words.append(current)
+            current = ""
+    if len(current) > 0:
+        words.append(current)
+    return words
 
 def one_edit_or_exact(actual, expected):
     if actual == expected:
@@ -52,16 +71,64 @@ def one_edit_or_exact(actual, expected):
 
 def bounds(points):
     left = points[0]["x"]
+    right = points[0]["x"]
     top = points[0]["y"]
     bottom = points[0]["y"]
     for point in points:
         if point["x"] < left:
             left = point["x"]
+        if point["x"] > right:
+            right = point["x"]
         if point["y"] < top:
             top = point["y"]
         if point["y"] > bottom:
             bottom = point["y"]
-    return {"left": left, "centerY": (top + bottom) / 2.0}
+    return {"left": left, "right": right, "top": top, "bottom": bottom, "centerY": (top + bottom) / 2.0}
+
+def occluded_word_prefix_matches(actual, expected):
+    if len(actual) < MIN_OCCLUDED_WORD_PREFIX or len(actual) > len(expected):
+        return False
+    expected_prefix = expected[:len(actual)]
+    mismatches = 0
+    for index in range(len(actual)):
+        if actual[index] != expected_prefix[index]:
+            mismatches += 1
+            if mismatches > 1:
+                return False
+    return True
+
+def multiline_candidate(first, second):
+    first_box = bounds(first["referencePoints"])
+    second_box = bounds(second["referencePoints"])
+    confidence = first["recognitionConfidence"]
+    if second["recognitionConfidence"] < confidence:
+        confidence = second["recognitionConfidence"]
+    right = first_box["right"] if first_box["right"] > second_box["right"] else second_box["right"]
+    return {
+        "text": first["text"] + " " + second["text"],
+        "detectionConfidence": first["detectionConfidence"],
+        "recognitionConfidence": confidence,
+        "referencePoints": [
+            {"x": first_box["left"], "y": first_box["top"]},
+            {"x": right, "y": first_box["top"]},
+            {"x": right, "y": second_box["bottom"]},
+            {"x": first_box["left"], "y": second_box["bottom"]},
+        ],
+        "matchReason": "OCCLUDED_TWO_LINE_WORD_PREFIXES_CONFIRMED",
+    }
+
+def append_deduplicated(matches, region):
+    candidate_box = bounds(region["referencePoints"])
+    duplicate_index = None
+    for index in range(len(matches)):
+        existing_box = bounds(matches[index]["referencePoints"])
+        if abs(candidate_box["left"] - existing_box["left"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS and abs(candidate_box["centerY"] - existing_box["centerY"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS:
+            duplicate_index = index
+            break
+    if duplicate_index == None:
+        matches.append(region)
+    elif region["recognitionConfidence"] > matches[duplicate_index]["recognitionConfidence"]:
+        matches[duplicate_index] = region
 
 def square_root(value):
     if value <= 0:
@@ -82,6 +149,7 @@ def marker_distance(region):
 def main(ctx):
     target_name = ctx.inputs["targetName"]
     expected = normalize(target_name)
+    expected_words = normalized_words(target_name)
     bands = [
         action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
@@ -90,23 +158,32 @@ def main(ctx):
     matches = []
     raw_texts = []
     for raw in bands:
+        eligible_regions = []
         for region in raw["regions"]:
             raw_texts.append(region["text"])
             if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
                 continue
+            eligible_regions.append(region)
             if not one_edit_or_exact(normalize(region["text"]), expected):
                 continue
-            candidate_box = bounds(region["referencePoints"])
-            duplicate_index = None
-            for index in range(len(matches)):
-                existing_box = bounds(matches[index]["referencePoints"])
-                if abs(candidate_box["left"] - existing_box["left"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS and abs(candidate_box["centerY"] - existing_box["centerY"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS:
-                    duplicate_index = index
-                    break
-            if duplicate_index == None:
-                matches.append(region)
-            elif region["recognitionConfidence"] > matches[duplicate_index]["recognitionConfidence"]:
-                matches[duplicate_index] = region
+            append_deduplicated(matches, region)
+        if len(expected_words) == 2:
+            for first in eligible_regions:
+                first_text = normalize(first["text"])
+                if not occluded_word_prefix_matches(first_text, expected_words[0]):
+                    continue
+                first_box = bounds(first["referencePoints"])
+                for second in eligible_regions:
+                    if second == first:
+                        continue
+                    second_text = normalize(second["text"])
+                    if not occluded_word_prefix_matches(second_text, expected_words[1]):
+                        continue
+                    second_box = bounds(second["referencePoints"])
+                    center_gap = second_box["centerY"] - first_box["centerY"]
+                    if abs(second_box["left"] - first_box["left"]) > MULTILINE_LEFT_TOLERANCE_PIXELS or center_gap < MULTILINE_MIN_CENTER_GAP_PIXELS or center_gap > MULTILINE_MAX_CENTER_GAP_PIXELS:
+                        continue
+                    append_deduplicated(matches, multiline_candidate(first, second))
     if len(matches) == 0:
         return {
             "schemaVersion": 1,
@@ -114,7 +191,7 @@ def main(ctx):
             "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"]]},
         }
     region = matches[0]
-    reason = "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED"
+    reason = region.get("matchReason", "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED")
     if len(matches) > 1:
         closest_distance = marker_distance(matches[0])
         second_distance = None

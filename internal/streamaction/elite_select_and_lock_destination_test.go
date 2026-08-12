@@ -122,6 +122,31 @@ func navigationRowsWithFocusRatios(targetText string, targetY int, targetSamples
 	return value
 }
 
+func navigationMenuRows(targetText string, focusedIndex int, locked bool) json.RawMessage {
+	texts := []string{"LHS 178", "NAV BEACON", "UNEXPLORED A", "UNEXPLORED B", "LAVOISIER'S HORIZON", "UNEXPLORED C", "UNEXPLORED D", "UNEXPLORED E", targetText}
+	regions := make([]any, 0, len(texts))
+	for index, text := range texts {
+		pixel := 0
+		if index == focusedIndex {
+			pixel = 0xff9000
+		}
+		if locked && text == targetText {
+			text = "< " + text + " >"
+		}
+		y := 330 + index*40
+		regions = append(regions, map[string]any{
+			"detectionConfidence": 0.92, "recognitionConfidence": 0.98, "text": text,
+			"referencePoints": []any{
+				map[string]any{"x": 520, "y": y}, map[string]any{"x": 800, "y": y},
+				map[string]any{"x": 800, "y": y + 30}, map[string]any{"x": 520, "y": y + 30},
+			},
+			"leftContext": map[string]any{"w": 1, "h": 1, "pixels": []any{pixel}},
+		})
+	}
+	value, _ := json.Marshal(map[string]any{"schemaVersion": 1, "regions": regions})
+	return value
+}
+
 func loadEliteSelectAndLockDestinationPackage(t *testing.T) *Package {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "select-and-lock-destination"))
@@ -275,6 +300,32 @@ func TestEliteSelectAndLockDestinationUsesUniqueRelativeFocusBelowOldThreshold(t
 	}
 	wantControls := []string{"DOWN", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
 	if !equalStrings(caller.controls, wantControls) || !contains(string(output), `"result":"ACQUIRED"`) {
+		t.Fatalf("controls=%v output=%s", caller.controls, output)
+	}
+}
+
+func TestEliteSelectAndLockDestinationReachesExactTargetOnEighthInputWithinStepBudget(t *testing.T) {
+	regions := make([]json.RawMessage, 0, 20)
+	for focusedIndex := 0; focusedIndex <= 8; focusedIndex++ {
+		observation := navigationMenuRows("CREON'S STANDING", focusedIndex, false)
+		regions = append(regions, observation, observation)
+	}
+	locked := navigationMenuRows("CREON'S STANDING", 8, true)
+	regions = append(regions, locked, locked)
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{"NAVIGATION", "NAVIGATION", "ABSENT", "ABSENT"},
+		regions:  regions,
+		buttons:  []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details:  []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "CREON'S STANDING"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "DOWN", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) || !contains(string(output), `"navigationCount":8`) || !contains(string(output), `"result":"ACQUIRED"`) {
 		t.Fatalf("controls=%v output=%s", caller.controls, output)
 	}
 }

@@ -284,6 +284,20 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/galaxy-map-search-text-regions": {
+      "path": "Actions/galaxy-map-search-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/galaxy-map-system-info-text-regions": {
+      "path": "Actions/galaxy-map-system-info-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/navigation-list-text-regions": {
       "path": "Actions/navigation-list-text-regions",
       "runtime": "ppocr-text-regions-v1",
@@ -309,8 +323,20 @@
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     },
+    "elite-dangerous/plot-route-to-system": {
+      "path": "Actions/plot-route-to-system",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
     "elite-dangerous/ui-control": {
       "path": "Actions/ui-control",
+      "runtime": "windows-key-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "elite-dangerous/ui-select-hold": {
+      "path": "Actions/ui-select-hold",
       "runtime": "windows-key-action-v1",
       "execution": {"completion": "return"},
       "registrableAs": []
@@ -502,6 +528,7 @@
       "elite-dangerous/inter-system-transit-to-station",
       "elite-dangerous/lock-destination",
       "elite-dangerous/prepare-auto-launch",
+      "elite-dangerous/plot-route-to-system",
       "elite-dangerous/select-and-lock-destination",
       "elite-dangerous/select-contacts-panel",
       "elite-dangerous/select-station-target",

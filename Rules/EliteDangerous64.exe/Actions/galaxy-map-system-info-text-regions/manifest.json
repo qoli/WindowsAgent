@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous selected Galaxy Map System information",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 1320, "y": 140, "w": 480, "h": 200},
+  "sampling": "reference",
+  "maxPixels": 96000,
+  "leftContextWidth": 1,
+  "verticalPadding": 4
+}

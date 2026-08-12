@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.plot-route-to-system.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "targetSystem", "command", "observation", "reason"],
+      "properties": {
+        "phase": {"enum": ["CHECKING_ROUTE", "OPENING_MAP", "FOCUSING_SEARCH", "ENTERING_NAME", "CONFIRMING_SUGGESTION", "SELECTING_SUGGESTION", "CONFIRMING_SYSTEM", "PLOTTING_ROUTE", "VERIFYING_ROUTE", "RESTORING_VIEW", "COMPLETED"]},
+        "targetSystem": {"type": "string", "minLength": 2, "maxLength": 96},
+        "command": {"type": ["string", "null"], "maxLength": 64},
+        "observation": {"type": ["object", "null"]},
+        "reason": {"type": ["string", "null"], "maxLength": 512}
+      }
+    }
+  }
+}

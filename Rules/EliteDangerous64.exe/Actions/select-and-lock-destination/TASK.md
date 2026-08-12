@@ -32,6 +32,10 @@ or calls the older streaming `lock-destination` Action as a hidden fallback.
 A unique normalized exact-name match remains selectable even when a similarly
 named neighboring system lowers the fuzzy runner-up margin; duplicate exact
 names remain ambiguous and are rejected.
+Exact matches use a linear scan and do not spend edit-distance steps on every
+other visible row. Fuzzy similarity is evaluated only when no exact row exists,
+so the full eight-input visible-list traversal remains inside the declared
+Starlark step budget.
 Keyboard focus is the unique strongest row-fill sample, not merely every row
 above one absolute threshold. The strongest sample must reach 0.40 and lead
 the runner-up by 0.10, which tolerates HUD skew while rejecting ambiguous focus.

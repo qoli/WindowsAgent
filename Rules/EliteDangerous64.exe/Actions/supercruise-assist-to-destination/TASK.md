@@ -11,14 +11,19 @@ invokes `align-station-target` with `targetMotion=STATIC`. Before Supercruise
 entry it uses the strict `NORMAL_SPACE` Compass profile; after a confirmed
 Supercruise entry it uses `SUPERCRUISE_ASSIST`. The Compass child remains the
 coarse and initial alignment feedback source and must complete while throttle
-is 0% before acceleration is permitted. Once the game explicitly emits
-`FSD_ALIGNMENT_REQUIRED` after Assist selection, the destination is expected
-in the forward HUD and the workflow switches to `align-visible-target` with
-exact target identity and the strict heat Gate.
-This avoids a measured loop where Compass remained within 3-5 pixels while the
-visible destination stayed off-centre and the game continued to reject Assist
-ownership. Missing visible-target evidence fails; it never authorizes a blind
-sweep or a different label.
+is 0% before acceleration is permitted. `ALIGN WITH TARGET DESTINATION` is a
+generic current-frame target-alignment prompt even though `flight-status`
+retains the historical `FSD_ALIGNMENT_REQUIRED` state name. It is not scoped
+to the FSD charging phase. After Assist selection, that prompt starts a bounded
+feedback cycle at 0% throttle: `align-station-target` first uses Compass for
+coarse/rear-hemisphere alignment, then `align-visible-target` refines the
+visible destination marker. The workflow re-reads the central prompt and
+requires two consecutive samples without `FSD_ALIGNMENT_REQUIRED` before it
+may restore 75% throttle. If the prompt remains, both alignment children run
+again, for at most six cycles. A child `completed` result is therefore not the
+Assist alignment postcondition; prompt disappearance is. Missing Compass or
+visible-target evidence fails explicitly and never authorizes a blind sweep or
+a different label.
 
 The runtime supervises each nested alignment Streaming Action synchronously: its start,
 events, completion, and failure are wrapped in the parent stream with a child
@@ -38,16 +43,21 @@ Only after Supercruise entry does the Action command 0% minimum Supercruise
 throttle and reopen NAVIGATION. This avoids racing the version-dependent UI
 behavior that may attempt to start FSD when Assist is selected in normal space.
 It requires the named target's angle brackets and focused row, opens its detail
-page, and uses the existing same-frame OCR context to find `SUPERCRUISE
-ASSIST`. The detail icon label is contextual, so the workflow sends exactly
-one `RIGHT` from BACK and requires that label in two consecutive observations
-before `SELECT`. Missing or ambiguous text, focus, module, target
+page, and uses the existing same-frame OCR context to find `ACTIVATE
+SUPERCRUISE ASSIST`, `DEACTIVATE SUPERCRUISE ASSIST`, or the shorter
+`SUPERCRUISE ASSIST` contextual label. The detail icon label is contextual, so
+the workflow sends exactly one `RIGHT` from BACK and requires the complete
+mode-correct label in two consecutive observations. `ACTIVATE` or the shorter
+label permits one `SELECT`; `DEACTIVATE` proves Assist is already active and
+must not be selected because that would disable it. Missing or ambiguous text, focus, module, target
 lock, or panel state fails explicitly. After the panel closes, the Action may
 command 75% into the Supercruise blue zone. It gives the game three prompt
 observations to react. If alignment remains required, it returns to 0%,
-completes the supervised visible-target alignment child, and only then restores
-75%; attitude control never runs at blue-zone throttle. `SUPERCRUISE ASSIST
-ACTIVE` must be classified twice
+performs Compass alignment followed by visible-target alignment, and verifies
+that the alignment prompt disappeared twice before restoring 75%; attitude
+control never runs at blue-zone throttle. A prompt still present after either
+child completed repeats the complete correction cycle instead of trusting the
+child terminal state. `SUPERCRUISE ASSIST ACTIVE` must be classified twice
 before the game computer owns flight.
 
 After ownership begins, the Action sends no throttle, attitude, UI, or FSD

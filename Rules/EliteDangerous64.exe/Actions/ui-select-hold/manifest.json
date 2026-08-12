@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Elite Dangerous bounded held UI select",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md",
+  "bindingSource": {"type": "frontier-active-preset-v1"},
+  "gesture": {
+    "type": "press",
+    "holdMs": 250,
+    "holdMsInputField": "holdMs",
+    "minHoldMs": 250,
+    "maxHoldMs": 1000
+  },
+  "selector": {"constant": "SELECT"},
+  "bindings": {"SELECT": {"control": "UI_Select"}},
+  "files": ["TASK.md", "input.schema.json", "output.schema.json"]
+}

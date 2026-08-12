@@ -66,16 +66,19 @@ control law, not a fallback to OCR or a visible-target search.
 The `SUPERCRUISE_ASSIST` profile with the default `MOVING` target instead uses
 a sixteen-reference-pixel entry radius and requires two current SOLID center
 contacts before returning control to its owning workflow. `STATIC` ALIGN uses
-an eight-pixel entry and ten-pixel verification hysteresis, with 80 ms pulses
-inside ten pixels and 160 ms pulses through thirty pixels. This accepts the
+an eight-pixel entry and ten-pixel verification hysteresis, with 40 ms
+ultra-fine pulses inside twelve pixels, 80 ms fine pulses after a measured
+ultra-fine no-progress escalation, and 160 ms pulses through thirty pixels. This accepts the
 observed 4.472-5.831-pixel integer-marker equilibria without relaxing STATIC
 TRACK's four-pixel entry and six-pixel hysteresis. The owning Supercruise
 Assist workflow now performs its collision-course refinement from the visible
 destination after the game emits `FSD_ALIGNMENT_REQUIRED`, so this Compass
 Gate is deliberately only the front/coarse handoff.
-When two consecutive 80 ms `STATIC` ALIGN pulses inside ten pixels produce no
+When two consecutive 40 ms `STATIC` ALIGN pulses inside twelve pixels produce no
 measurable Compass displacement, the next pulse is promoted only to the
-existing bounded 160 ms mid-band duration. This handles quantized one-pixel
+existing bounded 160 ms mid-band duration. A 40 ms or 80 ms pulse that enters
+the eight-pixel Gate is not immediately counter-pulsed; only a 160 ms entry
+receives the bounded 80 ms center-entry brake. This handles quantized one-pixel
 Compass sampling without invoking the rejected 240 ms recovery. `STATIC` TRACK
 retains its fixed 80/160 ms law and stricter four-pixel completion Gate.
 Live Station Assist evidence showed that the former 16/20px ALIGN Gate repeatedly

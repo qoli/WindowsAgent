@@ -78,6 +78,41 @@ func TestEliteSupercruiseHUDStateAcceptsSlashAsDigitSupercruiseSpeedUnit(t *test
 	}
 }
 
+func TestEliteSupercruiseHUDStateAcceptsObservedLowDetectionSlashAsDigitUnit(t *testing.T) {
+	caller := &supercruiseHUDCaller{
+		dashboard: ocrRegions("LHS 178", 0.9, 0.9),
+		speed:     ocrRegions("30.0km1s", 0.581352, 0.844397),
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteSupercruiseHUDStatePackage(t), map[string]any{}, caller, &fixtureReporter{})
+	if err != nil || !contains(string(output), `"state":"ACTIVE"`) || !contains(string(output), `"supercruiseSpeedUnit":"KM/S"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseHUDStateIgnoresLetterNoiseInNumericPrefix(t *testing.T) {
+	for _, raw := range []string{"3p.0km1s", "3p.0kmXs", "3p.akmxs"} {
+		caller := &supercruiseHUDCaller{
+			dashboard: ocrRegions("LHS 178", 0.9, 0.9),
+			speed:     ocrRegions(raw, 0.575, 0.81),
+		}
+		output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteSupercruiseHUDStatePackage(t), map[string]any{}, caller, &fixtureReporter{})
+		if err != nil || !contains(string(output), `"state":"ACTIVE"`) || !contains(string(output), `"supercruiseSpeedUnit":"KM/S"`) {
+			t.Fatalf("raw=%q output=%s error=%v", raw, output, err)
+		}
+	}
+}
+
+func TestEliteSupercruiseHUDStateRejectsSpeedUnitBelowDetectionGate(t *testing.T) {
+	caller := &supercruiseHUDCaller{
+		dashboard: ocrRegions("LHS 178", 0.9, 0.9),
+		speed:     ocrRegions("30.0km1s", 0.549, 0.99),
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteSupercruiseHUDStatePackage(t), map[string]any{}, caller, &fixtureReporter{})
+	if err != nil || !contains(string(output), `"state":"INACTIVE"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
 func TestEliteSupercruiseHUDStateRejectsPlainNormalSpaceSpeed(t *testing.T) {
 	caller := &supercruiseHUDCaller{
 		dashboard: ocrRegions("JAGDBADGER'S REST", 0.9, 0.9),

@@ -34,6 +34,7 @@ func VirtualKey(key string) (uint16, error) {
 		"Key_RightAlt":     0xA5,
 		"Key_Escape":       0x1B,
 		"Key_Space":        0x20,
+		"Key_Minus":        0xBD,
 		"Key_PageUp":       0x21,
 		"Key_PageDown":     0x22,
 		"Key_End":          0x23,

@@ -48,6 +48,21 @@ func targetPositionRegions(text string, left, centerY float64) json.RawMessage {
 	return value
 }
 
+func targetPositionMultipleRegions(regions ...map[string]any) json.RawMessage {
+	value, _ := json.Marshal(map[string]any{"regions": regions, "timing": map[string]any{}})
+	return value
+}
+
+func targetPositionRegion(text string, left, centerY float64) map[string]any {
+	return map[string]any{
+		"text": text, "detectionConfidence": 0.96, "recognitionConfidence": 0.97,
+		"referencePoints": []map[string]any{
+			{"x": left, "y": centerY - 10}, {"x": left + 46, "y": centerY - 10},
+			{"x": left + 46, "y": centerY + 10}, {"x": left, "y": centerY + 10},
+		},
+	}
+}
+
 func supercruiseTargetPositionBands(first, second, third json.RawMessage) map[string]json.RawMessage {
 	return map[string]json.RawMessage{
 		"elite-dangerous/supercruise-target-text-regions":            first,
@@ -114,6 +129,61 @@ func TestEliteSupercruiseTargetPositionRejectsNearEqualDuplicates(t *testing.T) 
 	)
 	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) ||
 		!contains(string(output), `"reason":"TARGET_TEXT_CANDIDATES_AMBIGUOUS"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionCombinesOccludedTwoLineStationName(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionMultipleRegions(
+			targetPositionRegion("CREL", 1307, 660),
+			targetPositionRegion("STAN", 1307, 680),
+		),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "CREON'S STANDING"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
+		!contains(string(output), `"reason":"OCCLUDED_TWO_LINE_WORD_PREFIXES_CONFIRMED"`) ||
+		!contains(string(output), `"referenceX":1277`) ||
+		!contains(string(output), `"referenceY":682.5`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionRejectsUnrelatedTwoLineFragments(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionMultipleRegions(
+			targetPositionRegion("CRAD", 1307, 660),
+			targetPositionRegion("STOP", 1307, 680),
+		),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "CREON'S STANDING"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) ||
+		!contains(string(output), `"reason":"TARGET_TEXT_NOT_FOUND"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionRejectsSeparatedWordPrefixes(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionMultipleRegions(
+			targetPositionRegion("CREL", 1307, 660),
+			targetPositionRegion("STAN", 1360, 720),
+		),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "CREON'S STANDING"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }

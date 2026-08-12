@@ -7,6 +7,8 @@ NAVIGATION_LOCK_WARMUP_RETRIES = 3
 SUPERCRUISE_ENTRY_LIMIT = 30
 ASSIST_START_LIMIT = 240
 BLUE_ZONE_GRACE_SAMPLES = 3
+ASSIST_ALIGNMENT_CYCLE_LIMIT = 6
+ALIGNMENT_PROMPT_CLEAR_CONFIRMATIONS = 2
 ASSIST_ACTIVE_LIMIT = 2400
 ASSIST_ACTIVE_CONFIRMATIONS = 2
 ASSIST_MISSING_LIMIT = 30
@@ -241,11 +243,18 @@ def inspect_assist_button(raw, destination_mode):
         if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
             continue
         normalized = normalize_text(region["text"]).replace("<", "").replace(">", "")
-        score = similarity(normalized, expected)
-        is_orbit = "ANDORBIT" in normalized
+        state = "FOCUSED"
+        label = normalized
+        if normalized.startswith("DEACTIVATE"):
+            state = "ACTIVE"
+            label = normalized[len("DEACTIVATE"):]
+        elif normalized.startswith("ACTIVATE"):
+            label = normalized[len("ACTIVATE"):]
+        score = similarity(label, expected)
+        is_orbit = "ANDORBIT" in label
         if (destination_mode == "DROP" and is_orbit) or (destination_mode == "ORBIT_HANDOFF" and not is_orbit):
             score = 0.0
-        candidate = {"region": region, "similarity": score, "score": score * region["recognitionConfidence"]}
+        candidate = {"region": region, "similarity": score, "score": score * region["recognitionConfidence"], "state": state}
         if best == None or candidate["score"] > best["score"]:
             best = candidate
     if best == None or best["similarity"] < MIN_TEXT_SIMILARITY:
@@ -254,8 +263,11 @@ def inspect_assist_button(raw, destination_mode):
     # In the Navigation detail icon row the action label is contextual and is
     # rendered only for the focused icon. Its left context is outside the icon
     # fill, so it is retained as evidence but does not classify focus.
-    reason = "ORBIT_ASSIST_CONTEXT_LABEL_CONFIRMED" if destination_mode == "ORBIT_HANDOFF" else "DROP_ASSIST_CONTEXT_LABEL_CONFIRMED"
-    return {"state": "FOCUSED", "text": best["region"]["text"], "focusFillRatio": ratio, "reason": reason}
+    if best["state"] == "ACTIVE":
+        reason = "ORBIT_ASSIST_ALREADY_ACTIVE_CONFIRMED" if destination_mode == "ORBIT_HANDOFF" else "DROP_ASSIST_ALREADY_ACTIVE_CONFIRMED"
+    else:
+        reason = "ORBIT_ASSIST_CONTEXT_LABEL_CONFIRMED" if destination_mode == "ORBIT_HANDOFF" else "DROP_ASSIST_CONTEXT_LABEL_CONFIRMED"
+    return {"state": best["state"], "text": best["region"]["text"], "focusFillRatio": ratio, "reason": reason}
 
 def observe_assist_button_stable(target_name, sample, destination_mode):
     previous = None
@@ -279,6 +291,9 @@ def request_assist(target_name, sample, destination_mode):
     emit_update("FOCUSING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state=None, last_command="RIGHT", reason="FOCUS_FIRST_DETAIL_ACTION_TO_REVEAL_LABEL")
     task.sleep(milliseconds=UI_SETTLE_MS)
     observation = observe_assist_button_stable(target_name, sample, destination_mode)
+    if observation["state"] == "ACTIVE":
+        emit_update("REQUESTING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state="ACTIVE", reason="ASSIST_ALREADY_ACTIVE_NO_SELECT")
+        return
     if observation["state"] != "FOCUSED":
         fail("RIGHT did not produce a focused Supercruise Assist button")
     action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
@@ -351,9 +366,68 @@ def align_visible_destination(target_name):
         visible_result["sampleCount"],
         target_name,
         last_command="ALIGN_VISIBLE_TARGET",
-        reason="VISIBLE_DESTINATION_ALIGNMENT_COMPLETED",
+        reason="VISIBLE_DESTINATION_FINE_ALIGNMENT_COMPLETED",
     )
     return visible_result["sampleCount"]
+
+def resolve_assist_alignment_prompt(target_name, sample):
+    for cycle_index in range(ASSIST_ALIGNMENT_CYCLE_LIMIT):
+        cycle = cycle_index + 1
+        compass_samples = align_compass(target_name, "SUPERCRUISE_ASSIST")
+        visible_samples = align_visible_destination(target_name)
+        emit_update(
+            "CORRECTING_ASSIST_ALIGNMENT",
+            sample,
+            target_name,
+            flight_status="FSD_ALIGNMENT_REQUIRED",
+            last_command="ALIGN_STATION_TARGET+ALIGN_VISIBLE_TARGET",
+            reason="ASSIST_ALIGNMENT_CYCLE_COMPLETED:" + str(cycle) + ":" + str(compass_samples) + "+" + str(visible_samples),
+        )
+
+        clear_confirmations = 0
+        active_confirmations = 0
+        last_flight = None
+        for _ in range(STABLE_ATTEMPTS):
+            sample += 1
+            last_flight = observe_flight()
+            state = last_flight["state"]
+            if state == "FSD_ALIGNMENT_REQUIRED":
+                emit_update(
+                    "VERIFYING_ASSIST_ALIGNMENT",
+                    sample,
+                    target_name,
+                    flight_status=state,
+                    prompt_text=last_flight["text"],
+                    commanded_throttle=0,
+                    reason="ALIGNMENT_PROMPT_STILL_PRESENT_AFTER_CYCLE:" + str(cycle),
+                )
+                break
+            if state not in ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "SAFE_DISENGAGE_READY", "UNKNOWN"]:
+                fail("unexpected known flight status while verifying Assist alignment: " + state)
+            clear_confirmations += 1
+            if state == "SUPERCRUISE_ASSIST_ACTIVE":
+                active_confirmations += 1
+            else:
+                active_confirmations = 0
+            emit_update(
+                "VERIFYING_ASSIST_ALIGNMENT",
+                sample,
+                target_name,
+                flight_status=state,
+                prompt_text=last_flight["text"],
+                assist_active_confirmations=active_confirmations,
+                commanded_throttle=0,
+                reason="ALIGNMENT_PROMPT_CLEAR_" + str(clear_confirmations) + "_OF_" + str(ALIGNMENT_PROMPT_CLEAR_CONFIRMATIONS) + ":CYCLE_" + str(cycle),
+            )
+            if clear_confirmations >= ALIGNMENT_PROMPT_CLEAR_CONFIRMATIONS:
+                return {
+                    "sample": sample,
+                    "flight": last_flight,
+                    "cycleCount": cycle,
+                    "assistActiveConfirmations": active_confirmations,
+                }
+            task.sleep(milliseconds=POLL_MS)
+    fail("ALIGNMENT_PROMPT_PERSISTED: Compass and visible-target alignment did not clear ALIGN WITH TARGET DESTINATION")
 
 def preflight(target_name):
     ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
@@ -475,6 +549,7 @@ def main(ctx):
         last_prompt_text = flight["text"]
         target = None
         command = None
+        commanded_throttle = 75
         phase = "WAITING_FOR_ASSIST"
         if last_flight_status == "SUPERCRUISE_ASSIST_ACTIVE":
             assist_active_confirmations += 1
@@ -485,18 +560,27 @@ def main(ctx):
             alignment_required_samples += 1
             if alignment_required_samples > BLUE_ZONE_GRACE_SAMPLES:
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-                emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
-                alignment_sample_count = align_visible_destination(target_name)
-                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
-                command = "ALIGN_VISIBLE_TARGET:" + str(alignment_sample_count) + "+SET_THROTTLE_75"
+                emit_update("CORRECTING_ASSIST_ALIGNMENT", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
+                alignment = resolve_assist_alignment_prompt(target_name, sample)
+                sample = alignment["sample"]
+                last_flight_status = alignment["flight"]["state"]
+                last_prompt_text = alignment["flight"]["text"]
+                assist_active_confirmations = alignment["assistActiveConfirmations"]
+                if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
+                    throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+                    command = "ALIGN_TARGETS:" + str(alignment["cycleCount"]) + "+SET_THROTTLE_75"
+                    commanded_throttle = 75
+                else:
+                    command = "ALIGN_TARGETS:" + str(alignment["cycleCount"])
+                    commanded_throttle = 0
                 alignment_required_samples = 0
-                phase = "ALIGNING_FOR_ENTRY"
+                phase = "ASSIST_ACTIVE" if assist_active_confirmations >= ASSIST_ACTIVE_CONFIRMATIONS else "VERIFYING_ASSIST_ALIGNMENT"
         elif last_flight_status in ["SUPERCRUISE", "SAFE_DISENGAGE_READY", "UNKNOWN"]:
             assist_active_confirmations = 0
             alignment_required_samples = 0
         else:
             fail("unexpected known flight status while awaiting Supercruise Assist activation: " + last_flight_status)
-        emit_update(phase, sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, target=target, assist_active_confirmations=assist_active_confirmations, commanded_throttle=75, last_command=command, reason="WAITING_FOR_BLUE_ZONE_ASSIST_THEN_TWO_ACTIVE_FRAMES")
+        emit_update(phase, sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, target=target, assist_active_confirmations=assist_active_confirmations, commanded_throttle=commanded_throttle, last_command=command, reason="WAITING_FOR_ALIGNMENT_PROMPT_CLEAR_THEN_BLUE_ZONE_ASSIST")
         if assist_active_confirmations >= ASSIST_ACTIVE_CONFIRMATIONS:
             break
         task.sleep(milliseconds=POLL_MS)

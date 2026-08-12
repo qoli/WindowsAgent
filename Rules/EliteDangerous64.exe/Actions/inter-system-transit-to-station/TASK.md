@@ -9,11 +9,25 @@ boundary. After departure, the parent owns every time-sensitive flight step.
 uses the Supercruise Compass control profile; it is never inferred from a
 `NORMAL_SPACE` claim.
 
-It delegates the exact target lock, 0% alignment, binding-resolved
+Before the jump it delegates complete-name Galaxy Map search, exact suggestion
+selection, held `PLOT ROUTE`, and exact one-hop `NavRoute.json` validation to
+`plot-route-to-system`. That durable route result is the explicit target-lock
+boundary passed to the jump child; the parent no longer asks the current-System
+Navigation list to find an arbitrary unplotted System.
+
+It delegates the resulting exact target lock, 0% alignment, binding-resolved
 `HyperSuperCombination`, FSD charging, hyperspace transition, first-returning-
 cockpit-frame 0% brake, and persistent Supercruise arrival evidence to
-`hyperspace-jump-to-system`. The parent then requires two exact destination-
-System target-text observations before it may enter the Station phase.
+`hyperspace-jump-to-system`. The jump child's exact matching `FSDJump` or
+bounded cockpit-transition arrival evidence authorizes the Station phase. It
+deliberately does not require the hyperspace destination label to remain
+visible after arrival: Elite Dangerous may clear that target together with
+`NavRoute.json` once the jump completes.
+
+`ARRIVED_SUPERCRUISE` is the explicit recovery entry after a parent-level
+failure in the destination System. It requires the latest retained `FSDJump`
+to match `destinationSystem` and two current Supercruise HUD observations,
+then resumes at Station selection without plotting or repeating the jump.
 
 Because a hyperspace exit is already in Supercruise, the Action does not wait
 for `ship-speed STOPPED`. It locks the exact destination Station, resumes
@@ -25,9 +39,10 @@ The destination Station must be present in the current visible Navigation
 list. A stale System-only filter remains an explicit missing-target failure;
 the Action does not blindly manipulate the icon-only filter menu.
 
-Missing target rows, missing bindings, ambiguous OCR, unconfirmed charging,
+Missing or partial Galaxy Map results, a route mismatch, missing Station rows,
+missing bindings, ambiguous OCR, unconfirmed charging,
 cockpit transition failure, missing Supercruise HUD, a destination-name
 mismatch, child failure, or cancellation fails explicitly and commands 0%.
-It never reads Journal, Status, NavRoute, network data, prior frames, or a
-different perception pipeline, and it never retries FSD or substitutes the
-dedicated Supercruise binding.
+It reads `NavRoute.json` only through the owning route child and never uses
+network data, prior frames, or a different perception pipeline. It never
+retries FSD or substitutes the dedicated Supercruise binding.

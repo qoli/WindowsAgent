@@ -6,7 +6,7 @@
   "properties": {
     "destinationSystem": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
     "destinationStation": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
-    "startMode": {"enum": ["DOCKED", "NORMAL_SPACE", "SUPERCRUISE"]},
+    "startMode": {"enum": ["DOCKED", "NORMAL_SPACE", "SUPERCRUISE", "ARRIVED_SUPERCRUISE"]},
     "normalSpaceConfirmed": {"type": "boolean"},
     "supercruiseConfirmed": {"type": "boolean"},
     "stationCompatibilityConfirmed": {"const": true},
@@ -15,6 +15,7 @@
   "allOf": [
     {"if": {"properties": {"startMode": {"const": "DOCKED"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": false}}}},
     {"if": {"properties": {"startMode": {"const": "NORMAL_SPACE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": true}, "supercruiseConfirmed": {"const": false}}}},
-    {"if": {"properties": {"startMode": {"const": "SUPERCRUISE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": true}}}}
+    {"if": {"properties": {"startMode": {"const": "SUPERCRUISE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": true}}}},
+    {"if": {"properties": {"startMode": {"const": "ARRIVED_SUPERCRUISE"}}}, "then": {"properties": {"normalSpaceConfirmed": {"const": false}, "supercruiseConfirmed": {"const": true}}}}
   ]
 }

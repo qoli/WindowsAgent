@@ -102,12 +102,13 @@ def focus_fill_ratio(region):
 
 def inspect_target(raw, target_name):
     expected = normalize_text(target_name)
+    candidates = []
+    exact = []
     best = None
     runner_up_score = 0.0
     focus_best = None
     focus_runner_up = 0.0
     meaningful = 0
-    exact_match_count = 0
     for region in raw["regions"]:
         if len(region["referencePoints"]) != 4:
             continue
@@ -118,17 +119,10 @@ def inspect_target(raw, target_name):
         if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE or len(normalized) == 0:
             continue
         meaningful += 1
-        text_similarity = similarity(normalized, expected)
+        candidate = {"region": region, "normalized": normalized, "bounds": box}
+        candidates.append(candidate)
         if normalized == expected:
-            exact_match_count += 1
-        score = region["recognitionConfidence"] * text_similarity
-        candidate = {"region": region, "similarity": text_similarity, "score": score, "bounds": box}
-        if best == None or score > best["score"]:
-            if best != None and best["score"] > runner_up_score:
-                runner_up_score = best["score"]
-            best = candidate
-        elif score > runner_up_score:
-            runner_up_score = score
+            exact.append(candidate)
         ratio = focus_fill_ratio(region)
         if ratio != None:
             focus_candidate = {"text": region["text"], "normalized": normalized, "centerY": box["centerY"], "fillRatio": ratio}
@@ -138,8 +132,26 @@ def inspect_target(raw, target_name):
                 focus_best = focus_candidate
             elif ratio > focus_runner_up:
                 focus_runner_up = ratio
+    if len(exact) == 1:
+        best = exact[0]
+        best["similarity"] = 1.0
+        best["score"] = best["region"]["recognitionConfidence"]
+    elif len(exact) > 1:
+        return {"state": "UNKNOWN", "locked": None, "focused": None, "direction": None, "text": exact[0]["region"]["text"], "similarity": 1.0, "margin": 0.0, "meaningfulRegionCount": meaningful, "focusFillRatio": None, "reason": "DUPLICATE_EXACT_TARGET_ROWS"}
+    else:
+        for candidate in candidates:
+            text_similarity = similarity(candidate["normalized"], expected)
+            score = candidate["region"]["recognitionConfidence"] * text_similarity
+            candidate["similarity"] = text_similarity
+            candidate["score"] = score
+            if best == None or score > best["score"]:
+                if best != None and best["score"] > runner_up_score:
+                    runner_up_score = best["score"]
+                best = candidate
+            elif score > runner_up_score:
+                runner_up_score = score
     margin = 0.0 if best == None else best["score"] - runner_up_score
-    unique_exact_match = best != None and best["similarity"] == 1.0 and exact_match_count == 1
+    unique_exact_match = len(exact) == 1
     if best == None or best["similarity"] < MIN_TEXT_SIMILARITY or (margin < MIN_TEXT_MARGIN and not unique_exact_match):
         return {"state": "UNKNOWN", "locked": None, "focused": None, "direction": None, "text": None if best == None else best["region"]["text"], "similarity": 0.0 if best == None else best["similarity"], "margin": margin, "meaningfulRegionCount": meaningful, "focusFillRatio": None, "reason": "TARGET_TEXT_NOT_CONFIRMED"}
     text = best["region"]["text"]

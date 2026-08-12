@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 3,
   "title": "Read Elite Dangerous persistent Supercruise HUD state",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

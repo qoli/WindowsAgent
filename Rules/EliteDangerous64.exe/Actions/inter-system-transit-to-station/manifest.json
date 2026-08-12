@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 3,
+  "version": 5,
   "title": "Elite Dangerous inter-system transit to station",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

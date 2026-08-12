@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Elite Dangerous single text-entry key",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -19,7 +19,7 @@
     "0": {"key": "Key_0"}, "1": {"key": "Key_1"}, "2": {"key": "Key_2"}, "3": {"key": "Key_3"},
     "4": {"key": "Key_4"}, "5": {"key": "Key_5"}, "6": {"key": "Key_6"}, "7": {"key": "Key_7"},
     "8": {"key": "Key_8"}, "9": {"key": "Key_9"},
-    "SPACE": {"key": "Key_Space"}, "BACKSPACE": {"key": "Key_Backspace"}, "ENTER": {"key": "Key_Enter"}
+    "SPACE": {"key": "Key_Space"}, "HYPHEN": {"key": "Key_Minus"}, "BACKSPACE": {"key": "Key_Backspace"}, "ENTER": {"key": "Key_Enter"}
   },
   "files": ["TASK.md", "input.schema.json", "output.schema.json"]
 }

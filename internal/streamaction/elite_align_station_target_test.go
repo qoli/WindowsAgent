@@ -415,7 +415,7 @@ func TestEliteAlignStationTargetStaticSupercruiseAlignEscalatesQuantizedFinePuls
 	if !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s", output)
 	}
-	want := []int{80, 80, 160, 80}
+	want := []int{40, 40, 160, 80}
 	if len(caller.holds) != len(want) {
 		t.Fatalf("holds=%v want=%v", caller.holds, want)
 	}
@@ -441,8 +441,32 @@ func TestEliteAlignStationTargetStaticSupercruiseAlignAcceptsQuantizedCenterEqui
 	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"stableConfirmations":2`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if strings.Join(caller.controls, ",") != "YAW_LEFT,YAW_RIGHT" || len(caller.holds) != 2 || caller.holds[0] != 80 || caller.holds[1] != 80 {
+	if strings.Join(caller.controls, ",") != "YAW_LEFT" || len(caller.holds) != 1 || caller.holds[0] != 40 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetStaticSupercruiseAlignDoesNotBrakeUltraFineCenterEntry(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 10, 0, 10, false),
+		alignObservation("SOLID", 7, 0, 7, false),
+		alignObservation("SOLID", 7, 0, 7, false),
+		alignObservation("SOLID", 7, 0, 7, false),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "YAW_RIGHT" || len(caller.holds) != 1 || caller.holds[0] != 40 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	if contains(joinEventPhases(reporter.payloads), `"reason":"CENTER_ENTRY_BRAKE"`) {
+		t.Fatalf("ultra-fine center entry must settle from fresh Compass frames: %s", joinEventPhases(reporter.payloads))
 	}
 }
 

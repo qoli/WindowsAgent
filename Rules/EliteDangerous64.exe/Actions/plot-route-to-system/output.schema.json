@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "result", "targetSystem", "exactSuggestionConfirmed", "selectedSystemConfirmed", "routeId", "jumpCount", "routeFreshness", "openedMap", "restoredView", "observationCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "PLOT_ROUTE_TO_SYSTEM"},
+    "completed": {"const": true},
+    "result": {"enum": ["EXISTING", "PLOTTED"]},
+    "targetSystem": {"type": "string", "minLength": 2, "maxLength": 96},
+    "exactSuggestionConfirmed": {"type": "boolean"},
+    "selectedSystemConfirmed": {"type": "boolean"},
+    "routeId": {"type": "string", "minLength": 5, "maxLength": 256},
+    "jumpCount": {"type": "integer", "minimum": 1, "maximum": 32},
+    "routeFreshness": {"enum": ["CURRENT", "UNKNOWN"]},
+    "openedMap": {"type": "boolean"},
+    "restoredView": {"const": true},
+    "observationCount": {"type": "integer", "minimum": 1, "maximum": 128}
+  }
+}

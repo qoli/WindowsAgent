@@ -5,7 +5,7 @@ import "testing"
 func TestVirtualKeySupportsCanonicalKeyboardSet(t *testing.T) {
 	for key, want := range map[string]uint16{
 		"Key_A": 0x41, "Key_Z": 0x5A, "Key_0": 0x30, "Key_9": 0x39,
-		"Key_F1": 0x70, "Key_F24": 0x87, "Key_Space": 0x20,
+		"Key_F1": 0x70, "Key_F24": 0x87, "Key_Space": 0x20, "Key_Minus": 0xBD,
 		"Key_RightControl": 0xA3,
 		"Key_Left":         0x25, "Key_Up": 0x26, "Key_Right": 0x27, "Key_Down": 0x28,
 		"Key_LeftArrow": 0x25, "Key_UpArrow": 0x26, "Key_RightArrow": 0x27, "Key_DownArrow": 0x28,

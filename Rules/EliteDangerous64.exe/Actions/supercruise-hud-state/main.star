@@ -1,6 +1,6 @@
 MIN_DETECTION_CONFIDENCE = 0.70
 MIN_RECOGNITION_CONFIDENCE = 0.75
-MIN_SPEED_DETECTION_CONFIDENCE = 0.60
+MIN_SPEED_DETECTION_CONFIDENCE = 0.55
 LABELS = ["DISTANCE", "SPEED", "ALIGNMENT"]
 
 def normalize(text):
@@ -21,15 +21,24 @@ def normalize_speed(text):
             result += character
     return result
 
+def has_speed_unit_suffix(letters, prefix):
+    for index in range(len(letters) - len(prefix) + 1):
+        if letters[index:index + len(prefix)] != prefix:
+            continue
+        suffix = letters[index + len(prefix):]
+        if len(suffix) >= 1 and len(suffix) <= 2 and suffix[len(suffix) - 1] == "S":
+            return True
+    return False
+
 def supercruise_speed_unit(raw):
     for region in raw["regions"]:
         if region["detectionConfidence"] < MIN_SPEED_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
             continue
         text = normalize_speed(region["text"])
         unit_letters = normalize(region["text"])
-        if unit_letters == "KMS":
+        if has_speed_unit_suffix(unit_letters, "KM"):
             return "KM/S"
-        if unit_letters == "MMS":
+        if has_speed_unit_suffix(unit_letters, "MM"):
             return "MM/S"
         if unit_letters == "C" and len(text) >= 2:
             return "C"
