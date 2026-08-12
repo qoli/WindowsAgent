@@ -111,27 +111,55 @@ try {
 if ($deploymentError) { throw $deploymentError }
 
 $deadline = [DateTime]::UtcNow.Add($Timeout)
-$status = $null
 $watchdogProcess = $null
-$unhealthy = @("status-missing")
+$targetStates = [ordered]@{}
 do {
-    $statusPath = Join-Path $root "watchdog\status.json"
-    $status = if (Test-Path -LiteralPath $statusPath) {
-        Get-Content -LiteralPath $statusPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction SilentlyContinue
-    }
     $watchdogProcess = Get-Process -Name "windows-watchdog" -ErrorAction SilentlyContinue |
         Where-Object { $_.Path -eq $watchdogPath } | Select-Object -First 1
-    $unhealthy = if ($status) { @($status.targets | Where-Object { $_.state -ne "HEALTHY" }) } else { @("status-missing") }
-    if ($watchdogProcess -and $status -and $status.watchdog.pid -eq $watchdogProcess.Id -and $unhealthy.Count -eq 0) { break }
+    $allHealthy = [bool]$watchdogProcess
+    foreach ($target in $targets) {
+        $healthy = $true
+        foreach ($probe in @($target.probes)) {
+            switch ([string]$probe.type) {
+                "process" {
+                    $matches = @(Get-Process -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Path -eq [string]$probe.executablePath })
+                    if ($matches.Count -ne 1 -or
+                        ([bool]$probe.requireInteractiveSession -and $matches[0].SessionId -eq 0)) {
+                        $healthy = $false
+                    }
+                }
+                "http-json" {
+                    try {
+                        $response = Invoke-WebRequest -Uri ([string]$probe.url) -UseBasicParsing `
+                            -TimeoutSec ([Math]::Max(1, [Math]::Ceiling([uint64]$probe.timeoutMs / 1000)))
+                        $body = $response.Content | ConvertFrom-Json -ErrorAction Stop
+                        if ([int]$response.StatusCode -ne [int]$probe.expectedStatusCode -or
+                            [string]$body.status -cne [string]$probe.expectedJSONStatus) {
+                            $healthy = $false
+                        }
+                    } catch {
+                        $healthy = $false
+                    }
+                }
+                default { throw "unsupported installed Watchdog probe type: $($probe.type)" }
+            }
+        }
+        $targetStates[[string]$target.id] = if ($healthy) { "HEALTHY" } else { "UNHEALTHY" }
+        if (-not $healthy) { $allHealthy = $false }
+    }
+    if ($allHealthy) { break }
     Start-Sleep -Milliseconds 500
 } while ([DateTime]::UtcNow -lt $deadline)
-if (-not $watchdogProcess -or -not $status -or $unhealthy.Count -ne 0) {
+if (-not $allHealthy) {
     throw "Watchdog did not restore all configured targets before the deadline"
 }
 
 [ordered]@{
     watchdog_pid = $watchdogProcess.Id
-    targets = @($status.targets | ForEach-Object { [ordered]@{id=$_.id; state=$_.state} })
+    targets = @($targets | ForEach-Object {
+        [ordered]@{id=$_.id; state=$targetStates[[string]$_.id]}
+    })
     binaries = @($expectedNames | ForEach-Object {
         [ordered]@{name=$_; path=$destinations[$_]; sha256=$hashes[$_]}
     })
