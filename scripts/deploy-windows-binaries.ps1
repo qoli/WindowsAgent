@@ -13,6 +13,7 @@ $watchdogTaskName = "gameGuide Windows Watchdog"
 $watchdogDescription = "gameGuide external process watchdog; no automatic self-recovery"
 $expectedNames = @(
     "windows-capture-agent.exe",
+    "windows-wgc-worker.exe",
     "windows-event-stream.exe",
     "windows-action-osd.exe",
     "windows-watchdog.exe",
@@ -48,7 +49,7 @@ foreach ($line in Get-Content -LiteralPath $sumPath) {
     $hashes[$Matches[2]] = $Matches[1]
 }
 if ((($hashes.Keys | Sort-Object) -join "`n") -cne (($expectedNames | Sort-Object) -join "`n")) {
-    throw "payload must contain exactly the nine deployed binaries"
+    throw "payload must contain exactly the ten deployed binaries"
 }
 foreach ($name in $expectedNames) {
     $source = Join-Path $payload $name
@@ -84,7 +85,7 @@ foreach ($target in $targets) {
 $capturePath = $destinations["windows-capture-agent.exe"]
 if (-not $capturePath) { throw "Watchdog config does not identify windows-capture-agent.exe" }
 $binDir = Split-Path -Parent $capturePath
-foreach ($name in @("windows-observer.exe", "windows-observation-script-runner.exe", "windows-observation-job.exe")) {
+foreach ($name in @("windows-wgc-worker.exe", "windows-observer.exe", "windows-observation-script-runner.exe", "windows-observation-job.exe")) {
     $destinations[$name] = Join-Path $binDir $name
 }
 if ((($destinations.Keys | Sort-Object) -join "`n") -cne (($expectedNames | Sort-Object) -join "`n")) {

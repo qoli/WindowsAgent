@@ -29,7 +29,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
-	"github.com/qoli/WindowsAgent/internal/wgc"
+	"github.com/qoli/WindowsAgent/internal/wgcworker"
 	"github.com/qoli/WindowsAgent/internal/windowsinput"
 )
 
@@ -78,18 +78,27 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize artifact store: %w", err)
 	}
-	capturer, err := wgc.New(logger)
-	if err != nil {
-		return fmt.Errorf("initialize WGC capturer: %w", err)
-	}
-	capturer.SetTrace(cfg.WGCTrace)
-	ruleStore, err := rules.New(cfg.RulesDir)
-	if err != nil {
-		return fmt.Errorf("initialize rule store: %w", err)
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
+	}
+	capturer, err := wgcworker.New(
+		filepath.Join(filepath.Dir(executable), "windows-wgc-worker.exe"),
+		cfg.CaptureTimeout,
+		cfg.WGCTrace,
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize persistent WGC worker adapter: %w", err)
+	}
+	defer func() {
+		if err := capturer.Close(); err != nil {
+			logger.Error("wgc_worker_shutdown_failed", "error", err)
+		}
+	}()
+	ruleStore, err := rules.New(cfg.RulesDir)
+	if err != nil {
+		return fmt.Errorf("initialize rule store: %w", err)
 	}
 	observationExecutor, err := scriptlaunch.NewLocalExecutor(filepath.Dir(executable), cfg.RulesDir, logger)
 	if err != nil {

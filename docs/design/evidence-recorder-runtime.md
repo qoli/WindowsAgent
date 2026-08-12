@@ -36,8 +36,9 @@ access and requires `IsBorderRequired=false` to read back exactly. Unsupported,
 denied, canceled, timed-out, or mismatched permission state is a terminal
 startup failure; the recorder does not silently retain the system capture
 border. This setting applies only to the Recorder's persistent session. The
-Capture Agent's request-driven WGC sessions remain independent and retain their
-current Windows border behavior.
+Capture Agent owns a separate persistent WGC worker generation and retains its
+current Windows border behavior; neither process borrows or controls the
+other's WGC session.
 
 Each assigned second is exactly one of:
 

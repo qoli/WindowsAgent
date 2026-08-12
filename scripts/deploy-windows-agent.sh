@@ -61,6 +61,7 @@ trap cleanup EXIT
 
 binaries=(
   windows-capture-agent.exe
+  windows-wgc-worker.exe
   windows-event-stream.exe
   windows-action-osd.exe
   windows-watchdog.exe

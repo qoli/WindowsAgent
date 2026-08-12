@@ -57,6 +57,14 @@ function Assert-GUIExecutable {
     }
 }
 
+function Assert-ConsoleExecutable {
+    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Label)
+    $subsystem = Get-WindowsPESubsystem -Path $Path
+    if ($subsystem -ne 3) {
+        throw "$Label must use PE console subsystem 3; found subsystem $subsystem."
+    }
+}
+
 $minimumVersion = [version]"10.0.18362.0"
 $osVersion = [Environment]::OSVersion.Version
 if (-not [Environment]::Is64BitOperatingSystem) {
@@ -76,6 +84,7 @@ if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
 Assert-GUIExecutable -Path $sourceExecutable -Label "capture agent executable"
 $sourceBinDir = Split-Path -Parent $sourceExecutable
 $runtimeSources = [ordered]@{
+    "windows-wgc-worker.exe" = Join-Path $sourceBinDir "windows-wgc-worker.exe"
     "windows-observation-job.exe" = Join-Path $sourceBinDir "windows-observation-job.exe"
     "windows-observation-script-runner.exe" = Join-Path $sourceBinDir "windows-observation-script-runner.exe"
     "windows-observer.exe" = Join-Path $sourceBinDir "windows-observer.exe"
@@ -83,10 +92,11 @@ $runtimeSources = [ordered]@{
 }
 foreach ($runtime in $runtimeSources.GetEnumerator()) {
     if (-not (Test-Path -LiteralPath $runtime.Value -PathType Leaf)) {
-        throw "required Starlark launcher runtime does not exist: $($runtime.Value)"
+        throw "required Agent runtime does not exist: $($runtime.Value)"
     }
 }
 Assert-GUIExecutable -Path $runtimeSources["windows-event-stream.exe"] -Label "event stream executable"
+Assert-ConsoleExecutable -Path $runtimeSources["windows-wgc-worker.exe"] -Label "WGC worker executable"
 $sourceRules = [IO.Path]::GetFullPath($RulesPath)
 if (-not (Test-Path -LiteralPath $sourceRules -PathType Container)) {
     throw "Rules directory does not exist: $sourceRules"
@@ -239,6 +249,11 @@ New-Item -Path $dumpRegistryPath -Force | Out-Null
 New-ItemProperty -Path $dumpRegistryPath -Name "DumpFolder" -PropertyType ExpandString -Value $dumpDir -Force | Out-Null
 New-ItemProperty -Path $dumpRegistryPath -Name "DumpType" -PropertyType DWord -Value 2 -Force | Out-Null
 New-ItemProperty -Path $dumpRegistryPath -Name "DumpCount" -PropertyType DWord -Value 5 -Force | Out-Null
+$workerDumpRegistryPath = "HKCU:\Software\Microsoft\Windows\Windows Error Reporting\LocalDumps\windows-wgc-worker.exe"
+New-Item -Path $workerDumpRegistryPath -Force | Out-Null
+New-ItemProperty -Path $workerDumpRegistryPath -Name "DumpFolder" -PropertyType ExpandString -Value $dumpDir -Force | Out-Null
+New-ItemProperty -Path $workerDumpRegistryPath -Name "DumpType" -PropertyType DWord -Value 2 -Force | Out-Null
+New-ItemProperty -Path $workerDumpRegistryPath -Name "DumpCount" -PropertyType DWord -Value 5 -Force | Out-Null
 
 $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($existingTask) {

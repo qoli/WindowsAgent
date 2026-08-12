@@ -44,6 +44,14 @@ function Assert-GUIExecutable {
     }
 }
 
+function Assert-ConsoleExecutable {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $subsystem = Get-WindowsPESubsystem -Path $Path
+    if ($subsystem -ne 3) {
+        throw "WGC worker executable must use PE console subsystem 3; found subsystem $subsystem: $Path"
+    }
+}
+
 if ($Timeout -le [timespan]::Zero) {
     throw "Timeout must be positive"
 }
@@ -57,11 +65,22 @@ if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
 }
 Assert-GUIExecutable -Path $sourceExecutable
 $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable).Hash.ToLowerInvariant()
+$sourceWorker = Join-Path (Split-Path -Parent $sourceExecutable) "windows-wgc-worker.exe"
+if (-not (Test-Path -LiteralPath $sourceWorker -PathType Leaf)) {
+    throw "WGC worker executable does not exist beside the agent: $sourceWorker"
+}
+Assert-ConsoleExecutable -Path $sourceWorker
+$sourceWorkerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceWorker).Hash.ToLowerInvariant()
 
 $resolvedDataDir = [IO.Path]::GetFullPath($DataDir)
 $installedExecutable = Join-Path $resolvedDataDir "bin\windows-capture-agent.exe"
+$installedWorker = Join-Path $resolvedDataDir "bin\windows-wgc-worker.exe"
 if (-not (Test-Path -LiteralPath $installedExecutable -PathType Leaf)) {
     throw "installed agent executable does not exist: $installedExecutable"
+}
+$installedWorkerExists = Test-Path -LiteralPath $installedWorker -PathType Leaf
+if ($installedWorkerExists) {
+    Assert-ConsoleExecutable -Path $installedWorker
 }
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
@@ -75,7 +94,12 @@ if ($taskActions.Count -ne 1 -or `
 }
 
 $installedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedExecutable).Hash.ToLowerInvariant()
-if ($installedHash -eq $sourceHash) {
+$installedWorkerHash = if ($installedWorkerExists) {
+    (Get-FileHash -Algorithm SHA256 -LiteralPath $installedWorker).Hash.ToLowerInvariant()
+} else {
+    $null
+}
+if ($installedHash -eq $sourceHash -and $installedWorkerExists -and $installedWorkerHash -eq $sourceWorkerHash) {
     Assert-GUIExecutable -Path $installedExecutable
     $health = Invoke-RestMethod -Method Get -Uri $HealthURI -TimeoutSec 2
     if (-not $health -or $health.status -ne "ok") {
@@ -85,6 +109,8 @@ if ($installedHash -eq $sourceHash) {
         changed = $false
         executable = $installedExecutable
         sha256 = $installedHash
+        wgc_worker = $installedWorker
+        wgc_worker_sha256 = $installedWorkerHash
         pe_subsystem = 2
         task_state = $task.State.ToString()
         health = $health.status
@@ -96,10 +122,15 @@ if ($installedHash -eq $sourceHash) {
 $binDir = Split-Path -Parent $installedExecutable
 $transactionID = [Guid]::NewGuid().ToString("N")
 $incomingExecutable = Join-Path $binDir (".windows-capture-agent." + $transactionID + ".incoming.exe")
+$incomingWorker = Join-Path $binDir (".windows-wgc-worker." + $transactionID + ".incoming.exe")
 $backupExecutable = Join-Path $binDir (
     "windows-capture-agent.pre-update-" + [DateTime]::UtcNow.ToString("yyyyMMddTHHmmssZ") + ".exe"
 )
-$replaced = $false
+$backupWorker = Join-Path $binDir (
+    "windows-wgc-worker.pre-update-" + [DateTime]::UtcNow.ToString("yyyyMMddTHHmmssZ") + ".exe"
+)
+$agentReplaced = $false
+$workerReplaced = $false
 $taskStopped = $false
 $rollbackHealth = $null
 
@@ -109,7 +140,15 @@ try {
         throw "staged executable hash differs from source"
     }
     Assert-GUIExecutable -Path $incomingExecutable
+    Copy-Item -LiteralPath $sourceWorker -Destination $incomingWorker
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $incomingWorker).Hash.ToLowerInvariant() -ne $sourceWorkerHash) {
+        throw "staged WGC worker hash differs from source"
+    }
+    Assert-ConsoleExecutable -Path $incomingWorker
     Copy-Item -LiteralPath $installedExecutable -Destination $backupExecutable
+    if ($installedWorkerExists) {
+        Copy-Item -LiteralPath $installedWorker -Destination $backupWorker
+    }
 
     Stop-ScheduledTask -TaskName $TaskName
     $taskStopped = $true
@@ -124,7 +163,9 @@ try {
     }
 
     Move-Item -LiteralPath $incomingExecutable -Destination $installedExecutable -Force
-    $replaced = $true
+    $agentReplaced = $true
+    Move-Item -LiteralPath $incomingWorker -Destination $installedWorker -Force
+    $workerReplaced = $true
     Start-ScheduledTask -TaskName $TaskName
     $taskStopped = $false
 
@@ -153,21 +194,28 @@ try {
     if ($deployedHash -ne $sourceHash) {
         throw "installed executable hash differs from source"
     }
+    $deployedWorkerHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installedWorker).Hash.ToLowerInvariant()
+    if ($deployedWorkerHash -ne $sourceWorkerHash) {
+        throw "installed WGC worker hash differs from source"
+    }
 
     [ordered]@{
         changed = $true
         executable = $installedExecutable
         sha256 = $deployedHash
+        wgc_worker = $installedWorker
+        wgc_worker_sha256 = $deployedWorkerHash
         pe_subsystem = 2
         process_id = $process.Id
         session_id = $process.SessionId
         task_state = (Get-ScheduledTask -TaskName $TaskName).State.ToString()
         health = $health.status
         backup = $backupExecutable
+        worker_backup = if ($installedWorkerExists) { $backupWorker } else { $null }
     } | ConvertTo-Json
 } catch {
     $updateError = $_
-    if ($replaced -and (Test-Path -LiteralPath $backupExecutable -PathType Leaf)) {
+    if (($agentReplaced -or $workerReplaced) -and (Test-Path -LiteralPath $backupExecutable -PathType Leaf)) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
         $taskStopped = $true
         $rollbackDeadline = [DateTime]::UtcNow.Add($Timeout)
@@ -176,7 +224,14 @@ try {
             if ($listener.Count -eq 0) { break }
             Start-Sleep -Milliseconds 200
         } while ([DateTime]::UtcNow -lt $rollbackDeadline)
-        Copy-Item -LiteralPath $backupExecutable -Destination $installedExecutable -Force
+        if ($agentReplaced) {
+            Copy-Item -LiteralPath $backupExecutable -Destination $installedExecutable -Force
+        }
+        if ($workerReplaced -and (Test-Path -LiteralPath $backupWorker -PathType Leaf)) {
+            Copy-Item -LiteralPath $backupWorker -Destination $installedWorker -Force
+        } elseif ($workerReplaced -and -not $installedWorkerExists) {
+            Remove-Item -LiteralPath $installedWorker -Force -ErrorAction SilentlyContinue
+        }
         Start-ScheduledTask -TaskName $TaskName
         $taskStopped = $false
         $rollbackDeadline = [DateTime]::UtcNow.Add($Timeout)
@@ -198,5 +253,8 @@ try {
 } finally {
     if (Test-Path -LiteralPath $incomingExecutable -PathType Leaf) {
         Remove-Item -LiteralPath $incomingExecutable -Force
+    }
+    if (Test-Path -LiteralPath $incomingWorker -PathType Leaf) {
+        Remove-Item -LiteralPath $incomingWorker -Force
     }
 }

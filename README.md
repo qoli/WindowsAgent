@@ -34,9 +34,11 @@ The screenshot capability is available today:
   recorded with each capture
 - capture-time foreground rule resolution with a navigable Codex `AGENTS.md`
 - SHA-256 verified artifacts and bounded retention
-- strict JSON errors with no GDI or hidden provider fallback; one capture may
-  rebuild its WGC item/session up to five times for explicitly classified
-  transient WGC failures before returning the preserved capture error
+- strict JSON errors with no GDI or hidden provider fallback; one
+  crash-isolated worker generation keeps its WGC session, D3D11
+  device/context, frame pool, and region shader resident across requests
+- a failed worker call is never replayed; that generation is retired and only
+  a later independent request may start a fresh generation
 - optional hidden startup through an interactive-user Scheduled Task
 
 The generic Starlark launcher and finite Script capabilities are available
@@ -198,7 +200,9 @@ cp -R Rules .build/
 
 `windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
 The build script also emits `windows-capture-agent-console.exe` for interactive
-terminal diagnostics, `windows-action-check.exe` for offline Rule validation,
+terminal diagnostics, `windows-wgc-worker.exe` for the Agent-owned persistent
+and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
+validation,
 `windows-action-osd.exe` for the display-only Action and Evidence-recording
 overlay, and the optional `windows-watchdog.exe` and independent
 `windows-evidence-recorder.exe` and `windows-visual-log.exe`. It also emits the
@@ -208,7 +212,7 @@ installer. It verifies the expected PE subsystem for every emitted executable.
 ## Deploy from macOS
 
 `scripts/deploy-windows-agent.sh` is the single macOS interface for a complete
-binary update. It validates source, builds and hashes all nine deployed
+binary update. It validates source, builds and hashes all ten deployed
 executables, uploads one ZIP over SSH, stops the installed Watchdog and its
 currently configured targets, replaces only their binaries, then restarts the
 Watchdog and waits for its existing target set to become healthy.
@@ -533,18 +537,20 @@ The Action OSD installer follows the same explicit `WatchdogManaged` default
 and `Standalone` override.
 
 The persistent installation enables bounded crash diagnostics for the capture
-process. Structured WGC lifecycle records are written to `logs/agent.jsonl`;
-Go runtime and fatal stderr output is appended to `logs/runtime-stderr.log`.
-The current user's Windows Error Reporting `LocalDumps` entry is scoped to
-`windows-capture-agent.exe` and retains at most five full dumps under `dumps/`.
+process and its WGC worker. Structured WGC lifecycle records are written to
+`logs/agent.jsonl`; Go runtime and fatal stderr output is appended to
+`logs/runtime-stderr.log`. The current user's Windows Error Reporting
+`LocalDumps` entries are scoped to `windows-capture-agent.exe` and
+`windows-wgc-worker.exe`; each retains at most five full dumps under `dumps/`.
 These dumps can contain private process memory and must never be published or
 committed. Pass `-WGCTrace $false` when reinstalling to keep only retry and
 failure records after an incident has been bounded.
 
 For a code-only update of an existing installation, use the transactional
 updater. It checks the GUI subsystem and SHA-256 before stopping the task,
-keeps the prior executable as a timestamped backup, verifies the interactive
-listener and `/healthz`, and restores the backup if the new process fails:
+keeps prior Agent and worker binaries as timestamped backups when present,
+verifies the interactive listener and `/healthz`, and restores the complete
+previous binary set if the new process fails:
 
 ```powershell
 .\scripts\update-windows-capture-agent.ps1 `
@@ -905,7 +911,8 @@ internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
 internal/streamaction/            bounded streaming Starlark orchestration runtime
-internal/wgc/                    WGC and Direct3D 11 implementation
+internal/wgc/                    Request and persistent WGC / Direct3D 11 implementations
+internal/wgcworker/              Versioned worker protocol and Agent-side generation owner
 Rules/<Executable.exe>/          distributable Rule v6 runtimes, Actions, registrations, and guidance
 runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
 runtimes/ppocr-directml/          resident PP-OCR text-line and text-regions workers

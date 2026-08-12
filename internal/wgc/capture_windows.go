@@ -264,64 +264,74 @@ func (c *Capturer) Capture(ctx context.Context, request capture.Request) (captur
 	var result capture.Result
 	err = c.withCapturedFrame(ctx, "full:"+string(profile), request.IncludeCursor, func(frame capturedFrame) error {
 		processedAt := time.Now()
-		frameImage, readWidth, readHeight, readErr := readFrame(frame.frame, frame.device, frame.context3D, frame.pixelFormat, frame.display)
-		if readErr != nil {
-			return readErr
-		}
-		if readWidth != frame.width || readHeight != frame.height {
-			return capture.Failure(
-				"capture_size_mismatch",
-				fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", readWidth, readHeight, frame.width, frame.height),
-				nil,
+		var processErr error
+		result, processErr = captureFullFrame(frame, request)
+		if processErr == nil {
+			c.logCaptureLifecycle(ctx, "wgc_capture_processed",
+				"profile", profile, "width", result.Width, "height", result.Height, "bytes", len(result.Content),
+				"process_ms", time.Since(processedAt).Milliseconds(),
 			)
 		}
-		var content []byte
-		width, height := frame.width, frame.height
-		format, contentType, extension := "jpeg", "image/jpeg", ".jpg"
-		quality, chroma := 90, "444"
-		switch profile {
-		case capture.ProfileNativeJPEG, capture.Profile1080pJPEG:
-			if profile == capture.Profile1080pJPEG {
-				width, height = fitInside(frame.width, frame.height, 1920, 1080)
-			}
-			bgr, convertErr := pixels.NRGBAToBGR(frameImage, width, height)
-			if convertErr != nil {
-				return capture.Failure("capture_encode_failed", "failed to prepare the captured frame for JPEG encoding", convertErr)
-			}
-			var encodeErr error
-			content, encodeErr = encodeWICJPEG(bgr, width, height, quality)
-			if encodeErr != nil {
-				return capture.Failure("capture_encode_failed", "failed to encode captured frame as JPEG Q90 4:4:4", encodeErr)
-			}
-		case capture.ProfileNativePNG:
-			var encoded bytes.Buffer
-			encoder := png.Encoder{CompressionLevel: png.BestSpeed}
-			if encodeErr := encoder.Encode(&encoded, frameImage); encodeErr != nil {
-				return capture.Failure("capture_encode_failed", "failed to encode captured frame as PNG", encodeErr)
-			}
-			content = encoded.Bytes()
-			format, contentType, extension = "png", "image/png", ".png"
-			quality, chroma = 0, ""
-		default:
-			return fmt.Errorf("unsupported capture profile %q", profile)
-		}
-		monitor := frame.monitor
-		monitor.Width = frame.width
-		monitor.Height = frame.height
-		result = capture.Result{
-			Content: content, Profile: profile, Format: format, ContentType: contentType,
-			FileExtension: extension, Quality: quality, ChromaSubsampling: chroma,
-			Width: width, Height: height,
-			IncludeCursor: request.IncludeCursor, Monitor: monitor, Foreground: frame.foreground,
-			CapturePixelFormat: frame.pixelFormatName, ToneMapped: monitor.HDR,
-		}
-		c.logCaptureLifecycle(ctx, "wgc_capture_processed",
-			"profile", profile, "width", width, "height", height,
-			"bytes", len(content), "process_ms", time.Since(processedAt).Milliseconds(),
-		)
-		return nil
+		return processErr
 	})
 	return result, err
+}
+
+func captureFullFrame(frame capturedFrame, request capture.Request) (capture.Result, error) {
+	profile, err := capture.ParseProfile(string(request.Profile))
+	if err != nil {
+		return capture.Result{}, err
+	}
+	frameImage, readWidth, readHeight, err := readFrame(frame.frame, frame.device, frame.context3D, frame.pixelFormat, frame.display)
+	if err != nil {
+		return capture.Result{}, err
+	}
+	if readWidth != frame.width || readHeight != frame.height {
+		return capture.Result{}, capture.Failure(
+			"capture_size_mismatch",
+			fmt.Sprintf("captured texture is %dx%d but WGC item is %dx%d", readWidth, readHeight, frame.width, frame.height),
+			nil,
+		)
+	}
+	var content []byte
+	width, height := frame.width, frame.height
+	format, contentType, extension := "jpeg", "image/jpeg", ".jpg"
+	quality, chroma := 90, "444"
+	switch profile {
+	case capture.ProfileNativeJPEG, capture.Profile1080pJPEG:
+		if profile == capture.Profile1080pJPEG {
+			width, height = fitInside(frame.width, frame.height, 1920, 1080)
+		}
+		bgr, convertErr := pixels.NRGBAToBGR(frameImage, width, height)
+		if convertErr != nil {
+			return capture.Result{}, capture.Failure("capture_encode_failed", "failed to prepare the captured frame for JPEG encoding", convertErr)
+		}
+		content, err = encodeWICJPEG(bgr, width, height, quality)
+		if err != nil {
+			return capture.Result{}, capture.Failure("capture_encode_failed", "failed to encode captured frame as JPEG Q90 4:4:4", err)
+		}
+	case capture.ProfileNativePNG:
+		var encoded bytes.Buffer
+		encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+		if err := encoder.Encode(&encoded, frameImage); err != nil {
+			return capture.Result{}, capture.Failure("capture_encode_failed", "failed to encode captured frame as PNG", err)
+		}
+		content = encoded.Bytes()
+		format, contentType, extension = "png", "image/png", ".png"
+		quality, chroma = 0, ""
+	default:
+		return capture.Result{}, fmt.Errorf("unsupported capture profile %q", profile)
+	}
+	monitor := frame.monitor
+	monitor.Width = frame.width
+	monitor.Height = frame.height
+	return capture.Result{
+		Content: content, Profile: profile, Format: format, ContentType: contentType,
+		FileExtension: extension, Quality: quality, ChromaSubsampling: chroma,
+		Width: width, Height: height,
+		IncludeCursor: request.IncludeCursor, Monitor: monitor, Foreground: frame.foreground,
+		CapturePixelFormat: frame.pixelFormatName, ToneMapped: monitor.HDR,
+	}, nil
 }
 
 // Run owns one persistent WGC session and samples its newest available frame
@@ -533,36 +543,55 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 
 	var result capture.RegionResult
 	err := c.withCapturedFrame(ctx, "region", false, func(frame capturedFrame) error {
-		viewport, physical, err := capture.MapReferenceRegion(frame.width, frame.height, request.Region)
-		if err != nil {
-			return capture.Failure("screen_region_invalid", "failed to map the reference screen region", err)
-		}
-		outputWidth, outputHeight := physical.Width, physical.Height
-		if request.Sampling == capture.SamplingReference {
-			outputWidth, outputHeight = request.Region.Width, request.Region.Height
-		}
-		pixelCount := uint64(outputWidth) * uint64(outputHeight)
-		if pixelCount > request.MaxPixels {
-			return capture.Failure(
-				"screen_pixel_limit_exceeded",
-				fmt.Sprintf("mapped screen region returns %d pixels, limit is %d", pixelCount, request.MaxPixels),
-				nil,
-			)
-		}
-		pixels, err := readRegionPixels(frame, physical, outputWidth, outputHeight)
-		if err != nil {
-			return err
-		}
-		result = capture.RegionResult{
-			Pixels: pixels, ImageWidth: outputWidth, ImageHeight: outputHeight,
-			FrameWidth: frame.width, FrameHeight: frame.height,
-			Viewport: viewport, PhysicalRegion: physical,
-			Monitor: frame.monitor, Foreground: frame.foreground,
-			CapturePixelFormat: frame.pixelFormatName, ToneMapped: frame.monitor.HDR,
-		}
-		return nil
+		var processErr error
+		result, processErr = captureRegionFrame(frame, request, nil)
+		return processErr
 	})
 	return result, err
+}
+
+func captureRegionFrame(frame capturedFrame, request capture.RegionRequest, shader unsafe.Pointer) (capture.RegionResult, error) {
+	if err := request.Region.Validate(); err != nil {
+		return capture.RegionResult{}, err
+	}
+	if request.Sampling != capture.SamplingReference && request.Sampling != capture.SamplingNative {
+		return capture.RegionResult{}, errors.New("region sampling must equal reference or native")
+	}
+	if request.MaxPixels == 0 || request.MaxPixels > 262_144 {
+		return capture.RegionResult{}, errors.New("region maxPixels must be from 1 through 262144")
+	}
+	viewport, physical, err := capture.MapReferenceRegion(frame.width, frame.height, request.Region)
+	if err != nil {
+		return capture.RegionResult{}, capture.Failure("screen_region_invalid", "failed to map the reference screen region", err)
+	}
+	outputWidth, outputHeight := physical.Width, physical.Height
+	if request.Sampling == capture.SamplingReference {
+		outputWidth, outputHeight = request.Region.Width, request.Region.Height
+	}
+	pixelCount := uint64(outputWidth) * uint64(outputHeight)
+	if pixelCount > request.MaxPixels {
+		return capture.RegionResult{}, capture.Failure(
+			"screen_pixel_limit_exceeded",
+			fmt.Sprintf("mapped screen region returns %d pixels, limit is %d", pixelCount, request.MaxPixels),
+			nil,
+		)
+	}
+	var capturedPixels []uint32
+	if shader == nil {
+		capturedPixels, err = readRegionPixels(frame, physical, outputWidth, outputHeight)
+	} else {
+		capturedPixels, err = readRegionPixelsWithShader(frame, physical, outputWidth, outputHeight, shader)
+	}
+	if err != nil {
+		return capture.RegionResult{}, err
+	}
+	return capture.RegionResult{
+		Pixels: capturedPixels, ImageWidth: outputWidth, ImageHeight: outputHeight,
+		FrameWidth: frame.width, FrameHeight: frame.height,
+		Viewport: viewport, PhysicalRegion: physical,
+		Monitor: frame.monitor, Foreground: frame.foreground,
+		CapturePixelFormat: frame.pixelFormatName, ToneMapped: frame.monitor.HDR,
+	}, nil
 }
 
 type capturedFrame struct {
