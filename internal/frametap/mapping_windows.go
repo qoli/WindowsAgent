@@ -28,30 +28,49 @@ var mappingMagic = [8]byte{'W', 'A', 'F', 'R', 'M', 'T', '0', '1'}
 var procOpenFileMappingW = windows.NewLazySystemDLL("kernel32.dll").NewProc("OpenFileMappingW")
 
 type mapping struct {
-	handle windows.Handle
-	view   uintptr
-	bytes  []byte
-	write  bool
+	handle    windows.Handle
+	ownership windows.Handle
+	view      uintptr
+	bytes     []byte
+	write     bool
 }
 
 func CreatePublisher(name string) (Publisher, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
+	ownershipWide, _ := windows.UTF16PtrFromString(publisherOwnershipName(name))
+	ownership, ownershipErr := windows.CreateMutex(nil, false, ownershipWide)
+	if errors.Is(ownershipErr, windows.ERROR_ALREADY_EXISTS) {
+		if ownership != 0 {
+			_ = windows.CloseHandle(ownership)
+		}
+		return nil, errors.New("frame tap publisher already exists")
+	}
+	if ownershipErr != nil {
+		if ownership != 0 {
+			_ = windows.CloseHandle(ownership)
+		}
+		return nil, fmt.Errorf("create frame tap publisher ownership: %w", ownershipErr)
+	}
 	wide, _ := windows.UTF16PtrFromString(name)
 	handle, err := windows.CreateFileMapping(windows.InvalidHandle, nil, pageReadWrite, 0, MappingBytes, wide)
-	if err != nil {
+	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		if handle != 0 {
 			_ = windows.CloseHandle(handle)
 		}
+		_ = windows.CloseHandle(ownership)
 		return nil, fmt.Errorf("create frame tap mapping: %w", err)
 	}
 	view, err := windows.MapViewOfFile(handle, fileMapRead|fileMapWrite, 0, 0, MappingBytes)
 	if err != nil {
 		windows.CloseHandle(handle)
+		windows.CloseHandle(ownership)
 		return nil, fmt.Errorf("map frame tap publisher: %w", err)
 	}
-	return &mapping{handle: handle, view: view, bytes: mappedBytes(view), write: true}, nil
+	bytes := mappedBytes(view)
+	clear(bytes)
+	return &mapping{handle: handle, ownership: ownership, view: view, bytes: bytes, write: true}, nil
 }
 
 func OpenReader(name string) (Reader, error) {
@@ -170,9 +189,13 @@ func (m *mapping) Close() error {
 	if m == nil || m.view == 0 {
 		return nil
 	}
-	view, handle := m.view, m.handle
-	m.view, m.handle, m.bytes = 0, 0, nil
+	view, handle, ownership := m.view, m.handle, m.ownership
+	m.view, m.handle, m.ownership, m.bytes = 0, 0, 0, nil
 	unmapErr := windows.UnmapViewOfFile(view)
 	closeErr := windows.CloseHandle(handle)
-	return errors.Join(unmapErr, closeErr)
+	var ownershipErr error
+	if ownership != 0 {
+		ownershipErr = windows.CloseHandle(ownership)
+	}
+	return errors.Join(unmapErr, closeErr, ownershipErr)
 }

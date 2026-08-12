@@ -12,3 +12,10 @@ func TestValidateName(t *testing.T) {
 		}
 	}
 }
+
+func TestPublisherOwnershipNameIsSeparateFromMapping(t *testing.T) {
+	name := `Local\WindowsAgent.Evidence.EliteDangerous.v1`
+	if got := publisherOwnershipName(name); got != name+".Publisher" {
+		t.Fatalf("publisher ownership name = %q", got)
+	}
+}

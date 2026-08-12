@@ -57,7 +57,9 @@ var (
 	modD3D11    = windows.NewLazySystemDLL("d3d11.dll")
 	modCompiler = windows.NewLazySystemDLL("d3dcompiler_47.dll")
 
-	procSetProcessDPIAwarenessContext        = modUser32.NewProc("SetProcessDpiAwarenessContext")
+	procSetThreadDPIAwarenessContext         = modUser32.NewProc("SetThreadDpiAwarenessContext")
+	procGetThreadDPIAwarenessContext         = modUser32.NewProc("GetThreadDpiAwarenessContext")
+	procAreDPIAwarenessContextsEqual         = modUser32.NewProc("AreDpiAwarenessContextsEqual")
 	procMonitorFromPoint                     = modUser32.NewProc("MonitorFromPoint")
 	procRoInitialize                         = modCombase.NewProc("RoInitialize")
 	procRoUninitialize                       = modCombase.NewProc("RoUninitialize")
@@ -219,11 +221,6 @@ void main(uint3 dispatchID : SV_DispatchThreadID) {
 func New(logger *slog.Logger) (*Capturer, error) {
 	if logger == nil {
 		return nil, errors.New("logger is required")
-	}
-	dpiContextPerMonitorAwareV2 := ^uintptr(3)
-	ok, _, callErr := procSetProcessDPIAwarenessContext.Call(dpiContextPerMonitorAwareV2)
-	if ok == 0 {
-		return nil, fmt.Errorf("set per-monitor-v2 DPI awareness: %w", callErr)
 	}
 	// WGC and the D3D11 immediate context are process-global native pressure
 	// points even though each request owns its COM objects. Keep only one
@@ -808,6 +805,11 @@ func onWinRTThread[T any](ctx context.Context, operation func() (T, error)) (T, 
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	restoreDPI, err := enterPerMonitorV2DPIAwareness()
+	if err != nil {
+		return zero, err
+	}
+	defer restoreDPI()
 
 	hr, _, _ := procRoInitialize.Call(uintptr(winapirt.RO_INIT_MULTITHREADED))
 	if hr != 0 && hr != 1 {
@@ -815,6 +817,25 @@ func onWinRTThread[T any](ctx context.Context, operation func() (T, error)) (T, 
 	}
 	defer procRoUninitialize.Call()
 	return operation()
+}
+
+func enterPerMonitorV2DPIAwareness() (func(), error) {
+	desired := ^uintptr(3)
+	previous, _, setErr := procSetThreadDPIAwarenessContext.Call(desired)
+	if previous == 0 {
+		return nil, fmt.Errorf("set WGC thread per-monitor-v2 DPI awareness: %w", setErr)
+	}
+	current, _, currentErr := procGetThreadDPIAwarenessContext.Call()
+	if current == 0 {
+		procSetThreadDPIAwarenessContext.Call(previous)
+		return nil, fmt.Errorf("query WGC thread DPI awareness: %w", currentErr)
+	}
+	equal, _, _ := procAreDPIAwarenessContextsEqual.Call(current, desired)
+	if equal == 0 {
+		procSetThreadDPIAwarenessContext.Call(previous)
+		return nil, errors.New("WGC thread DPI awareness is not per-monitor-v2 after explicit assignment")
+	}
+	return func() { procSetThreadDPIAwarenessContext.Call(previous) }, nil
 }
 
 func graphicsCaptureSupported() (bool, error) {

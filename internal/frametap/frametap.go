@@ -48,3 +48,7 @@ func ValidateName(name string) error {
 	}
 	return nil
 }
+
+func publisherOwnershipName(name string) string {
+	return name + ".Publisher"
+}
