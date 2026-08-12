@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "operation", "commodityName", "quantity", "stationName", "beforeCount", "afterCount", "beforeTimestamp", "afterTimestamp", "marketModeConfirmed", "dialogConfirmed", "commodityMarketAbsent", "observationCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "TRADE_VISIBLE_COMMODITY"},
+    "completed": {"const": true},
+    "operation": {"enum": ["BUY", "SELL"]},
+    "commodityName": {"type": "string"},
+    "quantity": {"type": "integer", "minimum": 1, "maximum": 752},
+    "stationName": {"type": "string"},
+    "beforeCount": {"type": "integer", "minimum": 0},
+    "afterCount": {"type": "integer", "minimum": 0},
+    "beforeTimestamp": {"type": "string"},
+    "afterTimestamp": {"type": "string"},
+    "marketModeConfirmed": {"const": true},
+    "dialogConfirmed": {"const": true},
+    "commodityMarketAbsent": {"const": true},
+    "observationCount": {"type": "integer", "minimum": 5, "maximum": 64}
+  }
+}

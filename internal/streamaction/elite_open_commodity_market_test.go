@@ -1,0 +1,172 @@
+package streamaction
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"testing"
+)
+
+type openCommodityMarketCaller struct {
+	docked   []json.RawMessage
+	header   []json.RawMessage
+	controls []string
+	clicks   []map[string]any
+	exits    int
+}
+
+func (c *openCommodityMarketCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	switch id {
+	case "elite-dangerous/docked-cockpit-menu-text-regions":
+		if len(c.docked) == 0 {
+			return nil, errors.New("missing docked menu OCR fixture")
+		}
+		value := c.docked[0]
+		c.docked = c.docked[1:]
+		return value, nil
+	case "elite-dangerous/commodity-market-header-text-regions":
+		if len(c.header) == 0 {
+			return nil, errors.New("missing market header OCR fixture")
+		}
+		value := c.header[0]
+		c.header = c.header[1:]
+		return value, nil
+	case "elite-dangerous/ui-control":
+		control, ok := inputs["control"].(string)
+		if !ok {
+			return nil, errors.New("UI control is not a string")
+		}
+		c.controls = append(c.controls, control)
+		return json.RawMessage(`{"schemaVersion":1}`), nil
+	case "elite-dangerous/pointer-click":
+		c.clicks = append(c.clicks, inputs)
+		return json.RawMessage(`{"schemaVersion":1}`), nil
+	case "elite-dangerous/exit-commodity-market":
+		c.exits++
+		return json.RawMessage(`{"schemaVersion":1,"backCount":2,"settleMs":1800}`), nil
+	default:
+		return nil, errors.New("unexpected open-commodity-market child Action: " + id)
+	}
+}
+
+func loadEliteOpenCommodityMarketPackage(t *testing.T) *Package {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "open-commodity-market"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pkg
+}
+
+func dockedMenuOCR(labels ...string) json.RawMessage {
+	regions := make([]any, 0, len(labels))
+	for index, label := range labels {
+		regions = append(regions, commodityRegion(label, 900, 760+index*40))
+	}
+	value, _ := json.Marshal(map[string]any{"schemaVersion": 1, "regions": regions})
+	return value
+}
+
+func marketHeaderOCR(station, mode string) json.RawMessage {
+	return commodityOCR(
+		commodityRegion("COMMODITIES MARKET", 140, 70),
+		commodityRegion(station, 140, 105),
+		commodityRegion(mode, 250, 180),
+	)
+}
+
+func TestEliteOpenCommodityMarketOpensAndSwitchesToSellWithOCRPostcondition(t *testing.T) {
+	caller := &openCommodityMarketCaller{
+		docked: []json.RawMessage{
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+		},
+		header: []json.RawMessage{
+			marketHeaderOCR("SHAW STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("SHAW STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("SHAW STATION", "SELL TO MARKET"),
+			marketHeaderOCR("SHAW STATION", "SELL TO MARKET"),
+		},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteOpenCommodityMarketPackage(t), map[string]any{
+			"operation": "SELL", "stationName": "Shaw Station",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"DOWN", "DOWN", "DOWN", "DOWN", "UP", "UP", "SELECT"}
+	if !equalStrings(caller.controls, wantControls) {
+		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
+	}
+	if len(caller.clicks) != 2 || caller.clicks[0]["x"] != int64(395) || caller.clicks[0]["y"] != int64(704) ||
+		caller.clicks[1]["x"] != int64(174) || caller.clicks[1]["y"] != int64(401) {
+		t.Fatalf("clicks=%v", caller.clicks)
+	}
+	if caller.exits != 0 {
+		t.Fatalf("failure cleanup executed on success: exits=%d", caller.exits)
+	}
+	if !contains(string(output), `"initialMode":"BUY"`) || !contains(string(output), `"modeConfirmed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteOpenCommodityMarketDoesNotInjectInputWithoutStableDockedMenu(t *testing.T) {
+	caller := &openCommodityMarketCaller{docked: []json.RawMessage{
+		dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH"),
+		dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH"),
+		dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH"),
+		dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH"),
+		dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH"),
+		dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH"),
+	}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteOpenCommodityMarketPackage(t), map[string]any{
+			"operation": "BUY", "stationName": "Shaw Station",
+		}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "complete docked cockpit menu") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 || len(caller.clicks) != 0 || caller.exits != 0 {
+		t.Fatalf("controls=%v clicks=%v exits=%d", caller.controls, caller.clicks, caller.exits)
+	}
+}
+
+func TestEliteOpenCommodityMarketRejectsWrongStationAfterOpening(t *testing.T) {
+	caller := &openCommodityMarketCaller{
+		docked: []json.RawMessage{
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+		},
+		header: []json.RawMessage{
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("OTHER STATION", "BUY FROM MARKET"),
+		},
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteOpenCommodityMarketPackage(t), map[string]any{
+			"operation": "BUY", "stationName": "Shaw Station",
+		}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "exact Station and mode") {
+		t.Fatalf("error=%v", err)
+	}
+	// Cleanup is not registered until the expected Station is positively
+	// confirmed, so a wrong screen cannot trigger blind BACK input.
+	if caller.exits != 0 {
+		t.Fatalf("exits=%d want=0", caller.exits)
+	}
+}

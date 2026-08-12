@@ -6,6 +6,16 @@ not select or identify a Station, approach it, request docking, or run the
 docking computer. The caller must establish the intended Station target lock
 before starting this Action.
 
+`alignmentPurpose=CENTER` preserves the standalone Compass-centering contract.
+`alignmentPurpose=VISIBLE_HANDOFF` is a narrower Supercruise STATIC ALIGN
+contract for an owning workflow that immediately delegates final geometry to
+`align-visible-target`: it requires two current SOLID samples within a
+16-reference-pixel entry radius and 20-pixel verification hysteresis, and does
+not issue a center-entry counter-pulse. It only proves that the rear/coarse
+Compass phase has placed the destination in the visible-target controller's
+domain; it is not precise alignment and is rejected for TRACK, MOVING targets,
+or a non-Supercruise control profile.
+
 By default the Action first commands 0% throttle, then repeatedly reads
 `elite-dangerous/compass`. While the marker is hollow, the Action starts a
 non-blocking `elite-dangerous/ship-attitude-hold` pitch-up lease and samples

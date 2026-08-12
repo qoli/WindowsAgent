@@ -12,6 +12,13 @@ repeat the same exact name twice, holds the binding-resolved `UI_Select` on the
 visible `(HOLD) PLOT ROUTE` state, and validates the resulting `NavRoute.json`
 against the requested System and jump limit.
 
+Galaxy Map presence is derived only from a trusted fixed-title line whose
+normalized text starts with `GALAXY` and contains both `MAP` and `REALISTIC`.
+This bounded rule accommodates PP-OCR interleaving the overlapping orange title
+and white mode glyphs; it is not fuzzy matching and never authorizes a System
+name. Suggestions and selected-System confirmation remain exact normalized
+name matches from their owning ROIs.
+
 If the map was already open, the Action takes ownership of its close
 compensation before touching the field. On success it closes Galaxy Map and requires two current observations with no
 Galaxy Map title. When it opened the map it registers the same close operation

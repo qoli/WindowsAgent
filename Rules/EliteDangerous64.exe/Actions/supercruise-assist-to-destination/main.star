@@ -13,6 +13,7 @@ ASSIST_ACTIVE_LIMIT = 2400
 ASSIST_ACTIVE_CONFIRMATIONS = 2
 ASSIST_MISSING_LIMIT = 30
 STOPPED_CONFIRMATIONS = 3
+MAX_WGC_CAPTURE_ERRORS = 5
 MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 MIN_TEXT_SIMILARITY = 0.72
@@ -49,6 +50,9 @@ def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=
             "reason": reason,
         },
     )
+
+def transient_wgc_region_capture_error(text):
+    return "persistent WGC worker region capture" in text and "persistent region capture failed" in text
 
 def normalize_text(text):
     normalized = ""
@@ -338,6 +342,7 @@ def align_compass(target_name, control_profile):
         inputs={
             "mode": "ALIGN",
             "targetMotion": "STATIC",
+            "alignmentPurpose": "VISIBLE_HANDOFF",
             "stopBeforeAlign": False,
             "controlProfile": control_profile,
         },
@@ -610,10 +615,23 @@ def main(ctx):
     assist_missing_samples = 0
     stopped_confirmations = 0
     final_speed = None
+    wgc_capture_errors = 0
     for _ in range(ASSIST_ACTIVE_LIMIT):
         sample += 1
         flight = observe_flight()
-        speed = action.call(id="elite-dangerous/ship-speed", inputs={})["speed"]
+        speed_attempt = action.try_call(id="elite-dangerous/ship-speed", inputs={})
+        if not speed_attempt["ok"]:
+            text = speed_attempt["error"]
+            if transient_wgc_region_capture_error(text):
+                wgc_capture_errors += 1
+                emit_update("GAME_CONTROLLED_APPROACH", sample, target_name, flight_status=flight["state"], prompt_text=flight["text"], assist_active_confirmations=assist_active_confirmations, assist_missing_samples=assist_missing_samples, stopped_confirmations=stopped_confirmations, commanded_throttle=None, reason="SHIP_SPEED_WGC_CAPTURE_RETRY_" + str(wgc_capture_errors) + "_OF_" + str(MAX_WGC_CAPTURE_ERRORS))
+                if wgc_capture_errors > MAX_WGC_CAPTURE_ERRORS:
+                    fail("ship-speed WGC region capture error limit exceeded after five skipped errors: " + text)
+                task.sleep(milliseconds=POLL_MS)
+                continue
+            fail("ship-speed observation failed while Supercruise Assist owns flight: " + text)
+        wgc_capture_errors = 0
+        speed = speed_attempt["output"]["speed"]
         final_speed = speed
         last_flight_status = flight["state"]
         last_prompt_text = flight["text"]

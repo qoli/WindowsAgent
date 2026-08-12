@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.open-commodity-market.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "operation", "stationName", "command", "observation", "reason"],
+      "properties": {
+        "phase": {"type": "string"},
+        "operation": {"enum": ["BUY", "SELL"]},
+        "stationName": {"type": "string"},
+        "command": {"type": ["string", "null"]},
+        "observation": {"type": ["object", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

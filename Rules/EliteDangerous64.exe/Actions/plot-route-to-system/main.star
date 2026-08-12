@@ -63,7 +63,12 @@ def inspect_search(raw, target_system):
             continue
         normalized = normalize_text(region["text"])
         box = bounds(region)
-        if normalized == "GALAXYMAP" or normalized == "GALAXYMAPREALISTIC" or normalized == "GALAXYMAPIREALISTIC":
+        # The orange GALAXY MAP label and white REALISTIC mode text overlap in
+        # this fixed title box. PP-OCR may interleave duplicated transition
+        # glyphs (for example GALAXYEMAPTPPREALISTIC). Presence remains bounded
+        # to one trusted title line with the title prefix and both required
+        # words; this rule is never used for target identity.
+        if normalized.startswith("GALAXY") and "MAP" in normalized and "REALISTIC" in normalized:
             map_title = True
         if normalized == expected and box["centerY"] >= SUGGESTION_MIN_Y and box["centerY"] <= SUGGESTION_MAX_Y:
             exact.append({"text": region["text"], "bounds": box, "recognitionConfidence": region["recognitionConfidence"]})

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.trade-visible-commodity.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "operation", "commodityName", "quantity", "command", "observation", "reason"],
+      "properties": {
+        "phase": {"type": "string"},
+        "operation": {"enum": ["BUY", "SELL"]},
+        "commodityName": {"type": "string"},
+        "quantity": {"type": "integer"},
+        "command": {"type": ["string", "null"]},
+        "observation": {"type": ["object", "null"]},
+        "reason": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

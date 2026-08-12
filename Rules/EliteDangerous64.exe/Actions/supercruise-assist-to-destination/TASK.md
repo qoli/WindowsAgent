@@ -7,7 +7,10 @@ is separate from the retained manual `supercruise-to-destination` workflow.
 The caller must first complete `select-and-lock-destination`, visually confirm
 normal space, and confirm the ship's Supercruise Assist setting is `Auto
 Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, then
-invokes `align-station-target` with `targetMotion=STATIC`. Before Supercruise
+invokes `align-station-target` with `targetMotion=STATIC` and the explicit
+`VISIBLE_HANDOFF` purpose. The Compass child owns rear/coarse entry into a
+16-pixel front SOLID domain; `align-visible-target` owns the following precise
+screen-centre Gate. Before Supercruise
 entry it uses the strict `NORMAL_SPACE` Compass profile; after a confirmed
 Supercruise entry it uses `SUPERCRUISE_ASSIST`. The Compass child remains the
 coarse and initial alignment feedback source and must complete while throttle
@@ -61,7 +64,11 @@ child terminal state. `SUPERCRUISE ASSIST ACTIVE` must be classified twice
 before the game computer owns flight.
 
 After ownership begins, the Action sends no throttle, attitude, UI, or FSD
-input. It only watches `flight-status` and `ship-speed`. `SAFE DISENGAGE READY`
+input. It only watches `flight-status` and `ship-speed`. Up to five transient
+failures from the same persistent WGC region-capture provider may be skipped
+while the game owns flight; the sixth consecutive failure, or any different
+observation error, remains terminal. A successful speed observation resets
+this counter. `SAFE DISENGAGE READY`
 is observational and never triggers a manual FSD command. Completion requires
 the Assist indication to have disappeared for three frames and three
 consecutive slashed-zero-backed `STOPPED` frames, proving the game's automatic

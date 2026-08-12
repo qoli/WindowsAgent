@@ -239,6 +239,64 @@ func TestEliteSelectAndLockDestinationRecoversWhenCompactHeaderLooksSelected(t *
 	}
 }
 
+func TestEliteSelectAndLockDestinationProbesAmbiguousForwardViewBeforeSelecting(t *testing.T) {
+	emptyRegions := json.RawMessage(`{"schemaVersion":1,"regions":[]}`)
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{
+			"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", // unrelated cockpit pixels conflict at the fixed tab samples
+			"NAVIGATION", "NAVIGATION", // the bounded focus probe opens the actual panel
+			"ABSENT", "ABSENT",
+		},
+		regions: []json.RawMessage{
+			emptyRegions, emptyRegions, emptyRegions, emptyRegions,
+			navigationRows("SHAW STATION", 460, "SHAW STATION", 460), navigationRows("SHAW STATION", 460, "SHAW STATION", 460),
+			navigationRows("< SHAW STATION >", 460, "< SHAW STATION >", 460), navigationRows("< SHAW STATION >", 460, "< SHAW STATION >", 460),
+		},
+		buttons: []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details: []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "SHAW STATION"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"FOCUS_LEFT_PANEL", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) || !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"openedPanel":true`) {
+		t.Fatalf("controls=%v output=%s", caller.controls, output)
+	}
+}
+
+func TestEliteSelectAndLockDestinationUsesSecondProbeForAmbiguousOpenPanel(t *testing.T) {
+	emptyRegions := json.RawMessage(`{"schemaVersion":1,"regions":[]}`)
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{
+			"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", // an open non-Navigation panel cannot be classified
+			"UNKNOWN", "UNKNOWN", "UNKNOWN", "UNKNOWN", // first probe closes it into the ambiguous compact HUD
+			"CONTACTS", "CONTACTS", // second probe reopens the panel in a known tab
+			"NAVIGATION", "NAVIGATION",
+			"ABSENT", "ABSENT",
+		},
+		regions: []json.RawMessage{
+			emptyRegions, emptyRegions, emptyRegions, emptyRegions,
+			navigationRows("SHAW STATION", 460, "SHAW STATION", 460), navigationRows("SHAW STATION", 460, "SHAW STATION", 460),
+			navigationRows("< SHAW STATION >", 460, "< SHAW STATION >", 460), navigationRows("< SHAW STATION >", 460, "< SHAW STATION >", 460),
+		},
+		buttons: []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details: []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "SHAW STATION"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"FOCUS_LEFT_PANEL", "FOCUS_LEFT_PANEL", "NEXT_PANEL", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) || !contains(string(output), `"result":"ACQUIRED"`) {
+		t.Fatalf("controls=%v output=%s", caller.controls, output)
+	}
+}
+
 func TestEliteSelectAndLockDestinationAcceptsUniqueExactNameBesideSimilarSystem(t *testing.T) {
 	rows := func(targetText string, focusedText string) json.RawMessage {
 		value := navigationRows(targetText, 460, focusedText, 460)

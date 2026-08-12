@@ -1,7 +1,8 @@
 # Elite Dangerous Supercruise target position
 
-This finite composite Action uses one tall central and two lower forward-HUD
-PP-OCR bands to find exactly one current-frame label matching `targetName`.
+This finite composite Action uses one tall central, two lower, and one
+upper-right forward-HUD PP-OCR band to find exactly one current-frame label
+matching `targetName`.
 The central band covers reference `y=80..400`: live Supercruise evidence placed
 an already Compass-aligned planetary marker around `y=185`, above the retired
 `y=240..400` strip. Its 800 by 320 shape retains the same 256k reference-pixel
@@ -36,3 +37,63 @@ recognizes reviewed `CREL` / `STAN` evidence for `CREON'S STANDING` without
 accepting arbitrary partial text or dropping target identity. The combined
 two-line box, not either fragment alone, owns marker geometry. Other word
 counts and unmatched fragments remain `UNKNOWN`.
+
+The upper-right band covers reference x=1120–1920 and y=80–400. It is required
+by live Supercruise Assist evidence where the selected Station label remained
+near the right HUD edge while `ALIGN WITH TARGET DESTINATION` was visible and
+all centre/lower bands were empty. It remains an explicit fourth observation;
+target matching and ambiguity rules are unchanged.
+
+A cockpit pillar can also occlude only the middle of a two-word Station proper
+name while leaving one OCR line, as in the reviewed `SW STATION` evidence for
+`SHAW STATION`. That shape is accepted only when there are exactly two tokens,
+the proper-name fragment contains at least two ordered characters matching both
+the first and last expected proper-name characters, and the complete type word
+passes the normal exact-or-one-edit matcher. A bare `STATION`, a mismatched
+endpoint, a reordered fragment, or a partial type word remains `UNKNOWN`.
+
+If the pillar leaves only one ordered character of the proper name, the
+position fragment is usable only when a separate current-frame lower-left HUD
+observation contains the complete requested target name at the normal
+confidence Gates and the position line still contains exactly two tokens with
+the complete type word. Thus reviewed `W STATION` can locate a target only in
+the same frame that independently confirms `SHAW STATION`; neither observation
+alone is enough. This cross-check never substitutes a prior lock or cached
+identity.
+
+The same pillar can split one horizontal label into two OCR boxes, as in
+reviewed `SHAW` and `TATION`. For a two-word target these boxes are combined
+only in requested-word order, with both tokens passing the normal
+exact-or-one-edit matcher, vertical centres within 20 pixels, and a horizontal
+separation from 20 pixels of detector-box overlap through a 120-pixel gap. The first box remains the label's
+left edge for marker geometry. Reversed, vertically separated, or unrelated
+boxes are not combined.
+When exact current-frame lower-left identity is independently confirmed, the
+proper-name side may be a three-character exact prefix such as `SHA`; the type
+side must still pass the complete exact-or-one-edit rule and the same spatial
+constraints. Because pillar clipping lowers the detector's box score for that
+tiny prefix, this identity-corroborated path alone accepts detection confidence
+0.55 with recognition confidence 0.90; every normal candidate retains the
+0.70/0.75 Gates, and final position still requires the independent ring CV.
+Under the same current-frame identity corroboration, the type side may be an
+exact suffix of at least four characters such as `ATION`; shorter or
+non-suffix fragments remain unusable.
+
+The detector can alternatively fuse both pillar sides into one malformed box,
+as in reviewed `SHAViTATION`. Such a box is positional evidence only when the
+same frame independently confirms the complete requested identity, the fused
+text preserves the first three requested proper-name characters exactly, and
+some suffix passes the normal exact-or-one-edit match for the complete type
+word (`TATION` versus `STATION`). Without all three conditions it remains
+`UNKNOWN`; this is not a general edit-distance relaxation.
+
+After current-frame target identity is established, the text geometry is only
+a bounded search hint. The Action calls `supercruise-visible-reticle-position`
+to locate the actual orange target ring in a 140×140 local region and returns
+that CV centre as the control coordinate. A missing or ambiguous ring returns
+`UNKNOWN`; the OCR label offset is never used directly for steering.
+If the pillar leaves only one position box beginning with the first three
+proper-name characters, such as `SHAW S`, it may provide that local search
+hint only after the lower-left band independently confirms the complete exact
+target identity. The hint itself is never a detected position: the orange-ring
+CV must still succeed in the same invocation.

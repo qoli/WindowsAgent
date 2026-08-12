@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "operation", "stationName", "dockedMenuConfirmed", "marketTitleConfirmed", "stationConfirmed", "modeConfirmed", "initialMode", "observationCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "OPEN_COMMODITY_MARKET"},
+    "completed": {"const": true},
+    "operation": {"enum": ["BUY", "SELL"]},
+    "stationName": {"type": "string"},
+    "dockedMenuConfirmed": {"const": true},
+    "marketTitleConfirmed": {"const": true},
+    "stationConfirmed": {"const": true},
+    "modeConfirmed": {"const": true},
+    "initialMode": {"enum": ["BUY", "SELL"]},
+    "observationCount": {"type": "integer", "minimum": 4, "maximum": 32}
+  }
+}

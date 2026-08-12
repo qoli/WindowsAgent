@@ -11,6 +11,14 @@ Either bracket is sufficient because PP-OCR may crop one edge of a skewed HUD
 text box; each observation reports `BOTH`, `LEADING_ONLY`, or `TRAILING_ONLY`
 bracket evidence. A normal focused row has neither bracket and is not accepted.
 
+The compact forward-view HUD can place unrelated orange pixels under more than
+one calibrated tab sample and therefore honestly return `UNKNOWN` instead of
+`ABSENT`. When Navigation text is also absent, the Action performs at most two
+settled `FOCUS_LEFT_PANEL` probes and requires a known four-tab state before it
+continues. This is a bounded state probe, not permission to reinterpret
+`UNKNOWN` as an absent panel. The probe is reported in stream events and the
+Action closes the panel it established on failure.
+
 Within NAVIGATION, an already bracket-bearing named row is direct destination
 lock evidence and returns `EXISTING`. This meaning is deliberately local to
 NAVIGATION; angle brackets in CONTACTS describe a different ship-target lock.

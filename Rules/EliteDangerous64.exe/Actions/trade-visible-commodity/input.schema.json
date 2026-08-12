@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation", "commodityName", "quantity", "stationName"],
+  "properties": {
+    "operation": {"enum": ["BUY", "SELL"]},
+    "commodityName": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
+    "quantity": {"type": "integer", "minimum": 1, "maximum": 752},
+    "stationName": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"}
+  }
+}

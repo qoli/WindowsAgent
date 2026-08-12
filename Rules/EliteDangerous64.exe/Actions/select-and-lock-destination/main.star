@@ -2,6 +2,7 @@ UI_SETTLE_MS = 1000
 OBSERVATION_SETTLE_MS = 250
 STABLE_ATTEMPTS = 4
 MAX_PANEL_CYCLES = 3
+MAX_UNKNOWN_PANEL_PROBES = 2
 MAX_NAVIGATION = 8
 MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
@@ -238,6 +239,33 @@ def resolve_navigation_from_target(target_name, phase, panel_cycles, navigation_
         return {"state": "NAVIGATION", "count": presence["count"], "observation": presence["observation"]}
     return {"state": "UNKNOWN", "count": presence["count"], "observation": presence["observation"]}
 
+def probe_unknown_panel(target_name, contacts, panel_cycles, navigation_count, opened_panel):
+    observation_count = 0
+    last = contacts
+    for probe in range(MAX_UNKNOWN_PANEL_PROBES):
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
+        if not opened_panel:
+            opened_panel = True
+            action.on_failure(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
+        emit_update(
+            "PROBING_UNKNOWN_PANEL",
+            target_name,
+            None,
+            last,
+            "FOCUS_LEFT_PANEL",
+            panel_cycles,
+            navigation_count,
+            opened_panel,
+        )
+        task.sleep(milliseconds=UI_SETTLE_MS)
+        stable = observe_contacts_stable()
+        observation_count += stable["count"]
+        last = stable["observation"]
+        state = last["activeTab"]["state"]
+        if state not in ["UNKNOWN", "ABSENT"]:
+            return {"state": state, "contacts": last, "openedPanel": opened_panel, "count": observation_count, "probeCount": probe + 1}
+    fail("left panel remained unknown after two bounded focus probes")
+
 def inspect_action_label(raw):
     best = None
     for region in raw["regions"]:
@@ -304,7 +332,11 @@ def main(ctx):
         observation_count += semantic["count"]
         state = semantic["state"]
         if state != "NAVIGATION":
-            fail("left panel presence was unknown and Navigation target text was not confirmed")
+            probed = probe_unknown_panel(target_name, contacts, panel_cycles, navigation_count, opened_panel)
+            observation_count += probed["count"]
+            state = probed["state"]
+            contacts = probed["contacts"]
+            opened_panel = probed["openedPanel"]
     if state == "ABSENT":
         action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
         opened_panel = True

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Open Elite Dangerous Commodity Market in an exact operation mode",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "eventSchema": "event.schema.json",
+  "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
+  "limits": {"maxSteps": 4000000, "maxOutputBytes": 8192, "maxEventBytes": 8192, "maxSleepMs": 1000}
+}

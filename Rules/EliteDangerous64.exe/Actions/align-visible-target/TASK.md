@@ -18,8 +18,13 @@ workflows. The Action does not select a target or engage FSD. By default it
 commands 0% throttle before turning. Unknown target text is tolerated for at
 most seven consecutive frames because live Pitch/Yaw motion can temporarily
 blur or animate the OCR label; no control input is sent from an UNKNOWN frame,
-and the eighth consecutive miss fails explicitly. Only exact deadline failures
-receive five bounded retries; other observation failures remain explicit.
+and the eighth consecutive miss fails explicitly. Exact deadline failures and
+the specifically identified transient persistent-WGC region-capture failure
+each receive at most five skipped observations. WGC retry events retain the
+original error code and text and remain infrastructure errors; they are never
+converted to target `UNKNOWN`, never authorize steering, and never select a
+different capture backend. A sixth such failure is terminal. Other observation
+failures remain explicit.
 
 `positionSource=DESTINATION` preserves the selected-destination OCR path.
 `positionSource=ESCAPE_VECTOR` instead calls the dedicated

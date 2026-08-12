@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous docked cockpit menu text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 790, "y": 680, "w": 430, "h": 330},
+  "sampling": "reference",
+  "maxPixels": 141900,
+  "leftContextWidth": 1,
+  "verticalPadding": 4
+}

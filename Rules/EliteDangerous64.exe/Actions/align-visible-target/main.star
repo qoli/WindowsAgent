@@ -20,6 +20,7 @@ ESCAPE_VECTOR_MEDIUM_HOLD_MS = 300
 ESCAPE_VECTOR_FINE_HOLD_MS = 160
 TRANSIENT_UNKNOWN_LIMIT = 8
 MAX_DEADLINE_ERRORS = 5
+MAX_WGC_CAPTURE_ERRORS = 5
 MAX_HEAT_PERCENT = 75
 HIGH_HEAT_CONFIRMATIONS = 2
 MAX_UNKNOWN_HEAT_SAMPLES = 3
@@ -60,6 +61,9 @@ def wait_for_cadence(started_ms, position_source):
         step = min(remaining, MAX_SLEEP_STEP_MS)
         task.sleep(milliseconds=step)
         remaining -= step
+
+def transient_wgc_region_capture_error(text):
+    return "persistent WGC worker region capture" in text and "persistent region capture failed" in text
 
 def choose_command(target, position_source):
     offset_x = target["offsetX"]
@@ -129,6 +133,7 @@ def main(ctx):
     command_count = 0
     unknown_count = 0
     deadline_count = 0
+    wgc_capture_error_count = 0
     unknown_heat_count = 0
     high_heat_count = 0
     last_known_heat_percent = None
@@ -190,6 +195,13 @@ def main(ctx):
                 emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_DEADLINE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent)
                 if deadline_count > MAX_DEADLINE_ERRORS:
                     fail("visible target deadline error limit exceeded after five skipped errors: " + text)
+                wait_for_cadence(started_ms, position_source)
+                continue
+            if transient_wgc_region_capture_error(text):
+                wgc_capture_error_count += 1
+                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_WGC_CAPTURE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent)
+                if wgc_capture_error_count > MAX_WGC_CAPTURE_ERRORS:
+                    fail("visible target WGC region capture error limit exceeded after five skipped errors: " + text)
                 wait_for_cadence(started_ms, position_source)
                 continue
             emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_OBSERVATION_FAILED", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent)

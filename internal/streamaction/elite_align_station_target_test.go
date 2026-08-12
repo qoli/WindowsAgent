@@ -208,7 +208,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"centerContactCount":3,"commandCount":2,"completed":true,"controlProfile":"NORMAL_SPACE","controlProfileSource":"STATUS_JSON","finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":2,"stableConfirmations":3,"targetMotion":"MOVING","task":"ALIGN_STATION_TARGET"}` {
+	if string(output) != `{"alignmentPurpose":"CENTER","centerContactCount":3,"commandCount":2,"completed":true,"controlProfile":"NORMAL_SPACE","controlProfileSource":"STATUS_JSON","finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":3,"stableConfirmations":3,"targetMotion":"MOVING","task":"ALIGN_STATION_TARGET"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
@@ -392,6 +392,35 @@ func TestEliteAlignStationTargetStaticSupercruiseAlignUsesPrecisionGate(t *testi
 	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_DOWN" ||
 		len(caller.holds) != 2 || caller.holds[0] != 160 || caller.holds[1] != 80 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetVisibleHandoffStopsCompassCorrectionBeforeVisibleRefinement(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 10, -5, 11.18, false),
+		alignObservation("SOLID", 13, -11, 17.029, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"alignmentPurpose":"VISIBLE_HANDOFF"`) || !contains(string(output), `"stableConfirmations":2`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 0 || len(caller.holdOps) != 0 {
+		t.Fatalf("visible handoff must leave precise correction to align-visible-target: controls=%v holds=%v", caller.controls, caller.holdOps)
+	}
+}
+
+func TestEliteAlignStationTargetRejectsVisibleHandoffOutsideSupercruiseStaticAlign(t *testing.T) {
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "MOVING", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, &alignStationTargetCaller{}, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "VISIBLE_HANDOFF requires ALIGN with STATIC target motion and SUPERCRUISE_ASSIST") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

@@ -585,6 +585,44 @@ relative brightness plus an absolute floor because unavailable grey tiles can
 still receive the game's bright keyboard-focus fill. It never interprets
 service availability or remembers a prior focus.
 
+`elite-dangerous/commodity-market-header-text-regions` and
+`elite-dangerous/commodity-market-text-regions` are bounded resident PP-OCR
+primitives for the open Commodity Market. The first owns the title, Station,
+and BUY/SELL mode header; the second owns the visible commodity list and trade
+dialog. They remain separate captures so neither request exceeds the OCR
+runtime pixel limit. `elite-dangerous/trade-visible-commodity` is an
+interruptible linear Streaming Action for one exact row already visible in the
+caller's already-selected BUY or SELL tab. It requires two adjacent current
+header/list cycles, uses only the exact row box from the list capture for the
+click, confirms the matching trade dialog twice, and treats a newer exact
+`Cargo.json` count delta as the transaction postcondition. It neither opens
+Starport Services nor changes tabs or scrolls; those are explicit caller
+preconditions. On success and failure it uses
+`elite-dangerous/exit-commodity-market`, which spaces two binding-resolved
+`BACK` inputs across the Commodity Market and Starport Services transitions;
+failure cleanup allows one extra spaced `BACK` when a trade dialog may still
+be open.
+The successful path additionally requires the Commodity Market header to
+remain absent twice. That proves market exit, not the exact resulting cockpit
+screen, so goal-layer confirmation remains a fresh supervising-model capture.
+The baseline
+Cargo event snapshot may report `UNKNOWN` freshness
+when inventory has not changed recently; completion still requires a different
+Cargo source timestamp and the exact requested count delta.
+
+`elite-dangerous/docked-cockpit-menu-text-regions` is the bounded raw OCR
+primitive for the three centered docked-menu labels. The interruptible linear
+`elite-dangerous/open-commodity-market` Action owns the missing transition from
+that menu to an exact Station's Commodity Market in caller-selected BUY or
+SELL mode. It uses clamped docked-menu navigation, the Rule-owned Market tile,
+and two current header confirmations before returning with the market still
+open. Input commands or tile clicks are never mode evidence. Use it before
+`trade-visible-commodity`; do not reproduce its UI path through high-level
+primitive calls.
+Quantity changes are sent at 60 ms intervals, while progress events are
+coalesced at the first, each twenty-five, and final step so a full cargo load
+does not flood the durable journal.
+
 `elite-dangerous/prepare-auto-launch` is a finite composite Action for the
 visible docked cockpit menu. Four `DOWN` inputs clamp focus at `DISEMBARK` and
 three `UP` inputs enter the service row at its game-remembered horizontal

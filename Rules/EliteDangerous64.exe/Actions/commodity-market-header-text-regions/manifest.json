@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous Commodity Market header text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 70, "y": 25, "w": 720, "h": 230},
+  "sampling": "reference",
+  "maxPixels": 165600,
+  "leftContextWidth": 1,
+  "verticalPadding": 4
+}

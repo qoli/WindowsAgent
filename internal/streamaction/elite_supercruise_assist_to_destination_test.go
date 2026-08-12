@@ -30,6 +30,7 @@ type supercruiseAssistDestinationCaller struct {
 	flightInputAfterAssist []string
 	supercruiseHUDStates   []string
 	supercruiseHUDIndex    int
+	speedErrors            []error
 }
 
 func focusedPixels(focused bool) []any {
@@ -146,6 +147,13 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		}
 		return json.Marshal(map[string]any{"supercruiseHud": map[string]any{"state": state}})
 	case "elite-dangerous/ship-speed":
+		if len(c.speedErrors) > 0 {
+			err := c.speedErrors[0]
+			c.speedErrors = c.speedErrors[1:]
+			if err != nil {
+				return nil, err
+			}
+		}
 		if c.speedIndex >= len(c.speedStates) {
 			return nil, errors.New("unexpected ship-speed observation")
 		}
@@ -157,6 +165,18 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		return json.RawMessage(`{"speed":{"state":"MOVING","displayValue":42,"rawCandidate":42}}`), nil
 	default:
 		return nil, errors.New("unexpected Supercruise Assist child Action: " + id)
+	}
+}
+
+func TestEliteSupercruiseAssistSkipsTransientShipSpeedWGCFailure(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = append(caller.flightStates, "UNKNOWN")
+	caller.speedErrors = []error{errors.New("capture OCR Action region: persistent WGC worker region capture: persistent region capture failed: HRESULT 0x80070057")}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
 

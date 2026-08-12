@@ -11,6 +11,8 @@ SUPERCRUISE_CENTER_RADIUS_PIXELS = 16.0
 SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS = 20.0
 SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 4.0
 SUPERCRUISE_STATIC_ALIGN_CENTER_RADIUS_PIXELS = 8.0
+SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS = 16.0
+SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS = 4.0
 SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS = 4.0
 SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS = 2.0
 SUSTAINED_DISTANCE_PIXELS = 40
@@ -262,12 +264,15 @@ def main(ctx):
     mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
     tracking_samples = int(ctx.inputs["trackingSamples"]) if "trackingSamples" in ctx.inputs else 120
     target_motion = ctx.inputs["targetMotion"] if "targetMotion" in ctx.inputs else "MOVING"
+    alignment_purpose = ctx.inputs["alignmentPurpose"] if "alignmentPurpose" in ctx.inputs else "CENTER"
     stop_before_align = ctx.inputs["stopBeforeAlign"] if "stopBeforeAlign" in ctx.inputs else True
     requested_control_profile = ctx.inputs["controlProfile"] if "controlProfile" in ctx.inputs else "AUTO"
     profile_resolution = resolve_control_profile(requested_control_profile)
     control_profile = profile_resolution["profile"]
     control_profile_source = profile_resolution["source"]
     supercruise_profile = control_profile == "SUPERCRUISE_ASSIST"
+    if alignment_purpose == "VISIBLE_HANDOFF" and (mode != "ALIGN" or not supercruise_profile or target_motion != "STATIC"):
+        fail("VISIBLE_HANDOFF requires ALIGN with STATIC target motion and SUPERCRUISE_ASSIST control profile")
     stable_confirmations_required = 2 if supercruise_profile else STABLE_CENTER_CONFIRMATIONS
     alignment_radius = SUPERCRUISE_CENTER_RADIUS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else ALIGN_CENTER_RADIUS_PIXELS
     alignment_hysteresis = SUPERCRUISE_CENTER_HYSTERESIS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else 0.0
@@ -277,6 +282,9 @@ def main(ctx):
     if control_profile == "SUPERCRUISE_ASSIST" and target_motion == "STATIC":
         alignment_radius = SUPERCRUISE_STATIC_ALIGN_CENTER_RADIUS_PIXELS if mode == "ALIGN" else SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS
         alignment_hysteresis = SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS
+        if alignment_purpose == "VISIBLE_HANDOFF":
+            alignment_radius = SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS
+            alignment_hysteresis = SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS
     elif control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK":
         alignment_radius = SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS
     fine_distance = SUPERCRUISE_FINE_DISTANCE_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else FINE_DISTANCE_PIXELS
@@ -286,7 +294,7 @@ def main(ctx):
     sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
     sample_cadence_ms = SUPERCRUISE_STATIC_TRACK_CADENCE_MS if target_motion == "STATIC" and supercruise_profile else SAMPLE_CADENCE_MS
 
-    stream.activity(message="Compass control profile " + control_profile + " selected from " + control_profile_source, level="info")
+    stream.activity(message="Compass control profile " + control_profile + " selected from " + control_profile_source + " for " + alignment_purpose, level="info")
     if mode == "TRACK":
         stream.activity(message="Target motion profile " + target_motion + " selected", level="info")
 
@@ -595,6 +603,7 @@ def main(ctx):
 
         should_brake_center_entry = (
             mode == "ALIGN" and
+            alignment_purpose == "CENTER" and
             alignment_centered and
             commanded_target != None and
             commanded_control != None and
@@ -640,10 +649,11 @@ def main(ctx):
             emit_update("COMPLETED", sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SOLID_TARGET_STABLY_CENTERED")
             stream.activity(message="Station target aligned", level="info")
             return {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "task": "ALIGN_STATION_TARGET",
                 "mode": mode,
                 "targetMotion": target_motion,
+                "alignmentPurpose": alignment_purpose,
                 "controlProfile": control_profile,
                 "controlProfileSource": control_profile_source,
                 "completed": True,
@@ -668,10 +678,11 @@ def main(ctx):
             emit_update("TRACKING_WINDOW_COMPLETED", sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="BOUNDED_TRACKING_WINDOW_COMPLETED", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             stream.activity(message="Moving-target tracking window completed", level="info")
             return {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "task": "ALIGN_STATION_TARGET",
                 "mode": mode,
                 "targetMotion": target_motion,
+                "alignmentPurpose": alignment_purpose,
                 "controlProfile": control_profile,
                 "controlProfileSource": control_profile_source,
                 "completed": True,

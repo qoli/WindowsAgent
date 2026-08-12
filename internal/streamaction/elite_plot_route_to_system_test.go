@@ -140,7 +140,7 @@ func TestElitePlotRouteRequiresExactSuggestionAndVerifiesNavRoute(t *testing.T) 
 }
 
 func TestElitePlotRouteResumesObservedOpenMapAndStillRestoresView(t *testing.T) {
-	mapOnly := galaxyOCR(galaxyRegion("GALAXY MAP I REALISTIC", 50))
+	mapOnly := galaxyOCR(galaxyRegion("GALAXYEMAPTPPREALISTIC", 50))
 	withSuggestion := galaxyOCR(galaxyRegion("GALAXY MAP I REALISTIC", 50), galaxyRegion("LHS 178", 165))
 	selected := galaxyOCR(galaxyRegion("LHS 178", 220))
 	absent := galaxyOCR()
@@ -156,6 +156,20 @@ func TestElitePlotRouteResumesObservedOpenMapAndStillRestoresView(t *testing.T) 
 	}
 	if !contains(string(output), `"result":"PLOTTED"`) || !contains(string(output), `"openedMap":false`) || !equalStrings(caller.controls, []string{"OPEN_GALAXY_MAP"}) {
 		t.Fatalf("output=%s controls=%v", output, caller.controls)
+	}
+}
+
+func TestElitePlotRouteRejectsTitleWordsWithoutGalaxyPrefix(t *testing.T) {
+	notMap := galaxyOCR(galaxyRegion("SEARCH MAP REALISTIC", 50))
+	caller := &plotRouteCaller{search: []json.RawMessage{notMap, notMap}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), plotRoutePackage(t), map[string]any{"targetSystem": "LHS 178", "maxJumps": int64(1)}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "unexpected Galaxy Map search observation") {
+		t.Fatalf("error=%v", err)
+	}
+	if !equalStrings(caller.controls, []string{"OPEN_GALAXY_MAP", "OPEN_GALAXY_MAP"}) {
+		t.Fatalf("controls=%v", caller.controls)
 	}
 }
 

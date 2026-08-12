@@ -12,6 +12,7 @@ import (
 type alignVisibleTargetCaller struct {
 	heats     []json.RawMessage
 	positions []json.RawMessage
+	posErrors []error
 	controls  []string
 	heatIndex int
 	posIndex  int
@@ -27,6 +28,11 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		c.heatIndex++
 		return value, nil
 	case "elite-dangerous/escape-vector-visible-position", "elite-dangerous/supercruise-target-position":
+		if len(c.posErrors) > 0 {
+			err := c.posErrors[0]
+			c.posErrors = c.posErrors[1:]
+			return nil, err
+		}
 		if c.posIndex >= len(c.positions) {
 			return nil, errors.New("unexpected position observation")
 		}
@@ -40,6 +46,10 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 	default:
 		return nil, errors.New("unexpected align-visible-target child Action: " + id)
 	}
+}
+
+func transientWGCRegionError() error {
+	return errors.New("capture OCR text regions Action region: persistent WGC worker region capture: persistent region capture failed: failed to create the region unordered-access view: COM method 8: HRESULT 0x80070057")
 }
 
 func loadEliteAlignVisibleTargetPackage(t *testing.T) *Package {
@@ -106,6 +116,44 @@ func TestEliteAlignVisibleTargetDoesNotSteerFromUnknownDestination(t *testing.T)
 	events := joinEventPhases(reporter.payloads)
 	if contains(events, `"phase":"SEARCHING"`) || contains(events, `"command":"YAW_`) {
 		t.Fatalf("UNKNOWN target emitted a search command: %s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetSkipsOneTransientWGCRegionCaptureFailure(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats:     []json.RawMessage{visibleHeat("KNOWN", 23)},
+		posErrors: []error{transientWGCRegionError()},
+		positions: []json.RawMessage{visiblePosition(8, 6, 10), visiblePosition(8, 6, 10), visiblePosition(8, 6, 10)},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "METZILI", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `TARGET_POSITION_WGC_CAPTURE_RETRY`) || len(caller.controls) != 0 {
+		t.Fatalf("events=%s controls=%v", joinEventPhases(reporter.payloads), caller.controls)
+	}
+}
+
+func TestEliteAlignVisibleTargetFailsSixthTransientWGCRegionCaptureFailure(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		posErrors: []error{
+			transientWGCRegionError(), transientWGCRegionError(), transientWGCRegionError(),
+			transientWGCRegionError(), transientWGCRegionError(), transientWGCRegionError(),
+		},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "METZILI", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err == nil || !contains(err.Error(), "error limit exceeded after five skipped errors") {
+		t.Fatalf("error=%v", err)
+	}
+	if strings.Count(joinEventPhases(reporter.payloads), `TARGET_POSITION_WGC_CAPTURE_RETRY`) != 6 || len(caller.controls) != 0 {
+		t.Fatalf("events=%s controls=%v", joinEventPhases(reporter.payloads), caller.controls)
 	}
 }
 
