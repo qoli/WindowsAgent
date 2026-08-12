@@ -1,6 +1,6 @@
 ---
 name: operate-windowsagent
-description: "Discover, invoke, observe, test, troubleshoot, and extend the live WindowsAgent capabilities owned by the foreground executable's matched Rule. Use when Codex must capture the current Windows screen, decide whether an interaction belongs in a new finite or streaming Action, identify an Action capability gap, read Rule guidance and Action catalogs, invoke Actions, compose a bounded ephemeral Action Sequence, follow invocation events, diagnose Action timing or control behavior with Visual Log and authoritative Evidence, validate a real game or app outcome, or repair an Action exposed by live evidence. Do not use Monitor or Reaction as executable or verified capabilities; their scheduler and dispatcher remain unvalidated and outside this v1 skill."
+description: "Discover, invoke, observe, test, troubleshoot, and extend the live WindowsAgent capabilities owned by the foreground executable's matched Rule. Use when Codex must capture the current Windows screen, decide whether an interaction belongs in a new finite or streaming Action, identify an Action capability gap, create a bounded Action that establishes a repeatable test state, read Rule guidance and Action catalogs, invoke Actions, compose a bounded ephemeral Action Sequence, follow invocation events, diagnose time-critical or safety-sensitive control behavior with Visual Log and authoritative Evidence, validate a real game or app outcome, or repair an Action exposed by live evidence. Do not use Monitor or Reaction as executable or verified capabilities; their scheduler and dispatcher remain unvalidated and outside this v1 skill."
 ---
 
 # Operate WindowsAgent
@@ -79,6 +79,15 @@ Use this decisive test: if the supervising model must wake up in a later turn
 to ensure the current operation completes correctly, put that responsibility
 inside an Action.
 
+Apply the same test to live setup and reproduction. If repeated testing needs
+the supervising model to fly, wait, steer, open UI, or otherwise recreate a
+domain precondition over several turns, create a separate bounded setup Action.
+Its terminal evidence must prove the requested precondition, not a proxy such
+as elapsed time, commanded throttle, requested distance, or an injected key.
+Keep the setup Action independent from the capability under test so a passing
+setup cannot conceal that capability's failure. Give it its own timeout,
+cancellation, cleanup, and failure compensation.
+
 Choose the smallest suitable abstraction:
 
 - Use a finite Action for one bounded operation or observation whose terminal
@@ -90,6 +99,13 @@ Choose the smallest suitable abstraction:
   stateful decision, or compensation contract.
 - Keep long-horizon intent, target choice, and composition of independent
   capabilities with the supervising model.
+
+For safety-sensitive or high-cadence control, keep the entire critical segment
+inside one Streaming Action. Do not split a heat-limited charge, collision
+avoidance maneuver, transient alignment, or similar deadline across model
+turns. The Action must observe, decide, operate, cancel, and compensate at its
+own cadence; the supervising model watches its events and decides only the
+long-horizon goal or whether to interrupt it.
 
 Do not create an Action merely to rename unrelated primitives or to encode a
 one-off sequence with no stable capability semantics. When the domain
@@ -149,6 +165,29 @@ requests cancellation, the task becomes unsafe to continue, or current
 evidence proves the original goal is no longer valid. After stopping, wait for
 the terminal cancellation record.
 
+### Transient observations inside a Streaming Action
+
+Treat observations that exist only during a charge, animation, focused panel,
+temporary prompt, or other short-lived mode as Action-local ephemeral state.
+Express their lifecycle in events when they can authorize control:
+
+- `LIVE` means the evidence belongs to the currently verified mode;
+- `CACHED_ONE_SHOT` means it may authorize at most the next bounded command;
+- `EXPIRED` means no later operation may consume it.
+
+Invalidate the observation after the authorized command, cancellation, mode
+change, foreground change, or any transition that can alter its meaning. A
+historical coordinate or classifier result remains diagnostic evidence, not a
+durable claim about the current world. Require a fresh observation before the
+next control decision.
+
+When acquiring transient evidence is itself risky, use a bounded probe cycle:
+establish a safe baseline, enter the temporary mode, acquire enough consistent
+samples, leave that mode, verify the newer idle state, consume at most one
+bounded command, then probe again. Do not keep the risky mode active while the
+supervising model reasons. Prefer a deliberately non-harmonic sampling cadence
+when a flashing HUD can phase-lock a fixed loop into repeated false absence.
+
 ### Ephemeral Action Sequence
 
 Fetch `/v3/rules/{rule-id}/action-sequence-tool` immediately before composing
@@ -191,6 +230,14 @@ Never collapse these layers. In particular:
 - A selected contact is not a docking request.
 - An injected jump control is not arrival in another system.
 - A build, deployment, or catalog entry is not live behavioral acceptance.
+
+Declare valid completion evidence according to the domain's state machine. A
+transient HUD marker disappearing during a successful transition is not, by
+itself, failure. A newer authoritative game-state transition may complete the
+Action only when the package contract explicitly declares that the application
+cannot make that transition without satisfying the missing visual Gate. This
+is an evidence alternative, not permission to substitute a cached observation
+or guessed result.
 
 When current visual confirmation is required, capture after the UI or game has
 settled. Do not associate a frame with an input that completed after the frame
@@ -256,6 +303,20 @@ the timelines to distinguish:
   different frame than the Action assumed; and
 - correct domain progress followed by runtime interruption.
 
+For heat-, collision-, or resource-limited Actions, also reconstruct the
+safety timeline. Emit the safety measurement, its freshness, the active phase,
+the command being protected, and the exact cancellation or compensation
+reason. Use phase-local ceilings only when the domain justifies them; entering
+an irreversible but bounded transition may need a different Gate than searching
+for alignment. A relaxed phase must have a clear entry proof, deadline, and
+terminal state and must not leak back into the search phase.
+
+After any comparatively slow OCR, CV, model, or artifact operation, refresh
+the cheapest authoritative fast state before sending a cancellation or other
+state-changing input. The application may have completed the transition while
+the observation was running. If the newer state proves completion, record that
+the domain transition won the race and do not inject a stale cancellation.
+
 Do not ask the supervising model to repair timing by issuing ad hoc primitives
 between turns. Use the timeline to repair the owning Action's observations,
 telemetry, control law, timeout, or compensation. A calibration-capable
@@ -304,6 +365,14 @@ Classify the failure before changing code:
   binding resolution, or cleanup;
 - **domain rejection** — the Action executed but the application rejected or
   blocked the requested effect.
+
+Keep same-provider transient retry distinct from provider fallback. A bounded
+retry of an idempotent observation after a known transport interruption may be
+implemented at its generic owning boundary when attempts and the final error
+remain visible. It must not change capture backend, provider, ROI, algorithm,
+or evidence source. Do not add Action-level retry loops merely to hide a broken
+capture runtime, and never convert exhausted infrastructure retries into domain
+`UNKNOWN`.
 
 If the task includes maintenance, repair the responsible Action or generic
 runtime at its owning layer, run focused tests, deploy the exact changed Rule
