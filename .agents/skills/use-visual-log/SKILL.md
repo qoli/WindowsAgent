@@ -1,6 +1,6 @@
 ---
 name: use-visual-log
-description: Operate and interpret WindowsAgent's independent visual-log process as an untrusted timeline index. Use when a supervising model needs to start or stop on-demand Gemma scene descriptions, check warm-up or producer status, retrieve visual-log events for a UTC time range, locate a likely game-recording interval, or decide which evidence range still needs authoritative review. Also use when diagnosing missing or low-quality visual-log samples without coupling them to evidence recording.
+description: Operate WindowsAgent's independent finite Evidence recordings and visual-log process, and interpret Gemma output only as an untrusted timeline index. Use when a supervising model needs to request a bounded Evidence run, start or stop on-demand Gemma scene descriptions, check run or producer status, retrieve visual-log events for a UTC time range, locate a likely recorded interval, or decide which Evidence range still needs authoritative review.
 ---
 
 # Use Visual Log
@@ -13,8 +13,10 @@ against the independent evidence layer before making a game-state claim.
 
 - Keep evidence recording, visual logging, and high-level analysis on separate
   lifecycles.
-- Start or stop only the visual-log run through its control API. Never start,
-  stop, pause, delete, or reschedule evidence recording as a side effect.
+- Request Evidence explicitly through its own finite-run interface. Never
+  start or extend Evidence as a side effect of starting Visual Log.
+- Evidence has no extension, pause, manual-stop, or delete operation. A new run
+  may be requested only after the previous run reaches a terminal state.
 - Do not synchronize the visual-log interval with the evidence recorder's 1 FPS
   cadence. Each visual-log tick reads the newest PC-local shared-memory frame
   newer than its own cursor; it never requests a screenshot or downloads an
@@ -43,11 +45,48 @@ are:
 ```text
 visual-log control  http://127.0.0.1:8789
 event journal       http://127.0.0.1:8788
+evidence control    http://127.0.0.1:8792
 ```
 
 Treat configured or live values as authoritative when they differ.
 
-## Start the on-demand run
+## Request a finite Evidence run
+
+Evidence recording is on demand. The process may be healthy while no WGC
+session exists and no recording dot is visible.
+
+1. Check `GET /healthz` on the Evidence process.
+2. Send authenticated `GET /v1/evidence/status` and read `state`, `finite`,
+   `defaultDurationSeconds`, and `maxDurationSeconds`.
+3. If state is `starting` or `recording`, do not submit another start. Record
+   the existing `runId` and `endsAt` and decide whether its remaining window is
+   sufficient.
+4. Otherwise, send authenticated `POST /v1/evidence/runs` with
+   `Content-Type: application/json`. Use `{}` for the default 1200-second run,
+   or `{"durationSeconds":N}` for an explicit integer from 1 through 1200.
+5. Expect HTTP 202. Require `finite:true`, a non-empty `runId`, the accepted
+   `durationSeconds`, and immutable `requestedAt` and `endsAt`. Do not proceed
+   on an ambiguous or unbounded response.
+6. Follow the returned `Location`, or call
+   `GET /v1/evidence/runs/<runId>`, until state becomes `recording`, `failed`,
+   or the task no longer benefits from new Evidence. `starting` means only that
+   the finite request was accepted; `recording` means WGC and the session-local
+   recording-presence signal started.
+7. Preserve `runId`, `requestedAt`, `startedAt`, `endsAt`, `frames`, `gaps`,
+   `tapFailures`, and terminal state with the task evidence.
+
+The run stops automatically at `endsAt` and finalizes its open MP4 segment.
+State `completed` means finalization returned successfully; it does not prove
+that every slot was a frame, so inspect `frames`, `gaps`, and the range
+manifest. State `failed` is terminal for that run. Request a new run explicitly
+if later Evidence is required; never assume continuous coverage between runs.
+
+HTTP 409 `EVIDENCE_RUN_ACTIVE` includes `activeRun`. Use that run's `runId` and
+deadline; do not retry in a loop or treat the conflict as an extension. Invalid
+or over-1200 duration input is a caller error and must be corrected rather than
+clamped.
+
+## Start the on-demand Visual Log run
 
 1. Check `GET /healthz` on the visual-log control process.
 2. Send authenticated `GET /v1/visual-log/status`.
@@ -162,9 +201,10 @@ timestamp, malformed grid, or excessive span is an explicit request failure;
 do not retry with a screenshot, frame tap, Gemma image, or neighbouring second.
 
 If the visual log is empty, misleading, or unavailable, bypass it and request
-the full relevant evidence range in bounded adjacent chunks. Never start,
-stop, pause, or delete the evidence recorder while doing so; no such API is
-part of its contract.
+the full relevant recorded range in bounded adjacent chunks. Range reads do
+not alter the active Evidence run. If the needed time was never covered by a
+run, report the missing coverage; starting a new run cannot recover past
+frames.
 
 ## Stop when no longer useful
 
@@ -180,6 +220,11 @@ completed. Use `sessionId` and current task context to establish ownership.
 
 - Rising `droppedSamples` or a recent `lastDropStage` indicates missing index
   entries, not lost evidence.
+- Evidence `starting` without transition to `recording` is a WGC startup or
+  permission problem, not proof that frames exist. Inspect terminal
+  `lastError` and do not substitute request-driven screenshots.
+- Evidence `completed` with gaps or missing slots remains authoritative about
+  those absences. Never fill them from the frame tap or Gemma output.
 - `failed` with an event-append error means the visual logger cannot guarantee
   durable output. Leave evidence untouched and fall back to evidence analysis.
 - HTTP `409 visual_log_already_active` means re-read status; do not restart the

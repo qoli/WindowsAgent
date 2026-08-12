@@ -18,36 +18,41 @@ import (
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
-const maxContactSheetRequestBytes = 16 << 10
+const (
+	maxContactSheetRequestBytes = 16 << 10
+	maxRunRequestBytes          = 4096
+)
 
 type Status struct {
-	State            string     `json:"state"`
-	StartedAt        time.Time  `json:"startedAt"`
-	LastScheduledAt  time.Time  `json:"lastScheduledAt,omitempty"`
+	evidence.RunStatus
 	AvailableThrough *time.Time `json:"availableThrough,omitempty"`
-	Frames           uint64     `json:"frames"`
-	Gaps             uint64     `json:"gaps"`
-	TapFailures      uint64     `json:"tapFailures"`
-	LastError        string     `json:"lastError,omitempty"`
-	LastTapError     string     `json:"lastTapError,omitempty"`
-}
-type Server struct {
-	store    *evidence.Store
-	decoder  evidence.VideoFrameDecoder
-	token    string
-	maxRange time.Duration
-	status   func() Status
-	handler  http.Handler
 }
 
-func New(store *evidence.Store, decoder evidence.VideoFrameDecoder, token string, maxRange time.Duration, status func() Status) (*Server, error) {
-	if store == nil || decoder == nil || len(token) < 32 || maxRange <= 0 || status == nil {
+type RunControl interface {
+	Start(evidence.RunRequest) (evidence.RunStatus, error)
+	Status() evidence.RunStatus
+	RunStatus(string) (evidence.RunStatus, error)
+}
+
+type Server struct {
+	store      *evidence.Store
+	decoder    evidence.VideoFrameDecoder
+	token      string
+	maxRange   time.Duration
+	controller RunControl
+	handler    http.Handler
+}
+
+func New(store *evidence.Store, decoder evidence.VideoFrameDecoder, token string, maxRange time.Duration, controller RunControl) (*Server, error) {
+	if store == nil || decoder == nil || len(token) < 32 || maxRange <= 0 || controller == nil {
 		return nil, errors.New("evidence HTTP dependencies are invalid")
 	}
-	s := &Server{store: store, decoder: decoder, token: token, maxRange: maxRange, status: status}
+	s := &Server{store: store, decoder: decoder, token: token, maxRange: maxRange, controller: controller}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /v1/evidence/status", s.auth(s.getStatus))
+	mux.HandleFunc("POST /v1/evidence/runs", s.auth(s.postRun))
+	mux.HandleFunc("GET /v1/evidence/runs/{runId}", s.auth(s.getRun))
 	mux.HandleFunc("GET /v1/evidence/range", s.auth(s.getRange))
 	mux.HandleFunc("POST /v1/evidence/contact-sheet", s.auth(s.postContactSheet))
 	s.handler = mux
@@ -132,12 +137,92 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 func (s *Server) getStatus(w http.ResponseWriter, _ *http.Request) {
-	status := s.status()
+	status := Status{RunStatus: s.controller.Status()}
 	if available := s.store.AvailableThrough(); !available.IsZero() {
 		status.AvailableThrough = &available
 	}
 	writeJSON(w, http.StatusOK, status)
 }
+
+func (s *Server) postRun(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()) != 0 {
+		writeError(w, http.StatusBadRequest, "EVIDENCE_RUN_REQUEST_INVALID", errors.New("query parameters are not accepted"))
+		return
+	}
+	request, err := decodeRunRequest(w, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "EVIDENCE_RUN_REQUEST_INVALID", err)
+		return
+	}
+	status, err := s.controller.Start(request)
+	switch {
+	case errors.Is(err, evidence.ErrDurationInvalid):
+		writeError(w, http.StatusBadRequest, "EVIDENCE_DURATION_INVALID", err)
+		return
+	case errors.Is(err, evidence.ErrRunActive):
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":     map[string]string{"code": "EVIDENCE_RUN_ACTIVE", "message": err.Error()},
+			"activeRun": status,
+		})
+		return
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "EVIDENCE_RUN_START_FAILED", err)
+		return
+	}
+	w.Header().Set("Location", "/v1/evidence/runs/"+url.PathEscape(status.RunID))
+	writeJSON(w, http.StatusAccepted, status)
+}
+
+func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
+	if len(r.URL.Query()) != 0 {
+		writeError(w, http.StatusBadRequest, "EVIDENCE_RUN_REQUEST_INVALID", errors.New("query parameters are not accepted"))
+		return
+	}
+	status, err := s.controller.RunStatus(r.PathValue("runId"))
+	if errors.Is(err, evidence.ErrRunNotFound) {
+		writeError(w, http.StatusNotFound, "EVIDENCE_RUN_NOT_FOUND", err)
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "EVIDENCE_RUN_STATUS_FAILED", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
+func decodeRunRequest(w http.ResponseWriter, r *http.Request) (evidence.RunRequest, error) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		return evidence.RunRequest{}, errors.New("Content-Type must equal application/json")
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRunRequestBytes)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return evidence.RunRequest{}, fmt.Errorf("read Evidence run request: %w", err)
+	}
+	if err = strictjson.Validate(data); err != nil {
+		return evidence.RunRequest{}, fmt.Errorf("Evidence run request must be strict JSON: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var wire struct {
+		DurationSeconds json.RawMessage `json:"durationSeconds"`
+	}
+	if err = decoder.Decode(&wire); err != nil {
+		return evidence.RunRequest{}, fmt.Errorf("decode Evidence run request: %w", err)
+	}
+	if len(wire.DurationSeconds) == 0 {
+		return evidence.RunRequest{}, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(wire.DurationSeconds), []byte("null")) {
+		return evidence.RunRequest{}, errors.New("durationSeconds must be an integer when provided")
+	}
+	var durationSeconds uint32
+	if err = json.Unmarshal(wire.DurationSeconds, &durationSeconds); err != nil {
+		return evidence.RunRequest{}, errors.New("durationSeconds must be an integer when provided")
+	}
+	return evidence.RunRequest{DurationSeconds: &durationSeconds}, nil
+}
+
 func (s *Server) getRange(w http.ResponseWriter, r *http.Request) {
 	if err := rejectUnknown(r.URL.Query(), "from", "to"); err != nil {
 		writeError(w, http.StatusBadRequest, "EVIDENCE_RANGE_INVALID", err)
@@ -205,6 +290,7 @@ func rejectUnknown(values url.Values, allowed ...string) error {
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }

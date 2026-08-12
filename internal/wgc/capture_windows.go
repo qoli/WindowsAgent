@@ -329,9 +329,9 @@ func (c *Capturer) Capture(ctx context.Context, request capture.Request) (captur
 
 // Run owns one persistent WGC session and samples its newest available frame
 // at each whole UTC interval. It never enters the request-driven capture path.
-func (c *Capturer) Run(ctx context.Context, interval time.Duration, consume videocapture.Consumer) error {
-	if ctx == nil || consume == nil {
-		return errors.New("video stream context and consumer are required")
+func (c *Capturer) Run(ctx context.Context, interval time.Duration, lifecycle videocapture.Lifecycle, consume videocapture.Consumer) error {
+	if ctx == nil || lifecycle == nil || consume == nil {
+		return errors.New("video stream context, lifecycle, and consumer are required")
 	}
 	if interval != time.Second {
 		return errors.New("WGC evidence stream interval must equal one second")
@@ -397,9 +397,19 @@ func (c *Capturer) Run(ctx context.Context, interval time.Duration, consume vide
 		if err = setCursorCapture(session, false); err != nil {
 			return struct{}{}, capture.Failure("capture_session_failed", "failed to disable cursor capture for persistent evidence", err)
 		}
+		if err = requestBorderlessCapture(ctx); err != nil {
+			return struct{}{}, capture.Failure("capture_borderless_access_failed", "failed to obtain borderless persistent evidence capture", err)
+		}
+		if err = setBorderRequired(session, false); err != nil {
+			return struct{}{}, capture.Failure("capture_session_failed", "failed to disable the persistent evidence capture border", err)
+		}
 		if err = callHRESULT(session, 6); err != nil {
 			return struct{}{}, capture.Failure("capture_session_failed", "failed to start persistent WGC capture", err)
 		}
+		if err = lifecycle.Start(); err != nil {
+			return struct{}{}, capture.Failure("capture_lifecycle_failed", "failed to publish the persistent evidence recording state", err)
+		}
+		defer lifecycle.Stop()
 		videoShader, err := createRegionComputeShader(device)
 		if err != nil {
 			return struct{}{}, capture.Failure("capture_region_shader_failed", "failed to create the persistent video sampling shader", err)

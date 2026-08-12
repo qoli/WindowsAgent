@@ -3,8 +3,9 @@
 ## Status
 
 **Landed.** The maintained companion, explicit activity contract, Ephemeral
-Action Sequence projection, bounded startup reconstruction, installer,
-lifecycle expiry, and live event client are implemented and tested. Real-device acceptance used
+Action Sequence projection, Evidence recording indicator, bounded startup
+reconstruction, installer, lifecycle expiry, and live event client are
+implemented and tested. Real-device acceptance used
 `elite-dangerous/select-contacts-panel` over a live 4K HDR game. The installed
 production task excludes the OSD from capture. The original card presentation
 was subsequently replaced by the landed compact viewfinder presentation.
@@ -12,8 +13,9 @@ was subsequently replaced by the landed compact viewfinder presentation.
 ## Responsibility
 
 The Action OSD is a display-only projection of the existing `action.runs`
-stream. It never invokes, stops, retries, or changes an Action. A missing or
-failed OSD does not alter Action execution.
+stream and the PC-local Evidence recording-presence signal. It never invokes,
+stops, retries, or changes an Action or Evidence Recorder. A missing or failed
+OSD alters neither process.
 
 The Host owns lifecycle presentation from `action.started`,
 `action.completed`, `action.failed`, and `action.cancelled`. A Streaming Action
@@ -42,7 +44,16 @@ events fail the OSD stream explicitly.
 
 The overlay occupies a compact transparent region at the top-left of the
 foreground monitor. It has no panel, card, border, status label, elapsed time,
-or per-record timestamps. While an Action is running it shows only a fixed-size
+or per-record timestamps. A fixed yellow dot is visible while at least one
+Evidence Recorder owns the signaled session-local named event
+`Local\WindowsAgent.Evidence.Recording.v1`. The OSD opens and closes a fresh
+observer handle on every one-second poll; it never keeps the kernel object
+alive after the finite run stops or the Recorder exits. An absent event means
+recording is stopped. An
+unexpected open or wait failure is fatal rather than rendered as a guessed
+state.
+
+While an Action is running the OSD also shows a fixed-size
 red dot that alternates every 1000 milliseconds between fully visible and fully
 absent, the short current Action name (the final segment of its canonical ID),
 and at most three distinct activity records from oldest to newest. During a
@@ -68,6 +79,8 @@ It follows the foreground monitor and is excluded from capture by default.
 
 `windows-action-osd.exe` is an independent GUI-subsystem companion in the
 signed-in interactive session. It reads the authenticated loopback event API.
+The recording signal is read-only, session-local, unauthenticated, and carries
+no frame, recording control, game identity, or authoritative Evidence state.
 It starts from the journal's current durable cursor, so historical completed
 Actions do not replay onto the desktop. An event-stream disconnect or invalid
 activity is fatal and visible in the OSD process log; no alternate log or event

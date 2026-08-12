@@ -4,16 +4,35 @@
 
 **Partially landed.** Persistent WGC capture, 1 FPS sampling, native H.264 MP4
 segments, UTC manifests, authenticated range export, exact-timestamp contact
-sheets, and a PC-local frame tap passed live Windows acceptance. Persistent
-installation and retention remain deferred.
+sheets, and a PC-local frame tap passed live Windows acceptance. Finite run
+control also passed isolated live Windows acceptance. Persistent installation
+and retention remain deferred.
 
 ## Recording contract
 
-`windows-evidence-recorder.exe` is the recording owner. On process start it
-creates one persistent WGC session in the signed-in PC user's session, samples
-the newest frame at each whole UTC second, GPU-scales and tone-maps it to
-1920x1080, and writes H.264 MP4 segments through Media Foundation. It never
-calls the request-driven screenshot API.
+`windows-evidence-recorder.exe` is the recording owner. Process start exposes
+the authenticated control and read interface but leaves recording idle. An
+accepted finite run creates one persistent WGC session in the signed-in PC
+user's session, samples the newest frame at each whole UTC second, GPU-scales
+and tone-maps it to 1920x1080, and writes H.264 MP4 segments through Media
+Foundation. It never calls the request-driven screenshot API.
+
+Every run is finite. `durationSeconds` is optional; omission selects 1200
+seconds, and an explicit value must be an integer from 1 through 1200. The
+default and hard maximum are both 20 minutes. The deadline begins when the
+start request is accepted, so the interface can return the immutable `endsAt`
+immediately. There is no renewal, extension, pause, manual-stop, or delete
+operation. When the deadline expires, the recorder releases WGC, finalizes the
+open segment, publishes terminal status, and returns to an idle process ready
+to accept a new run.
+
+Before starting the session, the process requests Windows borderless-capture
+access and requires `IsBorderRequired=false` to read back exactly. Unsupported,
+denied, canceled, timed-out, or mismatched permission state is a terminal
+startup failure; the recorder does not silently retain the system capture
+border. This setting applies only to the Recorder's persistent session. The
+Capture Agent's request-driven WGC sessions remain independent and retain their
+current Windows border behavior.
 
 Each assigned second is exactly one of:
 
@@ -24,8 +43,18 @@ It never reuses an old frame, changes capture backend, or synthesizes a frame
 for a gap. A frame-capture or foreground mismatch affects only that slot.
 Failure to encode or durably commit the authoritative segment is terminal.
 
-The recorder is independent of Gemma, Visual Log, the event journal, Actions,
-and the high-level model. Those consumers cannot pause or terminate recording.
+The recorder is independent of Gemma, Visual Log, the event journal, and
+Actions. The high-level model may explicitly request a finite Evidence run,
+but Visual Log startup has no implicit path to start, extend, pause, or
+terminate it.
+
+After the WGC session starts, the recorder holds the manual-reset named event
+`Local\WindowsAgent.Evidence.Recording.v1` signaled for its exact stream
+lifetime. The OSD may observe that presence to render one fixed yellow dot, but
+the event exposes no control operation and the recorder never depends on the
+OSD. When the recorder stops or exits, its handle closes; once the last
+recorder handle is gone, the kernel object disappears and the OSD hides the dot
+on its next one-second poll.
 
 ## Storage and frame tap
 
@@ -49,9 +78,54 @@ The process listens only on an explicit loopback address:
 ```text
 GET /healthz
 GET /v1/evidence/status
+POST /v1/evidence/runs
+GET /v1/evidence/runs/{runId}
 GET /v1/evidence/range?from=<UTC>&to=<UTC>
 POST /v1/evidence/contact-sheet
 ```
+
+`POST /v1/evidence/runs` requires `Content-Type: application/json` and one
+strict JSON object:
+
+```json
+{}
+```
+
+or:
+
+```json
+{"durationSeconds": 300}
+```
+
+A successful start returns HTTP 202. The response explicitly declares the
+finite contract instead of requiring callers to infer it from documentation:
+
+```json
+{
+  "state": "starting",
+  "runId": "evr_...",
+  "finite": true,
+  "defaultDurationSeconds": 1200,
+  "maxDurationSeconds": 1200,
+  "durationSeconds": 1200,
+  "requestedAt": "2026-08-12T10:00:00Z",
+  "endsAt": "2026-08-12T10:20:00Z"
+}
+```
+
+State changes to `recording` and adds `startedAt` only after the WGC session
+and recording-presence signal have started. The terminal state is `completed`
+after deadline cancellation and segment finalization, or `failed` with
+`lastError`. `GET /v1/evidence/runs/{runId}` exposes retained in-process status
+for recent runs. `GET /v1/evidence/status` returns the latest run status plus
+`availableThrough` when committed evidence exists. An idle status still
+returns `finite:true`, `defaultDurationSeconds`, and `maxDurationSeconds` so a
+caller can discover the finite constraint before starting.
+
+Zero, negative, fractional, null, unknown-field, and over-1200 duration inputs
+return HTTP 400. A second start while state is `starting` or `recording`
+returns HTTP 409 `EVIDENCE_RUN_ACTIVE` and includes `activeRun` with its
+`runId` and `endsAt`; it never extends or replaces that run.
 
 Every route except health requires the Evidence Bearer token. Ranges are
 half-open `[from,to)`, use RFC3339 UTC timestamps ending in `Z`, and cannot
@@ -123,6 +197,31 @@ returned HTTP 409. Evidence advanced from 14 to 17 frames during the bounded
 run with zero gaps and zero frame-tap failures. The isolated task, listener,
 token, and private video data were removed; the existing Capture and Event
 processes retained PIDs 15032 and 21072.
+
+Later on 2026-08-12, isolated PC runs on Windows build 26100 verified
+borderless permission and `IsBorderRequired=false`. The exact final Recorder
+artifact reached three advancing frames with zero gaps and zero frame-tap
+failures while the exact final OSD artifact displayed the new fixed yellow dot.
+Stopping the Recorder task without a graceful in-process stop removed the dot
+within the next poll while the isolated OSD remained running. The isolated
+tasks, token, binaries, and private recordings were then removed; the installed
+Capture Agent, Event Stream, and production OSD retained their original
+processes.
+
+The subsequent finite-run refactor was accepted on the same Windows build with
+the game foreground. Process startup returned `idle`, `finite:true`, and both
+duration limits at 1200 without opening WGC or showing the OSD dot. An explicit
+15-second run returned HTTP 202 with an immutable 15-second deadline, moved
+from `starting` to `recording`, rejected a concurrent start with HTTP 409, and
+completed 28 milliseconds after its deadline while the control process and
+listener remained alive. It committed 15 frames, zero gaps, zero tap failures,
+and zero missing slots across 5-second and 10-second 1920x1080 H.264 segments;
+both reported 1 FPS and exact matching durations. The yellow OSD dot appeared
+only during recording and disappeared after automatic completion. An
+over-limit request returned HTTP 400, and a later `{}` start returned an exact
+1200-second deadline. The isolated tasks, listener, token, binaries, and
+private recordings were removed; the pre-existing Capture Agent, Event Stream,
+and production OSD retained their original processes.
 
 No automatic retention or deletion policy exists. Runtime video, manifests,
 tokens, and logs are private operator data outside the public repository.

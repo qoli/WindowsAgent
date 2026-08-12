@@ -62,6 +62,14 @@ func (s Sample) Validate() error {
 
 type Consumer func(context.Context, Sample) error
 
+// Lifecycle is activated only after the persistent capture session has
+// started, and is deactivated before that session is released. Start failure
+// is terminal so a recorder never runs without its declared lifecycle state.
+type Lifecycle interface {
+	Start() error
+	Stop()
+}
+
 type Stream interface {
-	Run(context.Context, time.Duration, Consumer) error
+	Run(context.Context, time.Duration, Lifecycle, Consumer) error
 }

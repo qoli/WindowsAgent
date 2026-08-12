@@ -210,8 +210,9 @@ cp -R Rules .build/
 `windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
 The build script also emits `windows-capture-agent-console.exe` for interactive
 terminal diagnostics, `windows-action-check.exe` for offline Rule validation,
-`windows-action-osd.exe` for the display-only Action overlay, and the optional
-`windows-watchdog.exe` and independent `windows-visual-log.exe`. It verifies
+`windows-action-osd.exe` for the display-only Action and Evidence-recording
+overlay, and the optional `windows-watchdog.exe` and independent
+`windows-visual-log.exe`. It verifies
 the expected PE subsystem for every emitted executable.
 
 ### Offline Action dependency check
@@ -277,12 +278,15 @@ last durable cursor owned by the retired contract. The installed OSD skips only
 history at or before that boundary; later events remain subject to normal
 startup replay and strict validation.
 
-The independent interactive-user task stays hidden until a Streaming Action
-starts. While the Action is running its compact, background-free top-left
-viewfinder shows a blinking red dot, the short Action name, and at most the
-latest three explicit `stream.activity` records. Terminal
-states disappear automatically. The OSD is excluded from screen capture by
-default; `-AllowCapture` is intended only for visual acceptance evidence.
+The independent interactive-user task shows a fixed yellow dot while an
+Evidence Recorder holds the session-local
+`Local\WindowsAgent.Evidence.Recording.v1` signal; the dot disappears within
+one polling interval after the finite run stops or the recorder exits. While an Action is
+running, the compact background-free top-left viewfinder additionally shows a
+blinking red dot, the short Action name, and at most the latest three explicit
+`stream.activity` records. Terminal Action states disappear automatically.
+The OSD is excluded from screen capture by default; `-AllowCapture` is intended
+only for visual acceptance evidence.
 
 Run the partially landed event-stream service independently on loopback:
 
@@ -302,7 +306,9 @@ $tokenRng.GetBytes($tokenBytes)
 ```
 
 Run the partially landed Elite Dangerous visual log as its own process after
-the Evidence recorder and event stream are healthy. The model key file is local
+the Evidence recorder and event stream are healthy. Both processes may remain
+idle; before starting a Visual Log run, explicitly start a finite Evidence run
+and wait for its state to become `recording`. The model key file is local
 operator configuration and must not be stored in the Rule:
 
 ```powershell
@@ -331,8 +337,9 @@ Starting a run creates a new producer session and performs the configured
 warm-up before the process-owned description loop becomes active. Stopping the
 run leaves the independent process idle and has no path to the evidence layer.
 
-Run the evidence recorder as a separate always-recording PC process. The token
-is local operator configuration and the data directory contains private video:
+Run the evidence recorder as a separate on-demand PC process. The process stays
+idle until an authenticated finite recording run is accepted. The token is
+local operator configuration and the data directory contains private video:
 
 ```powershell
 .\.build\windows-evidence-recorder.exe `
@@ -342,24 +349,41 @@ is local operator configuration and the data directory contains private video:
   --token-file (Resolve-Path .\evidence.token)
 ```
 
-The process owns one persistent WGC session, samples its newest frame at 1 FPS,
-and records 1080p H.264 MP4 segments. Each second is a video sample or an
-explicit gap; Visual Log and Gemma failures do not terminate the recorder. It
-has no HTTP start, stop, pause, or delete route. Its loopback API is:
+Process startup does not open WGC or show the recording indicator. A finite run
+obtains Windows borderless-capture consent, owns one persistent WGC session
+with `IsBorderRequired=false`, samples its newest frame at 1 FPS, and records
+1080p H.264 MP4 segments. Denied or unsupported borderless access fails that
+run; it never silently records with the Windows capture border still visible.
+Each second is a video sample or an explicit gap; Visual Log and Gemma failures
+do not terminate the run. Its loopback API is:
 
 ```text
 GET http://127.0.0.1:8792/healthz
 GET http://127.0.0.1:8792/v1/evidence/status
+POST http://127.0.0.1:8792/v1/evidence/runs
+GET http://127.0.0.1:8792/v1/evidence/runs/<runId>
 GET http://127.0.0.1:8792/v1/evidence/range?from=<UTC>&to=<UTC>
 POST http://127.0.0.1:8792/v1/evidence/contact-sheet
 ```
+
+Start a default 20-minute run with `{}`, or request a shorter run with strict
+JSON such as `{"durationSeconds":300}`. `durationSeconds` is optional but, when
+present, must be an integer from 1 through 1200. Twenty minutes is both the
+default and the hard maximum. A successful start returns HTTP 202 with
+`finite:true`, `runId`, `durationSeconds`, `requestedAt`, and `endsAt`; the
+deadline starts when the request is accepted. State advances from `starting`
+to `recording` only after WGC and the recording indicator have started, then to
+`completed` after the deadline and final segment commit. There is no extension,
+manual stop, pause, or delete route. Starting while another run is active
+returns HTTP 409 `EVIDENCE_RUN_ACTIVE` with that run's finite deadline.
 
 Every evidence route except health requires the Evidence Bearer token. A
 successful half-open UTC
 range returns a ZIP with `manifest.json`, explicit committed gaps,
 `missingSlots` for recorder downtime, and integrity-checked overlapping MP4
 segments. Visual Log reads only the configured PC-local frame tap; it cannot
-control recording or download individual Evidence frames over HTTP.
+implicitly start or extend Evidence, or download individual Evidence frames
+over HTTP.
 
 The authenticated contact-sheet route accepts strict JSON containing `from`,
 `columns`, `rows`, and `intervalSeconds`. The PC decodes exact timestamps from
@@ -837,9 +861,10 @@ internal/actioncheck/            offline Action package and dependency validatio
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
-internal/evidence/               authoritative video store, range archive, and contact-sheet renderer
-internal/evidencehttp/           authenticated Evidence read interface
+internal/evidence/               finite recording lifecycle, authoritative video store, range archive, and contact sheets
+internal/evidencehttp/           authenticated Evidence run-control and read interface
 internal/mfvideo/                native Media Foundation Evidence encoder and decoder
+internal/recordingindicator/      session-local Evidence recording-presence signal
 internal/visuallog/              strict Game config, evidence/model adapters, and producer loop
 internal/visualloghttp/          authenticated loopback visual-log control adapter
 internal/watchdog/               target probes, bounded recovery, atomic status

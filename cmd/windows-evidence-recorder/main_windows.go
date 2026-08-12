@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -23,39 +22,11 @@ import (
 	"github.com/qoli/WindowsAgent/internal/evidencehttp"
 	"github.com/qoli/WindowsAgent/internal/frametap"
 	"github.com/qoli/WindowsAgent/internal/mfvideo"
+	"github.com/qoli/WindowsAgent/internal/recordingindicator"
 	"github.com/qoli/WindowsAgent/internal/wgc"
 )
 
 type options struct{ config, dataDir, listen, tokenFile string }
-type statusTracker struct {
-	mu    sync.Mutex
-	value evidencehttp.Status
-}
-
-func (t *statusTracker) snapshot() evidencehttp.Status {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.value
-}
-func (t *statusTracker) commit(record evidence.Record) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.value.LastScheduledAt = record.ScheduledAt
-	if record.Kind == "frame" {
-		t.value.Frames++
-	} else {
-		t.value.Gaps++
-		if record.Gap != nil {
-			t.value.LastError = record.Gap.Error
-		}
-	}
-}
-func (t *statusTracker) tapFailed(err error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.value.TapFailures++
-	t.value.LastTapError = err.Error()
-}
 
 func main() {
 	if err := run(); err != nil {
@@ -93,8 +64,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	tracker := &statusTracker{value: evidencehttp.Status{State: "recording", StartedAt: time.Now().UTC()}}
-	api, err := evidencehttp.New(store, mfvideo.NewDecoder(), token, time.Duration(config.MaxRangeSeconds)*time.Second, tracker.snapshot)
+	recordingIndicator := recordingindicator.NewPublisher()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	recorder := evidence.Recorder{Config: config, Stream: capturer, Lifecycle: recordingIndicator, Sink: store, FrameTap: tap}
+	controller, err := evidence.NewRunController(ctx, recorder)
+	if err != nil {
+		return err
+	}
+	defer controller.Close()
+	api, err := evidencehttp.New(store, mfvideo.NewDecoder(), token, time.Duration(config.MaxRangeSeconds)*time.Second, controller)
 	if err != nil {
 		return err
 	}
@@ -104,11 +83,7 @@ func run() error {
 	}
 	defer listener.Close()
 	server := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 10 * time.Minute, IdleTimeout: 60 * time.Second}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	recorder := evidence.Recorder{Config: config, Stream: capturer, Sink: store, FrameTap: tap, OnCommitted: tracker.commit, OnTapFailed: tracker.tapFailed}
-	errorsChannel := make(chan error, 2)
-	go func() { errorsChannel <- recorder.Run(ctx) }()
+	errorsChannel := make(chan error, 1)
 	go func() {
 		err := server.Serve(listener)
 		if errors.Is(err, http.ErrServerClosed) {
@@ -116,15 +91,18 @@ func run() error {
 		}
 		errorsChannel <- err
 	}()
-	first := <-errorsChannel
-	stop()
-	shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = server.Shutdown(shutdownContext)
-	if first != nil {
-		return first
+	select {
+	case serveErr := <-errorsChannel:
+		stop()
+		return serveErr
+	case <-ctx.Done():
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			return err
+		}
+		return <-errorsChannel
 	}
-	return nil
 }
 func parseFlags(args []string) (options, error) {
 	flags := flag.NewFlagSet("windows-evidence-recorder", flag.ContinueOnError)

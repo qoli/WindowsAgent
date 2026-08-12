@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,6 +148,19 @@ func TestArchiveRejectsCorruptCommittedVideo(t *testing.T) {
 
 type fakeStream struct{ samples []videocapture.Sample }
 
+type fakeLifecycle struct {
+	started int
+	stopped int
+	err     error
+}
+
+func (l *fakeLifecycle) Start() error {
+	l.started++
+	return l.err
+}
+
+func (l *fakeLifecycle) Stop() { l.stopped++ }
+
 type fakeTap struct {
 	frames int
 	err    error
@@ -157,10 +171,14 @@ func (t *fakeTap) Publish(context.Context, videocapture.Frame) error {
 	return t.err
 }
 
-func (s fakeStream) Run(ctx context.Context, interval time.Duration, consume videocapture.Consumer) error {
+func (s fakeStream) Run(ctx context.Context, interval time.Duration, lifecycle videocapture.Lifecycle, consume videocapture.Consumer) error {
 	if interval != time.Second {
 		return errors.New("unexpected interval")
 	}
+	if err := lifecycle.Start(); err != nil {
+		return err
+	}
+	defer lifecycle.Stop()
 	for _, sample := range s.samples {
 		if err := consume(ctx, sample); err != nil {
 			return err
@@ -173,13 +191,14 @@ func TestRecorderTapFailureDoesNotStopEvidence(t *testing.T) {
 	store, _ := OpenStore(t.TempDir(), testConfig(), fakeEncoderFactory{})
 	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	tap := &fakeTap{err: errors.New("shared memory unavailable")}
+	lifecycle := &fakeLifecycle{}
 	failures := 0
-	recorder := Recorder{Config: testConfig(), Stream: fakeStream{samples: []videocapture.Sample{testFrame(at, 1), testFrame(at.Add(time.Second), 2)}}, Sink: store, FrameTap: tap, OnTapFailed: func(error) { failures++ }}
+	recorder := Recorder{Config: testConfig(), Stream: fakeStream{samples: []videocapture.Sample{testFrame(at, 1), testFrame(at.Add(time.Second), 2)}}, Lifecycle: lifecycle, Sink: store, FrameTap: tap, OnTapFailed: func(error) { failures++ }}
 	if err := recorder.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if failures != 2 || tap.frames != 2 || !store.AvailableThrough().Equal(at.Add(2*time.Second)) {
-		t.Fatalf("failures=%d tap=%d available=%s", failures, tap.frames, store.AvailableThrough())
+	if failures != 2 || tap.frames != 2 || lifecycle.started != 1 || lifecycle.stopped != 1 || !store.AvailableThrough().Equal(at.Add(2*time.Second)) {
+		t.Fatalf("failures=%d tap=%d lifecycle=%d/%d available=%s", failures, tap.frames, lifecycle.started, lifecycle.stopped, store.AvailableThrough())
 	}
 }
 
@@ -187,7 +206,8 @@ func TestRecorderConsumesPCFrameStreamWithoutCaptureRequests(t *testing.T) {
 	store, _ := OpenStore(t.TempDir(), testConfig(), fakeEncoderFactory{})
 	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	tap := &fakeTap{}
-	recorder := Recorder{Config: testConfig(), Stream: fakeStream{samples: []videocapture.Sample{testFrame(at, 1)}}, Sink: store, FrameTap: tap}
+	lifecycle := &fakeLifecycle{}
+	recorder := Recorder{Config: testConfig(), Stream: fakeStream{samples: []videocapture.Sample{testFrame(at, 1)}}, Lifecycle: lifecycle, Sink: store, FrameTap: tap}
 	if err := recorder.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -196,5 +216,18 @@ func TestRecorderConsumesPCFrameStreamWithoutCaptureRequests(t *testing.T) {
 	}
 	if tap.frames != 1 {
 		t.Fatalf("tap frames=%d", tap.frames)
+	}
+}
+
+func TestRecorderFailsBeforeSamplesWhenLifecycleCannotStart(t *testing.T) {
+	store, _ := OpenStore(t.TempDir(), testConfig(), fakeEncoderFactory{})
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	lifecycle := &fakeLifecycle{err: errors.New("recording signal unavailable")}
+	recorder := Recorder{Config: testConfig(), Stream: fakeStream{samples: []videocapture.Sample{testFrame(at, 1)}}, Lifecycle: lifecycle, Sink: store, FrameTap: &fakeTap{}}
+	if err := recorder.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "recording signal unavailable") {
+		t.Fatalf("lifecycle failure=%v", err)
+	}
+	if lifecycle.started != 1 || lifecycle.stopped != 0 || !store.AvailableThrough().IsZero() {
+		t.Fatalf("lifecycle=%d/%d available=%s", lifecycle.started, lifecycle.stopped, store.AvailableThrough())
 	}
 }

@@ -24,15 +24,17 @@ import (
 	"github.com/qoli/WindowsAgent/internal/actionrun"
 	"github.com/qoli/WindowsAgent/internal/eventclient"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/recordingindicator"
 	"golang.org/x/sys/windows"
 )
 
 const (
-	windowWidth  = int32(360)
-	windowHeight = int32(110)
-	dotWidth     = int32(18)
-	dotHeight    = int32(24)
-	margin       = int32(16)
+	windowWidth        = int32(360)
+	windowHeight       = int32(110)
+	dotWidth           = int32(18)
+	dotHeight          = int32(24)
+	recordingSlotWidth = int32(20)
+	margin             = int32(16)
 
 	lwaColorKey          = 0x00000001
 	lwaAlpha             = 0x00000002
@@ -55,6 +57,7 @@ var (
 	liveColor       win.COLORREF = rgb(255, 70, 76)
 	doneColor       win.COLORREF = rgb(64, 215, 132)
 	warningColor    win.COLORREF = rgb(255, 184, 72)
+	recordingColor  win.COLORREF = rgb(255, 204, 0)
 
 	activeWindow *overlayWindow
 )
@@ -68,11 +71,15 @@ type config struct {
 }
 
 type overlayWindow struct {
-	hwnd      win.HWND
-	dotHWND   win.HWND
-	model     *actionosd.Model
-	dotOn     bool
-	closeOnce sync.Once
+	hwnd             win.HWND
+	dotHWND          win.HWND
+	recordingDotHWND win.HWND
+	model            *actionosd.Model
+	dotOn            bool
+	recording        bool
+	failureMu        sync.Mutex
+	failure          error
+	closeOnce        sync.Once
 }
 
 func main() {
@@ -147,7 +154,9 @@ func run(cfg config, logger *slog.Logger) error {
 	defer window.destroy()
 	logger.Info("action_osd_started", "event_api_url", cfg.EventAPIURL, "after_cursor", after,
 		"minimum_event_cursor", cfg.MinimumEventCursor, "capture_excluded", !cfg.AllowCapture)
-	window.refresh()
+	if err := window.refresh(); err != nil {
+		return err
+	}
 
 	streamContext, streamCancel := context.WithCancel(context.Background())
 	defer streamCancel()
@@ -195,6 +204,9 @@ func run(cfg config, logger *slog.Logger) error {
 	for {
 		status := win.GetMessage(&message, 0, 0, 0)
 		if status == 0 {
+			if err := window.runtimeFailure(); err != nil {
+				return err
+			}
 			logger.Info("action_osd_stopped")
 			return nil
 		}
@@ -266,7 +278,7 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 	}
 	x, y := overlayPosition(win.GetForegroundWindow())
 	exStyle := uint32(win.WS_EX_TOPMOST | win.WS_EX_LAYERED | win.WS_EX_TRANSPARENT | win.WS_EX_TOOLWINDOW | win.WS_EX_NOACTIVATE)
-	hwnd := win.CreateWindowEx(exStyle, className, windowName, win.WS_POPUP, x, y, windowWidth, windowHeight, 0, 0, instance, nil)
+	hwnd := win.CreateWindowEx(exStyle, className, windowName, win.WS_POPUP, x+recordingSlotWidth, y, windowWidth, windowHeight, 0, 0, instance, nil)
 	if hwnd == 0 {
 		win.UnregisterClass(className)
 		win.DeleteObject(win.HGDIOBJ(backgroundBrush))
@@ -284,7 +296,7 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 			return nil, errorsFromLast("exclude OSD from capture")
 		}
 	}
-	dotHWND := win.CreateWindowEx(exStyle, className, windowName, win.WS_POPUP, x, y, dotWidth, dotHeight, 0, 0, instance, nil)
+	dotHWND := win.CreateWindowEx(exStyle, className, windowName, win.WS_POPUP, x+recordingSlotWidth, y, dotWidth, dotHeight, 0, 0, instance, nil)
 	if dotHWND == 0 {
 		win.DestroyWindow(hwnd)
 		return nil, errorsFromLast("create OSD pulse window")
@@ -303,7 +315,29 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 			return nil, errorsFromLast("exclude OSD pulse from capture")
 		}
 	}
-	window := &overlayWindow{hwnd: hwnd, dotHWND: dotHWND, model: model, dotOn: true}
+	recordingDotHWND := win.CreateWindowEx(exStyle, className, windowName, win.WS_POPUP, x, y, dotWidth, dotHeight, 0, 0, instance, nil)
+	if recordingDotHWND == 0 {
+		win.DestroyWindow(dotHWND)
+		win.DestroyWindow(hwnd)
+		return nil, errorsFromLast("create Evidence recording indicator window")
+	}
+	recordingLayered, _, _ := setLayeredWindowAttributes.Call(uintptr(recordingDotHWND), uintptr(backgroundColor), 255, lwaColorKey|lwaAlpha)
+	if recordingLayered == 0 {
+		win.DestroyWindow(recordingDotHWND)
+		win.DestroyWindow(dotHWND)
+		win.DestroyWindow(hwnd)
+		return nil, errorsFromLast("configure Evidence recording indicator window")
+	}
+	if !allowCapture {
+		excluded, _, _ := setWindowDisplayAffinity.Call(uintptr(recordingDotHWND), wdExcludeFromCapture)
+		if excluded == 0 {
+			win.DestroyWindow(recordingDotHWND)
+			win.DestroyWindow(dotHWND)
+			win.DestroyWindow(hwnd)
+			return nil, errorsFromLast("exclude Evidence recording indicator from capture")
+		}
+	}
+	window := &overlayWindow{hwnd: hwnd, dotHWND: dotHWND, recordingDotHWND: recordingDotHWND, model: model, dotOn: true}
 	activeWindow = window
 	win.SetTimer(hwnd, timerID, 1000, 0)
 	return window, nil
@@ -311,6 +345,10 @@ func newOverlayWindow(model *actionosd.Model, allowCapture bool) (*overlayWindow
 
 func (w *overlayWindow) destroy() {
 	w.closeOnce.Do(func() {
+		if w.recordingDotHWND != 0 {
+			win.DestroyWindow(w.recordingDotHWND)
+			w.recordingDotHWND = 0
+		}
 		if w.dotHWND != 0 {
 			win.DestroyWindow(w.dotHWND)
 			w.dotHWND = 0
@@ -334,12 +372,16 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 	case win.WM_TIMER:
 		if activeWindow != nil {
 			activeWindow.toggleDot()
-			activeWindow.refresh()
+			if err := activeWindow.refresh(); err != nil {
+				activeWindow.fail(err)
+			}
 		}
 		return 0
 	case wmModelChanged:
 		if activeWindow != nil {
-			activeWindow.refresh()
+			if err := activeWindow.refresh(); err != nil {
+				activeWindow.fail(err)
+			}
 		}
 		return 0
 	case wmNCHitTest:
@@ -349,6 +391,10 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 		return 0
 	case win.WM_DESTROY:
 		if activeWindow != nil {
+			if activeWindow.recordingDotHWND == hwnd {
+				activeWindow.recordingDotHWND = 0
+				return 0
+			}
 			if activeWindow.dotHWND == hwnd {
 				activeWindow.dotHWND = 0
 				return 0
@@ -364,16 +410,29 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 	}
 }
 
-func (w *overlayWindow) refresh() {
+func (w *overlayWindow) refresh() error {
+	recording, err := recordingindicator.Active()
+	if err != nil {
+		return fmt.Errorf("read Evidence recording state: %w", err)
+	}
+	w.recording = recording
 	snapshot := w.model.Snapshot(time.Now().UTC())
 	if !snapshot.Visible {
 		win.ShowWindow(w.hwnd, win.SW_HIDE)
 		win.ShowWindow(w.dotHWND, win.SW_HIDE)
-		return
 	}
 	x, y := overlayPosition(win.GetForegroundWindow())
-	win.SetWindowPos(w.hwnd, win.HWND_TOPMOST, x, y, windowWidth, windowHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
-	win.SetWindowPos(w.dotHWND, win.HWND_TOPMOST, x, y, dotWidth, dotHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
+	if recording {
+		win.SetWindowPos(w.recordingDotHWND, win.HWND_TOPMOST, x, y, dotWidth, dotHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
+		win.InvalidateRect(w.recordingDotHWND, nil, true)
+	} else {
+		win.ShowWindow(w.recordingDotHWND, win.SW_HIDE)
+	}
+	if !snapshot.Visible {
+		return nil
+	}
+	win.SetWindowPos(w.hwnd, win.HWND_TOPMOST, x+recordingSlotWidth, y, windowWidth, windowHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
+	win.SetWindowPos(w.dotHWND, win.HWND_TOPMOST, x+recordingSlotWidth, y, dotWidth, dotHeight, win.SWP_NOACTIVATE|win.SWP_SHOWWINDOW)
 	alpha := byte(255)
 	if snapshot.Status == actionosd.StatusLive && !w.dotOn {
 		alpha = 0
@@ -381,14 +440,32 @@ func (w *overlayWindow) refresh() {
 	setLayeredWindowAttributes.Call(uintptr(w.dotHWND), uintptr(backgroundColor), uintptr(alpha), lwaColorKey|lwaAlpha)
 	win.InvalidateRect(w.hwnd, nil, true)
 	win.InvalidateRect(w.dotHWND, nil, true)
+	return nil
 }
 
 func (w *overlayWindow) paint(hwnd win.HWND) {
+	if hwnd == w.recordingDotHWND {
+		w.paintRecordingDot()
+		return
+	}
 	if hwnd == w.dotHWND {
 		w.paintDot()
 		return
 	}
 	w.paintText()
+}
+
+func (w *overlayWindow) paintRecordingDot() {
+	var paint win.PAINTSTRUCT
+	hdc := win.BeginPaint(w.recordingDotHWND, &paint)
+	if hdc == 0 {
+		return
+	}
+	defer win.EndPaint(w.recordingDotHWND, &paint)
+	if !w.recording {
+		return
+	}
+	paintCircle(hdc, recordingColor)
 }
 
 func (w *overlayWindow) paintText() {
@@ -427,7 +504,11 @@ func (w *overlayWindow) paintDot() {
 	if !snapshot.Visible {
 		return
 	}
-	brush := solidBrush(colorForStatus(snapshot.Status))
+	paintCircle(hdc, colorForStatus(snapshot.Status))
+}
+
+func paintCircle(hdc win.HDC, color win.COLORREF) {
+	brush := solidBrush(color)
 	if brush == 0 {
 		return
 	}
@@ -437,6 +518,21 @@ func (w *overlayWindow) paintDot() {
 	previousBrush := win.SelectObject(hdc, win.HGDIOBJ(brush))
 	win.Ellipse(hdc, 2, 6, 16, 20)
 	win.SelectObject(hdc, previousBrush)
+}
+
+func (w *overlayWindow) fail(err error) {
+	w.failureMu.Lock()
+	if w.failure == nil {
+		w.failure = err
+	}
+	w.failureMu.Unlock()
+	win.PostMessage(w.hwnd, win.WM_CLOSE, 0, 0)
+}
+
+func (w *overlayWindow) runtimeFailure() error {
+	w.failureMu.Lock()
+	defer w.failureMu.Unlock()
+	return w.failure
 }
 
 func displayActionName(actionID string) string {
