@@ -31,6 +31,11 @@ reviewed 1920x1080 reference rectangle and reference sampling choice. A Rule
 runtime profile may keep the initialized worker alive only while that Rule is
 active; reuse does not make the OCR runtime a Monitor.
 
+The runtime executable uses the Windows GUI PE subsystem so a resident worker
+cannot allocate an interactive console window. Its worker protocols still use
+only the standard input, output, and error handles explicitly redirected by the
+Agent; changing the subsystem does not change the framed protocol.
+
 The Elite Dangerous path is:
 
 ```text

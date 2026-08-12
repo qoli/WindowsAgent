@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,22 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: source.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def pe_subsystem(path: Path) -> int:
+    data = path.read_bytes()
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        raise PublishError("published runtime does not have a valid DOS header")
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    optional_offset = pe_offset + 24
+    if pe_offset + 4 > len(data) or data[pe_offset : pe_offset + 4] != b"PE\0\0":
+        raise PublishError("published runtime does not have a valid PE signature")
+    if optional_offset + 0x46 > len(data):
+        raise PublishError("published runtime has a truncated PE optional header")
+    magic = struct.unpack_from("<H", data, optional_offset)[0]
+    if magic not in (0x10B, 0x20B):
+        raise PublishError(f"published runtime has unsupported PE optional-header magic 0x{magic:04x}")
+    return struct.unpack_from("<H", data, optional_offset + 0x44)[0]
 
 
 def run(argv: list[str]) -> int:
@@ -75,6 +92,10 @@ def run(argv: list[str]) -> int:
         executable = output / RUNTIME_FILENAME
         shutil.copyfile(source, executable)
 
+    subsystem = pe_subsystem(executable)
+    if subsystem != 2:
+        raise PublishError(f"published runtime has PE subsystem {subsystem}; expected Windows GUI subsystem 2")
+
     artifact = {
         "schemaVersion": 1,
         "runtimeId": RUNTIME_ID,
@@ -82,7 +103,7 @@ def run(argv: list[str]) -> int:
         "sha256": sha256_file(executable),
         "bytes": executable.stat().st_size,
         "architecture": "win-x64",
-        "subsystem": "console",
+        "subsystem": "gui",
         "selfContained": True,
         "targetFramework": "net8.0-windows",
         "onnxRuntimeDirectML": ONNX_RUNTIME_DIRECTML_VERSION,

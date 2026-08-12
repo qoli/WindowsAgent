@@ -124,6 +124,8 @@ if ($requiresOCRRuntime) {
             throw "OCR runtime bundle is missing required file: $name"
         }
     }
+    Assert-GUIExecutable -Path (Join-Path $sourceOCRRuntime "PpOcr.DirectML.exe") `
+        -Label "resident OCR runtime executable"
 }
 $resolvedDataDir = [IO.Path]::GetFullPath($DataDir)
 if (-not [IO.Path]::IsPathRooted($resolvedDataDir)) {

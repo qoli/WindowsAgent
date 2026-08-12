@@ -57,6 +57,8 @@ func TestCaptureInstallerStopsExactResidentOCRRuntimeBeforeCopy(t *testing.T) {
 	}
 	script := string(data)
 	for _, required := range []string{
+		`Assert-GUIExecutable -Path (Join-Path $sourceOCRRuntime "PpOcr.DirectML.exe")`,
+		`-Label "resident OCR runtime executable"`,
 		`$installedOCRExecutable = Join-Path $installedOCRRuntime "PpOcr.DirectML.exe"`,
 		`Where-Object { $_.Path -eq $installedOCRExecutable }`,
 		`Stop-Process -Id $residentOCRProcess.Id -Force -ErrorAction Stop`,
