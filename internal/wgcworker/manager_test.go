@@ -3,6 +3,7 @@ package wgcworker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -21,6 +22,7 @@ type fakeWorkerClient struct {
 	regionCalls int
 	closeCalls  int
 	fullErr     error
+	regionErr   error
 }
 
 type fakeCaptureNotifier struct {
@@ -50,6 +52,9 @@ func (c *fakeWorkerClient) Capture(context.Context, time.Time, capture.Request) 
 
 func (c *fakeWorkerClient) CaptureRegion(context.Context, time.Time, capture.RegionRequest) (capture.RegionResult, error) {
 	c.regionCalls++
+	if c.regionErr != nil {
+		return capture.RegionResult{}, c.regionErr
+	}
 	return capture.RegionResult{ImageWidth: 10, ImageHeight: 10}, nil
 }
 
@@ -99,7 +104,7 @@ func TestCapturerReusesOneHealthyWorkerGeneration(t *testing.T) {
 	}
 }
 
-func TestCapturerDoesNotReplayFailedRequestAndStartsNextGenerationLater(t *testing.T) {
+func TestCapturerDoesNotReplayDomainFailureAndStartsNextGenerationLater(t *testing.T) {
 	first := &fakeWorkerClient{pid: 41, fullErr: capture.Failure("capture_readback_failed", "D3D11 Map failed", errors.New("worker exited"))}
 	second := &fakeWorkerClient{pid: 42}
 	clients := []workerClient{first, second}
@@ -129,6 +134,49 @@ func TestCapturerDoesNotReplayFailedRequestAndStartsNextGenerationLater(t *testi
 	}
 	if starts != 2 || second.fullCalls != 1 {
 		t.Fatalf("next generation not used: starts=%d second=%d", starts, second.fullCalls)
+	}
+}
+
+func TestCapturerRetriesRegionTransportEOFAcrossWorkerGenerations(t *testing.T) {
+	first := &fakeWorkerClient{pid: 41, regionErr: fmt.Errorf("read frame header: %w", io.EOF)}
+	second := &fakeWorkerClient{pid: 42}
+	clients := []workerClient{first, second}
+	starts := 0
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			client := clients[starts]
+			starts++
+			return client, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := capturer.CaptureRegion(context.Background(), capture.RegionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if starts != 2 || first.regionCalls != 1 || first.closeCalls != 1 || second.regionCalls != 1 || result.ImageWidth != 10 {
+		t.Fatalf("starts=%d first=%d/%d second=%d result=%+v", starts, first.regionCalls, first.closeCalls, second.regionCalls, result)
+	}
+}
+
+func TestCapturerDoesNotRetryNonTransportRegionFailure(t *testing.T) {
+	client := &fakeWorkerClient{pid: 41, regionErr: capture.Failure("capture_readback_failed", "D3D11 Map failed", errors.New("HRESULT"))}
+	starts := 0
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			starts++
+			return client, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = capturer.CaptureRegion(context.Background(), capture.RegionRequest{})
+	if err == nil {
+		t.Fatal("expected region failure")
+	}
+	if starts != 1 || client.regionCalls != 1 || client.closeCalls != 1 {
+		t.Fatalf("non-transport failure was retried: starts=%d calls=%d closes=%d", starts, client.regionCalls, client.closeCalls)
 	}
 }
 

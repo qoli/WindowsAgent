@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,8 @@ import (
 	"github.com/qoli/WindowsAgent/internal/captureindicator"
 )
 
+const maxTransportAttempts = 5
+
 type workerClient interface {
 	PID() int
 	Status(context.Context, time.Time) (capture.Status, error)
@@ -25,9 +28,10 @@ type workerClient interface {
 
 type workerStarter func(context.Context, string, bool, *slog.Logger) (workerClient, error)
 
-// Capturer is the Agent-side adapter for one crash-isolated persistent WGC
-// worker generation. A failed call retires that generation without replaying
-// the request. A later independent call may start a new generation.
+// Capturer is the Agent-side adapter for crash-isolated persistent WGC worker
+// generations. An idempotent capture request may be replayed on a fresh
+// generation only after an explicit worker transport EOF. Capture/provider
+// failures remain terminal and are never changed or retried here.
 type Capturer struct {
 	mu           sync.Mutex
 	executable   string
@@ -111,17 +115,28 @@ func (c *Capturer) Capture(ctx context.Context, request capture.Request) (captur
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	client, err := c.clientLocked(ctx)
-	if err != nil {
-		return capture.Result{}, err
-	}
 	c.notifyCapture("full")
-	result, err := client.Capture(ctx, deadline, request)
-	if err != nil {
+	for attempt := 1; attempt <= maxTransportAttempts; attempt++ {
+		client, err := c.clientLocked(ctx)
+		if err != nil {
+			return capture.Result{}, err
+		}
+		result, err := client.Capture(ctx, deadline, request)
+		if err == nil {
+			return result, nil
+		}
 		c.retireLocked("capture_failed", err)
-		return capture.Result{}, fmt.Errorf("persistent WGC worker capture: %w", err)
+		if attempt == maxTransportAttempts || !retryableTransportFailure(err) {
+			return capture.Result{}, fmt.Errorf("persistent WGC worker capture: %w", err)
+		}
+		c.logger.WarnContext(ctx, "wgc_worker_transport_retry",
+			"capture_kind", "full",
+			"attempt", attempt,
+			"max_attempts", maxTransportAttempts,
+			"error", err,
+		)
 	}
-	return result, nil
+	return capture.Result{}, errors.New("unreachable persistent WGC worker capture retry state")
 }
 
 func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequest) (capture.RegionResult, error) {
@@ -131,17 +146,32 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	client, err := c.clientLocked(ctx)
-	if err != nil {
-		return capture.RegionResult{}, err
-	}
 	c.notifyCapture("region")
-	result, err := client.CaptureRegion(ctx, deadline, request)
-	if err != nil {
+	for attempt := 1; attempt <= maxTransportAttempts; attempt++ {
+		client, err := c.clientLocked(ctx)
+		if err != nil {
+			return capture.RegionResult{}, err
+		}
+		result, err := client.CaptureRegion(ctx, deadline, request)
+		if err == nil {
+			return result, nil
+		}
 		c.retireLocked("region_failed", err)
-		return capture.RegionResult{}, fmt.Errorf("persistent WGC worker region capture: %w", err)
+		if attempt == maxTransportAttempts || !retryableTransportFailure(err) {
+			return capture.RegionResult{}, fmt.Errorf("persistent WGC worker region capture: %w", err)
+		}
+		c.logger.WarnContext(ctx, "wgc_worker_transport_retry",
+			"capture_kind", "region",
+			"attempt", attempt,
+			"max_attempts", maxTransportAttempts,
+			"error", err,
+		)
 	}
-	return result, nil
+	return capture.RegionResult{}, errors.New("unreachable persistent WGC worker region retry state")
+}
+
+func retryableTransportFailure(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 func (c *Capturer) notifyCapture(kind string) {
