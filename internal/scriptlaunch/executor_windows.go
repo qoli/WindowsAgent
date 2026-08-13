@@ -23,8 +23,8 @@ import (
 )
 
 const maxLauncherOutputBytes = 1 << 20
-const maxWGCTransportAttempts = 5
-const wgcTransportRetryDelay = 100 * time.Millisecond
+const maxWGCObservationAttempts = 5
+const wgcObservationRetryDelay = 100 * time.Millisecond
 
 type LocalExecutor struct {
 	launcher string
@@ -109,28 +109,16 @@ func (e *LocalExecutor) Run(ctx context.Context, invocation Invocation) (json.Ra
 		return nil, fmt.Errorf("write Script request: %w", err)
 	}
 
-	for attempt := 1; attempt <= maxWGCTransportAttempts; attempt++ {
-		output, err := e.runAttempt(ctx, invocation, requestPath, foregroundInfo)
-		if err == nil || attempt == maxWGCTransportAttempts || !retryableWGCTransportFailure(err) {
-			return output, err
-		}
-		e.logger.WarnContext(ctx, "script_wgc_transport_retry",
-			"capability", invocation.Capability,
-			"attempt", attempt,
-			"max_attempts", maxWGCTransportAttempts,
-			"error", err,
-		)
-		timer := time.NewTimer(wgcTransportRetryDelay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return nil, errors.New("unreachable Script transport retry state")
+	return runWithSilentWGCObservationRetry(
+		ctx,
+		invocation.Capability,
+		maxWGCObservationAttempts,
+		wgcObservationRetryDelay,
+		e.logger,
+		func() (json.RawMessage, error) {
+			return e.runAttempt(ctx, invocation, requestPath, foregroundInfo)
+		},
+	)
 }
 
 func (e *LocalExecutor) runAttempt(

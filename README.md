@@ -37,17 +37,19 @@ The screenshot capability is available today:
 - strict JSON errors with no GDI or hidden provider fallback; one
   crash-isolated worker generation keeps its WGC session, D3D11
   device/context, frame pool, and region shader resident across requests
-- a failed worker call is never replayed; that generation is retired and only
-  a later independent request may start a fresh generation
+- a failed WGC provider call is never replayed inside the worker adapter; that
+  generation is retired and only a later request may start a fresh generation
 - optional hidden startup through an interactive-user Scheduled Task
 
 The generic Starlark launcher and finite Script capabilities are available
 today:
 
-- a Script `screen.readRegion` whose Observer transport exits with the exact
-  broker EOF signature may restart its isolated launch up to five times, with
-  a bounded delay between attempts; unrelated and exhausted failures remain
-  explicit and terminal
+- a read-only `windows-observation-v1` Action whose `screen.readRegion` fails
+  with `SCREEN_CAPTURE_FAILED`, or whose Observer transport exits with the
+  exact screen broker EOF signature, is silently relaunched as a complete
+  package for up to five total attempts with a bounded delay; structured
+  runtime logs retain every scheduled retry, recovery, and exhaustion while
+  unrelated and exhausted failures remain explicit and terminal
 
 - `crimson-desert/inventory` performs a finite memory attempt and, only when
   that attempt cannot produce a valid inventory, discovers and decodes the

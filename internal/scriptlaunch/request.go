@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
@@ -114,12 +116,91 @@ func parseLauncherOutput(output []byte, runErr error) (json.RawMessage, error) {
 	return append(json.RawMessage(nil), output...), nil
 }
 
-func retryableWGCTransportFailure(err error) bool {
+type wgcObservationRetryKind string
+
+const (
+	wgcObservationRetryObserverEOF    wgcObservationRetryKind = "observer_transport_eof"
+	wgcObservationRetryCaptureFailure wgcObservationRetryKind = "screen_capture_failed"
+)
+
+func classifyWGCObservationRetry(err error) (wgcObservationRetryKind, bool) {
 	var typed *Error
-	if !errors.As(err, &typed) || typed.Code != "JOB_BROKER_FAILED" || typed.Stage != "brokering-observer-calls" {
-		return false
+	if !errors.As(err, &typed) {
+		return "", false
 	}
-	message := typed.Error()
-	return strings.Contains(message, "read observer response for screen.readRegion") &&
-		strings.Contains(message, "read frame header: EOF")
+	if typed.Code == "SCREEN_CAPTURE_FAILED" && typed.Stage == "brokering-observer-call" {
+		return wgcObservationRetryCaptureFailure, true
+	}
+	if typed.Code == "JOB_BROKER_FAILED" && typed.Stage == "brokering-observer-calls" {
+		message := typed.Error()
+		if strings.Contains(message, "read observer response for screen.readRegion") &&
+			strings.Contains(message, "read frame header: EOF") {
+			return wgcObservationRetryObserverEOF, true
+		}
+	}
+	return "", false
+}
+
+func runWithSilentWGCObservationRetry(
+	ctx context.Context,
+	capability string,
+	maxAttempts int,
+	delay time.Duration,
+	logger *slog.Logger,
+	attempt func() (json.RawMessage, error),
+) (json.RawMessage, error) {
+	if ctx == nil || capability == "" || maxAttempts <= 0 || delay < 0 || logger == nil || attempt == nil {
+		return nil, errors.New("silent WGC observation retry requires context, capability, positive attempts, non-negative delay, logger, and attempt")
+	}
+	startedAt := time.Now()
+	retryCount := 0
+	for attemptNumber := 1; attemptNumber <= maxAttempts; attemptNumber++ {
+		output, err := attempt()
+		if err == nil {
+			if retryCount > 0 {
+				logger.InfoContext(ctx, "observation_wgc_retry_recovered",
+					"capability", capability,
+					"attempts", attemptNumber,
+					"retry_count", retryCount,
+					"elapsed_ms", time.Since(startedAt).Milliseconds(),
+				)
+			}
+			return output, nil
+		}
+		kind, retryable := classifyWGCObservationRetry(err)
+		if !retryable {
+			return nil, err
+		}
+		retryCount++
+		if attemptNumber == maxAttempts {
+			logger.ErrorContext(ctx, "observation_wgc_retry_exhausted",
+				"capability", capability,
+				"failure_kind", kind,
+				"attempts", attemptNumber,
+				"retry_count", retryCount-1,
+				"elapsed_ms", time.Since(startedAt).Milliseconds(),
+				"error", err,
+			)
+			return nil, err
+		}
+		logger.WarnContext(ctx, "observation_wgc_retry_scheduled",
+			"capability", capability,
+			"failure_kind", kind,
+			"failed_attempt", attemptNumber,
+			"next_attempt", attemptNumber+1,
+			"max_attempts", maxAttempts,
+			"elapsed_ms", time.Since(startedAt).Milliseconds(),
+			"error", err,
+		)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, errors.New("unreachable silent WGC observation retry state")
 }

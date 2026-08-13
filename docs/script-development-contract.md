@@ -50,7 +50,11 @@ The package owns:
 WindowsAgent Core owns only generic execution: package validation, bounded
 Starlark, permission enforcement, read-only Observer calls, job-scoped blobs,
 generic Windows amd64 FFI, owning-Rule process binding, exact Host resource
-bindings, process isolation, deadlines, accounting, and provenance.
+bindings, process isolation, deadlines, accounting, provenance, and bounded
+same-provider replay of a complete read-only package after a structured WGC
+screen-capture or exact screen-broker transport failure. The replay is a
+runtime implementation detail: packages must not branch on it or emit domain
+events for it, and Core logs every retry, recovery, and exhaustion.
 
 Do not move package knowledge into `internal/observer`,
 `internal/observationjob`, `internal/scriptrunner`, or a command merely to make
@@ -156,7 +160,9 @@ value of `reference` or `native`. Core maps through a centered 16:9 viewport.
 Reference sampling returns exactly `w` by `h` pixels; native sampling preserves
 the mapped physical density. `maxPixels` bounds the returned image in either
 mode. Invalid mapping, unknown sampling, foreground identity drift, malformed
-pixel evidence, shader failure, and budget exhaustion are terminal. UI
+pixel evidence, and budget exhaustion are terminal. A structured WGC
+screen-capture failure may cause Core to replay the complete read-only package;
+exhausted replay remains terminal. UI
 location, sampling choice, color rules, and evidence thresholds belong to the
 package, not Core.
 
