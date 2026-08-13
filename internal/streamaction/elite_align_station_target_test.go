@@ -301,17 +301,16 @@ func TestEliteAlignStationTargetStaticNormalSpaceUsesStableStationHandoffGate(t 
 		t.Fatal(err)
 	}
 	if !contains(string(output), `"completed":true`) ||
-		!contains(string(output), `"sampleCount":5`) ||
+		!contains(string(output), `"sampleCount":4`) ||
 		!contains(string(output), `"stableConfirmations":3`) ||
 		!contains(string(output), `"targetMotion":"STATIC"`) {
 		t.Fatalf("output=%s", output)
 	}
-	if strings.Join(caller.holdOps, ",") != "START,STOP,START,STOP" ||
-		strings.Join(caller.holdControls, ",") != "PITCH_UP_YAW_RIGHT,PITCH_UP_YAW_RIGHT,PITCH_DOWN_YAW_LEFT,PITCH_DOWN_YAW_LEFT" {
-		t.Fatalf("holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
+	if len(caller.holdOps) != 0 || len(caller.holdControls) != 0 {
+		t.Fatalf("static near-Gate correction must not drive both axes: holdOps=%v holdControls=%v", caller.holdOps, caller.holdControls)
 	}
-	if len(caller.controls) != 0 {
-		t.Fatalf("static handoff vector brake must stay under the paired-key lease: controls=%v holds=%v", caller.controls, caller.holds)
+	if strings.Join(caller.controls, ",") != "YAW_RIGHT" || len(caller.holds) != 1 || caller.holds[0] != 80 {
+		t.Fatalf("static near-Gate correction must use one 80ms dominant-axis pulse: controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 
@@ -337,13 +336,12 @@ func TestEliteAlignStationTargetStaticNormalSpaceAcceptsQuantizedPlanetEquilibri
 	}
 }
 
-func TestEliteAlignStationTargetStaticNormalSpaceBrakesMediumPitchEntry(t *testing.T) {
+func TestEliteAlignStationTargetStaticNormalSpaceUsesFinePulseWithoutBrakeNearGate(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 0, -17, 17, false),
-		alignObservation("SOLID", 0, -11, 11, false),
-		alignObservation("SOLID", 0, -10, 10, false),
-		alignObservation("SOLID", 0, -9, 9, false),
-		alignObservation("SOLID", 0, -8, 8, false),
+		alignObservation("SOLID", 0, -14, 14, false),
+		alignObservation("SOLID", 0, -13, 13, false),
+		alignObservation("SOLID", 0, -12, 12, false),
 	}}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
@@ -354,17 +352,17 @@ func TestEliteAlignStationTargetStaticNormalSpaceBrakesMediumPitchEntry(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":5`) {
+	if !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":4`) {
 		t.Fatalf("output=%s", output)
 	}
-	if strings.Join(caller.controls, ",") != "PITCH_UP,PITCH_DOWN" ||
-		len(caller.holds) != 2 || caller.holds[0] != 300 || caller.holds[1] != 100 {
+	if strings.Join(caller.controls, ",") != "PITCH_UP" ||
+		len(caller.holds) != 1 || caller.holds[0] != 80 {
 		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
 	}
 	joined := joinEventPhases(reporter.payloads)
-	if !contains(joined, `"reason":"CENTER_ENTRY_BRAKE"`) ||
-		!contains(joined, `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
-		t.Fatalf("events=%s", joined)
+	if contains(joined, `"reason":"CENTER_ENTRY_BRAKE"`) ||
+		contains(joined, `"reason":"WAITING_POST_BRAKE_OBSERVATION"`) {
+		t.Fatalf("near-Gate fine pulse must not trigger the retired brake cycle: events=%s", joined)
 	}
 }
 

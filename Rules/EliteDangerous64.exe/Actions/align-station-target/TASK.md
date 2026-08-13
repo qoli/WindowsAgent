@@ -139,8 +139,17 @@ otherwise old continuous-control evidence can incorrectly promote that pulse
 to the 240 ms recovery strength. Live automatic-profile testing measured a
 former 1000 ms recovery crossing the center by 34 reference pixels; 240 ms
 retains a stronger recovery without repeating that overshoot.
-Normal-space entry braking retains its own 16-pixel fine-band boundary and
-100 ms duration. This
+Normal-space STATIC alignment now treats the 16–32-pixel pre-Gate band as
+single-axis fine control with an 80 ms pulse and does not apply the
+medium-pulse brake there. Live Evidence first showed the retired 300 ms pulse
+plus 100 ms brake cycling from 10–12 pixels back to 16–18 pixels for 56
+commands. After removing that brake, a two-axis target still cycled between
+17–25 pixels because both near-center axes received the same 120 ms pulse and
+the 25-pixel sample re-entered the 300 ms path. The current policy converges
+only the dominant component in this band, without changing diagonal control
+for larger entries or other profiles. Larger normal-space entries retain the
+bounded 100 ms brake, and every post-brake completion still requires fresh
+observations. This
 profile remains limited to front-hemisphere coarse hyperspace/Supercruise
 alignment. A live 32-pixel experiment was
 rejected because a 28.8-pixel Compass result still left the target label outside

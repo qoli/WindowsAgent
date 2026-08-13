@@ -7,6 +7,8 @@ STABLE_CENTER_CONFIRMATIONS = 3
 ALIGN_CENTER_RADIUS_PIXELS = 4.0
 NORMAL_SPACE_STATIC_ALIGN_CENTER_RADIUS_PIXELS = 16.0
 NORMAL_SPACE_STATIC_ALIGN_HYSTERESIS_PIXELS = 4.0
+NORMAL_SPACE_STATIC_FINE_DISTANCE_PIXELS = 32.0
+NORMAL_SPACE_STATIC_FINE_HOLD_MS = 80
 SUPERCRUISE_CENTER_RADIUS_PIXELS = 16.0
 SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS = 20.0
 SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 4.0
@@ -123,9 +125,10 @@ def is_alignment_centered(target, radius_pixels):
         target["centerDistancePixels"] <= radius_pixels
     )
 
-def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, supercruise_profile):
+def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, supercruise_profile, single_axis_fine=False):
     offset_x = target["offsetX"]
     offset_y = target["offsetY"]
+    distance = target["centerDistancePixels"]
     control = None
     if target["presentation"] == "HOLLOW":
         # Rear-projection offsets are not steering directions. Near the
@@ -135,6 +138,7 @@ def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, 
         control = "PITCH_UP"
     elif (
         target["presentation"] == "SOLID" and
+        not (single_axis_fine and distance <= fine_distance_pixels) and
         abs(offset_x) >= FINE_DIAGONAL_COMPONENT_MIN_PIXELS and
         abs(offset_y) >= FINE_DIAGONAL_COMPONENT_MIN_PIXELS and
         abs(offset_x) <= abs(offset_y) * 2 and
@@ -147,7 +151,6 @@ def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, 
         control = choose_front_control(target)
     if control == None:
         return None
-    distance = target["centerDistancePixels"]
     hold_ms = COARSE_HOLD_MS
     if distance <= fine_distance_pixels:
         hold_ms = fine_hold_ms
@@ -289,6 +292,17 @@ def main(ctx):
         alignment_radius = SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS
     fine_distance = SUPERCRUISE_FINE_DISTANCE_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else FINE_DISTANCE_PIXELS
     fine_hold = FINE_HOLD_MS
+    single_axis_fine = False
+    if control_profile == "NORMAL_SPACE" and mode == "ALIGN" and target_motion == "STATIC":
+        # Live normal-space evidence first showed a deterministic 10-18 px
+        # brake sawtooth, then a second two-axis 17-25 px cycle after that
+        # brake was removed. Inside 32 px, converge one dominant axis at a
+        # time with an 80 ms pulse. This prevents the already-near component
+        # from being driven by the other component's correction and keeps the
+        # whole calibrated band out of the 300 ms medium-pulse path.
+        fine_distance = NORMAL_SPACE_STATIC_FINE_DISTANCE_PIXELS
+        fine_hold = NORMAL_SPACE_STATIC_FINE_HOLD_MS
+        single_axis_fine = True
     if control_profile == "SUPERCRUISE_ASSIST":
         fine_hold = SUPERCRUISE_TRACK_FINE_HOLD_MS if mode == "TRACK" else SUPERCRUISE_FINE_HOLD_MS
     sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
@@ -764,7 +778,7 @@ def main(ctx):
                 track_hold_ms = SUPERCRUISE_RECOVERY_HOLD_MS if supercruise_profile and no_movement_count >= 2 else fine_hold
                 pulse = [track_recovery_control, track_hold_ms]
             else:
-                pulse = choose_pulse(control_target, no_movement_count, fine_distance, fine_hold, supercruise_profile)
+                pulse = choose_pulse(control_target, no_movement_count, fine_distance, fine_hold, supercruise_profile, single_axis_fine)
                 if (
                     mode == "TRACK" and
                     supercruise_profile and
