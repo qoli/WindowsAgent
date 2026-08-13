@@ -100,8 +100,8 @@
     </li>
     <li class="loop-card">
       <span class="loop-num">05</span>
-      <h3 data-i18n="loop.5.t">Feedback</h3>
-      <p data-i18n="loop.5.d">Every step lands in an append-only event journal the agent can replay — the shared timeline for planning.</p>
+      <h3 data-i18n="loop.5.t">Review</h3>
+      <p data-i18n="loop.5.d">Every step lands in an append-only event journal; 1 FPS Evidence and the Gemma index let the agent replay, locate the fault, and repair the action.</p>
     </li>
   </ol>
 </section>
@@ -147,42 +147,57 @@
         <li data-i18n="rt.p4.4">Bad requests fail explicitly; nothing degrades silently</li>
       </ul>
     </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">INDEX</span><span data-i18n="rt.p5.t">Visual Log</span></h3>
+      <ul>
+        <li data-i18n="rt.p5.1">Bounded 1 FPS Evidence recordings — MP4 segments, SHA-256 manifest</li>
+        <li data-i18n="rt.p5.2">Contact sheets and UTC-range ZIP export for fast localization</li>
+        <li data-i18n="rt.p5.3">On-demand gemma-4-e4b-it-8bit scene index over a LAN oMLX endpoint</li>
+        <li data-i18n="rt.p5.4">Untrusted index only — verification always lands on authoritative Evidence</li>
+      </ul>
+    </article>
   </div>
 </section>
 
-<!-- ============ DUAL-SPEED DESIGN ============ -->
+<!-- ============ THREE-LINE DESIGN ============ -->
 <section id="design" class="section">
-  <p class="section-kicker" data-i18n="ds.kicker">Two-speed architecture</p>
-  <h2 data-i18n="ds.title">Slow planning meets fast reflexes</h2>
-  <p class="section-sub" data-i18n="ds.sub">The high-level model never sits in the fast path. It plans and supervises; streaming actions react in real time behind hard evidence gates. The event journal joins the two.</p>
-  <p class="ds-problem"><span class="ds-problem-num" data-i18n="ds.problem.num">~10s</span><span data-i18n="ds.problem.d">is one raw LLM screenshot-think-act turn. Games don't wait — so the fast path belongs to streaming actions, while the model plans and authors new actions.</span></p>
-  <div class="dual">
-    <div class="dual-col dual-slow">
-      <h3 data-i18n="ds.slow.t">Slow · The Planner</h3>
-      <p class="dual-role" data-i18n="ds.slow.role">High-level model · Codex / OpenCode</p>
-      <ul>
-        <li data-i18n="ds.slow.1">Captures the screen and reasons about the goal</li>
-        <li data-i18n="ds.slow.2">Arranges UI one logical key at a time</li>
-        <li data-i18n="ds.slow.3">Starts, watches, and stops streaming actions</li>
-        <li data-i18n="ds.slow.4">Replays the event timeline to plan the next move</li>
-      </ul>
-    </div>
-    <div class="dual-seam">
-      <span class="dual-seam-label" data-i18n="ds.seam">event journal</span>
-      <span class="dual-seam-line"></span>
-      <span class="dual-seam-sub" data-i18n="ds.seam.sub">append-only · durable · replayable</span>
-    </div>
+  <p class="section-kicker" data-i18n="ds.kicker">Three-line architecture</p>
+  <h2 data-i18n="ds.title">Three lines, one agent</h2>
+  <p class="section-sub" data-i18n="ds.sub">The fast path never waits for a model. Streaming actions fly the ship; the visual log records and indexes what happened; the high-level agent plans, supervises — and repairs the actions themselves.</p>
+  <p class="ds-problem"><span class="ds-problem-num" data-i18n="ds.problem.num">0 model calls</span><span data-i18n="ds.problem.d">in the fast path. Any model-in-the-loop reaction — local or remote — costs seconds per step, burns tokens on every frame, and can't be verified. Reflexes here are deterministic Starlark: bounded, replayable, exact. The model plans; code reacts.</span></p>
+  <div class="trio">
     <div class="dual-col dual-fast">
       <h3 data-i18n="ds.fast.t">Fast · The Reflex</h3>
       <p class="dual-role" data-i18n="ds.fast.role">Streaming Starlark actions</p>
       <ul>
-        <li data-i18n="ds.fast.1">Observe → gate → key pulse → emit event</li>
-        <li data-i18n="ds.fast.2">Hard gates: consecutive frames, confidence margins</li>
-        <li data-i18n="ds.fast.3">Fails explicitly when evidence runs out</li>
+        <li data-i18n="ds.fast.1">Observe → gate → key pulse → emit, on a 250 ms cadence</li>
+        <li data-i18n="ds.fast.2">Hard gates: consecutive frames, confidence margins, sample budgets</li>
+        <li data-i18n="ds.fast.3">40–160 ms scan-code pulses; critical compensation on exit</li>
         <li data-i18n="ds.fast.4">Interruptible, always bounded, never guessing</li>
       </ul>
     </div>
+    <div class="dual-col trio-index">
+      <h3 data-i18n="ds.index.t">Index · The Visual Log</h3>
+      <p class="dual-role" data-i18n="ds.index.role">1 FPS Evidence + gemma-4-e4b-it-8bit</p>
+      <ul>
+        <li data-i18n="ds.index.1">Bounded 1 FPS 1080p recordings — MP4 segments, SHA-256 manifest, contact sheets</li>
+        <li data-i18n="ds.index.2">On-demand Gemma scene index, one frame per tick, over a LAN oMLX endpoint</li>
+        <li data-i18n="ds.index.3">An untrusted locator: narrows the interval, never authoritative evidence</li>
+        <li data-i18n="ds.index.4">Failure-isolated — a bad description drops one sample; recording never stops</li>
+      </ul>
+    </div>
+    <div class="dual-col dual-slow">
+      <h3 data-i18n="ds.slow.t">Slow · The Planner-Developer</h3>
+      <p class="dual-role" data-i18n="ds.slow.role">High-level model · Codex / OpenCode</p>
+      <ul>
+        <li data-i18n="ds.slow.1">Plans the goal; starts, watches, and stops streaming actions</li>
+        <li data-i18n="ds.slow.2">Uses the index to find the suspect interval, verifies against authoritative Evidence</li>
+        <li data-i18n="ds.slow.3">Edits the owning Action package when evidence exposes a fault</li>
+        <li data-i18n="ds.slow.4">Hot-syncs the Rule — no rebuild, no agent restart — and re-runs acceptance</li>
+      </ul>
+    </div>
   </div>
+  <p class="trio-seam"><span data-i18n="ds.seam">event journal + evidence timeline</span><span data-i18n="ds.seam.sub">append-only · durable · replayable</span></p>
 </section>
 
 <!-- ============ SHIPPED RULES ============ -->
@@ -196,7 +211,7 @@
         <h3>Elite Dangerous</h3>
         <span class="rule-tag" data-i18n="rules.ed.tag">Full docking workflow</span>
       </header>
-      <p data-i18n="rules.ed.d">A supervised departure: the planner arranges AUTO LAUNCH key-by-key, then the leave-station streaming action takes over — throttle gates, mass-lock checks, and three consecutive zero-speed OCR confirmations before it reports completion.</p>
+      <p data-i18n="rules.ed.d">A supervised departure: the leave-station streaming action owns the whole flow — AUTO LAUNCH menu preparation, throttle gates, mass-lock checks, and three consecutive zero-speed OCR confirmations. The planner confirms the station, then just watches.</p>
       <ul class="rule-caps">
         <li>compass</li><li>ship-status</li><li>ship-speed</li><li>flight-status</li><li>leave-station</li><li>align-station-target</li><li>ui-control</li><li>set-throttle</li>
       </ul>
@@ -253,11 +268,11 @@
   <div class="game-gallery">
     <figure>
       <img loading="lazy" src="assets/ed-tablet-departure-plan.jpg" alt="Tablet showing the agent planning a station departure with Elite Dangerous cockpit captures">
-      <figcaption data-i18n="game.p1.cap">Supervising from a tablet: the planner walks the AUTO LAUNCH checklist key-by-key before the leave-station reflex takes over.</figcaption>
+      <figcaption data-i18n="game.p1.cap">Supervising from a tablet: the agent verifies the cockpit HUD, then leave-station owns the whole AUTO LAUNCH flow — the planner just watches the events.</figcaption>
     </figure>
     <figure>
       <img loading="lazy" src="assets/ed-tablet-evidence-debug.jpg" alt="Tablet showing the agent debugging a button classifier with 1 fps evidence frames">
-      <figcaption data-i18n="game.p2.cap">Debugging with evidence: 1 fps frames catch a button classifier honestly reporting UNKNOWN — repaired in place, never guessed around.</figcaption>
+      <figcaption data-i18n="game.p2.cap">Debugging with evidence: the Gemma index narrows the interval; 1 fps frames confirm a button classifier honestly reporting UNKNOWN — repaired in place, never guessed around.</figcaption>
     </figure>
     <figure>
       <img loading="lazy" src="assets/ed-osd-supercruise-assist.jpg" alt="Close-up of the Action OSD overlay on Elite Dangerous during supercruise assist">
@@ -291,7 +306,7 @@
     <article class="pillar">
       <h3><span class="pillar-tag">REPLAY</span><span data-i18n="mg.p.t">Every run is a record</span></h3>
       <ul>
-        <li data-i18n="mg.p.1">The durable event journal captures the whole clear</li>
+        <li data-i18n="mg.p.1">The durable event journal and 1 FPS Evidence capture the whole clear</li>
         <li data-i18n="mg.p.2">Export, share, and compare your agent's runs</li>
         <li data-i18n="mg.p.3">A four-minute station departure becomes a time to beat</li>
       </ul>

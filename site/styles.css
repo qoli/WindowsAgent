@@ -8,6 +8,7 @@
   --cyan: #38e1ff;
   --cyan-dim: #1b6d80;
   --orange: #ff9d45;
+  --violet: #b78cff;
   --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft YaHei", sans-serif;
 }
@@ -190,7 +191,7 @@ body {
   content: "▸"; position: absolute; left: 0; color: var(--cyan);
 }
 
-/* ---------- dual-speed ---------- */
+/* ---------- three-line design ---------- */
 .ds-problem {
   display: flex; align-items: baseline; gap: 1rem;
   border: 1px solid var(--line); border-left: 4px solid var(--orange);
@@ -202,8 +203,9 @@ body {
   font-family: var(--mono); font-size: 1.5rem; font-weight: 700;
   color: var(--orange); white-space: nowrap;
 }
-.dual {
-  display: grid; grid-template-columns: 1fr auto 1fr; gap: 1.4rem; align-items: stretch;
+.trio {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem;
+  align-items: stretch;
 }
 .dual-col {
   background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
@@ -211,6 +213,7 @@ body {
 }
 .dual-slow { border-top: 3px solid var(--orange); }
 .dual-fast { border-top: 3px solid var(--cyan); }
+.trio-index { border-top: 3px solid var(--violet); }
 .dual-col h3 { font-size: 1.2rem; margin-bottom: 0.3rem; }
 .dual-role {
   font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
@@ -223,22 +226,18 @@ body {
 }
 .dual-slow li::before { content: "◆"; position: absolute; left: 0; color: var(--orange); font-size: 0.7rem; top: 0.25rem; }
 .dual-fast li::before { content: "◆"; position: absolute; left: 0; color: var(--cyan); font-size: 0.7rem; top: 0.25rem; }
-.dual-seam {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 0.5rem; min-width: 110px;
+.trio-index li::before { content: "◆"; position: absolute; left: 0; color: var(--violet); font-size: 0.7rem; top: 0.25rem; }
+.trio-seam {
+  display: flex; align-items: center; justify-content: center;
+  gap: 0.8rem; flex-wrap: wrap; margin-top: 1.6rem;
 }
-.dual-seam-label {
-  font-family: var(--mono); font-size: 0.72rem; color: var(--text);
-  border: 1px solid var(--line); border-radius: 99px; padding: 0.25rem 0.8rem;
-  background: var(--bg);
+.trio-seam span:first-child {
+  font-family: var(--mono); font-size: 0.75rem; color: var(--text);
+  border: 1px solid var(--line); border-radius: 99px;
+  padding: 0.3rem 0.9rem; background: var(--bg);
 }
-.dual-seam-line {
-  width: 1px; flex: 1; min-height: 40px;
-  background: linear-gradient(var(--orange), var(--cyan));
-}
-.dual-seam-sub {
-  font-family: var(--mono); font-size: 0.65rem; color: var(--muted);
-  writing-mode: vertical-rl;
+.trio-seam span:last-child {
+  font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
 }
 
 /* ---------- rules ---------- */
@@ -336,11 +335,7 @@ body {
   .loop-grid { grid-template-columns: repeat(2, 1fr); }
   .pillar-grid, .rules-grid, .qs-grid { grid-template-columns: 1fr; }
   .game-intro, .game-gallery { grid-template-columns: 1fr; }
-  .dual { grid-template-columns: 1fr; }
-  .dual-seam { flex-direction: row; min-width: 0; padding: 0.4rem 0; }
-  .dual-seam-line { width: auto; height: 1px; flex: 1; min-height: 0;
-    background: linear-gradient(90deg, var(--orange), var(--cyan)); }
-  .dual-seam-sub { writing-mode: horizontal-tb; }
+  .trio { grid-template-columns: 1fr; }
   .nav-links { display: none; }
 }
 
