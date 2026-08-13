@@ -57,10 +57,12 @@ def main(ctx):
                     blue = pixel % 256
                     bright = is_bright(red, green, blue)
                     warm = is_warm_orange(red, green, blue)
-                    # HUD and cockpit trim contain warm orange by design.
-                    # Only high-luminance pixels own the wide-field stellar
-                    # coverage and centroid; warm evidence remains diagnostic.
-                    stellar = bright
+                    # The special y=20 canopy-edge strip crosses the fixed
+                    # upper HUD. Warm bright pixels in that one strip are HUD
+                    # evidence, not stellar coverage. Neutral stellar cores
+                    # remain eligible there, while all lower strips retain
+                    # ordinary bright stellar evidence including warm discs.
+                    stellar = bright and (strip_index != 0 or not warm)
                     sampled_count += 1
                     cell_samples += 1
                     if bright:

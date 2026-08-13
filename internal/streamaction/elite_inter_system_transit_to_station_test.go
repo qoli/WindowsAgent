@@ -87,7 +87,7 @@ func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map
 	case "elite-dangerous/filesystem/journal-navigation-tail":
 		c.journalCalls++
 		if c.resumeJournal {
-			return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-12T07:56:44Z","event":"FSDJump","StarSystem":"NLTT 8084","SystemAddress":123,"JumpType":null,"RemainingJumpsInRoute":null}]}`), nil
+			return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-12T07:56:44Z","event":"FSDJump","StarSystem":"Nltt 8084","SystemAddress":123,"JumpType":null,"RemainingJumpsInRoute":null}]}`), nil
 		}
 		if c.journalArrival && c.journalCalls > 1 {
 			return json.RawMessage(`{"state":"AVAILABLE","events":[{"timestamp":"2026-08-10T11:03:03Z","event":"FSDJump","StarSystem":"Acihaut","SystemAddress":123,"JumpType":null,"RemainingJumpsInRoute":null}]}`), nil
@@ -232,6 +232,25 @@ func TestEliteInterSystemTransitResumesAfterExactDestinationFSDJump(t *testing.T
 	}
 	if caller.systemLocks != 1 || caller.hudCalls != 2 {
 		t.Fatalf("station locks=%d hudCalls=%d", caller.systemLocks, caller.hudCalls)
+	}
+}
+
+func TestEliteInterSystemTransitResumeAcceptsCanonicalJournalCaseForUppercaseInput(t *testing.T) {
+	pkg, err := Load(interSystemTransitPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &interSystemTransitCaller{resumeJournal: true}
+	inputs := interSystemInputs()
+	inputs["destinationSystem"] = "NLTT 8084"
+	inputs["startMode"] = "ARRIVED_SUPERCRUISE"
+	inputs["normalSpaceConfirmed"] = false
+	inputs["supercruiseConfirmed"] = true
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, inputs, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"destinationSystemArrivalEvidence":"JOURNAL_FSDJUMP_RESUME"`) {
+		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
 

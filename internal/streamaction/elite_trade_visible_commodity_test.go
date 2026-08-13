@@ -25,6 +25,13 @@ func (c *tradeVisibleCommodityCaller) Call(_ context.Context, id string, inputs 
 		value := c.ocr[0]
 		c.ocr = c.ocr[1:]
 		return value, nil
+	case "elite-dangerous/commodity-market-list-text-regions":
+		if len(c.ocr) == 0 {
+			return nil, errors.New("missing Commodity Market full-height list OCR fixture")
+		}
+		value := c.ocr[0]
+		c.ocr = c.ocr[1:]
+		return value, nil
 	case "elite-dangerous/commodity-market-text-regions":
 		if len(c.ocr) == 0 {
 			return nil, errors.New("missing Commodity Market OCR fixture")
@@ -128,8 +135,8 @@ func cargoFixture(timestamp, commodity string, count int) json.RawMessage {
 func TestEliteTradeVisibleCommodityBuysExactQuantityAndRequiresNewCargo(t *testing.T) {
 	caller := &tradeVisibleCommodityCaller{
 		ocr: []json.RawMessage{
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(commodityRegion("HYDROGEN FUEL", 400, 325)),
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(commodityRegion("HYDROGEN FUEL", 400, 325)),
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), commodityOCR(commodityRegion("HYDROGEN FUEL", 400, 625)),
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), commodityOCR(commodityRegion("HYDROGEN FUEL", 400, 625)),
 			commodityDialogOCR("BUY", "HYDROGEN FUEL"), commodityDialogOCR("BUY", "HYDROGEN FUEL"),
 			commodityOCR(), commodityOCR(),
 		},
@@ -146,11 +153,11 @@ func TestEliteTradeVisibleCommodityBuysExactQuantityAndRequiresNewCargo(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"RIGHT", "RIGHT", "RIGHT", "DOWN", "SELECT"}
+	want := []string{"SELECT", "RIGHT", "RIGHT", "RIGHT", "DOWN", "SELECT"}
 	if !equalStrings(caller.controls, want) {
 		t.Fatalf("controls=%v want=%v", caller.controls, want)
 	}
-	if len(caller.clicks) != 1 || caller.clicks[0]["x"] != int64(490) || caller.clicks[0]["y"] != int64(340) {
+	if len(caller.clicks) != 1 || caller.clicks[0]["x"] != int64(490) || caller.clicks[0]["y"] != int64(640) {
 		t.Fatalf("clicks=%v", caller.clicks)
 	}
 	if caller.exits != 1 {
@@ -169,12 +176,12 @@ func TestEliteTradeVisibleCommodityFailsBeforeInputOnAmbiguousExactRows(t *testi
 	)
 	caller := &tradeVisibleCommodityCaller{
 		ocr: []json.RawMessage{
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), duplicate,
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), duplicate,
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), duplicate,
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), duplicate,
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), duplicate,
-			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), duplicate,
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), duplicate,
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), duplicate,
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), duplicate,
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), duplicate,
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), duplicate,
+			commodityMarketOCR("BUY FROM MARKET", "IGNORED"), commodityOCR(), duplicate,
 		},
 		cargo: []json.RawMessage{cargoFixture("2026-08-12T09:41:00Z", "Gold", 0)},
 	}
@@ -183,11 +190,51 @@ func TestEliteTradeVisibleCommodityFailsBeforeInputOnAmbiguousExactRows(t *testi
 			"operation": "BUY", "commodityName": "Gold", "quantity": 1, "stationName": "Creon's Standing",
 		}, caller, &fixtureReporter{},
 	)
-	if err == nil || !contains(err.Error(), "one exact visible commodity") {
+	if err == nil || !contains(err.Error(), "ambiguous duplicate exact commodity") {
 		t.Fatalf("error=%v", err)
 	}
 	if len(caller.controls) != 0 || len(caller.clicks) != 0 {
 		t.Fatalf("controls=%v clicks=%v", caller.controls, caller.clicks)
+	}
+}
+
+func TestEliteTradeVisibleCommoditySearchesBoundedListBeforeTrading(t *testing.T) {
+	marketWithoutTarget := []json.RawMessage{
+		commodityMarketOCR("SELL TO MARKET", "IGNORED"), commodityOCR(), commodityOCR(commodityRegion("COFFEE", 400, 625)),
+	}
+	marketWithTarget := []json.RawMessage{
+		commodityMarketOCR("SELL TO MARKET", "IGNORED"), commodityOCR(), commodityOCR(commodityRegion("SILVER", 400, 625)),
+	}
+	ocr := append([]json.RawMessage{}, marketWithoutTarget...)
+	ocr = append(ocr, marketWithoutTarget...)
+	ocr = append(ocr, marketWithoutTarget...)
+	ocr = append(ocr, marketWithTarget...)
+	ocr = append(ocr, marketWithTarget...)
+	ocr = append(ocr, commodityDialogOCR("SELL", "SILVER"), commodityDialogOCR("SELL", "SILVER"))
+	ocr = append(ocr, commodityOCR(), commodityOCR())
+	caller := &tradeVisibleCommodityCaller{
+		ocr: ocr,
+		cargo: []json.RawMessage{
+			cargoFixture("2026-08-12T09:41:00Z", "Silver", 2),
+			cargoFixture("2026-08-12T09:42:00Z", "Silver", 0),
+		},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteTradeVisibleCommodityPackage(t), map[string]any{
+			"operation": "SELL", "commodityName": "Silver", "quantity": 2.0, "stationName": "Creon's Standing",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.clicks) != 2 || caller.clicks[0]["x"] != int64(174) || caller.clicks[0]["y"] != int64(401) {
+		t.Fatalf("clicks=%v", caller.clicks)
+	}
+	if len(caller.controls) != 16 || caller.controls[0] != "RIGHT" || caller.controls[11] != "SELECT" {
+		t.Fatalf("controls=%v", caller.controls)
+	}
+	if !contains(string(output), `"beforeCount":2`) || !contains(string(output), `"afterCount":0`) {
+		t.Fatalf("output=%s", output)
 	}
 }
 

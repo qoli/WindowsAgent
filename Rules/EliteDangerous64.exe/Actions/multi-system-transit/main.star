@@ -133,6 +133,13 @@ def main(ctx):
         completed_jumps += 1
         emit_update("HOP_COMPLETED", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/hyperspace-jump-to-system", commanded_throttle=0, fuel_main=final_readiness["fuelMain"], status_timestamp=final_readiness["sourceTimestamp"], reason="ARRIVED_IN_SUPERCRUISE:STATUS_" + final_readiness["freshness"])
 
+        if hop_index < jump_count:
+            emit_update("ARRIVAL_CLEARANCE", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, fuel_main=final_readiness["fuelMain"], status_timestamp=final_readiness["sourceTimestamp"], reason="CV_SAFE_CHARGE_HEADING+24S_SUPERCRUISE_FLIGHT+45PCT_HEAT_GATE")
+            clearance = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": next_system, "startMode": "SUPERCRUISE"})
+            if not clearance["completed"] or clearance["finalOcclusionState"] != "CLEAR" or not clearance["finalSupercruiseConfirmed"] or clearance["finalCommandedThrottle"] != 0:
+                fail("arrival stellar-clearance child returned an invalid completion result after route hop " + str(hop_index))
+            emit_update("ARRIVAL_CLEARANCE_COMPLETED", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, fuel_main=final_readiness["fuelMain"], status_timestamp=final_readiness["sourceTimestamp"], reason=clearance["entryAlignmentEvidence"] + ":" + str(clearance["supercruiseEscapeDurationMs"]) + "MS")
+
         emit_update("REVALIDATING_ROUTE", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/nav-route-plan", commanded_throttle=0)
         current_plan = read_route_plan(destination_system, max_jumps)
         if current_plan["routeId"] != route_id:

@@ -8,7 +8,7 @@
     "task": {"const": "ALIGN_STATION_TARGET"},
     "mode": {"enum": ["ALIGN", "TRACK"]},
     "targetMotion": {"enum": ["MOVING", "STATIC"]},
-    "alignmentPurpose": {"enum": ["CENTER", "VISIBLE_HANDOFF"]},
+    "alignmentPurpose": {"enum": ["CENTER", "VISIBLE_HANDOFF", "HYPERSPACE_CHARGE"]},
     "controlProfile": {"enum": ["NORMAL_SPACE", "SUPERCRUISE_ASSIST"]},
     "controlProfileSource": {"enum": ["INPUT", "STATUS_JSON"]},
     "completed": {"const": true},

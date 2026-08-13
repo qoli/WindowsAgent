@@ -396,7 +396,8 @@ func TestEliteAlignStationTargetStaticSupercruiseAlignUsesPrecisionGate(t *testi
 func TestEliteAlignStationTargetVisibleHandoffStopsCompassCorrectionBeforeVisibleRefinement(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 10, -5, 11.18, false),
-		alignObservation("SOLID", 13, -11, 17.029, false),
+		alignObservation("SOLID", 6, -5, 7.81, false),
+		alignObservation("SOLID", 7, -6, 9.22, false),
 	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
@@ -406,8 +407,67 @@ func TestEliteAlignStationTargetVisibleHandoffStopsCompassCorrectionBeforeVisibl
 	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"alignmentPurpose":"VISIBLE_HANDOFF"`) || !contains(string(output), `"stableConfirmations":2`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if len(caller.controls) != 0 || len(caller.holdOps) != 0 {
-		t.Fatalf("visible handoff must leave precise correction to align-visible-target: controls=%v holds=%v", caller.controls, caller.holdOps)
+	if len(caller.controls) != 0 || strings.Join(caller.holdOps, ",") != "START,STOP" || strings.Join(caller.holdControls, ",") != "PITCH_UP_YAW_RIGHT,PITCH_UP_YAW_RIGHT" {
+		t.Fatalf("visible handoff must correct into the tighter OCR proposal domain, then leave precision to align-visible-target: controls=%v holds=%v holdOps=%v", caller.controls, caller.holds, caller.holdOps)
+	}
+}
+
+func TestEliteAlignStationTargetVisibleHandoffRejectsFormerNineteenPixelCompletion(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -19, -2, 19.105, false),
+		alignObservation("SOLID", -7, -2, 7.28, false),
+		alignObservation("SOLID", -8, -2, 8.246, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":3`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "YAW_LEFT" || len(caller.holds) != 1 || caller.holds[0] != 40 {
+		t.Fatalf("former nineteen-pixel completion must receive a bounded correction: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetHyperspaceChargeRequiresThreeFourPixelSamples(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -3, 3, true),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "HYPERSPACE_CHARGE", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"stableConfirmations":3`) || !contains(string(output), `"centerDistancePixels":3`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP" || len(caller.holds) != 1 || caller.holds[0] != 40 {
+		t.Fatalf("HYPERSPACE_CHARGE must correct the five-pixel sample with one ultra-fine pulse: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetHyperspaceChargeUsesNormalSpaceProfileWithoutWeakeningGate(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -5, 5, false),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -3, 3, true),
+		alignObservation("SOLID", 0, -3, 3, true),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "HYPERSPACE_CHARGE", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"controlProfile":"NORMAL_SPACE"`) || !contains(string(output), `"stableConfirmations":3`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "PITCH_UP" || len(caller.holds) != 1 || caller.holds[0] != 40 {
+		t.Fatalf("normal-space HYPERSPACE_CHARGE must use the strict ultra-fine pulse: controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 

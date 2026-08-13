@@ -4,7 +4,10 @@ This finite CV Action samples five seven-pixel horizontal strips across the
 upper and central 1680 by 900 forward-flight viewport in the 1920 by 1080
 reference space. The first strip starts at reference y 20 to close the
 reproduced top-edge blind spot where a visibly dominant star was previously
-missed. Because that strip extends above the nominal ROI origin, the public
+missed. That strip crosses the fixed upper orange HUD, so warm bright pixels
+there are excluded from stellar coverage while neutral high-luminance stellar
+cores remain eligible. Lower strips retain ordinary bright stellar evidence,
+including warm discs. Because the top strip extends above the nominal ROI origin, the public
 ROI-relative centroid is clamped at its top boundary while direction continues
 to use the unclamped sample position. The former lower-cockpit strip is deliberately excluded:
 bright cockpit reflections are not stellar evidence. It sparsely measures tone-mapped high-luminance

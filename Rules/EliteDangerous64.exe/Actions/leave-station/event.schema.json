@@ -30,7 +30,7 @@
         "movementSeen": {"type": "boolean"},
         "maximumObservedSpeed": {"type": ["integer", "null"], "minimum": 0, "maximum": 9999},
         "lowSpeedConfirmations": {"type": "integer", "minimum": 0, "maximum": 8},
-        "handoverEvidence": {"enum": ["NONE", "CLASSIFIED_LOW_SPEED"]},
+        "handoverEvidence": {"enum": ["NONE", "CLASSIFIED_LOW_SPEED", "AUTO_LAUNCH_MASS_LOCK_RELEASE"]},
         "handoverCandidate": {"type": "boolean"},
         "gateDecision": {
           "enum": ["WAITING_FOR_AUTO_LAUNCH", "AUTO_LAUNCH_VISIBLE", "WAITING_FOR_MOVEMENT", "WAITING_FOR_AUTO_LAUNCH_ABSENCE", "WAITING_FOR_MASS_LOCK", "WAITING_FOR_LOW_SPEED_CONFIRMATION", "HANDOVER_CONFIRMED", "WAITING_FOR_MASS_LOCK_RELEASE", "MASS_LOCK_RELEASE_CONFIRMED"]

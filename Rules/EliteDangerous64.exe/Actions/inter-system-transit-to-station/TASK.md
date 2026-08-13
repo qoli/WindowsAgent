@@ -26,7 +26,8 @@ visible after arrival: Elite Dangerous may clear that target together with
 
 `ARRIVED_SUPERCRUISE` is the explicit recovery entry after a parent-level
 failure in the destination System. It requires the latest retained `FSDJump`
-to match `destinationSystem` and two current Supercruise HUD observations,
+to match `destinationSystem` case-insensitively but otherwise exactly and two
+current Supercruise HUD observations,
 then resumes at Station selection without plotting or repeating the jump.
 
 Because a hyperspace exit is already in Supercruise, the Action does not wait

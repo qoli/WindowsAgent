@@ -3,13 +3,25 @@
 This interruptible linear Streaming Action owns exactly one hyperspace
 jump to an exact System. With `targetLockConfirmed=false` it verifies or
 acquires the named Navigation target. With `targetLockConfirmed=true` it uses
-the caller's explicit evidence boundary and does not reopen Navigation. It then
-coarsely aligns at 0% through the Compass, requires a current stellar
-obstruction Gate, and invokes visible-target fine alignment only while the
-forward view is `CLEAR`. It rechecks the obstruction after fine alignment,
-records the latest allowlisted navigation Journal timestamp, invokes only the binding-resolved
+the caller's explicit evidence boundary and does not reopen Navigation. It first
+requires the current stellar `safeToCharge` Gate and completes any necessary
+stellar-angle clearance. Only then does it align at 0% through the strict
+`HYPERSPACE_CHARGE` Compass purpose (four-pixel entry, then three consecutive
+SOLID observations within the six-pixel verification band). It immediately rechecks substantial stellar coverage
+from that Compass-aligned target line before visible-target fine alignment, so
+a destination behind the arrival star is cleared before its reticle becomes
+washed out. It then fine-aligns, rechecks substantial stellar coverage again,
+and requires three fresh numeric heat
+observations at or below 60%. Only after all of those Gates pass may it send FSD
+input. The ordinary stellar Gate deliberately runs before target alignment. A
+post-alignment recheck ignores only small orange-ratio contamination from the
+centered destination reticle; a `BLOCKING` result, at least 0.08 total stellar
+coverage, or at least 0.10 central coverage forces another bounded stellar
+escape and complete realignment. The Action then records the latest allowlisted navigation Journal timestamp and invokes only the binding-resolved
 `HyperSuperCombination`, and requires FSD charging. A newer `FSDJump` matching
-both the target name and optional SystemAddress is the primary arrival Gate.
+the target name case-insensitively but otherwise exactly, plus the optional
+SystemAddress, is the primary arrival Gate. This accepts an all-caps HUD name
+against the Journal's canonical title casing without fuzzy identity matching.
 Two stable cockpit-HUD-absent samples remain a visual transition path when the
 Journal evidence is unavailable.
 
@@ -20,11 +32,19 @@ also trigger the required 100% throttle, preventing a blind second keypress
 from cancelling an already accepted charge.
 
 `PARTIAL` or `BLOCKING` stellar evidence before FSD delegates to
-`clear-hyperspace-occlusion`. That child turns away through measured coverage
-trends, enters or reuses dedicated Supercruise, and finishes at 0% after a
-bounded tangential escape. The parent then realigns and repeats both the
-pre-fine and post-fine obstruction Gates. At most two such escapes are allowed;
+`clear-hyperspace-occlusion` with the jump Action's explicit start mode before
+either alignment child is allowed to run. From
+normal space that child enters dedicated Supercruise and completes a bounded
+tangential escape. From an existing Supercruise arrival it never toggles FSD;
+it turns at 0% until the stellar view is stably `CLEAR`. The parent then runs the
+strict Compass and visible-target Gates. At most two such escapes are allowed;
 FSD input is never sent through a currently obstructed target line.
+
+Compass and stellar evidence never substitute for visible-target completion.
+An UNKNOWN visible target, deadline, WGC, schema, runtime, or any other child
+failure is terminal before FSD control. If the game nevertheless returns
+`ALIGNMENT_REQUIRED` after charge begins, the Action cancels that charge and
+fails explicitly; it does not perform attitude correction under active charge.
 
 On a matching `FSDJump`, or on the first returning cockpit-HUD sample in the
 visual path, the Action immediately commands 0% throttle. Two persistent
@@ -33,8 +53,8 @@ is deliberately owned by the fast workflow rather than a higher-model callback.
 
 `NORMAL_SPACE` and `SUPERCRUISE` are explicit start modes with matching caller
 confirmations. A Supercruise start uses the Supercruise Compass control profile.
-An alignment-required prompt after charging commands 0%, runs the same
-supervised alignment children, and restores 100% only after they complete.
+An alignment-required prompt after charging commands 0%, cancels the active
+charge, and fails explicitly. It never tries to steer while charging.
 
 The Action does not read `NavRoute.json`, choose a later route hop, select a
 Station, approach a Station, or dock. Missing target rows, ambiguous visual

@@ -4,6 +4,11 @@ TRANSIT_ABSENT_CONFIRMATIONS = 2
 ARRIVAL_PRESENT_CONFIRMATIONS = 2
 ARRIVAL_LIMIT = 240
 SUPERCRUISE_HUD_CONFIRMATIONS = 2
+POST_ALIGNMENT_HEAT_LIMIT = 60
+POST_ALIGNMENT_HEAT_CONFIRMATIONS = 3
+POST_ALIGNMENT_HEAT_SAMPLES = 12
+POST_ALIGNMENT_BLOCKING_STELLAR_RATIO = 0.08
+POST_ALIGNMENT_BLOCKING_CENTER_RATIO = 0.10
 
 def emit_update(phase, sample, target_system, child_action=None, hyperspace_state=None, flight_status=None, cockpit_hud=None, commanded_throttle=None, last_command=None, reason=None):
     stream.emit(
@@ -24,41 +29,94 @@ def emit_update(phase, sample, target_system, child_action=None, hyperspace_stat
 
 def coarse_align_target(target_system, sample, phase, control_profile):
     emit_update(phase, sample, target_system, child_action="elite-dangerous/align-station-target", commanded_throttle=0, reason="COMPASS_COARSE_ALIGNMENT")
-    return action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "stopBeforeAlign": True, "controlProfile": control_profile})
+    result = action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "HYPERSPACE_CHARGE", "stopBeforeAlign": True, "controlProfile": control_profile})
+    target = result["finalObservation"]["target"]
+    if not target["detected"] or target["presentation"] != "SOLID" or target["centerDistancePixels"] > 6.0 or result["stableConfirmations"] < 3:
+        fail("pre-FSD Compass alignment did not satisfy the four-pixel entry and six-pixel three-frame verification Gate")
+    return result
 
-def align_target(target_system, sample, phase, control_profile):
-    coarse = coarse_align_target(target_system, sample, phase, control_profile)
-    initial_coarse_samples = coarse["sampleCount"]
-    recovery_alignment = None
+def post_alignment_heat_gate(target_system, sample):
+    confirmations = 0
+    last_percent = None
+    for _ in range(POST_ALIGNMENT_HEAT_SAMPLES):
+        heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
+        last_percent = heat["percent"]
+        if heat["state"] == "KNOWN" and last_percent <= POST_ALIGNMENT_HEAT_LIMIT:
+            confirmations += 1
+        else:
+            confirmations = 0
+        reason = "HEAT_UNKNOWN"
+        if heat["state"] == "KNOWN":
+            reason = "KNOWN_" + str(last_percent) + "_OF_" + str(POST_ALIGNMENT_HEAT_LIMIT)
+        emit_update("VERIFYING_POST_ALIGNMENT_HEAT", sample, target_system, child_action="elite-dangerous/ship-heat", commanded_throttle=0, reason=reason)
+        if confirmations >= POST_ALIGNMENT_HEAT_CONFIRMATIONS:
+            return {"percent": last_percent, "confirmations": confirmations}
+        task.sleep(milliseconds=POLL_MS)
+    fail("post-alignment ship heat did not produce three known observations at or below 60 percent")
+
+def substantial_post_alignment_obstruction(obstruction):
+    return (
+        obstruction["state"] == "BLOCKING" or
+        obstruction["stellarCoverageRatio"] >= POST_ALIGNMENT_BLOCKING_STELLAR_RATIO or
+        obstruction["centerCoverageRatio"] >= POST_ALIGNMENT_BLOCKING_CENTER_RATIO
+    )
+
+def align_target(target_system, sample, phase, control_profile, start_mode):
     escape_count = 0
+    latest_escape = None
     for _ in range(3):
         obstruction = action.call(id="elite-dangerous/hyperspace-target-occlusion", inputs={})["occlusion"]
-        if obstruction["state"] != "CLEAR":
+        if not obstruction["safeToCharge"]:
             if escape_count >= 2:
                 fail("hyperspace target remained stellar-obstructed after two Supercruise escapes")
-            emit_update("CLEARING_OCCLUSION", sample, target_system, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason=obstruction["state"] + ":CENTER=" + str(obstruction["centerCoverageRatio"]) + ":TOTAL=" + str(obstruction["stellarCoverageRatio"]))
-            escape = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": target_system})
+            emit_update("CLEARING_OCCLUSION", sample, target_system, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason="UNSAFE_TO_CHARGE:" + obstruction["state"] + ":CENTER=" + str(obstruction["centerCoverageRatio"]) + ":TOTAL=" + str(obstruction["stellarCoverageRatio"]) + ":MAX_CELL=" + str(obstruction["maximumCellCoverageRatio"]))
+            latest_escape = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": target_system, "startMode": start_mode})
             escape_count += 1
-            coarse = coarse_align_target(target_system, sample, "REALIGNING_TARGET", "SUPERCRUISE_ASSIST")
-            recovery_alignment = {"escapeCount": escape_count, "escape": escape, "coarseSamples": coarse["sampleCount"], "fineSamples": None}
+            continue
+        alignment_phase = "REALIGNING_TARGET" if escape_count > 0 else phase
+        alignment_profile = "SUPERCRUISE_ASSIST" if escape_count > 0 else control_profile
+        coarse = coarse_align_target(target_system, sample, alignment_phase, alignment_profile)
+        # Compass alignment changes the forward view. Re-check the stellar
+        # field before visible-target refinement: when the destination lies
+        # behind the arrival star, the reticle can be washed out and the fine
+        # controller would otherwise steer deeper into the obstruction. The
+        # clearance flight must create enough parallax before either fine
+        # alignment or FSD is allowed.
+        coarse_obstruction = action.call(id="elite-dangerous/hyperspace-target-occlusion", inputs={})["occlusion"]
+        emit_update("VERIFYING_COMPASS_ALIGNED_OCCLUSION", sample, target_system, child_action="elite-dangerous/hyperspace-target-occlusion", commanded_throttle=0, reason=coarse_obstruction["state"] + ":CENTER=" + str(coarse_obstruction["centerCoverageRatio"]) + ":TOTAL=" + str(coarse_obstruction["stellarCoverageRatio"]))
+        if substantial_post_alignment_obstruction(coarse_obstruction):
+            if escape_count >= 2:
+                fail("Compass-aligned hyperspace target remained substantially stellar-obstructed after two Supercruise escapes")
+            emit_update("CLEARING_OCCLUSION", sample, target_system, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason="COMPASS_ALIGNED_STELLAR_OBSTRUCTION")
+            latest_escape = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": target_system, "startMode": "SUPERCRUISE"})
+            escape_count += 1
             continue
         emit_update(phase, sample, target_system, child_action="elite-dangerous/align-visible-target", commanded_throttle=0, reason="VISIBLE_TARGET_FINE_ALIGNMENT")
-        fine = action.call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_system, "stopBeforeAlign": False})
-        post_alignment = action.call(id="elite-dangerous/hyperspace-target-occlusion", inputs={})["occlusion"]
-        if post_alignment["state"] == "CLEAR":
-            if recovery_alignment != None:
-                recovery_alignment = {"escapeCount": recovery_alignment["escapeCount"], "escape": recovery_alignment["escape"], "coarseSamples": recovery_alignment["coarseSamples"], "fineSamples": fine["sampleCount"]}
-            return {
-                "initialAlignment": {"coarseSamples": initial_coarse_samples, "fineSamples": fine["sampleCount"]},
-                "recoveryAlignment": recovery_alignment,
-            }
-        if escape_count >= 2:
-            fail("visible target alignment remained stellar-obstructed after two Supercruise escapes")
-        emit_update("CLEARING_OCCLUSION", sample, target_system, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason="POST_ALIGNMENT_" + post_alignment["state"] + ":CENTER=" + str(post_alignment["centerCoverageRatio"]) + ":TOTAL=" + str(post_alignment["stellarCoverageRatio"]))
-        escape = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": target_system})
-        escape_count += 1
-        coarse = coarse_align_target(target_system, sample, "REALIGNING_TARGET", "SUPERCRUISE_ASSIST")
-        recovery_alignment = {"escapeCount": escape_count, "escape": escape, "coarseSamples": coarse["sampleCount"], "fineSamples": None}
+        fine_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_system, "stopBeforeAlign": False})
+        if not fine_attempt["ok"]:
+            fail(fine_attempt["error"])
+        fine = fine_attempt["output"]
+        # The centered destination reticle can contaminate a strict orange-ratio
+        # safeToCharge bit, but cannot create the substantial topology below. If
+        # alignment points the ship back into the arrival star, clear again and
+        # repeat both alignment children before allowing FSD control.
+        post_obstruction = action.call(id="elite-dangerous/hyperspace-target-occlusion", inputs={})["occlusion"]
+        emit_update("VERIFYING_POST_ALIGNMENT_OCCLUSION", sample, target_system, child_action="elite-dangerous/hyperspace-target-occlusion", commanded_throttle=0, reason=post_obstruction["state"] + ":CENTER=" + str(post_obstruction["centerCoverageRatio"]) + ":TOTAL=" + str(post_obstruction["stellarCoverageRatio"]))
+        if substantial_post_alignment_obstruction(post_obstruction):
+            if escape_count >= 2:
+                fail("aligned hyperspace target remained substantially stellar-obstructed after two Supercruise escapes")
+            emit_update("CLEARING_OCCLUSION", sample, target_system, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason="POST_ALIGNMENT_STELLAR_OBSTRUCTION")
+            latest_escape = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": target_system, "startMode": "SUPERCRUISE"})
+            escape_count += 1
+            continue
+        heat = post_alignment_heat_gate(target_system, sample)
+        recovery_alignment = None
+        if escape_count > 0:
+            recovery_alignment = {"escapeCount": escape_count, "escape": latest_escape, "coarseSamples": coarse["sampleCount"], "fineSamples": fine["sampleCount"]}
+        return {
+            "initialAlignment": {"coarseSamples": coarse["sampleCount"], "fineSamples": fine["sampleCount"], "postAlignmentHeatPercent": heat["percent"], "postAlignmentHeatConfirmations": heat["confirmations"]},
+            "recoveryAlignment": recovery_alignment,
+        }
     fail("hyperspace target alignment did not reach a clear forward view")
 
 def observe_hyperspace():
@@ -93,6 +151,13 @@ def journal_baseline():
             latest = timestamp
     return latest
 
+def same_system_name(actual, expected):
+    if actual == None or expected == None:
+        return False
+    # Journal uses canonical title casing while callers commonly preserve the
+    # all-caps HUD spelling. Identity stays otherwise exact.
+    return actual.upper() == expected.upper()
+
 def journal_jump_evidence(target_system, target_address, baseline):
     tail = action.call(id="elite-dangerous/filesystem/journal-navigation-tail", inputs={})
     start_jump = None
@@ -101,7 +166,7 @@ def journal_jump_evidence(target_system, target_address, baseline):
         timestamp = event["timestamp"]
         if timestamp == None or (baseline != None and timestamp <= baseline):
             continue
-        if event["StarSystem"] != target_system:
+        if not same_system_name(event["StarSystem"], target_system):
             continue
         if target_address != None and event["SystemAddress"] != target_address:
             continue
@@ -153,7 +218,7 @@ def main(ctx):
 
     control_profile = "SUPERCRUISE_ASSIST" if start_mode == "SUPERCRUISE" else "NORMAL_SPACE"
     stream.activity(message="Aligning hyperspace target", level="info")
-    alignment = align_target(target_system, sample, "ALIGNING_TARGET", control_profile)
+    alignment = align_target(target_system, sample, "ALIGNING_TARGET", control_profile, start_mode)
     initial_alignment = alignment["initialAlignment"]
     recovery_alignment = alignment["recoveryAlignment"]
     initial = observe_hyperspace()
@@ -186,14 +251,9 @@ def main(ctx):
         elif state == "ALIGNMENT_REQUIRED":
             charging_seen = True
             throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-            emit_update("REALIGNING_TARGET", sample, target_system, hyperspace_state=state, flight_status=observation["flightStatus"], cockpit_hud=observation["cockpitHud"], commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
-            alignment = align_target(target_system, sample, "REALIGNING_TARGET", "SUPERCRUISE_ASSIST")
-            recovery_alignment = alignment["recoveryAlignment"] if alignment["recoveryAlignment"] != None else alignment["initialAlignment"]
-            throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
-            throttle_100_sent = True
-            command = "REALIGN_TARGETS+SET_THROTTLE_100"
-            phase = "REALIGNING_TARGET"
-            reason = throttle["control"]
+            cancel = action.call(id="elite-dangerous/hyperspace-control", inputs={"command": "JUMP"})
+            emit_update("CANCELLING_MISALIGNED_FSD", sample, target_system, hyperspace_state=state, flight_status=observation["flightStatus"], cockpit_hud=observation["cockpitHud"], commanded_throttle=0, last_command="SET_THROTTLE_0+HYPERSPACE_JUMP_CANCEL", reason=cancel["control"])
+            fail("game reported ALIGNMENT_REQUIRED after strict pre-FSD alignment; charge cancelled")
         elif state == "COCKPIT_ABSENT":
             if not charging_seen:
                 fail("cockpit HUD disappeared before FSD charging was visually confirmed")

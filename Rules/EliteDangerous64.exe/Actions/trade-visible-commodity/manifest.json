@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": 1,
-  "title": "Elite Dangerous trade one visible commodity",
+  "version": 3,
+  "title": "Elite Dangerous trade one exact commodity with bounded list search",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",

@@ -1813,7 +1813,7 @@ func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *test
 			paint: func(strips map[int64][]any) {
 				for _, pixels := range strips {
 					for index := range pixels {
-						pixels[index] = uint32(0xFFF090)
+						pixels[index] = uint32(0xFFF8F0)
 					}
 				}
 			},
@@ -1834,10 +1834,22 @@ func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *test
 			paint: func(strips map[int64][]any) {
 				pixels := strips[20]
 				for index := range pixels {
-					pixels[index] = uint32(0xFFB020)
+					pixels[index] = uint32(0xFFF8F0)
 				}
 			},
 			wantState: "BLOCKING", wantControl: "PITCH_DOWN", wantSafe: false,
+		},
+		{
+			name: "fixed top warm HUD is not stellar coverage",
+			paint: func(strips map[int64][]any) {
+				pixels := strips[20]
+				for y := range 7 {
+					for x := 336; x < 672; x++ {
+						pixels[y*1680+x] = uint32(0xFFB020)
+					}
+				}
+			},
+			wantState: "CLEAR", wantControl: nil, wantSafe: true,
 		},
 		{
 			name: "empty starfield is clear",

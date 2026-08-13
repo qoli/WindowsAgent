@@ -27,6 +27,13 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/commodity-market-list-text-regions": {
+      "path": "Actions/commodity-market-list-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/commodity-market-header-text-regions": {
       "path": "Actions/commodity-market-header-text-regions",
       "runtime": "ppocr-text-regions-v1",
@@ -238,6 +245,24 @@
     },
     "elite-dangerous/supercruise-target-text-regions-upper-right": {
       "path": "Actions/supercruise-target-text-regions-upper-right",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-target-text-regions-middle-right": {
+      "path": "Actions/supercruise-target-text-regions-middle-right",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "execution": {
+        "completion": "return"
+      },
+      "registrableAs": []
+    },
+    "elite-dangerous/supercruise-target-text-regions-middle-left": {
+      "path": "Actions/supercruise-target-text-regions-middle-left",
       "runtime": "ppocr-text-regions-v1",
       "runtimeProfile": "ocr/text-regions",
       "execution": {

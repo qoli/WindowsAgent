@@ -1,8 +1,60 @@
-# Clear a gravity obstruction with short-charge Compass probes
+# Clear a stellar obstruction with explicit Supercruise entry modes
 
 This interruptible linear Streaming Action owns the time-sensitive segment
-that escapes a local gravity well into Supercruise. Its caller still owns
-restoring and aligning any later hyperspace destination.
+that clears a stellar line-of-sight obstruction. `startMode=NORMAL_SPACE`
+(also the compatibility default) uses one of two explicit Supercruise-entry
+modes. `startMode=SUPERCRUISE` never toggles FSD: it commands 0% throttle,
+uses bounded stellar-CV attitude pulses until the stricter `safeToCharge` Gate
+is stable for two frames, continues the last reliable turn for two one-second
+pulses to add angular margin, flies that safe heading at 100% for 24 seconds,
+returns to 0%, and requires two fresh confirmations that the ship remains
+safely in Supercruise. During this existing-Supercruise path it owns the fast
+`Status.overHeating` Gate; it deliberately defers numeric heat OCR because the
+unaligned destination projection can cover the heat digits. Its caller owns
+restoring and fully aligning the hyperspace destination, then acquiring fresh
+numeric heat evidence before any FSD input.
+
+While a blocking stellar disk still covers at least 0.25 of the central cell,
+the existing-Supercruise path uses the interruptible 2500 ms attitude lease and
+renews it around each fresh CV sample. This preserves continuous T9 rotation
+without delegating the stop decision to a higher-model turn. A direction
+change, `safeToCharge`, cancellation, deadline, or child failure releases the
+exact lease. Below that central ratio, it returns to one-second finite pulses
+for boundary control. The whole turn phase remains bounded to 24 observations.
+
+When the star has reached the sampled edge, the centroid can disappear before
+the strict maximum-cell `safeToCharge` threshold is met. The Action may then
+continue the last reliable direction for at most three one-second pulses, but
+only while the current state is `CLEAR` and the still-failing `safeToCharge`
+dimension decreases by at least 0.0001 per sample: total coverage while it
+exceeds 0.005, otherwise maximum-cell coverage while it exceeds 0.02. This
+prevents broad-ROI orange flicker from hiding continued progress in the exact
+strict Gate dimension. Events identify this mode as
+`TREND_CONFIRMED_EDGE_EXIT`. A flat or worsening sample, missing prior measured
+direction, exhausted budget, or non-`CLEAR` state fails explicitly.
+
+Inside the final residual band (total coverage no higher than 0.005 and
+maximum-cell coverage no higher than 0.03), attitude correction shrinks from a
+one-second pulse to 250 ms. Live evidence showed a one-second edge pulse improve
+maximum-cell coverage from 0.0259 to 0.0208, then the identical next pulse cross
+the 0.02 Gate and worsen the frame. Every 250 ms pulse still consumes one fresh
+CV observation and the same trend and confidence rules.
+
+A fresh invocation can begin after the disk has already reached that edge and
+therefore has no local trend history. For the exact `CLEAR` residual topology
+where total stellar coverage is at most 0.005 but `safeToCharge` remains false
+because one cell still exceeds its limit, the current frame's non-null measured
+direction is accepted at confidence 0.25. Live edge evidence measured 0.263
+while one cell remained at 0.0259 against the 0.02 Gate. This authorizes only the first edge
+pulse; subsequent direction loss must satisfy the bounded improving trend Gate.
+
+The normal CV direction Gate remains 0.5. A separately bounded severe-arrival
+case applies only when the observation is `BLOCKING` and central stellar
+coverage is at least 0.75: the measured centroid direction may be accepted at
+0.35 because a nearly centered stellar disk is radially symmetric and therefore
+has lower normalized directional magnitude. A non-null measured direction is
+still required, every turn is limited to one second, and every pulse is followed
+by a fresh CV observation. No fixed-direction or prior-frame substitute exists.
 
 The Action commands 0% throttle and records `hyperspace-target-occlusion` only
 as diagnostic context. Forward-view CV does not choose an attitude command or
@@ -52,6 +104,24 @@ Compass and the short OCR prompt are absent. That single window is not a
 durable domain conclusion: the Action cancels charge, verifies the newer idle
 Status, cools, and consumes another one of the existing eight bounded probes.
 Only exhaustion of the total probe budget fails prealignment.
+
+Two complete probes with an unchanged pre-existing Compass marker and no
+`FSD_ESCAPE_VECTOR_REQUIRED` prompt establish the separate
+`DIRECT_SUPERCRUISE_CLEAR_HEADING` mode. This is not treated as missing Escape
+Vector evidence: it means the ship is not gravity-gated and may enter ordinary
+Supercruise. The Action cancels the second probe, uses the declared stellar CV
+`recommendedControl` only while throttle remains 0%, and requires the forward
+view to become `CLEAR` within eight one-second attitude pulses. It then starts
+one fresh Supercruise charge, commands 100%, retains the 75% heat and Status
+safety gates, and requires a newer confirmed Supercruise Status transition.
+A most-recent known heat reading no higher than the existing 60% charge-start
+Gate permits at most eight seconds of UNKNOWN OCR during the direct FSD
+countdown; a known 75% reading or Status Over Heating remains immediately
+terminal. The grace is measured from that current known sample and cannot be
+renewed by UNKNOWN.
+Events and terminal output preserve `escapeVectorDetected=false` and the
+direct-mode evidence name; this path is never reported as gravity-well Escape
+Vector alignment.
 
 A HOLLOW marker is an antipodal rear projection. Its small signed offset is
 not treated as a reliable screen-space angle. The Action reuses the proven

@@ -151,6 +151,18 @@ def identity_corroborated_type_suffix(actual, expected, identity_confirmed):
         return False
     return actual == expected[len(expected) - len(actual):]
 
+def identity_corroborated_single_word_fragment(actual, expected_words, identity_confirmed):
+    if not identity_confirmed or len(expected_words) != 1 or len(actual) < 4:
+        return False
+    expected = expected_words[0]
+    if len(actual) > len(expected):
+        return False
+    # A cockpit pillar can hide either edge of a one-token System name. Keep
+    # this evidence deliberately narrow: only an exact prefix or suffix is
+    # accepted, and only when the independent selected-identity ROI confirms
+    # the full requested name in the same invocation.
+    return actual == expected[:len(actual)] or actual == expected[len(expected) - len(actual):]
+
 def bounds(points):
     left = points[0]["x"]
     right = points[0]["x"]
@@ -340,6 +352,12 @@ def unknown_target(reason, raw_texts, captured_at = None):
         "verticalGapPixels": None, "rawTexts": raw_texts,
     }
 
+def timing_output(bands, identity_band):
+    result = []
+    for band in bands:
+        result.append(band["timing"])
+    return {"bands": result, "identity": identity_band["timing"]}
+
 def main(ctx):
     target_name = ctx.inputs["targetName"]
     expected = normalize(target_name)
@@ -350,6 +368,8 @@ def main(ctx):
         action.call(id="elite-dangerous/supercruise-target-text-regions-lower-wide", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-upper-left", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-upper-right", inputs={}),
+        action.call(id="elite-dangerous/supercruise-target-text-regions-middle-left", inputs={}),
+        action.call(id="elite-dangerous/supercruise-target-text-regions-middle-right", inputs={}),
     ]
     identity_band = action.call(id="elite-dangerous/request-docking-distance-regions", inputs={})
     identity_confirmed = False
@@ -379,10 +399,19 @@ def main(ctx):
             identity_fragment = same_line_identity_corroborated_fragment(region["text"], expected_words, identity_confirmed)
             fused_pillar = identity_corroborated_fused_pillar_label(region["text"], expected_words, identity_confirmed)
             normalized_region = normalize(region["text"])
+            single_word_fragment = identity_corroborated_single_word_fragment(normalized_region, expected_words, identity_confirmed)
             identity_prefix_hint = identity_confirmed and len(expected_words) == 2 and len(normalized_region) >= 3 and normalized_region[:3] == expected_words[0][:3]
-            if not exact_or_one_edit and not occluded_same_line and not identity_fragment and not fused_pillar and not identity_prefix_hint:
+            if not exact_or_one_edit and not occluded_same_line and not identity_fragment and not fused_pillar and not single_word_fragment and not identity_prefix_hint:
                 continue
-            if identity_prefix_hint and not fused_pillar and not identity_fragment and not occluded_same_line:
+            if single_word_fragment and not exact_or_one_edit:
+                region = {
+                    "text": region["text"],
+                    "detectionConfidence": region["detectionConfidence"],
+                    "recognitionConfidence": region["recognitionConfidence"],
+                    "referencePoints": region["referencePoints"],
+                    "matchReason": "OCCLUDED_SINGLE_WORD_POSITION_AND_EXACT_SELECTED_IDENTITY_CONFIRMED",
+                }
+            elif identity_prefix_hint and not fused_pillar and not identity_fragment and not occluded_same_line:
                 region = {
                     "text": region["text"],
                     "detectionConfidence": region["detectionConfidence"],
@@ -479,7 +508,7 @@ def main(ctx):
         return {
             "schemaVersion": 1,
             "target": unknown_target("TARGET_TEXT_NOT_FOUND", raw_texts),
-            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
+            "timing": timing_output(bands, identity_band),
         }
     candidates = []
     for match in matches:
@@ -492,7 +521,7 @@ def main(ctx):
         return {
             "schemaVersion": 1,
             "target": unknown_target("NO_SHAPE_FIRST_FOCUS_FRAME_CANDIDATE", raw_texts, last_reticle_capture),
-            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
+            "timing": timing_output(bands, identity_band),
         }
     selected = candidates[0]
     runner_up = None
@@ -506,7 +535,7 @@ def main(ctx):
         return {
             "schemaVersion": 1,
             "target": unknown_target("FOCUS_FRAME_CANDIDATES_AMBIGUOUS", raw_texts, selected["reticleOutput"]["evidence"]["capturedAt"]),
-            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
+            "timing": timing_output(bands, identity_band),
         }
     region = selected["region"]
     reticle_output = selected["reticleOutput"]
@@ -543,5 +572,5 @@ def main(ctx):
             "verticalGapPixels": selected["verticalGapPixels"],
             "rawTexts": raw_texts,
         },
-        "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
+        "timing": timing_output(bands, identity_band),
     }

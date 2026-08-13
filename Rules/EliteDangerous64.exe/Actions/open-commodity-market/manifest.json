@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 3,
   "title": "Open Elite Dangerous Commodity Market in an exact operation mode",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

@@ -316,6 +316,33 @@ func TestEliteLeaveStationWorkflowFailsWhenZeroSpeedIsNotVisuallyConfirmed(t *te
 	}
 }
 
+func TestEliteLeaveStationWorkflowAcceptsAutoLaunchMassLockReleaseWithoutLateFullThrottle(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{massOffAt: 10}
+	reporter := &leaveStationReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
+		t.Fatalf("throttle controls=%v; expected only the safe 0%% command", caller.throttles)
+	}
+	if !strings.Contains(string(output), `"completed":true`) || !strings.Contains(string(output), `"finalMassLock":"OFF"`) {
+		t.Fatalf("output=%s", output)
+	}
+	seenRelease := false
+	for _, payload := range reporter.payloads {
+		if payload["handoverEvidence"] == "AUTO_LAUNCH_MASS_LOCK_RELEASE" && payload["gateDecision"] == "MASS_LOCK_RELEASE_CONFIRMED" {
+			seenRelease = true
+		}
+	}
+	if !seenRelease {
+		t.Fatalf("missing Auto Launch Mass Lock release evidence: %#v", reporter.payloads)
+	}
+}
+
 func TestEliteLeaveStationWorkflowSkipsFiveWGCErrorsAfterThrottle100(t *testing.T) {
 	pkg := loadEliteLeaveStationPackage(t)
 	caller := &leaveStationCaller{massOffAt: 20, wgcFailuresAfterThrottle100: 5}

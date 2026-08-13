@@ -2,173 +2,286 @@ package streamaction
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
+
+	"github.com/qoli/WindowsAgent/internal/capture"
 )
 
-func hyperspaceJumpPackageRoot(t *testing.T) string {
+type hyperspaceJumpCaller struct {
+	hyperspaceObservations int
+	hyperspaceControls     int
+	alignVisibleError      error
+	throttles              []int
+	forceObstruction       bool
+	postAlignObstruction   bool
+	heatUnknown            bool
+	occlusionCalls         int
+	clearStartModes        []string
+	alignmentPurposes      []string
+	alignmentProfiles      []string
+	alignmentRequired      bool
+	journalCaseVariant     bool
+	calls                  []string
+}
+
+func (c *hyperspaceJumpCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	switch id {
+	case "elite-dangerous/align-station-target":
+		c.calls = append(c.calls, id)
+		c.alignmentPurposes = append(c.alignmentPurposes, inputs["alignmentPurpose"].(string))
+		c.alignmentProfiles = append(c.alignmentProfiles, inputs["controlProfile"].(string))
+		return json.RawMessage(`{"completed":true,"sampleCount":3,"stableConfirmations":3,"finalObservation":{"target":{"detected":true,"presentation":"SOLID","centerDistancePixels":3}}}`), nil
+	case "elite-dangerous/hyperspace-target-occlusion":
+		c.calls = append(c.calls, id)
+		c.occlusionCalls++
+		if c.forceObstruction && c.occlusionCalls == 1 {
+			return json.RawMessage(`{"occlusion":{"state":"BLOCKING","stellarCoverageRatio":0.2,"centerCoverageRatio":0.01,"maximumCellCoverageRatio":1,"directionConfidence":0.9,"recommendedControl":"PITCH_UP","safeToCharge":false}}`), nil
+		}
+		if c.postAlignObstruction && c.occlusionCalls == 2 {
+			return json.RawMessage(`{"occlusion":{"state":"BLOCKING","stellarCoverageRatio":0.3,"centerCoverageRatio":0.2,"maximumCellCoverageRatio":0.8,"directionConfidence":0.9,"recommendedControl":"YAW_LEFT","safeToCharge":false}}`), nil
+		}
+		return json.RawMessage(`{"occlusion":{"state":"CLEAR","stellarCoverageRatio":0.002,"centerCoverageRatio":0,"maximumCellCoverageRatio":0.01,"directionConfidence":0.8,"recommendedControl":"PITCH_UP","safeToCharge":true}}`), nil
+	case "elite-dangerous/clear-hyperspace-occlusion":
+		c.calls = append(c.calls, id)
+		c.clearStartModes = append(c.clearStartModes, inputs["startMode"].(string))
+		return json.RawMessage(`{"completed":true,"finalOcclusionState":"CLEAR"}`), nil
+	case "elite-dangerous/align-visible-target":
+		c.calls = append(c.calls, id)
+		if c.alignVisibleError != nil {
+			return nil, c.alignVisibleError
+		}
+		return json.RawMessage(`{"completed":true,"sampleCount":3,"finalTarget":{"presentation":"SOLID"}}`), nil
+	case "elite-dangerous/ship-heat":
+		c.calls = append(c.calls, id)
+		if c.heatUnknown {
+			return json.RawMessage(`{"heat":{"state":"UNKNOWN","percent":null}}`), nil
+		}
+		return json.RawMessage(`{"heat":{"state":"KNOWN","percent":46}}`), nil
+	case "elite-dangerous/hyperspace-state":
+		c.hyperspaceObservations++
+		state := "COCKPIT_PRESENT"
+		cockpit := "PRESENT"
+		if c.hyperspaceControls > 0 {
+			if c.journalCaseVariant {
+				if c.hyperspaceObservations == 2 {
+					state = "FSD_CHARGING"
+				}
+			} else {
+				switch c.hyperspaceObservations {
+				case 2:
+					if c.alignmentRequired {
+						state = "ALIGNMENT_REQUIRED"
+					} else {
+						state = "FSD_CHARGING"
+					}
+				case 3, 4:
+					state = "COCKPIT_ABSENT"
+					cockpit = "ABSENT"
+				default:
+					state = "COCKPIT_PRESENT"
+				}
+			}
+		}
+		return json.Marshal(map[string]any{"hyperspaceState": map[string]any{
+			"state": state, "flightStatus": "UNKNOWN", "cockpitHud": map[string]any{"state": cockpit}, "promptText": "",
+		}})
+	case "elite-dangerous/filesystem/journal-navigation-tail":
+		if c.journalCaseVariant && c.hyperspaceControls > 0 {
+			return json.RawMessage(`{"events":[{"event":"FSDJump","timestamp":"2026-08-13T05:43:10Z","StarSystem":"Aasgananu","SystemAddress":9466510452105}]}`), nil
+		}
+		return json.RawMessage(`{"events":[]}`), nil
+	case "elite-dangerous/hyperspace-control":
+		c.hyperspaceControls++
+		return json.RawMessage(`{"control":"HyperSuperCombination"}`), nil
+	case "elite-dangerous/set-throttle":
+		percent := int(inputs["percent"].(int64))
+		c.throttles = append(c.throttles, percent)
+		return json.Marshal(map[string]any{"control": "SetSpeed"})
+	case "elite-dangerous/supercruise-hud-state":
+		return json.RawMessage(`{"supercruiseHud":{"state":"ACTIVE"}}`), nil
+	default:
+		return nil, errors.New("unexpected hyperspace child Action: " + id)
+	}
+}
+
+func TestEliteHyperspaceJumpReclearsBeforeVisibleAlignmentWhenCompassPointsBackIntoStar(t *testing.T) {
+	caller := &hyperspaceJumpCaller{postAlignObstruction: true}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.clearStartModes) != 1 || caller.clearStartModes[0] != "SUPERCRUISE" {
+		t.Fatalf("post-alignment clear start modes=%v", caller.clearStartModes)
+	}
+	alignCalls := 0
+	for _, call := range caller.calls {
+		if call == "elite-dangerous/align-station-target" {
+			alignCalls++
+		}
+	}
+	if alignCalls != 2 || caller.hyperspaceControls != 1 {
+		t.Fatalf("alignCalls=%d hyperspaceControls=%d calls=%v", alignCalls, caller.hyperspaceControls, caller.calls)
+	}
+	firstVisible := -1
+	firstClear := -1
+	for index, call := range caller.calls {
+		if call == "elite-dangerous/clear-hyperspace-occlusion" && firstClear < 0 {
+			firstClear = index
+		}
+		if call == "elite-dangerous/align-visible-target" && firstVisible < 0 {
+			firstVisible = index
+		}
+	}
+	if firstClear < 0 || firstVisible < 0 || firstClear > firstVisible {
+		t.Fatalf("stellar clearance must precede visible-target refinement, calls=%v", caller.calls)
+	}
+}
+
+func TestEliteHyperspaceJumpFailsClosedOnUnknownPostAlignmentHeat(t *testing.T) {
+	caller := &hyperspaceJumpCaller{heatUnknown: true}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err == nil || !strings.Contains(err.Error(), "post-alignment ship heat") {
+		t.Fatalf("error=%v", err)
+	}
+	if caller.hyperspaceControls != 0 {
+		t.Fatalf("unknown heat must block all FSD input, controls=%d", caller.hyperspaceControls)
+	}
+}
+
+func loadEliteHyperspaceJumpPackage(t *testing.T) *Package {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "hyperspace-jump-to-system"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return root
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pkg
 }
 
 func hyperspaceJumpInputs() map[string]any {
 	return map[string]any{
-		"targetSystem":         "Acihaut",
-		"targetLockConfirmed":  false,
-		"startMode":            "NORMAL_SPACE",
-		"normalSpaceConfirmed": true,
-		"supercruiseConfirmed": false,
+		"targetSystem": "87 Mu Ceti", "targetLockConfirmed": true,
+		"startMode": "NORMAL_SPACE", "normalSpaceConfirmed": true, "supercruiseConfirmed": false,
 	}
 }
 
-func TestEliteHyperspaceJumpUsesCallerConfirmedTargetWithoutNavigation(t *testing.T) {
-	pkg, err := Load(hyperspaceJumpPackageRoot(t))
-	if err != nil {
-		t.Fatal(err)
+func TestEliteHyperspaceJumpRejectsVisibleTargetDomainUnknownBeforeFSD(t *testing.T) {
+	caller := &hyperspaceJumpCaller{alignVisibleError: errors.New("fail: visible target remained UNKNOWN after its bounded observation window")}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err == nil || !strings.Contains(err.Error(), "visible target remained UNKNOWN") {
+		t.Fatalf("error=%v", err)
 	}
-	caller := &interSystemTransitCaller{hyperspaceStates: []string{
-		"COCKPIT_PRESENT", "FSD_CHARGING", "COCKPIT_ABSENT", "COCKPIT_ABSENT", "COCKPIT_PRESENT", "COCKPIT_PRESENT",
-	}}
+	if caller.hyperspaceControls != 0 || len(caller.throttles) != 1 || caller.throttles[0] != 0 {
+		t.Fatalf("controls=%d throttles=%v", caller.hyperspaceControls, caller.throttles)
+	}
+}
+
+func TestEliteHyperspaceJumpNormalSpaceUsesNormalSpaceCompassProfile(t *testing.T) {
+	caller := &hyperspaceJumpCaller{alignVisibleError: errors.New("stop after profile evidence")}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err == nil || len(caller.alignmentProfiles) != 1 || caller.alignmentProfiles[0] != "NORMAL_SPACE" {
+		t.Fatalf("error=%v alignmentProfiles=%v", err, caller.alignmentProfiles)
+	}
+}
+
+func TestEliteHyperspaceJumpAcceptsCanonicalJournalCaseForUppercaseHUDTarget(t *testing.T) {
+	caller := &hyperspaceJumpCaller{journalCaseVariant: true}
 	inputs := hyperspaceJumpInputs()
-	inputs["targetLockConfirmed"] = true
-	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(context.Background(), pkg, inputs, caller, &fixtureReporter{})
-	if err != nil {
-		t.Fatal(err)
+	inputs["targetSystem"] = "AASGANANU"
+	inputs["targetSystemAddress"] = int64(9466510452105)
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), inputs, caller, &fixtureReporter{})
+	if err != nil || !strings.Contains(string(output), `"completed":true`) || !strings.Contains(string(output), `"arrivalEvidence":"JOURNAL_FSDJUMP"`) {
+		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if caller.systemLocks != 0 {
-		t.Fatalf("systemLocks=%d", caller.systemLocks)
-	}
-}
-
-func TestEliteHyperspaceJumpBrakesOnFirstReturningCockpitFrame(t *testing.T) {
-	pkg, err := Load(hyperspaceJumpPackageRoot(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	caller := &interSystemTransitCaller{hyperspaceStates: []string{
-		"COCKPIT_PRESENT",
-		"FSD_CHARGING", "COCKPIT_PRESENT", "COCKPIT_ABSENT", "COCKPIT_ABSENT",
-		"COCKPIT_PRESENT", "COCKPIT_PRESENT",
-	}}
-	reporter := &fixtureReporter{}
-	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
-		context.Background(), pkg, hyperspaceJumpInputs(), caller, reporter,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !contains(string(output), `"finalPhase":"ARRIVED_IN_SUPERCRUISE"`) ||
-		!contains(string(output), `"arrivalBrakeSent":true`) || caller.systemLocks != 1 || caller.hudCalls != 2 {
-		t.Fatalf("output=%s locks=%d hud=%d", output, caller.systemLocks, caller.hudCalls)
-	}
-	if !equalInt64s(caller.throttles, []int64{100, 0}) {
-		t.Fatalf("throttles=%v", caller.throttles)
-	}
-	joined := joinEventPhases(reporter.payloads)
-	if !contains(joined, `"phase":"ARRIVAL_BRAKE"`) || !contains(joined, `"lastCommand":"SET_THROTTLE_0"`) {
-		t.Fatalf("arrival brake event missing: %s", joined)
+	if len(caller.throttles) < 2 || caller.throttles[len(caller.throttles)-1] != 0 {
+		t.Fatalf("Journal arrival must send the arrival brake, throttles=%v", caller.throttles)
 	}
 }
 
-func TestEliteHyperspaceJumpAcceptsJournalFSDJumpWhenTunnelFramesAreMissed(t *testing.T) {
-	pkg, err := Load(hyperspaceJumpPackageRoot(t))
-	if err != nil {
-		t.Fatal(err)
+func TestEliteHyperspaceJumpCancelsAndFailsInsteadOfRealigningDuringCharge(t *testing.T) {
+	caller := &hyperspaceJumpCaller{alignmentRequired: true}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err == nil || !strings.Contains(err.Error(), "ALIGNMENT_REQUIRED") || !strings.Contains(err.Error(), "charge cancelled") {
+		t.Fatalf("error=%v", err)
 	}
-	caller := &interSystemTransitCaller{
-		hyperspaceStates: []string{"COCKPIT_PRESENT", "FSD_CHARGING", "COCKPIT_PRESENT", "COCKPIT_PRESENT", "COCKPIT_PRESENT"},
-		journalArrival:   true,
+	if caller.hyperspaceControls != 2 {
+		t.Fatalf("expected one start and one cancel FSD control, controls=%d", caller.hyperspaceControls)
 	}
-	inputs := hyperspaceJumpInputs()
-	inputs["targetLockConfirmed"] = true
-	inputs["targetSystemAddress"] = int64(123)
-	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
-		context.Background(), pkg, inputs, caller, &fixtureReporter{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !contains(string(output), `"arrivalEvidence":"JOURNAL_FSDJUMP"`) ||
-		!contains(string(output), `"cockpitReturnConfirmations":0`) {
-		t.Fatalf("output=%s", output)
-	}
-	if !equalInt64s(caller.throttles, []int64{100, 0}) || caller.hudCalls != 2 {
-		t.Fatalf("throttles=%v hudCalls=%d", caller.throttles, caller.hudCalls)
+	if len(caller.alignmentPurposes) != 1 || caller.alignmentPurposes[0] != "HYPERSPACE_CHARGE" {
+		t.Fatalf("alignmentPurposes=%v", caller.alignmentPurposes)
 	}
 }
 
-func TestEliteHyperspaceJumpSupercruiseStartUsesSupercruiseProfile(t *testing.T) {
-	pkg, err := Load(hyperspaceJumpPackageRoot(t))
-	if err != nil {
-		t.Fatal(err)
+func TestEliteHyperspaceJumpDoesNotConvertVisibleTargetInfrastructureFailureIntoDomainUnknown(t *testing.T) {
+	caller := &hyperspaceJumpCaller{alignVisibleError: capture.Failure("capture_readback_failed", "region readback failed", errors.New("HRESULT 0x80070057"))}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err == nil || !strings.Contains(err.Error(), "region readback failed") || !strings.Contains(err.Error(), "HRESULT 0x80070057") {
+		t.Fatalf("error=%v", err)
 	}
-	caller := &interSystemTransitCaller{hyperspaceStates: []string{
-		"COCKPIT_PRESENT", "FSD_CHARGING", "COCKPIT_ABSENT", "COCKPIT_ABSENT",
-		"COCKPIT_PRESENT", "COCKPIT_PRESENT",
-	}}
+	if caller.hyperspaceControls != 0 {
+		t.Fatalf("infrastructure failure must block FSD control, controls=%d", caller.hyperspaceControls)
+	}
+}
+
+func TestEliteHyperspaceJumpPassesSupercruiseModeToOcclusionClearance(t *testing.T) {
+	caller := &hyperspaceJumpCaller{forceObstruction: true}
 	inputs := hyperspaceJumpInputs()
 	inputs["startMode"] = "SUPERCRUISE"
 	inputs["normalSpaceConfirmed"] = false
 	inputs["supercruiseConfirmed"] = true
-	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
-		context.Background(), pkg, inputs, caller, &fixtureReporter{},
-	)
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), inputs, caller, &fixtureReporter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.alignProfiles) == 0 || caller.alignProfiles[0] != "SUPERCRUISE_ASSIST" {
-		t.Fatalf("alignProfiles=%v", caller.alignProfiles)
+	if !strings.Contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.clearStartModes) != 1 || caller.clearStartModes[0] != "SUPERCRUISE" {
+		t.Fatalf("clear start modes=%v", caller.clearStartModes)
 	}
 }
 
-func TestEliteHyperspaceJumpEscapesStellarObstructionBeforeFSD(t *testing.T) {
-	pkg, err := Load(hyperspaceJumpPackageRoot(t))
+func TestEliteHyperspaceJumpChecksSubstantialStellarCoverageAndHeatAfterAlignment(t *testing.T) {
+	caller := &hyperspaceJumpCaller{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	caller := &interSystemTransitCaller{
-		hyperspaceStates: []string{"COCKPIT_PRESENT", "FSD_CHARGING", "COCKPIT_ABSENT", "COCKPIT_ABSENT", "COCKPIT_PRESENT", "COCKPIT_PRESENT"},
-		occlusionStates:  []string{"BLOCKING", "CLEAR", "CLEAR"},
+	if !strings.Contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
 	}
-	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
-		context.Background(), pkg, hyperspaceJumpInputs(), caller, &fixtureReporter{},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if caller.occlusionEscapes != 1 || len(caller.alignProfiles) != 2 || caller.alignProfiles[1] != "SUPERCRUISE_ASSIST" {
-		t.Fatalf("escapes=%d alignProfiles=%v", caller.occlusionEscapes, caller.alignProfiles)
+	if caller.occlusionCalls != 3 {
+		t.Fatalf("stellar CV must run before Compass, after Compass, and after visible alignment, calls=%d", caller.occlusionCalls)
 	}
 	if caller.hyperspaceControls != 1 {
-		t.Fatalf("hyperspaceControls=%d", caller.hyperspaceControls)
+		t.Fatalf("expected FSD control only after successful visible alignment, controls=%d", caller.hyperspaceControls)
 	}
-}
-
-func TestEliteHyperspaceJumpFailsClosedWithoutCharging(t *testing.T) {
-	pkg, err := Load(hyperspaceJumpPackageRoot(t))
-	if err != nil {
-		t.Fatal(err)
+	wantPrefix := []string{
+		"elite-dangerous/hyperspace-target-occlusion",
+		"elite-dangerous/align-station-target",
+		"elite-dangerous/hyperspace-target-occlusion",
+		"elite-dangerous/align-visible-target",
+		"elite-dangerous/hyperspace-target-occlusion",
+		"elite-dangerous/ship-heat",
+		"elite-dangerous/ship-heat",
+		"elite-dangerous/ship-heat",
 	}
-	states := make([]string, 161)
-	for index := range states {
-		states[index] = "COCKPIT_PRESENT"
+	if len(caller.calls) < len(wantPrefix) {
+		t.Fatalf("child calls=%v", caller.calls)
 	}
-	caller := &interSystemTransitCaller{hyperspaceStates: states}
-	_, err = (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
-		context.Background(), pkg, hyperspaceJumpInputs(), caller, &fixtureReporter{},
-	)
-	if err == nil || !contains(err.Error(), "FSD charging followed by stable hyperspace cockpit absence was not confirmed") {
-		t.Fatalf("error=%v", err)
-	}
-	if !equalInt64s(caller.throttles, []int64{0}) {
-		t.Fatalf("failure compensation throttles=%v", caller.throttles)
-	}
-	if caller.hyperspaceControls != 2 {
-		t.Fatalf("hyperspaceControls=%d, want initial plus one bounded retry", caller.hyperspaceControls)
+	for index, want := range wantPrefix {
+		if caller.calls[index] != want {
+			t.Fatalf("child call %d=%q want %q; calls=%v", index, caller.calls[index], want, caller.calls)
+		}
 	}
 }

@@ -26,6 +26,54 @@ type Config struct {
 	Sampling            capture.Sampling        `json:"sampling"`
 	MaxPixels           uint64                  `json:"maxPixels"`
 	CharacterConstraint string                  `json:"characterConstraint"`
+	PixelFilter         *PixelFilter            `json:"pixelFilter,omitempty"`
+}
+
+type PixelFilter struct {
+	Mode              string `json:"mode"`
+	MinRed            int    `json:"minRed"`
+	MinGreen          int    `json:"minGreen"`
+	MaxBlue           int    `json:"maxBlue"`
+	MinRedMinusBlue   int    `json:"minRedMinusBlue"`
+	MinGreenMinusBlue int    `json:"minGreenMinusBlue"`
+}
+
+func (f PixelFilter) Validate() error {
+	if f.Mode != "rgb-threshold" {
+		return errors.New("OCR Action pixelFilter mode must equal rgb-threshold")
+	}
+	for label, value := range map[string]int{
+		"minRed": f.MinRed, "minGreen": f.MinGreen, "maxBlue": f.MaxBlue,
+		"minRedMinusBlue": f.MinRedMinusBlue, "minGreenMinusBlue": f.MinGreenMinusBlue,
+	} {
+		if value < 0 || value > 255 {
+			return fmt.Errorf("OCR Action pixelFilter %s must be from 0 through 255", label)
+		}
+	}
+	return nil
+}
+
+// Apply replaces pixels outside the declared generic RGB threshold with black.
+// The Rule owns the threshold values; this package has no HUD or game semantics.
+func (f PixelFilter) Apply(rgb []byte) (int, error) {
+	if len(rgb)%3 != 0 {
+		return 0, errors.New("OCR Action pixelFilter requires packed RGB24 pixels")
+	}
+	filtered := 0
+	for index := 0; index < len(rgb); index += 3 {
+		red := int(rgb[index])
+		green := int(rgb[index+1])
+		blue := int(rgb[index+2])
+		keep := red >= f.MinRed && green >= f.MinGreen && blue <= f.MaxBlue && red-blue >= f.MinRedMinusBlue && green-blue >= f.MinGreenMinusBlue
+		if keep {
+			continue
+		}
+		rgb[index] = 0
+		rgb[index+1] = 0
+		rgb[index+2] = 0
+		filtered++
+	}
+	return filtered, nil
 }
 
 func Load(root string) (Config, error) {
@@ -92,6 +140,11 @@ func (c Config) Validate(root string) error {
 	}
 	if c.CharacterConstraint != "none" && c.CharacterConstraint != "digits" {
 		return errors.New("OCR Action characterConstraint must equal none or digits")
+	}
+	if c.PixelFilter != nil {
+		if err := c.PixelFilter.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

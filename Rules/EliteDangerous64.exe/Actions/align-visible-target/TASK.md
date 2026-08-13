@@ -7,7 +7,7 @@ identity and a confirmed reticle centre while no attitude command is active.
 It then feeds each current reticle centre into
 `elite-dangerous/supercruise-visible-reticle-position` as the next bounded local
 CV hint. Only that fresh tracked centre can authorize the next dominant-axis
-Pitch or Yaw pulse. Identity is reacquired after eight tracked samples,
+Pitch or Yaw pulse. Identity is reacquired after 32 tracked samples,
 whenever tracking returns `UNKNOWN`, or whenever the centre leaves the local
 tracker's valid hint range. A tracking miss sends no input and the event stream
 exposes the transition back to identity acquisition.
@@ -72,7 +72,11 @@ two centred samples followed by 13.27 and 12.32 pixel OCR estimates; one-sample
 tolerance issued an unnecessary 80 ms Pitch pulse on the second estimate.
 
 `DESTINATION` mode obtains a bounded visual `ship-heat` checkpoint before the
-first target observation and refreshes it every eight target samples. Known
+first target observation and refreshes it every 32 target samples. This keeps a
+continuously detected same-frame reticle track alive through a full coarse-to-
+fine correction when a cockpit pillar temporarily hides the label; a lost
+reticle still invalidates the track immediately and forces identity reacquisition.
+Known
 heat at or above 75% requires a second confirming sample; UNKNOWN or one false
 high sample cannot authorize the checkpoint. Intermediate target events report
 heat as unobserved (`null`), not as cached current evidence. This avoids rapid

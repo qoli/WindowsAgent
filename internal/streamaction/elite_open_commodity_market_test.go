@@ -101,7 +101,7 @@ func TestEliteOpenCommodityMarketOpensAndSwitchesToSellWithOCRPostcondition(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"DOWN", "DOWN", "DOWN", "DOWN", "UP", "UP", "SELECT"}
+	wantControls := []string{"DOWN", "DOWN", "DOWN", "DOWN", "UP", "UP", "SELECT", "SELECT", "SELECT"}
 	if !equalStrings(caller.controls, wantControls) {
 		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
 	}
@@ -164,9 +164,9 @@ func TestEliteOpenCommodityMarketRejectsWrongStationAfterOpening(t *testing.T) {
 	if err == nil || !contains(err.Error(), "exact Station and mode") {
 		t.Fatalf("error=%v", err)
 	}
-	// Cleanup is not registered until the expected Station is positively
-	// confirmed, so a wrong screen cannot trigger blind BACK input.
-	if caller.exits != 0 {
-		t.Fatalf("exits=%d want=0", caller.exits)
+	// Cleanup is registered after the docked cockpit menu was proven and must
+	// restore the cockpit even when market-header validation fails.
+	if caller.exits != 1 {
+		t.Fatalf("exits=%d want=1", caller.exits)
 	}
 }

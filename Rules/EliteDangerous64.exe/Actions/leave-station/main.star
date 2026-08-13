@@ -177,6 +177,92 @@ def emit_update(phase, sample, observation, gate, commanded_throttle=None, instr
         },
     )
 
+def complete_stopped_departure(sample, observation, gate, wgc_error_count, samples_since_auto_launch_seen, movement_seen, maximum_observed_speed, low_speed_samples, handover_evidence, clear_failure_compensation=False):
+    throttle_0 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    stream.activity(message="Throttle set to 0%", level="info")
+    if clear_failure_compensation:
+        action.clear_on_failure()
+    gate = gate_state(
+        auto_launch_seen=True,
+        samples_since_auto_launch_seen=samples_since_auto_launch_seen,
+        movement_seen=movement_seen,
+        maximum_observed_speed=maximum_observed_speed,
+        low_speed_confirmations=len(low_speed_samples),
+        handover_evidence=handover_evidence,
+        handover_candidate=True,
+        decision="MASS_LOCK_RELEASE_CONFIRMED",
+        samples_since_throttle_zero=0,
+        zero_speed_confirmations=0,
+        stop_decision="WAITING_FOR_ZERO_SPEED",
+    )
+    emit_update("VERIFYING_STOP", sample, observation, gate, commanded_throttle=0, throttle_command=throttle_0)
+
+    zero_speed_confirmations = 0
+    for samples_since_throttle_zero in range(1, STOP_VERIFICATION_LIMIT + 1):
+        attempt = observe_stop_speed()
+        sample += 1
+        if not attempt["ok"]:
+            if not is_retryable_wgc_error(attempt):
+                fail(attempt["error"])
+            wgc_error_count += 1
+            if wgc_error_count > MAX_WGC_ERRORS:
+                fail("WGC observation error limit exceeded after five skipped errors: " + attempt["error"])
+            emit_update("OBSERVATION_ERROR", sample, unknown_observation("SPEED_ONLY"), gate, commanded_throttle=0, observation_error_count=wgc_error_count, observation_error=attempt["error"])
+            task.sleep(milliseconds=POLL_MS)
+            continue
+        observation = attempt["output"]
+
+        pixel_confirmed_zero = (
+            observation["observedSpeedState"] == "STOPPED" and
+            observation["observedSpeedDisplayValue"] == 0 and
+            observation["observedSpeedRawCandidate"] == 0 and
+            observation["observedSpeedReason"] == "SLASHED_ZERO_GLYPH_CONFIRMED"
+        )
+        if pixel_confirmed_zero:
+            zero_speed_confirmations += 1
+            stream.activity(message="Zero speed confirmed " + str(zero_speed_confirmations) + "/3", level="info")
+        else:
+            zero_speed_confirmations = 0
+
+        stop_decision = "ZERO_SPEED_CONFIRMED" if zero_speed_confirmations >= ZERO_SPEED_CONFIRMATIONS else "WAITING_FOR_ZERO_SPEED"
+        gate = gate_state(
+            auto_launch_seen=True,
+            samples_since_auto_launch_seen=samples_since_auto_launch_seen,
+            movement_seen=movement_seen,
+            maximum_observed_speed=maximum_observed_speed,
+            low_speed_confirmations=len(low_speed_samples),
+            handover_evidence=handover_evidence,
+            handover_candidate=True,
+            decision="MASS_LOCK_RELEASE_CONFIRMED",
+            samples_since_throttle_zero=samples_since_throttle_zero,
+            zero_speed_confirmations=zero_speed_confirmations,
+            stop_decision=stop_decision,
+        )
+        phase = "COMPLETED" if stop_decision == "ZERO_SPEED_CONFIRMED" else "VERIFYING_STOP"
+        emit_update(phase, sample, observation, gate, commanded_throttle=0)
+        if stop_decision == "ZERO_SPEED_CONFIRMED":
+            stream.activity(message="Departure completed", level="info")
+            return {
+                "schemaVersion": 3,
+                "task": "LEAVE_STATION",
+                "completed": True,
+                "finalPhase": "COMPLETED",
+                "finalMassLock": "OFF",
+                "finalCommandedThrottle": 0,
+                "finalStopState": "CONFIRMED",
+                "zeroSpeedConfirmations": zero_speed_confirmations,
+                "lastObservedSpeedState": observation["observedSpeedState"],
+                "lastObservedSpeedDisplayValue": observation["observedSpeedDisplayValue"],
+                "lastObservedSpeedRawCandidate": observation["observedSpeedRawCandidate"],
+                "lastObservedSpeedRawText": observation["observedSpeedRawText"],
+                "lastObservedSpeedConstrainedText": observation["observedSpeedConstrainedText"],
+                "lastObservedSpeedConstrainedConfidence": observation["observedSpeedConstrainedConfidence"],
+                "lastObservedSpeedRawConstraintMargin": observation["observedSpeedRawConstraintMargin"],
+                "sampleCount": sample,
+            }
+        task.sleep(milliseconds=POLL_MS)
+    fail("Zero speed was not visually confirmed after throttle 0")
+
 def main(ctx):
     if ctx.inputs["stationConfirmed"] != True:
         fail("stationConfirmed must be true")
@@ -260,7 +346,22 @@ def main(ctx):
         else:
             unknown_mass_lock_count = 0
         if mass_lock == "OFF":
-            fail("Mass Lock became OFF before throttle 100 was commanded")
+            if not movement_seen:
+                fail("Mass Lock became OFF before Auto Launch movement was observed")
+            handover_evidence = "AUTO_LAUNCH_MASS_LOCK_RELEASE"
+            gate = gate_state(
+                auto_launch_seen=True,
+                samples_since_auto_launch_seen=samples_since_auto_launch_seen,
+                movement_seen=True,
+                maximum_observed_speed=maximum_observed_speed,
+                low_speed_confirmations=len(low_speed_samples),
+                handover_evidence=handover_evidence,
+                handover_candidate=True,
+                decision="MASS_LOCK_RELEASE_CONFIRMED",
+            )
+            stream.activity(message="Auto Launch released Mass Lock before the throttle handover", level="info")
+            emit_update("HANDOVER_CANDIDATE", sample, observation, gate)
+            return complete_stopped_departure(sample, observation, gate, wgc_error_count, samples_since_auto_launch_seen, movement_seen, maximum_observed_speed, low_speed_samples, handover_evidence)
         flight_status = observation["flightStatus"]
         if flight_status == "AUTO_LAUNCH" or flight_status == "WAITING_IN_QUEUE":
             samples_since_auto_launch_seen = 0
@@ -377,93 +478,6 @@ def main(ctx):
         emit_update("DEPARTING", sample, observation, gate, commanded_throttle=100)
         if mass_lock_off_count >= MASS_LOCK_OFF_STABLE:
             stream.activity(message="Mass Lock released", level="info")
-            throttle_0 = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-            stream.activity(message="Throttle set to 0%", level="info")
-            action.clear_on_failure()
-            gate = gate_state(
-                auto_launch_seen=True,
-                samples_since_auto_launch_seen=samples_since_auto_launch_seen,
-                movement_seen=movement_seen,
-                maximum_observed_speed=maximum_observed_speed,
-                low_speed_confirmations=len(low_speed_samples),
-                handover_evidence=handover_evidence,
-                handover_candidate=True,
-                decision="MASS_LOCK_RELEASE_CONFIRMED",
-                samples_since_throttle_zero=0,
-                zero_speed_confirmations=0,
-                stop_decision="WAITING_FOR_ZERO_SPEED",
-            )
-            emit_update("VERIFYING_STOP", sample, observation, gate, commanded_throttle=0, throttle_command=throttle_0)
-
-            zero_speed_confirmations = 0
-            for samples_since_throttle_zero in range(1, STOP_VERIFICATION_LIMIT + 1):
-                attempt = observe_stop_speed()
-                sample += 1
-                if not attempt["ok"]:
-                    if not is_retryable_wgc_error(attempt):
-                        fail(attempt["error"])
-                    wgc_error_count += 1
-                    if wgc_error_count > MAX_WGC_ERRORS:
-                        fail("WGC observation error limit exceeded after five skipped errors: " + attempt["error"])
-                    emit_update("OBSERVATION_ERROR", sample, unknown_observation("SPEED_ONLY"), gate, commanded_throttle=0, observation_error_count=wgc_error_count, observation_error=attempt["error"])
-                    task.sleep(milliseconds=POLL_MS)
-                    continue
-                observation = attempt["output"]
-
-                pixel_confirmed_zero = (
-                    observation["observedSpeedState"] == "STOPPED" and
-                    observation["observedSpeedDisplayValue"] == 0 and
-                    observation["observedSpeedRawCandidate"] == 0 and
-                    observation["observedSpeedReason"] == "SLASHED_ZERO_GLYPH_CONFIRMED"
-                )
-                if pixel_confirmed_zero:
-                    zero_speed_confirmations += 1
-                    if zero_speed_confirmations == 1:
-                        stream.activity(message="Zero speed confirmed 1/3", level="info")
-                    elif zero_speed_confirmations == 2:
-                        stream.activity(message="Zero speed confirmed 2/3", level="info")
-                    elif zero_speed_confirmations == 3:
-                        stream.activity(message="Zero speed confirmed 3/3", level="info")
-                else:
-                    zero_speed_confirmations = 0
-
-                stop_decision = "ZERO_SPEED_CONFIRMED" if zero_speed_confirmations >= ZERO_SPEED_CONFIRMATIONS else "WAITING_FOR_ZERO_SPEED"
-                gate = gate_state(
-                    auto_launch_seen=True,
-                    samples_since_auto_launch_seen=samples_since_auto_launch_seen,
-                    movement_seen=movement_seen,
-                    maximum_observed_speed=maximum_observed_speed,
-                    low_speed_confirmations=len(low_speed_samples),
-                    handover_evidence=handover_evidence,
-                    handover_candidate=True,
-                    decision="MASS_LOCK_RELEASE_CONFIRMED",
-                    samples_since_throttle_zero=samples_since_throttle_zero,
-                    zero_speed_confirmations=zero_speed_confirmations,
-                    stop_decision=stop_decision,
-                )
-                phase = "COMPLETED" if stop_decision == "ZERO_SPEED_CONFIRMED" else "VERIFYING_STOP"
-                emit_update(phase, sample, observation, gate, commanded_throttle=0)
-                if stop_decision == "ZERO_SPEED_CONFIRMED":
-                    stream.activity(message="Departure completed", level="info")
-                    return {
-                        "schemaVersion": 3,
-                        "task": "LEAVE_STATION",
-                        "completed": True,
-                        "finalPhase": "COMPLETED",
-                        "finalMassLock": "OFF",
-                        "finalCommandedThrottle": 0,
-                        "finalStopState": "CONFIRMED",
-                        "zeroSpeedConfirmations": zero_speed_confirmations,
-                        "lastObservedSpeedState": observation["observedSpeedState"],
-                        "lastObservedSpeedDisplayValue": observation["observedSpeedDisplayValue"],
-                        "lastObservedSpeedRawCandidate": observation["observedSpeedRawCandidate"],
-                        "lastObservedSpeedRawText": observation["observedSpeedRawText"],
-                        "lastObservedSpeedConstrainedText": observation["observedSpeedConstrainedText"],
-                        "lastObservedSpeedConstrainedConfidence": observation["observedSpeedConstrainedConfidence"],
-                        "lastObservedSpeedRawConstraintMargin": observation["observedSpeedRawConstraintMargin"],
-                        "sampleCount": sample,
-                    }
-                task.sleep(milliseconds=POLL_MS)
-            fail("Zero speed was not visually confirmed after throttle 0")
+            return complete_stopped_departure(sample, observation, gate, wgc_error_count, samples_since_auto_launch_seen, movement_seen, maximum_observed_speed, low_speed_samples, handover_evidence, clear_failure_compensation=True)
         task.sleep(milliseconds=POLL_MS)
     fail("Mass Lock did not become OFF before the departure sample limit")

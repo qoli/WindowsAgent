@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 6,
+  "version": 7,
   "title": "Measure wide-field stellar presence, charge-safe heading, and escape direction",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

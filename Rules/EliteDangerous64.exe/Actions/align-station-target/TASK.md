@@ -10,11 +10,33 @@ before starting this Action.
 `alignmentPurpose=VISIBLE_HANDOFF` is a narrower Supercruise STATIC ALIGN
 contract for an owning workflow that immediately delegates final geometry to
 `align-visible-target`: it requires two current SOLID samples within a
-16-reference-pixel entry radius and 20-pixel verification hysteresis, and does
+10-reference-pixel entry radius and 12-pixel verification exit, and does
 not issue a center-entry counter-pulse. It only proves that the rear/coarse
 Compass phase has placed the destination in the visible-target controller's
 domain; it is not precise alignment and is rejected for TRACK, MOVING targets,
 or a non-Supercruise control profile.
+
+Live Houssay Ring evidence bounded that coarse domain: a 19.105-pixel Compass
+contact satisfied the former 16+4 Gate while the destination label remained at
+the extreme left edge of the forward HUD. The tighter entry and verification
+limits keep the label inside the OCR-first proposal domain without asking
+Compass to replace the following local reticle measurement.
+The first tighter live run then exposed a 9-to-12-pixel oscillation because the
+same Yaw correction jumped from 40 ms to 160 ms at the twelve-pixel boundary.
+`VISIBLE_HANDOFF` now keeps its 40 ms pulse through 24 pixels; once a current
+sample enters ten pixels, it stops injecting and verifies one fresh sample
+within the 12-pixel exit instead of driving through the useful heading.
+
+`alignmentPurpose=HYPERSPACE_CHARGE` is the strict pre-FSD Compass handoff. It
+is valid for STATIC ALIGN in normal space or Supercruise; the start mode must
+select the matching control profile. It requires three consecutive SOLID
+Compass observations within four reference pixels, with a two-pixel
+verification hysteresis. Live Supercruise evidence showed the earlier 120/160
+ms law oscillating between 8 and 13 pixels for the full 120-command budget; the
+FSD purpose uses 40 ms ultra-fine pulses throughout the inner 20 pixels so
+that the four-pixel Gate remains achievable without weakening alignment. The caller
+must still require exact visible-target completion and recheck the
+stellar `safeToCharge` Gate before sending FSD input.
 
 By default the Action first commands 0% throttle, then repeatedly reads
 `elite-dangerous/compass`. While the marker is hollow, the Action starts a

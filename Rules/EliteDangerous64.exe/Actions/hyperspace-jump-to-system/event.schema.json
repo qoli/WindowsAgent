@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["phase", "sample", "targetSystem", "childAction", "hyperspaceState", "flightStatus", "cockpitHud", "commandedThrottle", "lastCommand", "reason"],
       "properties": {
-        "phase": {"enum": ["LOCKING_TARGET", "TARGET_LOCKED", "ALIGNING_TARGET", "AWAITING_FSD_CHARGING", "RETRYING_FSD_CONTROL", "CLEARING_OCCLUSION", "FSD_CHARGING", "FSD_START_CONFIRMED", "REALIGNING_TARGET", "HYPERSPACE_TRANSIT_CANDIDATE", "HYPERSPACE_TRANSIT", "AWAITING_COCKPIT_RETURN", "ARRIVAL_BRAKE", "CONFIRMING_SUPERCRUISE", "ARRIVED_IN_SUPERCRUISE"]},
+        "phase": {"enum": ["LOCKING_TARGET", "TARGET_LOCKED", "ALIGNING_TARGET", "AWAITING_FSD_CHARGING", "RETRYING_FSD_CONTROL", "CLEARING_OCCLUSION", "VERIFYING_COMPASS_ALIGNED_OCCLUSION", "VERIFYING_POST_ALIGNMENT_OCCLUSION", "VERIFYING_POST_ALIGNMENT_HEAT", "FSD_CHARGING", "FSD_START_CONFIRMED", "REALIGNING_TARGET", "CANCELLING_MISALIGNED_FSD", "HYPERSPACE_TRANSIT_CANDIDATE", "HYPERSPACE_TRANSIT", "AWAITING_COCKPIT_RETURN", "ARRIVAL_BRAKE", "CONFIRMING_SUPERCRUISE", "ARRIVED_IN_SUPERCRUISE"]},
         "sample": {"type": "integer", "minimum": 0},
         "targetSystem": {"type": "string", "minLength": 2, "maxLength": 96},
         "childAction": {"type": ["string", "null"]},

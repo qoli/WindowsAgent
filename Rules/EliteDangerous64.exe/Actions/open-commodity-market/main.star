@@ -105,10 +105,26 @@ def send(control, operation, station_name):
     action.call(id="elite-dangerous/ui-control", inputs={"control": control})
     task.sleep(milliseconds=UI_SETTLE_MS)
 
+def activate_pointer_target(x, y, operation, station_name, reason):
+    # In the Starport Services and Commodity Market surfaces the injected
+    # pointer establishes focus, but a click is not accepted as activation by
+    # Elite Dangerous. Confirm the now-focused Rule-owned target through the
+    # game's binding-resolved UI_Select control.
+    emit_update("NAVIGATING", operation, station_name, command="POINTER_CLICK", observation={"x": x, "y": y}, reason=reason + "_FOCUS")
+    action.call(id="elite-dangerous/pointer-click", inputs={"x": x, "y": y, "holdMs": 40})
+    task.sleep(milliseconds=UI_SETTLE_MS)
+    emit_update("NAVIGATING", operation, station_name, command="SELECT", observation={"x": x, "y": y}, reason=reason + "_ACTIVATE")
+    action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
+
 def main(ctx):
     operation = ctx.inputs["operation"]
     station_name = ctx.inputs["stationName"]
     observation_count = observe_docked_menu_stable(operation, station_name)
+
+    # From this point onward the Action may have entered Starport Services or
+    # the market even when a later OCR postcondition fails. The shared cleanup
+    # safely restores the cockpit from either surface.
+    action.on_failure(id="elite-dangerous/exit-commodity-market", inputs={"dialogMayBeOpen": False})
 
     for _ in range(4):
         send("DOWN", operation, station_name)
@@ -117,19 +133,18 @@ def main(ctx):
     send("SELECT", operation, station_name)
     task.sleep(milliseconds=SERVICE_TRANSITION_MS)
 
-    emit_update("OPENING_MARKET", operation, station_name, command="POINTER_CLICK", observation={"x": COMMODITY_MARKET_X, "y": COMMODITY_MARKET_Y}, reason="RULE_OWNED_COMMODITY_MARKET_TILE")
-    action.call(id="elite-dangerous/pointer-click", inputs={"x": COMMODITY_MARKET_X, "y": COMMODITY_MARKET_Y, "holdMs": 40})
+    emit_update("OPENING_MARKET", operation, station_name, observation={"x": COMMODITY_MARKET_X, "y": COMMODITY_MARKET_Y}, reason="RULE_OWNED_COMMODITY_MARKET_TILE")
+    activate_pointer_target(COMMODITY_MARKET_X, COMMODITY_MARKET_Y, operation, station_name, "RULE_OWNED_COMMODITY_MARKET_TILE")
     task.sleep(milliseconds=MARKET_TRANSITION_MS)
     initial = observe_market_stable(operation, station_name, "CONFIRMING_MARKET")
     observation_count += initial["count"]
     initial_mode = initial["observation"]["mode"]
-    action.on_failure(id="elite-dangerous/exit-commodity-market", inputs={"dialogMayBeOpen": False})
 
     if initial_mode != operation:
         tile_x = BUY_TILE_X if operation == "BUY" else SELL_TILE_X
         tile_y = BUY_TILE_Y if operation == "BUY" else SELL_TILE_Y
-        emit_update("SWITCHING_MODE", operation, station_name, command="POINTER_CLICK", observation={"x": tile_x, "y": tile_y, "initialMode": initial_mode}, reason="RULE_OWNED_MARKET_MODE_TILE")
-        action.call(id="elite-dangerous/pointer-click", inputs={"x": tile_x, "y": tile_y, "holdMs": 40})
+        emit_update("SWITCHING_MODE", operation, station_name, observation={"x": tile_x, "y": tile_y, "initialMode": initial_mode}, reason="RULE_OWNED_MARKET_MODE_TILE")
+        activate_pointer_target(tile_x, tile_y, operation, station_name, "RULE_OWNED_MARKET_MODE_TILE")
         task.sleep(milliseconds=UI_SETTLE_MS)
         confirmed = observe_market_stable(operation, station_name, "CONFIRMING_MODE", required_mode=operation)
         observation_count += confirmed["count"]

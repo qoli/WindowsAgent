@@ -15,6 +15,7 @@ type multiSystemTransitCaller struct {
 	changeRouteAtPlan int
 	jumpTargets       []string
 	jumpModes         []string
+	clearanceTargets  []string
 	throttles         []int64
 	fuelMain          float64
 	resumeAtSecond    bool
@@ -66,6 +67,12 @@ func (c *multiSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		c.jumpTargets = append(c.jumpTargets, inputs["targetSystem"].(string))
 		c.jumpModes = append(c.jumpModes, inputs["startMode"].(string))
 		return json.RawMessage(`{"completed":true,"finalPhase":"ARRIVED_IN_SUPERCRUISE","arrivalBrakeSent":true}`), nil
+	case "elite-dangerous/clear-hyperspace-occlusion":
+		c.clearanceTargets = append(c.clearanceTargets, inputs["targetName"].(string))
+		if inputs["startMode"] != "SUPERCRUISE" {
+			return nil, errors.New("arrival clearance did not use SUPERCRUISE mode")
+		}
+		return json.RawMessage(`{"completed":true,"finalOcclusionState":"CLEAR","finalSupercruiseConfirmed":true,"finalCommandedThrottle":0,"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_CLEAR_HEADING","supercruiseEscapeDurationMs":24000}`), nil
 	case "elite-dangerous/set-throttle":
 		percent, _ := inputs["percent"].(int64)
 		c.throttles = append(c.throttles, percent)
@@ -143,11 +150,14 @@ func TestEliteMultiSystemTransitConsumesFrozenRouteInOrder(t *testing.T) {
 	if len(caller.jumpModes) != 2 || caller.jumpModes[0] != "NORMAL_SPACE" || caller.jumpModes[1] != "SUPERCRUISE" {
 		t.Fatalf("jumpModes=%v", caller.jumpModes)
 	}
+	if len(caller.clearanceTargets) != 1 || caller.clearanceTargets[0] != "Destination" {
+		t.Fatalf("clearanceTargets=%v", caller.clearanceTargets)
+	}
 	if caller.planCalls != 3 || len(caller.throttles) != 0 {
 		t.Fatalf("planCalls=%d throttles=%v", caller.planCalls, caller.throttles)
 	}
 	joined := joinEventPhases(reporter.payloads)
-	for _, phase := range []string{"ROUTE_READY", "HOP_STARTING", "HOP_COMPLETED", "ROUTE_REVALIDATED", "FINAL_SYSTEM_REACHED"} {
+	for _, phase := range []string{"ROUTE_READY", "HOP_STARTING", "HOP_COMPLETED", "ARRIVAL_CLEARANCE", "ARRIVAL_CLEARANCE_COMPLETED", "ROUTE_REVALIDATED", "FINAL_SYSTEM_REACHED"} {
 		if !contains(joined, phase) {
 			t.Fatalf("missing phase %s in %s", phase, joined)
 		}

@@ -5,7 +5,7 @@
   "properties": {
     "mode": {"enum": ["ALIGN", "TRACK"], "default": "ALIGN"},
     "targetMotion": {"enum": ["MOVING", "STATIC"], "default": "MOVING"},
-    "alignmentPurpose": {"enum": ["CENTER", "VISIBLE_HANDOFF"], "default": "CENTER"},
+    "alignmentPurpose": {"enum": ["CENTER", "VISIBLE_HANDOFF", "HYPERSPACE_CHARGE"], "default": "CENTER"},
     "trackingSamples": {"type": "integer", "minimum": 10, "maximum": 240, "default": 120},
     "stopBeforeAlign": {"type": "boolean", "default": true},
     "controlProfile": {"enum": ["AUTO", "NORMAL_SPACE", "SUPERCRUISE_ASSIST"], "default": "AUTO"}

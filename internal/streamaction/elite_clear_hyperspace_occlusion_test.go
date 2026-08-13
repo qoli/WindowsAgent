@@ -181,9 +181,13 @@ func (c *clearHyperspaceOcclusionCaller) Call(_ context.Context, id string, inpu
 }
 
 func clearHyperspaceOcclusionObservation(state string, ratio, center float64, control any) json.RawMessage {
+	return clearHyperspaceOcclusionObservationWithConfidence(state, ratio, center, 0.5, control)
+}
+
+func clearHyperspaceOcclusionObservationWithConfidence(state string, ratio, center, confidence float64, control any) json.RawMessage {
 	value, _ := json.Marshal(map[string]any{"occlusion": map[string]any{
 		"state": state, "stellarCoverageRatio": ratio, "centerCoverageRatio": center,
-		"maximumCellCoverageRatio": ratio, "directionConfidence": 0.5, "recommendedControl": control, "safeToCharge": ratio <= 0.005,
+		"maximumCellCoverageRatio": ratio, "directionConfidence": confidence, "recommendedControl": control, "safeToCharge": ratio <= 0.005,
 	}})
 	return value
 }
@@ -285,6 +289,156 @@ func TestEliteClearHyperspaceOcclusionAlignsEscapeVectorThenEntersSupercruise(t 
 	}
 	if !contains(joined, `"phase":"ALIGNING_VISIBLE_ESCAPE_VECTOR"`) || !contains(joined, `"reason":"VISIBLE_ESCAPE_VECTOR_ALIGNMENT_COMPLETED"`) {
 		t.Fatalf("SOLID plus a detected ROI must hand off to visible-target alignment: %s", joined)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionReusesExistingSupercruiseWithoutTogglingFSD(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: []json.RawMessage{
+			clearHyperspaceOcclusionObservationWithConfidence("BLOCKING", 0.601224, 0.970663, 0.400021, "YAW_LEFT"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+			clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP"),
+		},
+		enteredSupercruise: true,
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t),
+		map[string]any{"targetName": "29 Arietis", "startMode": "SUPERCRUISE"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"completed":true`, `"prealignmentProbeCount":0`, `"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_CLEAR_HEADING"`, `"supercruiseEscapeDurationMs":24000`} {
+		if !contains(string(output), expected) {
+			t.Fatalf("missing %s output=%s", expected, output)
+		}
+	}
+	if caller.supercruiseToggle != 0 {
+		t.Fatalf("existing Supercruise mode toggled FSD %d times", caller.supercruiseToggle)
+	}
+	if len(caller.controls) != 2 || caller.controls[0] != "YAW_LEFT" || caller.controls[1] != "YAW_LEFT" {
+		t.Fatalf("controls=%v", caller.controls)
+	}
+	if len(caller.holdOperations) != 3 || caller.holdOperations[0] != "START" || caller.holdOperations[1] != "RENEW" || caller.holdOperations[2] != "STOP" {
+		t.Fatalf("holdOperations=%v", caller.holdOperations)
+	}
+	if caller.heatIndex != 0 {
+		t.Fatalf("existing-Supercruise clearance must defer numeric heat until parent target alignment, calls=%d", caller.heatIndex)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionKeepsDefaultDirectionGateOutsideSevereCenterBlock(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: []json.RawMessage{
+			clearHyperspaceOcclusionObservationWithConfidence("BLOCKING", 0.20, 0.70, 0.40, "YAW_LEFT"),
+		},
+		heatPercents:       []int64{40, 40, 40},
+		enteredSupercruise: true,
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t),
+		map[string]any{"targetName": "29 Arietis", "startMode": "SUPERCRUISE"}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "no confident CV turn direction") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("non-severe low-confidence direction must not move ship, controls=%v", caller.controls)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionUsesBoundedImprovingEdgeTrend(t *testing.T) {
+	occlusions := []json.RawMessage{
+		json.RawMessage(`{"occlusion":{"state":"CLEAR","stellarCoverageRatio":0.004,"centerCoverageRatio":0,"maximumCellCoverageRatio":0.028,"directionConfidence":0.263,"recommendedControl":"YAW_LEFT","safeToCharge":false}}`),
+		json.RawMessage(`{"occlusion":{"state":"CLEAR","stellarCoverageRatio":0.0042,"centerCoverageRatio":0,"maximumCellCoverageRatio":0.025,"directionConfidence":0,"recommendedControl":null,"safeToCharge":false}}`),
+	}
+	for range 20 {
+		occlusions = append(occlusions, clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "YAW_LEFT"))
+	}
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions:         occlusions,
+		heatPercents:       []int64{40, 40, 40, 40, 40, 40},
+		enteredSupercruise: true,
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t),
+		map[string]any{"targetName": "29 Arietis", "startMode": "SUPERCRUISE"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if len(caller.controls) != 4 {
+		t.Fatalf("controls=%v", caller.controls)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `EXISTING_SUPERCRUISE_TREND_CONFIRMED_EDGE_EXIT:1`) {
+		t.Fatalf("missing bounded trend evidence: %s", joinEventPhases(reporter.payloads))
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"commandHoldMs":250`) {
+		t.Fatalf("missing residual edge fine pulse: %s", joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionRejectsNonImprovingEdgeTrend(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: []json.RawMessage{
+			clearHyperspaceOcclusionObservationWithConfidence("CLEAR", 0.0116, 0, 1.0, "YAW_LEFT"),
+			clearHyperspaceOcclusionObservationWithConfidence("CLEAR", 0.0120, 0, 0, nil),
+		},
+		heatPercents:       []int64{40, 40, 40},
+		enteredSupercruise: true,
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t),
+		map[string]any{"targetName": "29 Arietis", "startMode": "SUPERCRUISE"}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "no confident CV turn direction") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 1 {
+		t.Fatalf("non-improving edge must stop after first measured pulse, controls=%v", caller.controls)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionRejectsUnmeasuredFreshEdgeDirection(t *testing.T) {
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions: []json.RawMessage{
+			json.RawMessage(`{"occlusion":{"state":"CLEAR","stellarCoverageRatio":0.0045,"centerCoverageRatio":0,"maximumCellCoverageRatio":0.026,"directionConfidence":0.24,"recommendedControl":"YAW_RIGHT","safeToCharge":false}}`),
+		},
+		enteredSupercruise: true,
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t),
+		map[string]any{"targetName": "Aasgananu", "startMode": "SUPERCRUISE"}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "no confident CV turn direction") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("sub-threshold fresh edge must not move ship, controls=%v", caller.controls)
 	}
 }
 
@@ -486,7 +640,7 @@ func TestEliteClearHyperspaceOcclusionRequiresStableVisibleHandoffAndEscalatesSt
 		t.Fatalf("missing stagnant fine-segment escalation: %s", joined)
 	}
 	for _, expected := range []string{
-		`"schemaVersion":8`,
+		`"schemaVersion":9`,
 		`"prealignmentProbeCount":3`,
 		`"prealignmentTurnCount":2`,
 		`"visibleHandoffAttemptCount":1`,
@@ -670,6 +824,52 @@ func TestEliteClearHyperspaceOcclusionFailsClosedWhenEscapeVectorNeverAppears(t 
 	}
 	if caller.supercruiseToggle != 16 {
 		t.Fatalf("Supercruise toggles=%d, want eight bounded probes with explicit cancellation", caller.supercruiseToggle)
+	}
+}
+
+func TestEliteClearHyperspaceOcclusionUsesDirectSupercruiseWhenNoEscapeVectorOwnsCompass(t *testing.T) {
+	partial := clearHyperspaceOcclusionObservation("PARTIAL", 0.02, 0, "PITCH_UP")
+	clear := clearHyperspaceOcclusionObservation("CLEAR", 0.002, 0, "PITCH_UP")
+	caller := &clearHyperspaceOcclusionCaller{
+		occlusions:     []json.RawMessage{partial, partial, clear, clear, clear, clear, clear, clear, clear, clear, clear},
+		baselineTarget: escapeVectorTarget("SOLID", 0, -4, 4),
+		compassTargets: repeatCompassTargets(
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+			escapeVectorTarget("SOLID", 0, -4, 4),
+		),
+		heatPercents: []int64{24, 24, 24, 24, 24, 24, 24, 24},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteClearHyperspaceOcclusionPackage(t), map[string]any{"targetName": "87 Mu Ceti"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"completed":true`, `"escapeVectorDetected":false`, `"entryAlignmentEvidence":"DIRECT_SUPERCRUISE_CLEAR_HEADING"`, `"finalSupercruiseConfirmed":true`} {
+		if !contains(string(output), expected) {
+			t.Fatalf("output=%s missing %s", output, expected)
+		}
+	}
+	if len(caller.controls) != 1 || caller.controls[0] != "PITCH_UP" {
+		t.Fatalf("direct clearance controls=%v", caller.controls)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"DIRECT_SUPERCRUISE_ENTRY_CONFIRMED"`) {
+		t.Fatalf("missing direct entry evidence: %s", joinEventPhases(reporter.payloads))
 	}
 }
 

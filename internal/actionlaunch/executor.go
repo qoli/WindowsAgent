@@ -317,6 +317,13 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		rgb[index*3+1] = byte(pixel >> 8)
 		rgb[index*3+2] = byte(pixel)
 	}
+	filteredPixelCount := 0
+	if config.PixelFilter != nil {
+		filteredPixelCount, err = config.PixelFilter.Apply(rgb)
+		if err != nil {
+			return nil, fmt.Errorf("preprocess OCR Action region: %w", err)
+		}
+	}
 	capturedAt := region.Foreground.ObservedAt.UTC()
 	identity := capturedAt.Format("20060102T150405.000000000Z")
 	result, err := e.ocr.Recognize(ctx, action.RuleID, action.RuntimeProfile, ocrworker.Request{
@@ -353,6 +360,8 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 			"image": map[string]any{
 				"width": region.ImageWidth, "height": region.ImageHeight, "encoding": "rgb24",
 			},
+			"pixelFilter":        config.PixelFilter,
+			"filteredPixelCount": filteredPixelCount,
 		},
 		"model": result.Model,
 		"timing": map[string]any{

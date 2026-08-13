@@ -13,8 +13,11 @@ SUPERCRUISE_CENTER_RADIUS_PIXELS = 16.0
 SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS = 20.0
 SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 4.0
 SUPERCRUISE_STATIC_ALIGN_CENTER_RADIUS_PIXELS = 8.0
-SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS = 16.0
-SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS = 4.0
+SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS = 10.0
+SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS = 2.0
+SUPERCRUISE_VISIBLE_HANDOFF_ULTRA_FINE_DISTANCE_PIXELS = 24
+HYPERSPACE_CHARGE_RADIUS_PIXELS = 4.0
+HYPERSPACE_CHARGE_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS = 4.0
 SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS = 2.0
 SUSTAINED_DISTANCE_PIXELS = 40
@@ -33,6 +36,7 @@ SUPERCRUISE_STATIC_TRACK_FINE_DISTANCE_PIXELS = 10
 SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS = 80
 SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS = 160
 SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS = 12
+HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS = 20
 SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS = 40
 CENTER_ENTRY_BRAKE_MS = 100
 SUPERCRUISE_CENTER_ENTRY_BRAKE_MS = 300
@@ -276,6 +280,8 @@ def main(ctx):
     supercruise_profile = control_profile == "SUPERCRUISE_ASSIST"
     if alignment_purpose == "VISIBLE_HANDOFF" and (mode != "ALIGN" or not supercruise_profile or target_motion != "STATIC"):
         fail("VISIBLE_HANDOFF requires ALIGN with STATIC target motion and SUPERCRUISE_ASSIST control profile")
+    if alignment_purpose == "HYPERSPACE_CHARGE" and (mode != "ALIGN" or target_motion != "STATIC"):
+        fail("HYPERSPACE_CHARGE requires ALIGN with STATIC target motion")
     stable_confirmations_required = 2 if supercruise_profile else STABLE_CENTER_CONFIRMATIONS
     alignment_radius = SUPERCRUISE_CENTER_RADIUS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else ALIGN_CENTER_RADIUS_PIXELS
     alignment_hysteresis = SUPERCRUISE_CENTER_HYSTERESIS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else 0.0
@@ -288,7 +294,13 @@ def main(ctx):
         if alignment_purpose == "VISIBLE_HANDOFF":
             alignment_radius = SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS
             alignment_hysteresis = SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS
-    elif control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK":
+    if alignment_purpose == "HYPERSPACE_CHARGE":
+        # The start mode selects the calibrated motion profile, but the pre-FSD
+        # visual Gate is identical in normal space and Supercruise.
+        alignment_radius = HYPERSPACE_CHARGE_RADIUS_PIXELS
+        alignment_hysteresis = HYPERSPACE_CHARGE_HYSTERESIS_PIXELS
+        stable_confirmations_required = STABLE_CENTER_CONFIRMATIONS
+    elif control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK" and target_motion != "STATIC":
         alignment_radius = SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS
     fine_distance = SUPERCRUISE_FINE_DISTANCE_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else FINE_DISTANCE_PIXELS
     fine_hold = FINE_HOLD_MS
@@ -780,6 +792,14 @@ def main(ctx):
             else:
                 pulse = choose_pulse(control_target, no_movement_count, fine_distance, fine_hold, supercruise_profile, single_axis_fine)
                 if (
+                    alignment_purpose == "HYPERSPACE_CHARGE" and
+                    control_target["presentation"] == "SOLID" and
+                    target["centerDistancePixels"] <= HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS and
+                    no_movement_count < 2 and
+                    pulse != None
+                ):
+                    pulse = [pulse[0], SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS]
+                if (
                     mode == "TRACK" and
                     supercruise_profile and
                     control_target["presentation"] == "SOLID" and
@@ -797,7 +817,9 @@ def main(ctx):
                 ):
                     static_ultra_fine_pulse = (
                         mode == "ALIGN" and
-                        target["centerDistancePixels"] <= SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS and
+                        target["centerDistancePixels"] <= (
+                            HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS if alignment_purpose == "HYPERSPACE_CHARGE" else (SUPERCRUISE_VISIBLE_HANDOFF_ULTRA_FINE_DISTANCE_PIXELS if alignment_purpose == "VISIBLE_HANDOFF" else SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS)
+                        ) and
                         no_movement_count < 2
                     )
                     static_fine_pulse = (

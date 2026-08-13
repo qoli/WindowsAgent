@@ -1,6 +1,6 @@
 # Elite Dangerous serviced Auto Launch and leave station
 
-This version 9 interruptible linear Streaming Action begins only after a supervising
+This version 10 interruptible linear Streaming Action begins only after a supervising
 model supplies `stationConfirmed: true` for the visible docked cockpit menu.
 It first delegates to `elite-dangerous/prepare-auto-launch` with
 `activateAutoLaunch=true`. The child reads the remembered four-tile service
@@ -21,7 +21,11 @@ garbage is neutral rather than a false clear signal. While Mass Lock remains
 `ON`, the low-speed handover accepts two classified `STOPPED` or `LOW_SPEED`
 observations within an eight-sample window. `UNKNOWN` never contributes to a
 Gate. Intervening `UNKNOWN` samples do not erase valid low-speed evidence,
-while a later `MOVING` observation does. It then calls
+while a later `MOVING` observation does. If the observed Auto Launch lifecycle
+itself releases Mass Lock after movement was proved, the Action records
+`AUTO_LAUNCH_MASS_LOCK_RELEASE`, commands 0%, and proceeds directly to visual
+stop verification; it must not inject a late 100% command after the ship has
+already left the station's Mass Lock range. Otherwise it calls
 `elite-dangerous/set-throttle` with `100` and emits the resolved preset,
 binding file, logical control, and physical key. After Mass Lock is `OFF` for
 two consecutive samples, it calls the same Action with `0` and enters

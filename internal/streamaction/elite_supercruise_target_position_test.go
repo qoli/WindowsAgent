@@ -94,12 +94,53 @@ func supercruiseTargetPositionBands(first, second, third json.RawMessage, rest .
 		identity = rest[1]
 	}
 	return map[string]json.RawMessage{
-		"elite-dangerous/supercruise-target-text-regions":             first,
-		"elite-dangerous/supercruise-target-text-regions-lower":       second,
-		"elite-dangerous/supercruise-target-text-regions-lower-wide":  third,
-		"elite-dangerous/supercruise-target-text-regions-upper-left":  upperLeft,
-		"elite-dangerous/supercruise-target-text-regions-upper-right": fourth,
-		"elite-dangerous/request-docking-distance-regions":            identity,
+		"elite-dangerous/supercruise-target-text-regions":              first,
+		"elite-dangerous/supercruise-target-text-regions-lower":        second,
+		"elite-dangerous/supercruise-target-text-regions-lower-wide":   third,
+		"elite-dangerous/supercruise-target-text-regions-upper-left":   upperLeft,
+		"elite-dangerous/supercruise-target-text-regions-upper-right":  fourth,
+		"elite-dangerous/supercruise-target-text-regions-middle-left":  targetPositionRegions("", 0, 0),
+		"elite-dangerous/supercruise-target-text-regions-middle-right": targetPositionRegions("", 0, 0),
+		"elite-dangerous/request-docking-distance-regions":             identity,
+	}
+}
+
+func TestEliteSupercruiseTargetPositionFindsMiddleLeftStation(t *testing.T) {
+	regions := supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("HOUSSAY RING", 172, 780),
+	)
+	regions["elite-dangerous/supercruise-target-text-regions-middle-left"] = targetPositionRegions("HOUSSAY RING", 100, 474)
+	caller := &supercruiseTargetPositionCaller{regions: regions}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "HOUSSAY RING"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
+		!contains(string(output), `"referenceX":70`) || !contains(string(output), `"referenceY":486`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionFindsIdentityCorroboratedMiddleRightSystemSuffix(t *testing.T) {
+	regions := supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("AASGANANU", 172, 780),
+	)
+	regions["elite-dangerous/supercruise-target-text-regions-middle-right"] = targetPositionRegions("SGANANU", 1415, 420)
+	caller := &supercruiseTargetPositionCaller{regions: regions}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "AASGANANU"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
+		!contains(string(output), `"reason":"OCCLUDED_SINGLE_WORD_POSITION_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"referenceX":1385`) || !contains(string(output), `"referenceY":432`) {
+		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
 

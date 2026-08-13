@@ -4,6 +4,9 @@ CARGO_POLL_MS = 500
 CONTROL_SETTLE_MS = 500
 QUANTITY_STEP_MS = 60
 CARGO_POLL_LIMIT = 20
+LIST_SEARCH_BATCH_SIZE = 10
+LIST_SEARCH_BATCH_LIMIT = 18
+LIST_SEARCH_STEP_MS = 60
 MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 LIST_MIN_X = 360.0
@@ -112,23 +115,69 @@ def inspect_dialog(raw, operation, commodity_name):
             title_confirmed = True
     return {"commodityConfirmed": commodity_confirmed, "titleConfirmed": title_confirmed}
 
-def observe_market_stable(operation, commodity_name, quantity, station_name, phase):
-    previous = False
-    last = None
-    count = 0
+def observe_market_once(operation, commodity_name, station_name):
+    header = action.call(id="elite-dangerous/commodity-market-header-text-regions", inputs={})
+    upper = action.call(id="elite-dangerous/commodity-market-text-regions", inputs={})
+    lower = action.call(id="elite-dangerous/commodity-market-list-text-regions", inputs={})
+    return inspect_market({"regions": header["regions"] + upper["regions"] + lower["regions"]}, operation, commodity_name, station_name)
+
+def market_context_confirmed(observation):
+    return observation["marketTitle"] and observation["stationConfirmed"] and observation["modeConfirmed"]
+
+def locate_commodity(operation, commodity_name, quantity, station_name):
+    observation_count = 0
+    previous_context = False
+    initial = None
     for _ in range(6):
-        header = action.call(id="elite-dangerous/commodity-market-header-text-regions", inputs={})
-        visible = action.call(id="elite-dangerous/commodity-market-text-regions", inputs={})
-        raw = {"regions": header["regions"] + visible["regions"]}
-        last = inspect_market(raw, operation, commodity_name, station_name)
-        count += 1
-        known = last["marketTitle"] and last["stationConfirmed"] and last["modeConfirmed"] and last["exactCommodityCount"] == 1
-        emit_update(phase, operation, commodity_name, quantity, observation=last, reason="EXACT_VISIBLE_COMMODITY_REQUIRED")
-        if known and previous:
-            return {"observation": last, "count": count}
-        previous = known
+        current = observe_market_once(operation, commodity_name, station_name)
+        observation_count += 1
+        if current["exactCommodityCount"] > 1:
+            fail("Commodity Market showed ambiguous duplicate exact commodity rows")
+        context = market_context_confirmed(current)
+        emit_update("CONFIRMING_MARKET", operation, commodity_name, quantity, observation=current, reason="EXACT_MARKET_CONTEXT_BEFORE_BOUNDED_LIST_SEARCH")
+        if context and previous_context:
+            initial = current
+            break
+        previous_context = context
         task.sleep(milliseconds=OCR_SETTLE_MS)
-    fail("Commodity Market did not show one exact visible commodity in the expected Station and mode")
+    if initial == None:
+        fail("Commodity Market did not confirm the exact Station and mode before list search")
+
+    if initial["exactCommodityCount"] == 1:
+        return {"observation": initial, "count": observation_count, "navigationSteps": 0}
+
+    mode_y = 252 if operation == "BUY" else 401
+    emit_update("FOCUSING_LIST", operation, commodity_name, quantity, command="POINTER_FOCUS_MODE_TILE", observation={"x": 174, "y": mode_y}, reason="RESET_MARKET_FOCUS_BEFORE_BOUNDED_LIST_SEARCH")
+    action.call(id="elite-dangerous/pointer-click", inputs={"x": 174, "y": mode_y, "holdMs": 40})
+    task.sleep(milliseconds=UI_SETTLE_MS)
+    emit_update("FOCUSING_LIST", operation, commodity_name, quantity, command="RIGHT", observation=None, reason="ENTER_FIRST_COMMODITY_ROW_FROM_MODE_TILE")
+    action.call(id="elite-dangerous/ui-control", inputs={"control": "RIGHT"})
+    task.sleep(milliseconds=CONTROL_SETTLE_MS)
+
+    navigation_steps = 0
+    for batch in range(LIST_SEARCH_BATCH_LIMIT + 1):
+        current = observe_market_once(operation, commodity_name, station_name)
+        observation_count += 1
+        if not market_context_confirmed(current):
+            fail("Commodity Market context changed during bounded list search")
+        if current["exactCommodityCount"] > 1:
+            fail("Commodity Market showed ambiguous duplicate exact commodity rows")
+        emit_update("SEARCHING_LIST", operation, commodity_name, quantity, observation={"batch": batch, "navigationSteps": navigation_steps, "market": current}, reason="EXACT_COMMODITY_OCR_AFTER_BOUNDED_NAVIGATION")
+        if current["exactCommodityCount"] == 1:
+            confirmation = observe_market_once(operation, commodity_name, station_name)
+            observation_count += 1
+            emit_update("SEARCHING_LIST", operation, commodity_name, quantity, observation={"batch": batch, "navigationSteps": navigation_steps, "market": confirmation}, reason="SECOND_EXACT_COMMODITY_OBSERVATION_WITHOUT_INTERVENING_INPUT")
+            if market_context_confirmed(confirmation) and confirmation["exactCommodityCount"] == 1:
+                return {"observation": confirmation, "count": observation_count, "navigationSteps": navigation_steps}
+        if batch == LIST_SEARCH_BATCH_LIMIT:
+            break
+        for _ in range(LIST_SEARCH_BATCH_SIZE):
+            action.call(id="elite-dangerous/ui-control", inputs={"control": "DOWN"})
+            navigation_steps += 1
+            task.sleep(milliseconds=LIST_SEARCH_STEP_MS)
+        emit_update("SCROLLING_LIST", operation, commodity_name, quantity, command="DOWN_X_10", observation={"batch": batch + 1, "navigationSteps": navigation_steps}, reason="BOUNDED_KEYBOARD_LIST_NAVIGATION")
+        task.sleep(milliseconds=CONTROL_SETTLE_MS)
+    fail("exact commodity was not found within the bounded Commodity Market list search")
 
 def observe_dialog_stable(operation, commodity_name, quantity):
     previous = False
@@ -190,7 +239,7 @@ def main(ctx):
         fail("Cargo.json does not contain enough of the exact commodity to sell")
     emit_update("PREFLIGHT", operation, commodity_name, quantity, observation=before, reason="CURRENT_CARGO_BASELINE")
 
-    visible = observe_market_stable(operation, commodity_name, quantity, station_name, "CONFIRMING_MARKET")
+    visible = locate_commodity(operation, commodity_name, quantity, station_name)
     observation_count = visible["count"] + 1
     commodity = visible["observation"]["commodity"]
     click_x = int(commodity["bounds"]["centerX"])
@@ -202,6 +251,9 @@ def main(ctx):
 
     emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="POINTER_CLICK", observation={"x": click_x, "y": click_y, "commodity": commodity}, reason="SAME_FRAME_EXACT_OCR_BOX")
     action.call(id="elite-dangerous/pointer-click", inputs={"x": click_x, "y": click_y, "holdMs": 40})
+    task.sleep(milliseconds=CONTROL_SETTLE_MS)
+    emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="SELECT", observation={"x": click_x, "y": click_y}, reason="POINTER_ESTABLISHES_FOCUS_AND_BOUND_UI_SELECT_ACTIVATES")
+    action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
     task.sleep(milliseconds=UI_SETTLE_MS)
     dialog = observe_dialog_stable(operation, commodity_name, quantity)
     observation_count += dialog["count"]

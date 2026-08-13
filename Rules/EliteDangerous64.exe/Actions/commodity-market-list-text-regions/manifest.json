@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect the lower Elite Dangerous Commodity Market goods column",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 350, "y": 544, "w": 450, "h": 456},
+  "sampling": "reference",
+  "maxPixels": 205200,
+  "leftContextWidth": 1,
+  "verticalPadding": 4
+}

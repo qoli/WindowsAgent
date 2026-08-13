@@ -86,6 +86,42 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 	}
 }
 
+func TestEliteAlignVisibleTargetKeepsContinuousReticleTrackThroughPillarOcclusion(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 46), visibleHeat("KNOWN", 46)},
+		positions: []json.RawMessage{
+			visiblePosition(320, -120, 341.8),
+			visiblePosition(280, -100, 297.3),
+			visiblePosition(240, -80, 253.0),
+			visiblePosition(200, -60, 208.8),
+			visiblePosition(160, -40, 164.9),
+			visiblePosition(120, -20, 121.7),
+			visiblePosition(80, -10, 80.6),
+			visiblePosition(40, -8, 40.8),
+			visiblePosition(18, -4, 18.4),
+			visiblePosition(8, -4, 8.9),
+			visiblePosition(7, -3, 7.6),
+			visiblePosition(6, -2, 6.3),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "Aasgananu", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	identityCalls := 0
+	for _, actionID := range caller.positionActions {
+		if actionID == "elite-dangerous/supercruise-target-position" {
+			identityCalls++
+		}
+	}
+	if identityCalls != 1 {
+		t.Fatalf("continuous reticle track unnecessarily reacquired occluded identity: actions=%v", caller.positionActions)
+	}
+}
+
 func TestEliteAlignVisibleTargetTrackingLossReacquiresIdentityWithoutSteering(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},

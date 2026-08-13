@@ -1,10 +1,12 @@
 # Elite Dangerous Supercruise target position
 
-This finite composite Action fuses a CV-first focus-frame decision with current
-forward-HUD PP-OCR layout and identity evidence. It uses one tall central, two
-lower, and symmetric upper-left and upper-right OCR bands to propose bounded
-local search hints. Every normally legible forward-HUD proposal is enhanced and
-shape-scored before target-name semantics are applied; OCR never authorizes a
+This finite composite Action uses PP-OCR first to propose bounded spatial
+candidates, then fuses a local CV focus-frame measurement with current HUD
+layout and identity evidence. It uses one tall central, two lower, symmetric
+upper-left and upper-right bands, and symmetric middle-left and middle-right
+gap bands. Every normally
+legible OCR proposal receives a fresh 140×140 local enhancement and 3/4-annulus
+measurement before target-name semantics may select it. OCR never authorizes a
 control coordinate or decides which shape is viable by itself.
 The central band covers reference `y=80..400`: live Supercruise evidence placed
 an already Compass-aligned planetary marker around `y=185`, above the retired
@@ -44,8 +46,23 @@ counts and unmatched fragments remain `UNKNOWN`.
 The upper-right band covers reference x=1120–1920 and y=80–400. It is required
 by live Supercruise Assist evidence where the selected Station label remained
 near the right HUD edge while `ALIGN WITH TARGET DESTINATION` was visible and
-all centre/lower bands were empty. It remains an explicit fourth observation;
+all centre/lower bands were empty. It remains an explicit observation;
 target matching and ambiguity rules are unchanged.
+
+The middle-right band covers reference x=960–1920 and y=360–626. Live
+`AASGANANU` evidence placed a selected target's partly occluded label near
+reference x=1341, y=398, between the upper-right and lower-wide bands. The band
+returned `SGANANU` at 0.815 detector and 0.994 recognizer confidence. That
+single-token suffix is accepted only when the same invocation independently
+confirms the complete `AASGANANU` identity in the lower-left HUD and the local
+3/4-annulus measurement passes all shape and layout Gates. It is not a general
+partial-text match.
+
+The middle-left band covers reference x=0–960 and y=360–626. Houssay Ring
+evidence placed its selected label near reference x=35, y=474, inside the
+previous x=0–800, y=400–480 gap between upper-left and lower-wide OCR. This is
+an OCR proposal coverage correction only: the projected local 3/4-annulus must
+still pass the same shape, layout, and ambiguity Gates.
 
 The symmetric upper-left band covers reference x=0–800 and y=80–400. Live
 post-jump evidence placed `LP 298-42` at reference x=258, y=390 while the

@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "required": ["phase", "hopIndex", "jumpCount", "fromSystem", "toSystem", "nextSystem", "routeId", "childAction", "commandedThrottle", "fuelMain", "temperature", "statusTimestamp", "reason"],
       "properties": {
-        "phase": {"enum": ["PLANNING_ROUTE", "ROUTE_READY", "ROUTE_RESUMED", "DEPARTURE", "DEPARTURE_COMPLETED", "WAITING_READINESS", "HOP_STARTING", "HOP_COMPLETED", "REVALIDATING_ROUTE", "ROUTE_REVALIDATED", "FINAL_SYSTEM_REACHED"]},
+        "phase": {"enum": ["PLANNING_ROUTE", "ROUTE_READY", "ROUTE_RESUMED", "DEPARTURE", "DEPARTURE_COMPLETED", "WAITING_READINESS", "HOP_STARTING", "HOP_COMPLETED", "ARRIVAL_CLEARANCE", "ARRIVAL_CLEARANCE_COMPLETED", "REVALIDATING_ROUTE", "ROUTE_REVALIDATED", "FINAL_SYSTEM_REACHED"]},
         "hopIndex": {"type": "integer", "minimum": 0, "maximum": 32},
         "jumpCount": {"type": "integer", "minimum": 0, "maximum": 32},
         "fromSystem": {"type": ["string", "null"]},

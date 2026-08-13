@@ -585,12 +585,14 @@ relative brightness plus an absolute floor because unavailable grey tiles can
 still receive the game's bright keyboard-focus fill. It never interprets
 service availability or remembers a prior focus.
 
-`elite-dangerous/commodity-market-header-text-regions` and
+`elite-dangerous/commodity-market-header-text-regions`,
+`elite-dangerous/commodity-market-list-text-regions`, and
 `elite-dangerous/commodity-market-text-regions` are bounded resident PP-OCR
 primitives for the open Commodity Market. The first owns the title, Station,
-and BUY/SELL mode header; the second owns the visible commodity list and trade
-dialog. They remain separate captures so neither request exceeds the OCR
-runtime pixel limit. `elite-dangerous/trade-visible-commodity` is an
+and BUY/SELL mode header; the second owns the lower GOODS column; the third
+owns the upper list and trade dialog. The two list ROIs meet without overlap so
+all currently visible rows are covered, while no request exceeds the OCR pixel
+or detector-shape limit. `elite-dangerous/trade-visible-commodity` is an
 interruptible linear Streaming Action for one exact row already visible in the
 caller's already-selected BUY or SELL tab. It requires two adjacent current
 header/list cycles, uses only the exact row box from the list capture for the

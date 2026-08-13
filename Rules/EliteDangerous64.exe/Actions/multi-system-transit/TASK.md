@@ -17,6 +17,15 @@ Supercruise. The child owns target-lock verification, alignment, FSD control,
 bounded Journal `FSDJump` evidence, arrival braking, and Supercruise
 confirmation.
 
+After every non-final `FSDJump`, the workflow unconditionally delegates an
+arrival-star clearance before it begins the next hop. The child uses the
+existing-Supercruise CV mode: turn at 0% until the stricter `safeToCharge`
+Gate is stable, add two seconds of angular margin, fly the safe heading at 100%
+for 24 seconds, then return to 0% and cool to the child's 45% handoff Gate. This lowers
+the next alignment and charge failure probability by moving the ship away from
+the arrival star before the next hyperspace target is pursued. Its final
+`CLEAR`, Supercruise, and 0%-throttle postconditions are all required.
+
 Before each hop, the workflow requires one AVAILABLE `Status.json` snapshot
 with numeric `Fuel.FuelMain`. Fuel must be at or above the explicit
 `minimumFuelMain`. ED's Status snapshot does not provide a temperature field,

@@ -1,5 +1,10 @@
 POLL_MS = 250
 
+def same_system_name(actual, expected):
+    if actual == None or expected == None:
+        return False
+    return actual.upper() == expected.upper()
+
 def emit_update(phase, sample, target_name=None, child_action=None, hyperspace_state=None, flight_status=None, cockpit_hud=None, commanded_throttle=None, last_command=None, reason=None):
     stream.emit(
         type="action.inter-system-transit-to-station.update",
@@ -23,7 +28,7 @@ def require_arrived_supercruise_resume(target_name):
     for event in tail["events"]:
         if event["event"] == "FSDJump" and (latest == None or event["timestamp"] > latest["timestamp"]):
             latest = event
-    if latest == None or latest["StarSystem"] != target_name:
+    if latest == None or not same_system_name(latest["StarSystem"], target_name):
         fail("latest Journal FSDJump does not match destinationSystem for arrived Supercruise resume")
     confirmations = 0
     for _ in range(8):
