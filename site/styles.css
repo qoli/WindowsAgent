@@ -271,6 +271,31 @@ body {
   border-radius: 6px; padding: 0.2rem 0.55rem;
 }
 
+/* ---------- game ---------- */
+.game-intro {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem;
+  margin-bottom: 2.4rem;
+}
+.game-video { margin: 0 0 1.6rem; }
+.game-video video {
+  display: block; width: 100%; background: #000;
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.game-video figcaption,
+.game-gallery figcaption {
+  font-size: 0.85rem; color: var(--muted); padding-top: 0.7rem;
+}
+.game-gallery {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 1.2rem; align-items: start;
+}
+.game-gallery figure { margin: 0; }
+.game-gallery img {
+  display: block; width: 100%; height: auto;
+  border: 1px solid var(--line); border-radius: 12px;
+}
+
 /* ---------- quick start ---------- */
 .qs-grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem;
@@ -310,6 +335,7 @@ body {
   .hero-inner { grid-template-columns: 1fr; gap: 2.5rem; }
   .loop-grid { grid-template-columns: repeat(2, 1fr); }
   .pillar-grid, .rules-grid, .qs-grid { grid-template-columns: 1fr; }
+  .game-intro, .game-gallery { grid-template-columns: 1fr; }
   .dual { grid-template-columns: 1fr; }
   .dual-seam { flex-direction: row; min-width: 0; padding: 0.4rem 0; }
   .dual-seam-line { width: auto; height: 1px; flex: 1; min-height: 0;

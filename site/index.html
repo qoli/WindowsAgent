@@ -20,6 +20,7 @@
     <a href="#runtime" data-i18n="nav.runtime">Runtime</a>
     <a href="#design" data-i18n="nav.design">Design</a>
     <a href="#rules" data-i18n="nav.rules">Rules</a>
+    <a href="#game" data-i18n="nav.game">The Game</a>
     <a href="#metagame" data-i18n="nav.metagame">Meta-game</a>
     <a href="#quickstart" data-i18n="nav.quickstart">Quick Start</a>
   </nav>
@@ -216,6 +217,52 @@
       <p data-i18n="rules.pw.d">The screenparser action runs a pinned FP16 ScreenParser v2 ONNX model over DirectML on one caller-supplied, hash-pinned frame — then exits. No loop, no fallback, no residue.</p>
       <ul class="rule-caps"><li>ui-elements</li><li>ONNX · DirectML</li></ul>
     </article>
+  </div>
+</section>
+
+<!-- ============ THE GAME ============ -->
+<section id="game" class="section">
+  <p class="section-kicker" data-i18n="game.kicker">The proving ground</p>
+  <h2 data-i18n="game.title">Elite Dangerous — the game your agent learns to fly</h2>
+  <p class="section-sub" data-i18n="game.sub">Frontier's 1:1 Milky Way is home turf for the first shipped Rule. Long-haul flight, strict physics, and a HUD that never forgives a guess — exactly the environment the two-speed architecture was built for.</p>
+  <div class="game-intro">
+    <article class="pillar">
+      <h3><span class="pillar-tag">GAME</span><span data-i18n="game.g.t">About the game</span></h3>
+      <ul>
+        <li data-i18n="game.g.1">A 1:1-scale Milky Way — hundreds of billions of star systems, flown in real time</li>
+        <li data-i18n="game.g.2">No pause button: docking, supercruise, and hyperspace jumps are manual flying skills</li>
+        <li data-i18n="game.g.3">Long-haul trade runs mix minutes of routine flight with seconds that decide everything</li>
+      </ul>
+    </article>
+    <article class="pillar">
+      <h3><span class="pillar-tag">FIT</span><span data-i18n="game.f.t">Why it fits an agent runtime</span></h3>
+      <ul>
+        <li data-i18n="game.f.1">High-contrast orange HUD — friendly to OCR and region classifiers</li>
+        <li data-i18n="game.f.2">Hard failure gates (mass-lock, throttle zones, station rotation) make honesty testable</li>
+        <li data-i18n="game.f.3">Routine flight phases hand over cleanly to deterministic streaming reflexes</li>
+        <li data-i18n="game.f.4">Every flight ends with observable postconditions — docked, departed, jumped — not vibes</li>
+      </ul>
+    </article>
+  </div>
+  <figure class="game-video">
+    <video controls preload="none" playsinline poster="assets/ed-supercruise-assist-osd-poster.jpg">
+      <source src="assets/ed-supercruise-assist-osd.mp4" type="video/mp4">
+    </video>
+    <figcaption data-i18n="game.video.cap">Filmed off the living-room TV: the agent owns flight controls through supercruise while the Action OSD narrates every gate — zero model calls in the fast path.</figcaption>
+  </figure>
+  <div class="game-gallery">
+    <figure>
+      <img loading="lazy" src="assets/ed-tablet-departure-plan.jpg" alt="Tablet showing the agent planning a station departure with Elite Dangerous cockpit captures">
+      <figcaption data-i18n="game.p1.cap">Supervising from a tablet: the planner walks the AUTO LAUNCH checklist key-by-key before the leave-station reflex takes over.</figcaption>
+    </figure>
+    <figure>
+      <img loading="lazy" src="assets/ed-tablet-evidence-debug.jpg" alt="Tablet showing the agent debugging a button classifier with 1 fps evidence frames">
+      <figcaption data-i18n="game.p2.cap">Debugging with evidence: 1 fps frames catch a button classifier honestly reporting UNKNOWN — repaired in place, never guessed around.</figcaption>
+    </figure>
+    <figure>
+      <img loading="lazy" src="assets/ed-osd-supercruise-assist.jpg" alt="Close-up of the Action OSD overlay on Elite Dangerous during supercruise assist">
+      <figcaption data-i18n="game.p3.cap">Up close: the supercruise-assist-to-destination OSD — preflight gates, destination alignment, flight-control ownership.</figcaption>
+    </figure>
   </div>
 </section>
 
