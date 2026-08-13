@@ -9,19 +9,27 @@ import (
 )
 
 type supercruiseTargetPositionCaller struct {
-	regions map[string]json.RawMessage
+	regions         map[string]json.RawMessage
+	reticleShapeFor func(map[string]any) int
+	reticleHints    []map[string]any
 }
 
 func (c *supercruiseTargetPositionCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	if id == "elite-dangerous/supercruise-visible-reticle-position" {
+		c.reticleHints = append(c.reticleHints, inputs)
 		x := inputs["hintX"]
 		y := inputs["hintY"]
+		shapeConfidence := 900
+		if c.reticleShapeFor != nil {
+			shapeConfidence = c.reticleShapeFor(inputs)
+		}
 		value, _ := json.Marshal(map[string]any{"target": map[string]any{
 			"state": "DETECTED", "referenceX": x, "referenceY": y,
 			"offsetX": 0, "offsetY": 0, "centerDistancePixels": 0,
 			"reason": "ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED", "bestScore": 30, "secondScore": 10,
 			"presentation": "SOLID", "occupiedAngularBins": 60, "angularRuns": 1,
 			"evidencePlane": "HSV_ORANGE", "evidenceQuality": 61000,
+			"shapeConfidencePermille": shapeConfidence,
 		}, "evidence": map[string]any{"capturedAt": "2026-08-13T01:02:03Z"}})
 		return value, nil
 	}
@@ -284,12 +292,17 @@ func TestEliteSupercruiseTargetPositionSelectsForwardDuplicate(t *testing.T) {
 		targetPositionRegions("LTT 11244 A 2", 1030, 557.5),
 		targetPositionRegions("LTT 11244 A 2", 230, 908),
 		targetPositionRegions("", 0, 0),
-	)}
+	), reticleShapeFor: func(inputs map[string]any) int {
+		if inputs["hintX"].(int64) > 500 {
+			return 940
+		}
+		return 700
+	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"NEAREST_FORWARD_TARGET_LABEL_SELECTED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"HIGHEST_SHAPE_LAYOUT_TEXT_CONFIDENCE_SELECTED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
 		!contains(string(output), `"centerDistancePixels":50`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
@@ -336,8 +349,43 @@ func TestEliteSupercruiseTargetPositionRejectsNearEqualDuplicates(t *testing.T) 
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) ||
-		!contains(string(output), `"reason":"TARGET_TEXT_CANDIDATES_AMBIGUOUS"`) {
+		!contains(string(output), `"reason":"FOCUS_FRAME_CANDIDATES_AMBIGUOUS"`) {
 		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionRejectsTextWhenShapeConfidenceIsLow(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("LTT 11244 A 2", 1030, 557.5),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+	), reticleShapeFor: func(map[string]any) int { return 519 }}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) ||
+		!contains(string(output), `"reason":"NO_SHAPE_FIRST_FOCUS_FRAME_CANDIDATE"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionShapeScoresAllSpatialProposalsBeforeTextSelection(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionMultipleRegions(
+			targetPositionRegion("UNRELATED HUD TEXT", 600, 300),
+			targetPositionRegion("LTT 11244 A 2", 1030, 557.5),
+		),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.reticleHints) != 2 {
+		t.Fatalf("shape stage evaluated %d proposals, want both OCR spatial proposals", len(caller.reticleHints))
 	}
 }
 

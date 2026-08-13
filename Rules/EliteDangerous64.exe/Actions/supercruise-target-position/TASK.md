@@ -1,8 +1,11 @@
 # Elite Dangerous Supercruise target position
 
-This finite composite Action uses one tall central, two lower, and symmetric
-upper-left and upper-right forward-HUD PP-OCR bands to find exactly one current
-label matching `targetName`.
+This finite composite Action fuses a CV-first focus-frame decision with current
+forward-HUD PP-OCR layout and identity evidence. It uses one tall central, two
+lower, and symmetric upper-left and upper-right OCR bands to propose bounded
+local search hints. Every normally legible forward-HUD proposal is enhanced and
+shape-scored before target-name semantics are applied; OCR never authorizes a
+control coordinate or decides which shape is viable by itself.
 The central band covers reference `y=80..400`: live Supercruise evidence placed
 an already Compass-aligned planetary marker around `y=185`, above the retired
 `y=240..400` strip. Its 800 by 320 shape retains the same 256k reference-pixel
@@ -20,11 +23,11 @@ screen centre. Matches at a band
 boundary are de-duplicated when their reference boxes agree within 16 pixels;
 live overlapping lower bands placed the same label 8.76 pixels apart. Elite
 also repeats the selected destination in the lower-left
-information panel. When distinct same-name candidates remain, this Action
-selects the label whose derived marker is nearest the forward-screen centre
-only if it leads the next candidate by at least 32 reference pixels. Closer
-candidates remain explicitly ambiguous. Missing, ambiguous, or low-confidence
-labels return `UNKNOWN`; Compass evidence is not reused.
+information panel. When distinct same-name candidates remain, each receives an
+independent local CV measurement. The Action selects by fused focus-frame
+confidence only when the leader exceeds the runner-up by 30 permille. A
+nearest-screen heuristic no longer resolves ambiguity. Missing, ambiguous, or
+low-confidence evidence returns `UNKNOWN`; Compass evidence is not reused.
 
 Some Station labels near the lower cockpit edge are split into two lines and
 partly occluded by the dashboard. For an exact two-word `targetName`, the
@@ -101,16 +104,24 @@ some suffix passes the normal exact-or-one-edit match for the complete type
 word (`TATION` versus `STATION`). Without all three conditions it remains
 `UNKNOWN`; this is not a general edit-distance relaxation.
 
-After target identity is established, the text geometry is only a bounded
-search hint. The Action calls `supercruise-visible-reticle-position` while no
+Text geometry is only a bounded local search hint. For every text-compatible
+candidate the Action calls `supercruise-visible-reticle-position` while no
 attitude command is active to locate the actual target ring in a fresh 140×140
-local region and returns that CV centre as the control coordinate. The output
-preserves the CV capture time, selected evidence plane, quality, angular
-coverage, run topology, and solid/dashed presentation. A missing or ambiguous
-ring returns `UNKNOWN`; the OCR label offset is never used directly for
-steering. The composite does not claim that the sequential OCR and reticle
-captures are the same frame. `align-visible-target` owns the subsequent
-current-frame local tracking loop and periodically reacquires exact identity.
+local region. The local detector first enhances `HSV_ORANGE` and
+`ORANGE_OPPONENT` evidence, then scores the fifty-four-bin three-quarter arc,
+the intentional right-side label sector, radial contrast, and centre
+uniqueness. Only a shape confidence of at least 520 permille may enter fusion.
+The candidate then receives a layout score from the measured ring-to-label
+horizontal and vertical relationship and bounded OCR confidence. Final
+confidence is `60% shape + 25% layout + 15% text`; layout must be at least 400
+and the fused result at least 650 permille. Thus high OCR confidence cannot
+rescue a star edge or another orange object whose focus-frame geometry fails.
+The output preserves all confidence components, gaps, CV capture time, selected
+evidence plane, angular topology, and solid/dashed presentation. A missing or
+ambiguous shape returns `UNKNOWN`; the OCR-derived hint is never used directly
+for steering. The composite does not claim that the sequential OCR and reticle
+captures are the same frame. `align-visible-target` owns the subsequent local
+tracking loop and periodically reacquires exact identity.
 If the pillar leaves only one position box beginning with the first three
 proper-name characters, such as `SHAW S`, it may provide that local search
 hint only after the lower-left band independently confirms the complete exact

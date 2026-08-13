@@ -8,7 +8,7 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "bestScore", "secondScore", "presentation", "occupiedAngularBins", "angularRuns", "evidencePlane", "evidenceQuality"],
+      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "bestScore", "secondScore", "presentation", "occupiedAngularBins", "angularRuns", "evidencePlane", "evidenceQuality", "shapeConfidencePermille"],
       "properties": {
         "state": {"enum": ["DETECTED", "UNKNOWN"]},
         "referenceX": {"type": ["number", "null"]},
@@ -23,7 +23,8 @@
         "occupiedAngularBins": {"type": "integer", "minimum": 0, "maximum": 72},
         "angularRuns": {"type": "integer", "minimum": 0, "maximum": 36},
         "evidencePlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
-        "evidenceQuality": {"type": ["integer", "null"], "minimum": 0}
+        "evidenceQuality": {"type": ["integer", "null"], "minimum": 0},
+        "shapeConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000}
       }
     },
     "evidence": {
@@ -43,7 +44,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "state", "reason", "threshold", "pixelCount", "referenceX", "referenceY", "quality", "ringScore", "secondQuality", "clutterScore", "occupiedAngularBins", "angularTransitions", "angularRuns", "presentation"],
+            "required": ["name", "state", "reason", "threshold", "pixelCount", "referenceX", "referenceY", "quality", "ringScore", "secondQuality", "clutterScore", "occupiedAngularBins", "angularTransitions", "angularRuns", "structuralArcOccupiedBins", "labelSectorOccupiedBins", "structuralCoveragePermille", "labelGapClarityPermille", "radialContrastPermille", "centerUniquenessPermille", "shapeConfidencePermille", "presentation"],
             "properties": {
               "name": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE"]},
               "state": {"enum": ["VIABLE", "REJECTED"]},
@@ -59,6 +60,13 @@
               "occupiedAngularBins": {"type": "integer", "minimum": 0, "maximum": 72},
               "angularTransitions": {"type": "integer", "minimum": 0, "maximum": 72},
               "angularRuns": {"type": "integer", "minimum": 0, "maximum": 36},
+              "structuralArcOccupiedBins": {"type": "integer", "minimum": 0, "maximum": 54},
+              "labelSectorOccupiedBins": {"type": "integer", "minimum": 0, "maximum": 18},
+              "structuralCoveragePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+              "labelGapClarityPermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+              "radialContrastPermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+              "centerUniquenessPermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+              "shapeConfidencePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
               "presentation": {"enum": ["SOLID", "DASHED", null]}
             }
           }

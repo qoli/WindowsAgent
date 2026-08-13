@@ -9,7 +9,10 @@ LABEL_TO_MARKER_X = 30.0
 # call sites therefore uses a negative offset to move the derived point down.
 LABEL_TO_MARKER_Y = -12.5
 DUPLICATE_BOX_TOLERANCE_PIXELS = 16.0
-MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS = 32.0
+MIN_FOCUS_FRAME_CONFIDENCE_PERMILLE = 650
+MIN_SHAPE_CONFIDENCE_PERMILLE = 520
+MIN_LAYOUT_CONFIDENCE_PERMILLE = 400
+MIN_FOCUS_FRAME_LEAD_PERMILLE = 30
 MIN_OCCLUDED_WORD_PREFIX = 4
 MULTILINE_LEFT_TOLERANCE_PIXELS = 16.0
 MULTILINE_MIN_CENTER_GAP_PIXELS = 12.0
@@ -248,6 +251,11 @@ def append_deduplicated(matches, region):
     elif region["recognitionConfidence"] > matches[duplicate_index]["recognitionConfidence"]:
         matches[duplicate_index] = region
 
+def same_box(first, second):
+    first_box = bounds(first["referencePoints"])
+    second_box = bounds(second["referencePoints"])
+    return abs(first_box["left"] - second_box["left"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS and abs(first_box["centerY"] - second_box["centerY"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS
+
 def square_root(value):
     if value <= 0:
         return 0.0
@@ -255,14 +263,6 @@ def square_root(value):
     for _ in range(12):
         guess = (guess + value / guess) / 2.0
     return guess
-
-def marker_distance(region):
-    box = bounds(region["referencePoints"])
-    reference_x = box["left"] - LABEL_TO_MARKER_X
-    reference_y = box["centerY"] - LABEL_TO_MARKER_Y
-    offset_x = reference_x - SCREEN_CENTER_X
-    offset_y = reference_y - SCREEN_CENTER_Y
-    return square_root(offset_x * offset_x + offset_y * offset_y)
 
 def locate_reticle(region):
     box = bounds(region["referencePoints"])
@@ -277,6 +277,68 @@ def locate_reticle(region):
     elif hint_y > 1010:
         hint_y = 1010
     return action.call(id="elite-dangerous/supercruise-visible-reticle-position", inputs={"hintX": hint_x, "hintY": hint_y})
+
+def clamp_permille(value):
+    if value < 0:
+        return 0
+    if value > 1000:
+        return 1000
+    return value
+
+def focus_frame_candidate(region, reticle_output, identity_confirmed):
+    reticle = reticle_output["target"]
+    if reticle["state"] != "DETECTED":
+        return None
+    box = bounds(region["referencePoints"])
+    horizontal_gap = box["left"] - reticle["referenceX"]
+    vertical_gap = reticle["referenceY"] - box["centerY"]
+    horizontal_score = clamp_permille(1000 - int(abs(horizontal_gap - LABEL_TO_MARKER_X) * 20.0))
+    vertical_score = clamp_permille(1000 - int(abs(vertical_gap + LABEL_TO_MARKER_Y) * 25.0))
+    layout_confidence = (horizontal_score * 60 + vertical_score * 40) // 100
+    text_confidence = int(min(region["detectionConfidence"], region["recognitionConfidence"]) * 1000.0)
+    shape_confidence = reticle["shapeConfidencePermille"]
+    # Shape owns candidate admission and most of the fused score. Text may
+    # confirm identity and layout, but cannot rescue an invalid focus frame.
+    focus_confidence = (shape_confidence * 60 + layout_confidence * 25 + text_confidence * 15) // 100
+    if shape_confidence < MIN_SHAPE_CONFIDENCE_PERMILLE or layout_confidence < MIN_LAYOUT_CONFIDENCE_PERMILLE or focus_confidence < MIN_FOCUS_FRAME_CONFIDENCE_PERMILLE:
+        return None
+    return {
+        "region": region,
+        "reticleOutput": reticle_output,
+        "shapeConfidencePermille": shape_confidence,
+        "layoutConfidencePermille": layout_confidence,
+        "textConfidencePermille": text_confidence,
+        "focusFrameConfidencePermille": focus_confidence,
+        "horizontalGapPixels": horizontal_gap,
+        "verticalGapPixels": vertical_gap,
+        "identityConfirmed": identity_confirmed,
+    }
+
+def append_focus_candidate(candidates, candidate):
+    candidate_box = bounds(candidate["region"]["referencePoints"])
+    candidate_reticle = candidate["reticleOutput"]["target"]
+    for index in range(len(candidates)):
+        existing = candidates[index]
+        existing_box = bounds(existing["region"]["referencePoints"])
+        existing_reticle = existing["reticleOutput"]["target"]
+        if abs(candidate_box["left"] - existing_box["left"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS and abs(candidate_box["centerY"] - existing_box["centerY"]) <= DUPLICATE_BOX_TOLERANCE_PIXELS and abs(candidate_reticle["referenceX"] - existing_reticle["referenceX"]) <= 20 and abs(candidate_reticle["referenceY"] - existing_reticle["referenceY"]) <= 20:
+            if candidate["focusFrameConfidencePermille"] > existing["focusFrameConfidencePermille"]:
+                candidates[index] = candidate
+            return
+    candidates.append(candidate)
+
+def unknown_target(reason, raw_texts, captured_at = None):
+    return {
+        "state": "UNKNOWN", "referenceX": None, "referenceY": None,
+        "offsetX": None, "offsetY": None, "centerDistancePixels": None,
+        "reason": reason, "presentation": None, "occupiedAngularBins": None,
+        "angularRuns": None, "reticleEvidencePlane": None,
+        "reticleEvidenceQuality": None, "reticleCapturedAt": captured_at,
+        "shapeConfidencePermille": None, "layoutConfidencePermille": None,
+        "textConfidencePermille": None, "focusFrameConfidencePermille": None,
+        "identityConfirmed": False, "horizontalGapPixels": None,
+        "verticalGapPixels": None, "rawTexts": raw_texts,
+    }
 
 def main(ctx):
     target_name = ctx.inputs["targetName"]
@@ -296,6 +358,7 @@ def main(ctx):
             identity_confirmed = True
             break
     matches = []
+    proposals = []
     raw_texts = []
     for raw in bands:
         eligible_regions = []
@@ -307,6 +370,10 @@ def main(ctx):
             if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
                 continue
             eligible_regions.append(region)
+            # OCR supplies a spatial proposal, not a semantic Gate. Every
+            # normally legible forward-HUD box receives shape analysis before
+            # target-name and layout evidence are allowed to select it.
+            append_deduplicated(proposals, region)
             exact_or_one_edit = one_edit_or_exact(normalize(region["text"]), expected)
             occluded_same_line = same_line_occluded_two_words(region["text"], expected_words)
             identity_fragment = same_line_identity_corroborated_fragment(region["text"], expected_words, identity_confirmed)
@@ -362,7 +429,9 @@ def main(ctx):
                 if abs(second_box["left"] - first_box["left"]) > MULTILINE_LEFT_TOLERANCE_PIXELS or center_gap < MULTILINE_MIN_CENTER_GAP_PIXELS or center_gap > MULTILINE_MAX_CENTER_GAP_PIXELS:
                     continue
                 if one_edit_or_exact(normalize(first["text"] + " " + second["text"]), expected):
-                    append_deduplicated(matches, stacked_full_name_candidate(first, second))
+                    combined = stacked_full_name_candidate(first, second)
+                    proposals.append(combined)
+                    append_deduplicated(matches, combined)
         if len(expected_words) == 2:
             for first in eligible_regions:
                 first_text = normalize(first["text"])
@@ -379,7 +448,9 @@ def main(ctx):
                     center_gap = second_box["centerY"] - first_box["centerY"]
                     if abs(second_box["left"] - first_box["left"]) > MULTILINE_LEFT_TOLERANCE_PIXELS or center_gap < MULTILINE_MIN_CENTER_GAP_PIXELS or center_gap > MULTILINE_MAX_CENTER_GAP_PIXELS:
                         continue
-                    append_deduplicated(matches, multiline_candidate(first, second))
+                    combined = multiline_candidate(first, second)
+                    proposals.append(combined)
+                    append_deduplicated(matches, combined)
             split_regions = corroborated_split_regions if identity_confirmed else eligible_regions
             for first in split_regions:
                 first_normalized = normalize(first["text"])
@@ -394,41 +465,55 @@ def main(ctx):
                     horizontal_gap = second_box["left"] - first_box["right"]
                     if horizontal_gap < -SAME_LINE_MAX_HORIZONTAL_OVERLAP_PIXELS or horizontal_gap > SAME_LINE_MAX_HORIZONTAL_GAP_PIXELS or abs(second_box["centerY"] - first_box["centerY"]) > SAME_LINE_CENTER_TOLERANCE_PIXELS:
                         continue
-                    append_deduplicated(matches, same_line_split_candidate(first, second))
+                    combined = same_line_split_candidate(first, second)
+                    proposals.append(combined)
+                    append_deduplicated(matches, combined)
+    shaped_proposals = []
+    last_reticle_capture = None
+    for proposal in proposals:
+        reticle_output = locate_reticle(proposal)
+        last_reticle_capture = reticle_output["evidence"]["capturedAt"]
+        if reticle_output["target"]["state"] == "DETECTED":
+            shaped_proposals.append({"region": proposal, "reticleOutput": reticle_output})
     if len(matches) == 0:
         return {
             "schemaVersion": 1,
-            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_FOUND", "presentation": None, "occupiedAngularBins": None, "angularRuns": None, "reticleEvidencePlane": None, "reticleEvidenceQuality": None, "reticleCapturedAt": None, "rawTexts": raw_texts},
+            "target": unknown_target("TARGET_TEXT_NOT_FOUND", raw_texts),
             "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
         }
-    region = matches[0]
-    reason = region.get("matchReason", "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED")
-    if len(matches) > 1:
-        closest_distance = marker_distance(matches[0])
-        second_distance = None
-        for index in range(1, len(matches)):
-            distance = marker_distance(matches[index])
-            if distance < closest_distance:
-                second_distance = closest_distance
-                closest_distance = distance
-                region = matches[index]
-            elif second_distance == None or distance < second_distance:
-                second_distance = distance
-        if second_distance == None or second_distance - closest_distance < MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS:
-            return {
-                "schemaVersion": 1,
-                "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_CANDIDATES_AMBIGUOUS", "presentation": None, "occupiedAngularBins": None, "angularRuns": None, "reticleEvidencePlane": None, "reticleEvidenceQuality": None, "reticleCapturedAt": None, "rawTexts": raw_texts},
-                "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
-            }
-        reason = "NEAREST_FORWARD_TARGET_LABEL_SELECTED"
-    reticle_output = locate_reticle(region)
-    reticle = reticle_output["target"]
-    if reticle["state"] != "DETECTED":
+    candidates = []
+    for match in matches:
+        for shaped in shaped_proposals:
+            if same_box(match, shaped["region"]):
+                candidate = focus_frame_candidate(match, shaped["reticleOutput"], identity_confirmed)
+                if candidate != None:
+                    append_focus_candidate(candidates, candidate)
+    if len(candidates) == 0:
         return {
             "schemaVersion": 1,
-            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": reticle["reason"], "presentation": None, "occupiedAngularBins": None, "angularRuns": None, "reticleEvidencePlane": None, "reticleEvidenceQuality": None, "reticleCapturedAt": reticle_output["evidence"]["capturedAt"], "rawTexts": raw_texts},
+            "target": unknown_target("NO_SHAPE_FIRST_FOCUS_FRAME_CANDIDATE", raw_texts, last_reticle_capture),
             "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
         }
+    selected = candidates[0]
+    runner_up = None
+    for candidate in candidates[1:]:
+        if candidate["focusFrameConfidencePermille"] > selected["focusFrameConfidencePermille"]:
+            runner_up = selected
+            selected = candidate
+        elif runner_up == None or candidate["focusFrameConfidencePermille"] > runner_up["focusFrameConfidencePermille"]:
+            runner_up = candidate
+    if runner_up != None and selected["focusFrameConfidencePermille"] - runner_up["focusFrameConfidencePermille"] < MIN_FOCUS_FRAME_LEAD_PERMILLE:
+        return {
+            "schemaVersion": 1,
+            "target": unknown_target("FOCUS_FRAME_CANDIDATES_AMBIGUOUS", raw_texts, selected["reticleOutput"]["evidence"]["capturedAt"]),
+            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
+        }
+    region = selected["region"]
+    reticle_output = selected["reticleOutput"]
+    reticle = reticle_output["target"]
+    reason = region.get("matchReason", "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED")
+    if len(matches) > 1:
+        reason = "HIGHEST_SHAPE_LAYOUT_TEXT_CONFIDENCE_SELECTED"
     reference_x = reticle["referenceX"]
     reference_y = reticle["referenceY"]
     offset_x = reference_x - SCREEN_CENTER_X
@@ -449,6 +534,13 @@ def main(ctx):
             "reticleEvidencePlane": reticle["evidencePlane"],
             "reticleEvidenceQuality": reticle["evidenceQuality"],
             "reticleCapturedAt": reticle_output["evidence"]["capturedAt"],
+            "shapeConfidencePermille": selected["shapeConfidencePermille"],
+            "layoutConfidencePermille": selected["layoutConfidencePermille"],
+            "textConfidencePermille": selected["textConfidencePermille"],
+            "focusFrameConfidencePermille": selected["focusFrameConfidencePermille"],
+            "identityConfirmed": selected["identityConfirmed"],
+            "horizontalGapPixels": selected["horizontalGapPixels"],
+            "verticalGapPixels": selected["verticalGapPixels"],
             "rawTexts": raw_texts,
         },
         "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},

@@ -1740,11 +1740,11 @@ func TestEliteSupercruiseVisibleReticleUsesAdaptivePlaneForDimDashedRingOnMagent
 	target := result["target"].(map[string]any)
 	if target["state"] != "DETECTED" || target["presentation"] != "DASHED" ||
 		target["evidencePlane"] == "STRICT_RGB" || math.Abs(target["referenceX"].(float64)-968) > 4 ||
-		math.Abs(target["referenceY"].(float64)-548) > 4 {
+		math.Abs(target["referenceY"].(float64)-548) > 4 || target["shapeConfidencePermille"].(float64) < 650 {
 		t.Fatalf("target = %#v", target)
 	}
 	evidence := result["evidence"].(map[string]any)
-	if len(evidence["planes"].([]any)) != 3 || evidence["selectionReason"] != "MAX_ANGULAR_COVERAGE_THEN_RADIAL_QUALITY" {
+	if len(evidence["planes"].([]any)) != 3 || evidence["selectionReason"] != "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY" {
 		t.Fatalf("evidence = %#v", evidence)
 	}
 }

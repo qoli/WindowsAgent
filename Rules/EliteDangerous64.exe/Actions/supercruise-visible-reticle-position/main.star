@@ -24,6 +24,13 @@ PLANE_DISAGREEMENT_DISTANCE_SQUARED = 20 * 20
 PLANE_DISAGREEMENT_BIN_MARGIN = 2
 ANGULAR_BINS = 72
 MIN_DASHED_ANGULAR_RUNS = 5
+# The selected-target focus frame is intentionally open on the label side. The
+# eighteen bins centred on +X are the reviewed one-quarter label sector; the
+# remaining fifty-four bins are the structural three-quarter arc.
+LABEL_SECTOR_START = 27
+LABEL_SECTOR_END = 44
+STRUCTURAL_ARC_BINS = 54
+LABEL_SECTOR_BINS = 18
 PERCENTILE_NUMERATOR = 995
 PERCENTILE_DENOMINATOR = 1000
 ADAPTIVE_THRESHOLD_PERCENT = 35
@@ -107,12 +114,37 @@ def topology(points, center_x, center_y):
         angular_bins[angular_bin] = True
     occupied = 0
     transitions = 0
+    structural_occupied = 0
+    label_sector_occupied = 0
     for index in range(ANGULAR_BINS):
         if angular_bins[index]:
             occupied += 1
+            if index >= LABEL_SECTOR_START and index <= LABEL_SECTOR_END:
+                label_sector_occupied += 1
+            else:
+                structural_occupied += 1
         if angular_bins[index] != angular_bins[(index - 1) % ANGULAR_BINS]:
             transitions += 1
-    return [occupied, transitions, transitions // 2]
+    return [occupied, transitions, transitions // 2, structural_occupied, label_sector_occupied]
+
+def clamp_permille(value):
+    if value < 0:
+        return 0
+    if value > 1000:
+        return 1000
+    return value
+
+def shape_confidence(best, second_quality, shape):
+    structural_coverage = clamp_permille(shape[3] * 1000 // STRUCTURAL_ARC_BINS)
+    label_gap_clarity = clamp_permille((LABEL_SECTOR_BINS - shape[4]) * 1000 // LABEL_SECTOR_BINS)
+    radial_contrast = clamp_permille(best["ringScore"] * 1000 // (best["ringScore"] + best["clutterScore"] + 1))
+    centre_margin = best["quality"] if second_quality <= 0 else best["quality"] - second_quality
+    centre_uniqueness = clamp_permille(centre_margin * 25)
+    # Structural arc dominates. A bright label may occupy some of the open
+    # sector, so gap clarity is corroborative and cannot veto an otherwise
+    # strong three-quarter arc by itself.
+    confidence = (structural_coverage * 55 + radial_contrast * 20 + centre_uniqueness * 15 + label_gap_clarity * 10) // 100
+    return [confidence, structural_coverage, label_gap_clarity, radial_contrast, centre_uniqueness]
 
 def evaluate_plane(name, points, threshold):
     if len(points) > MAX_EVIDENCE_PLANE_PIXELS:
@@ -121,7 +153,11 @@ def evaluate_plane(name, points, threshold):
             "threshold": threshold, "pixelCount": len(points), "x": ROI_HALF, "y": ROI_HALF,
             "quality": 0, "ringScore": 0, "secondQuality": 0, "secondRingScore": 0,
             "clutterScore": 0, "occupiedAngularBins": 0, "angularTransitions": 0,
-            "angularRuns": 0, "presentation": None,
+            "angularRuns": 0, "structuralArcOccupiedBins": 0,
+            "labelSectorOccupiedBins": 0, "structuralCoveragePermille": 0,
+            "labelGapClarityPermille": 0, "radialContrastPermille": 0,
+            "centerUniquenessPermille": 0, "shapeConfidencePermille": 0,
+            "presentation": None,
         }
     sampled_points = []
     for point in points:
@@ -166,6 +202,13 @@ def evaluate_plane(name, points, threshold):
         "occupiedAngularBins": 0,
         "angularTransitions": 0,
         "angularRuns": 0,
+        "structuralArcOccupiedBins": 0,
+        "labelSectorOccupiedBins": 0,
+        "structuralCoveragePermille": 0,
+        "labelGapClarityPermille": 0,
+        "radialContrastPermille": 0,
+        "centerUniquenessPermille": 0,
+        "shapeConfidencePermille": 0,
         "presentation": None,
     }
     if best["ringScore"] < MIN_RING_SCORE:
@@ -180,6 +223,8 @@ def evaluate_plane(name, points, threshold):
     result["occupiedAngularBins"] = shape[0]
     result["angularTransitions"] = shape[1]
     result["angularRuns"] = shape[2]
+    result["structuralArcOccupiedBins"] = shape[3]
+    result["labelSectorOccupiedBins"] = shape[4]
     if shape[1] < 2:
         result["reason"] = "RETICLE_GAP_NOT_CONFIRMED"
         return result
@@ -188,8 +233,14 @@ def evaluate_plane(name, points, threshold):
     if shape[0] < minimum_occupied:
         result["reason"] = result["presentation"] + "_ANGULAR_COVERAGE_LOW"
         return result
+    confidence = shape_confidence(best, second_quality, shape)
+    result["shapeConfidencePermille"] = confidence[0]
+    result["structuralCoveragePermille"] = confidence[1]
+    result["labelGapClarityPermille"] = confidence[2]
+    result["radialContrastPermille"] = confidence[3]
+    result["centerUniquenessPermille"] = confidence[4]
     result["state"] = "VIABLE"
-    result["reason"] = "ANNULUS_TOPOLOGY_CONFIRMED"
+    result["reason"] = "THREE_QUARTER_FOCUS_FRAME_CONFIRMED"
     return result
 
 def public_plane(plane, roi_x, roi_y):
@@ -208,6 +259,13 @@ def public_plane(plane, roi_x, roi_y):
         "occupiedAngularBins": plane["occupiedAngularBins"],
         "angularTransitions": plane["angularTransitions"],
         "angularRuns": plane["angularRuns"],
+        "structuralArcOccupiedBins": plane["structuralArcOccupiedBins"],
+        "labelSectorOccupiedBins": plane["labelSectorOccupiedBins"],
+        "structuralCoveragePermille": plane["structuralCoveragePermille"],
+        "labelGapClarityPermille": plane["labelGapClarityPermille"],
+        "radialContrastPermille": plane["radialContrastPermille"],
+        "centerUniquenessPermille": plane["centerUniquenessPermille"],
+        "shapeConfidencePermille": plane["shapeConfidencePermille"],
         "presentation": plane["presentation"],
     }
 
@@ -223,6 +281,7 @@ def unknown(reason, planes, sample, roi_x, roi_y):
             "reason": reason, "bestScore": 0, "secondScore": 0,
             "presentation": None, "occupiedAngularBins": 0,
             "angularRuns": 0, "evidencePlane": None, "evidenceQuality": None,
+            "shapeConfidencePermille": None,
         },
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],
@@ -276,7 +335,7 @@ def main(ctx):
         # The offline four-background ablation showed it loses dim targets and
         # produces false high-contrast fragments; it cannot authorize control.
         if plane["state"] == "VIABLE" and plane["name"] != "STRICT_RGB":
-            selection_score = plane["occupiedAngularBins"] * 1000 + min(999, plane["quality"])
+            selection_score = plane["shapeConfidencePermille"] * 1000 + min(999, plane["quality"])
             viable.append([selection_score, plane])
     if len(viable) == 0:
         return unknown("NO_EVIDENCE_PLANE_CONFIRMED_RETICLE", planes, sample, roi_x, roi_y)
@@ -316,11 +375,12 @@ def main(ctx):
             "occupiedAngularBins": selected_plane["occupiedAngularBins"],
             "angularRuns": selected_plane["angularRuns"],
             "evidencePlane": selected_plane["name"], "evidenceQuality": selected[0],
+            "shapeConfidencePermille": selected_plane["shapeConfidencePermille"],
         },
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],
             "capturedAt": sample["frame"]["capturedAt"], "selectedPlane": selected_plane["name"],
-            "selectionReason": "MAX_ANGULAR_COVERAGE_THEN_RADIAL_QUALITY",
+            "selectionReason": "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY",
             "planes": public_planes,
         },
     }

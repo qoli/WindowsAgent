@@ -8,7 +8,7 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "presentation", "occupiedAngularBins", "angularRuns", "reticleEvidencePlane", "reticleEvidenceQuality", "reticleCapturedAt", "rawTexts"],
+      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "presentation", "occupiedAngularBins", "angularRuns", "reticleEvidencePlane", "reticleEvidenceQuality", "reticleCapturedAt", "shapeConfidencePermille", "layoutConfidencePermille", "textConfidencePermille", "focusFrameConfidencePermille", "identityConfirmed", "horizontalGapPixels", "verticalGapPixels", "rawTexts"],
       "properties": {
         "state": {"enum": ["DETECTED", "UNKNOWN"]},
         "referenceX": {"type": ["number", "null"]},
@@ -23,6 +23,13 @@
         "reticleEvidencePlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
         "reticleEvidenceQuality": {"type": ["integer", "null"], "minimum": 0},
         "reticleCapturedAt": {"type": ["string", "null"]},
+        "shapeConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "layoutConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "textConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "focusFrameConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "identityConfirmed": {"type": "boolean"},
+        "horizontalGapPixels": {"type": ["number", "null"]},
+        "verticalGapPixels": {"type": ["number", "null"]},
         "rawTexts": {"type": "array", "items": {"type": "string"}}
       }
     },

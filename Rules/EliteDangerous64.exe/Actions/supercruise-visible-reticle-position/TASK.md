@@ -26,7 +26,13 @@ near-equal angular coverage, the Action returns `UNKNOWN` instead of silently
 choosing one.
 
 The selected annulus is divided into 72 angular bins without morphological
-closing. One through four occupied runs is `SOLID`; five or more is `DASHED`.
+closing. The eighteen bins centred on the label-facing right side are treated
+as the intentional one-quarter opening; the other fifty-four bins form the
+required three-quarter structural arc. The Action publishes structural
+coverage, label-gap clarity, radial contrast, centre uniqueness, and their
+weighted `shapeConfidencePermille`. Shape confidence, rather than global image
+contrast or OCR confidence, selects the evidence plane. One through four
+occupied runs is `SOLID`; five or more is `DASHED`.
 Solid topology additionally requires at least 40 occupied bins; dashed
 topology requires at least 18. This rejects a few accidental warm-colour arcs
 without demanding solid-ring coverage from a deliberately sparse dashed ring.
