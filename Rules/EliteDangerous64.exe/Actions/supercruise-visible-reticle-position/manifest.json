@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 2,
+  "version": 4,
   "title": "Locate the orange Supercruise selected-target reticle",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
@@ -8,5 +8,5 @@
   "outputSchema": "output.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json"],
   "permissions": {"memory": null, "file": null, "screen": {"operations": ["readRegion"], "maxCalls": 1, "maxPixels": 19600}},
-  "limits": {"wallTimeMs": 10000, "maxSteps": 32000000, "maxResultBytes": 8192, "maxLogBytes": 4096}
+  "limits": {"wallTimeMs": 10000, "maxSteps": 64000000, "maxResultBytes": 16384, "maxLogBytes": 4096}
 }

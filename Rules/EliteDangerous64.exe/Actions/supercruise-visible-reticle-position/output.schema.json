@@ -8,7 +8,7 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "bestScore", "secondScore"],
+      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "bestScore", "secondScore", "presentation", "occupiedAngularBins", "angularRuns", "evidencePlane", "evidenceQuality"],
       "properties": {
         "state": {"enum": ["DETECTED", "UNKNOWN"]},
         "referenceX": {"type": ["number", "null"]},
@@ -18,9 +18,52 @@
         "centerDistancePixels": {"type": ["number", "null"], "minimum": 0},
         "reason": {"type": "string"},
         "bestScore": {"type": "integer", "minimum": 0},
-        "secondScore": {"type": "integer", "minimum": 0}
+        "secondScore": {"type": "integer", "minimum": 0},
+        "presentation": {"enum": ["SOLID", "DASHED", null]},
+        "occupiedAngularBins": {"type": "integer", "minimum": 0, "maximum": 72},
+        "angularRuns": {"type": "integer", "minimum": 0, "maximum": 36},
+        "evidencePlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
+        "evidenceQuality": {"type": ["integer", "null"], "minimum": 0}
       }
     },
-    "evidence": {"type": "object"}
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["region", "physicalRegion", "capturedAt", "selectedPlane", "selectionReason", "planes"],
+      "properties": {
+        "region": {"type": "object"},
+        "physicalRegion": {"type": "object"},
+        "capturedAt": {"type": "string"},
+        "selectedPlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
+        "selectionReason": {"type": "string"},
+        "planes": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "state", "reason", "threshold", "pixelCount", "referenceX", "referenceY", "quality", "ringScore", "secondQuality", "clutterScore", "occupiedAngularBins", "angularTransitions", "angularRuns", "presentation"],
+            "properties": {
+              "name": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE"]},
+              "state": {"enum": ["VIABLE", "REJECTED"]},
+              "reason": {"type": "string"},
+              "threshold": {"type": "integer", "minimum": 0, "maximum": 255},
+              "pixelCount": {"type": "integer", "minimum": 0, "maximum": 19600},
+              "referenceX": {"type": "integer"},
+              "referenceY": {"type": "integer"},
+              "quality": {"type": "integer"},
+              "ringScore": {"type": "integer", "minimum": 0},
+              "secondQuality": {"type": "integer", "minimum": 0},
+              "clutterScore": {"type": "integer", "minimum": 0},
+              "occupiedAngularBins": {"type": "integer", "minimum": 0, "maximum": 72},
+              "angularTransitions": {"type": "integer", "minimum": 0, "maximum": 72},
+              "angularRuns": {"type": "integer", "minimum": 0, "maximum": 36},
+              "presentation": {"enum": ["SOLID", "DASHED", null]}
+            }
+          }
+        }
+      }
+    }
   }
 }

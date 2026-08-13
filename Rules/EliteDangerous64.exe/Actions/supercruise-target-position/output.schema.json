@@ -8,7 +8,7 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "rawTexts"],
+      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "presentation", "occupiedAngularBins", "angularRuns", "reticleEvidencePlane", "reticleEvidenceQuality", "reticleCapturedAt", "rawTexts"],
       "properties": {
         "state": {"enum": ["DETECTED", "UNKNOWN"]},
         "referenceX": {"type": ["number", "null"]},
@@ -17,6 +17,12 @@
         "offsetY": {"type": ["number", "null"]},
         "centerDistancePixels": {"type": ["number", "null"], "minimum": 0},
         "reason": {"type": "string"},
+        "presentation": {"enum": ["SOLID", "DASHED", null]},
+        "occupiedAngularBins": {"type": ["integer", "null"], "minimum": 0, "maximum": 72},
+        "angularRuns": {"type": ["integer", "null"], "minimum": 0, "maximum": 36},
+        "reticleEvidencePlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
+        "reticleEvidenceQuality": {"type": ["integer", "null"], "minimum": 0},
+        "reticleCapturedAt": {"type": ["string", "null"]},
         "rawTexts": {"type": "array", "items": {"type": "string"}}
       }
     },

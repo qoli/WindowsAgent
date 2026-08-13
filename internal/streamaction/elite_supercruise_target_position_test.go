@@ -20,7 +20,9 @@ func (c *supercruiseTargetPositionCaller) Call(_ context.Context, id string, inp
 			"state": "DETECTED", "referenceX": x, "referenceY": y,
 			"offsetX": 0, "offsetY": 0, "centerDistancePixels": 0,
 			"reason": "ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED", "bestScore": 30, "secondScore": 10,
-		}})
+			"presentation": "SOLID", "occupiedAngularBins": 60, "angularRuns": 1,
+			"evidencePlane": "HSV_ORANGE", "evidenceQuality": 61000,
+		}, "evidence": map[string]any{"capturedAt": "2026-08-13T01:02:03Z"}})
 		return value, nil
 	}
 	value, ok := c.regions[id]
@@ -74,6 +76,7 @@ func targetPositionRegion(text string, left, centerY float64) map[string]any {
 }
 
 func supercruiseTargetPositionBands(first, second, third json.RawMessage, rest ...json.RawMessage) map[string]json.RawMessage {
+	upperLeft := targetPositionRegions("", 0, 0)
 	fourth := targetPositionRegions("", 0, 0)
 	identity := targetPositionRegions("", 0, 0)
 	if len(rest) > 0 {
@@ -86,8 +89,26 @@ func supercruiseTargetPositionBands(first, second, third json.RawMessage, rest .
 		"elite-dangerous/supercruise-target-text-regions":             first,
 		"elite-dangerous/supercruise-target-text-regions-lower":       second,
 		"elite-dangerous/supercruise-target-text-regions-lower-wide":  third,
+		"elite-dangerous/supercruise-target-text-regions-upper-left":  upperLeft,
 		"elite-dangerous/supercruise-target-text-regions-upper-right": fourth,
 		"elite-dangerous/request-docking-distance-regions":            identity,
+	}
+}
+
+func TestEliteSupercruiseTargetPositionFindsUpperLeftTarget(t *testing.T) {
+	regions := supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+	)
+	regions["elite-dangerous/supercruise-target-text-regions-upper-left"] = targetPositionRegions("LP 298-42", 258, 390)
+	caller := &supercruiseTargetPositionCaller{regions: regions}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LP 298-42"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
+		!contains(string(output), `"referenceX":228`) || !contains(string(output), `"referenceY":402`) {
+		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
 
@@ -336,6 +357,42 @@ func TestEliteSupercruiseTargetPositionCombinesOccludedTwoLineStationName(t *tes
 		!contains(string(output), `"reason":"OCCLUDED_TWO_LINE_WORD_PREFIXES_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
 		!contains(string(output), `"referenceX":1277`) ||
 		!contains(string(output), `"referenceY":682`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionCombinesStackedMultiwordSystemName(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionMultipleRegions(
+			targetPositionRegion("TASCHETER", 1133.57, 417.36),
+			targetPositionRegion("SECTOR TE-Q A5-1", 1132.92, 436.31),
+		),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Tascheter Sector TE-Q a5-1"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
+		!contains(string(output), `"reason":"STACKED_FULL_TARGET_NAME_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"referenceX":1103`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionRejectsStackedPartialSystemName(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("", 0, 0),
+		targetPositionMultipleRegions(
+			targetPositionRegion("TASCHETER", 1133.57, 417.36),
+			targetPositionRegion("SECTOR TE-Q", 1132.92, 436.31),
+		),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Tascheter Sector TE-Q a5-1"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }

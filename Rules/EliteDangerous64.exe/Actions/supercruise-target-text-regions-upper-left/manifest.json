@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect selected Supercruise target text in the upper-left HUD",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 0, "y": 80, "w": 800, "h": 320},
+  "sampling": "reference",
+  "maxPixels": 256000,
+  "leftContextWidth": 32,
+  "verticalPadding": 8
+}

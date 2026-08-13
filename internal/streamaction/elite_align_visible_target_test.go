@@ -10,12 +10,13 @@ import (
 )
 
 type alignVisibleTargetCaller struct {
-	heats     []json.RawMessage
-	positions []json.RawMessage
-	posErrors []error
-	controls  []string
-	heatIndex int
-	posIndex  int
+	heats           []json.RawMessage
+	positions       []json.RawMessage
+	posErrors       []error
+	controls        []string
+	positionActions []string
+	heatIndex       int
+	posIndex        int
 }
 
 func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -27,7 +28,8 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		value := c.heats[c.heatIndex]
 		c.heatIndex++
 		return value, nil
-	case "elite-dangerous/escape-vector-visible-position", "elite-dangerous/supercruise-target-position":
+	case "elite-dangerous/escape-vector-visible-position", "elite-dangerous/supercruise-target-position", "elite-dangerous/supercruise-visible-reticle-position":
+		c.positionActions = append(c.positionActions, id)
 		if len(c.posErrors) > 0 {
 			err := c.posErrors[0]
 			c.posErrors = c.posErrors[1:]
@@ -45,6 +47,70 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		return json.Marshal(map[string]any{"control": control})
 	default:
 		return nil, errors.New("unexpected align-visible-target child Action: " + id)
+	}
+}
+
+func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(8, 6, 10),
+			visiblePosition(7, 5, 8.6),
+			visiblePosition(6, 4, 7.3),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LP 298-42", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	want := []string{
+		"elite-dangerous/supercruise-target-position",
+		"elite-dangerous/supercruise-visible-reticle-position",
+		"elite-dangerous/supercruise-visible-reticle-position",
+	}
+	if len(caller.positionActions) != len(want) {
+		t.Fatalf("position Actions=%v want=%v", caller.positionActions, want)
+	}
+	for index := range want {
+		if caller.positionActions[index] != want[index] {
+			t.Fatalf("position Actions=%v want=%v", caller.positionActions, want)
+		}
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) ||
+		strings.Count(events, `"observationMode":"RETICLE_TRACKING"`) != 3 {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetTrackingLossReacquiresIdentityWithoutSteering(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePosition(0, -30, 30),
+			unknownVisiblePosition(),
+			visiblePosition(8, 6, 10),
+			visiblePosition(7, 5, 8.6),
+			visiblePosition(6, 4, 7.3),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "LP 298-42", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 1 {
+		t.Fatalf("tracking loss authorized control: %v", caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `RETICLE_TRACKING_LOST_REACQUIRE_IDENTITY`) ||
+		strings.Count(events, `"observationMode":"IDENTITY_ACQUISITION"`) != 2 {
+		t.Fatalf("events=%s", events)
 	}
 }
 
@@ -81,7 +147,7 @@ func visiblePosition(x, y, distance float64) json.RawMessage {
 		"state": "DETECTED", "referenceX": 960 + x, "referenceY": 540 + y,
 		"offsetX": x, "offsetY": y, "centerDistancePixels": distance,
 		"reason": "TEST", "rawTexts": []string{"ESCAPE", "VECTOR"},
-	}, "timing": map[string]any{}})
+	}, "timing": map[string]any{}, "evidence": map[string]any{"capturedAt": "2026-08-13T01:02:03Z"}})
 	return value
 }
 
@@ -90,7 +156,7 @@ func unknownVisiblePosition() json.RawMessage {
 		"state": "UNKNOWN", "referenceX": nil, "referenceY": nil,
 		"offsetX": nil, "offsetY": nil, "centerDistancePixels": nil,
 		"reason": "TARGET_TEXT_NOT_FOUND", "rawTexts": []string{},
-	}, "timing": map[string]any{}})
+	}, "timing": map[string]any{}, "evidence": map[string]any{"capturedAt": "2026-08-13T01:02:03Z"}})
 	return value
 }
 

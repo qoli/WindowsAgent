@@ -181,6 +181,45 @@ func compassPackageRoot(t *testing.T) string {
 	return root
 }
 
+func supercruiseVisibleReticlePackageRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "supercruise-visible-reticle-position"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func reticleFixturePixels(centerX, centerY int, dashed bool, ring uint32, background func(x, y int) uint32) []any {
+	pixels := make([]any, 140*140)
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 140; x++ {
+			pixels[y*140+x] = background(x, y)
+		}
+	}
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 140; x++ {
+			distance := math.Hypot(float64(x-centerX), float64(y-centerY))
+			if distance < 44 || distance > 48 {
+				continue
+			}
+			angle := math.Atan2(float64(y-centerY), float64(x-centerX))
+			// Both presentations retain the real right-side label opening.
+			if math.Abs(angle) < .34 {
+				continue
+			}
+			if dashed {
+				segment := int(math.Floor((angle + math.Pi) * 18 / (2 * math.Pi)))
+				if segment%2 != 0 {
+					continue
+				}
+			}
+			pixels[y*140+x] = ring
+		}
+	}
+	return pixels
+}
+
 func hyperspaceTargetOcclusionPackageRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "hyperspace-target-occlusion"))
@@ -1671,6 +1710,89 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 		math.Abs(target["centerDistancePixels"].(float64)-13.038) > 0.0001 ||
 		zone["shape"] != "circle" || zone["radiusPixels"] != float64(4) || zone["inside"] != false {
 		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleUsesAdaptivePlaneForDimDashedRingOnMagenta(t *testing.T) {
+	pixels := reticleFixturePixels(78, 78, true, 0x8A5A18, func(x, _ int) uint32 {
+		if x >= 82 {
+			return 0xD02AAE
+		}
+		return 0x080A12
+	})
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker := &compassBroker{pixels: pixels}
+	runner, err := New(broker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	target := result["target"].(map[string]any)
+	if target["state"] != "DETECTED" || target["presentation"] != "DASHED" ||
+		target["evidencePlane"] == "STRICT_RGB" || math.Abs(target["referenceX"].(float64)-968) > 4 ||
+		math.Abs(target["referenceY"].(float64)-548) > 4 {
+		t.Fatalf("target = %#v", target)
+	}
+	evidence := result["evidence"].(map[string]any)
+	if len(evidence["planes"].([]any)) != 3 || evidence["selectionReason"] != "MAX_ANGULAR_COVERAGE_THEN_RADIAL_QUALITY" {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleKeepsSolidTopologyWithoutClosingGap(t *testing.T) {
+	pixels := reticleFixturePixels(74, 66, false, 0xF58A18, func(x, y int) uint32 {
+		value := uint32((x*7 + y*11) % 24)
+		return (value << 16) | (value << 8) | value
+	})
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&compassBroker{pixels: pixels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	if !strings.Contains(string(output), `"state":"DETECTED"`) ||
+		!strings.Contains(string(output), `"presentation":"SOLID"`) ||
+		strings.Contains(string(output), `"angularRuns":0`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleRejectsFilledWarmField(t *testing.T) {
+	pixels := make([]any, 140*140)
+	for index := range pixels {
+		pixels[index] = uint32(0xD08020)
+	}
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&compassBroker{pixels: pixels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	if !strings.Contains(string(output), `"state":"UNKNOWN"`) ||
+		!strings.Contains(string(output), `"reason":"PIXEL_DENSITY_HIGH"`) {
+		t.Fatalf("output=%s", output)
 	}
 }
 

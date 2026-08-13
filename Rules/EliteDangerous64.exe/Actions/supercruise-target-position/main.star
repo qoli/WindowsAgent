@@ -196,6 +196,26 @@ def multiline_candidate(first, second):
         "matchReason": "OCCLUDED_TWO_LINE_WORD_PREFIXES_CONFIRMED",
     }
 
+def stacked_full_name_candidate(first, second):
+    first_box = bounds(first["referencePoints"])
+    second_box = bounds(second["referencePoints"])
+    confidence = first["recognitionConfidence"]
+    if second["recognitionConfidence"] < confidence:
+        confidence = second["recognitionConfidence"]
+    right = first_box["right"] if first_box["right"] > second_box["right"] else second_box["right"]
+    return {
+        "text": first["text"] + " " + second["text"],
+        "detectionConfidence": first["detectionConfidence"],
+        "recognitionConfidence": confidence,
+        "referencePoints": [
+            {"x": first_box["left"], "y": first_box["top"]},
+            {"x": right, "y": first_box["top"]},
+            {"x": right, "y": second_box["bottom"]},
+            {"x": first_box["left"], "y": second_box["bottom"]},
+        ],
+        "matchReason": "STACKED_FULL_TARGET_NAME_CONFIRMED",
+    }
+
 def same_line_split_candidate(first, second):
     first_box = bounds(first["referencePoints"])
     second_box = bounds(second["referencePoints"])
@@ -256,8 +276,7 @@ def locate_reticle(region):
         hint_y = 70
     elif hint_y > 1010:
         hint_y = 1010
-    reticle = action.call(id="elite-dangerous/supercruise-visible-reticle-position", inputs={"hintX": hint_x, "hintY": hint_y})["target"]
-    return reticle
+    return action.call(id="elite-dangerous/supercruise-visible-reticle-position", inputs={"hintX": hint_x, "hintY": hint_y})
 
 def main(ctx):
     target_name = ctx.inputs["targetName"]
@@ -267,6 +286,7 @@ def main(ctx):
         action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-lower-wide", inputs={}),
+        action.call(id="elite-dangerous/supercruise-target-text-regions-upper-left", inputs={}),
         action.call(id="elite-dangerous/supercruise-target-text-regions-upper-right", inputs={}),
     ]
     identity_band = action.call(id="elite-dangerous/request-docking-distance-regions", inputs={})
@@ -328,6 +348,21 @@ def main(ctx):
                     "matchReason": "OCCLUDED_SAME_LINE_PROPER_NAME_ENDPOINTS_CONFIRMED",
                 }
             append_deduplicated(matches, region)
+        # Long System names are rendered as two stacked HUD lines even though
+        # they contain more than two words. Combine only same-frame boxes that
+        # share the reviewed left edge and line spacing, and require their
+        # complete normalized concatenation to match the requested target.
+        for first in eligible_regions:
+            first_box = bounds(first["referencePoints"])
+            for second in eligible_regions:
+                if second == first:
+                    continue
+                second_box = bounds(second["referencePoints"])
+                center_gap = second_box["centerY"] - first_box["centerY"]
+                if abs(second_box["left"] - first_box["left"]) > MULTILINE_LEFT_TOLERANCE_PIXELS or center_gap < MULTILINE_MIN_CENTER_GAP_PIXELS or center_gap > MULTILINE_MAX_CENTER_GAP_PIXELS:
+                    continue
+                if one_edit_or_exact(normalize(first["text"] + " " + second["text"]), expected):
+                    append_deduplicated(matches, stacked_full_name_candidate(first, second))
         if len(expected_words) == 2:
             for first in eligible_regions:
                 first_text = normalize(first["text"])
@@ -363,8 +398,8 @@ def main(ctx):
     if len(matches) == 0:
         return {
             "schemaVersion": 1,
-            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_FOUND", "rawTexts": raw_texts},
-            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"]], "identity": identity_band["timing"]},
+            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_NOT_FOUND", "presentation": None, "occupiedAngularBins": None, "angularRuns": None, "reticleEvidencePlane": None, "reticleEvidenceQuality": None, "reticleCapturedAt": None, "rawTexts": raw_texts},
+            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
         }
     region = matches[0]
     reason = region.get("matchReason", "TARGET_LABEL_TO_MARKER_OFFSET_APPLIED")
@@ -382,16 +417,17 @@ def main(ctx):
         if second_distance == None or second_distance - closest_distance < MIN_NEAREST_CANDIDATE_SEPARATION_PIXELS:
             return {
                 "schemaVersion": 1,
-                "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_CANDIDATES_AMBIGUOUS", "rawTexts": raw_texts},
-                "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"]], "identity": identity_band["timing"]},
+                "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": "TARGET_TEXT_CANDIDATES_AMBIGUOUS", "presentation": None, "occupiedAngularBins": None, "angularRuns": None, "reticleEvidencePlane": None, "reticleEvidenceQuality": None, "reticleCapturedAt": None, "rawTexts": raw_texts},
+                "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
             }
         reason = "NEAREST_FORWARD_TARGET_LABEL_SELECTED"
-    reticle = locate_reticle(region)
+    reticle_output = locate_reticle(region)
+    reticle = reticle_output["target"]
     if reticle["state"] != "DETECTED":
         return {
             "schemaVersion": 1,
-            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": reticle["reason"], "rawTexts": raw_texts},
-            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"]], "identity": identity_band["timing"]},
+            "target": {"state": "UNKNOWN", "referenceX": None, "referenceY": None, "offsetX": None, "offsetY": None, "centerDistancePixels": None, "reason": reticle["reason"], "presentation": None, "occupiedAngularBins": None, "angularRuns": None, "reticleEvidencePlane": None, "reticleEvidenceQuality": None, "reticleCapturedAt": reticle_output["evidence"]["capturedAt"], "rawTexts": raw_texts},
+            "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
         }
     reference_x = reticle["referenceX"]
     reference_y = reticle["referenceY"]
@@ -407,7 +443,13 @@ def main(ctx):
             "offsetY": offset_y,
             "centerDistancePixels": square_root(offset_x * offset_x + offset_y * offset_y),
             "reason": reason + ":ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED",
+            "presentation": reticle["presentation"],
+            "occupiedAngularBins": reticle["occupiedAngularBins"],
+            "angularRuns": reticle["angularRuns"],
+            "reticleEvidencePlane": reticle["evidencePlane"],
+            "reticleEvidenceQuality": reticle["evidenceQuality"],
+            "reticleCapturedAt": reticle_output["evidence"]["capturedAt"],
             "rawTexts": raw_texts,
         },
-        "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"]], "identity": identity_band["timing"]},
+        "timing": {"bands": [bands[0]["timing"], bands[1]["timing"], bands[2]["timing"], bands[3]["timing"], bands[4]["timing"]], "identity": identity_band["timing"]},
     }

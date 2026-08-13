@@ -1,21 +1,45 @@
 # Supercruise visible reticle position
 
-Locate the orange selected-target ring inside one 140×140 reference-pixel
-window supplied by the owning target-identity composite. The hint is only a
-search-window centre derived from current-frame OCR; it is not returned as the
-target position.
+Locate the selected-target reticle inside one 140×140 reference-pixel window
+whose centre is supplied by the owning target-identity or tracking Action. The
+hint is a bounded search origin, not a returned target position.
 
-The Action evaluates a bounded grid of candidate centres and counts orange HUD
-pixels in a 34–58 pixel annulus. A unique score of at least 18 sampled ring
-pixels is required. A near-tied candidate returns `UNKNOWN` only when its
-centre is at least 20 pixels away, representing a distinct possible ring;
-adjacent 4-pixel grid samples are one local peak. Missing evidence remains
-`UNKNOWN`. This
-local CV deliberately ignores target identity; `supercruise-target-position`
-must independently confirm the requested name in the same frame before it may
-use this position.
+The Action derives three declared evidence planes from the same current RGB
+region: the legacy strict RGB gate, a normalized orange-opponent plane, and an
+HSV orange-hue plane. The strict RGB result is diagnostic only: the reviewed
+four-background ablation showed that it loses dim rings and creates false
+high-contrast fragments, so it cannot authorize control. The latter two planes
+use their own 99.5-percentile-derived threshold with an absolute floor. This is
+one primary adaptive classifier, not a provider or capture fallback: every
+plane is evaluated on the same pixels, all thresholds and scores are returned,
+and the selected adaptive plane is explicit.
 
-The fixed 140×140 ROI and fixed candidate grid bound computation. The package
-has a 32M Starlark step budget because orange HUD text can transiently increase
-the extracted point set; exceeding that explicit bound remains a terminal
-infrastructure failure rather than domain `UNKNOWN`.
+Each plane evaluates a fixed grid of candidate centres. Its score rewards
+pixels in the reviewed 34–58-pixel annulus, penalizes pixels in the adjacent
+inner and outer clutter bands, and applies a small distance penalty from the
+supplied hint. A distinct near-tied centre, insufficient annulus evidence,
+non-positive radial contrast, or insufficient angular coverage rejects that
+plane. A filled warm-colour field is also rejected because ED's reticle has an
+intentional right-side label gap; zero angular transitions cannot establish a
+reticle. If the two strongest viable planes point to distinct centres with
+near-equal angular coverage, the Action returns `UNKNOWN` instead of silently
+choosing one.
+
+The selected annulus is divided into 72 angular bins without morphological
+closing. One through four occupied runs is `SOLID`; five or more is `DASHED`.
+Solid topology additionally requires at least 40 occupied bins; dashed
+topology requires at least 18. This rejects a few accidental warm-colour arcs
+without demanding solid-ring coverage from a deliberately sparse dashed ring.
+This preserves ED's actual topology: a solid ring still has its intentional
+label gap, while a dashed ring contains repeated gaps. `occupiedAngularBins`
+alone is retained as evidence but is no longer used as the solid/dashed rule.
+
+This local CV deliberately ignores target identity. Initial acquisition must
+come from `supercruise-target-position`; after that, a bounded controller may
+track the already-identified reticle by feeding each current result back as the
+next hint. A tracking miss authorizes no steering and must transition visibly
+back to identity acquisition.
+
+The ROI, candidate grid, evidence-plane order, and 64M Starlark step budget are
+fixed. Exceeding the declared budget or receiving incomplete screen evidence
+is a terminal infrastructure failure, not domain `UNKNOWN`.

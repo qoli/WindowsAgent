@@ -29,8 +29,25 @@ DESTINATION_HEAT_UNKNOWN_RETRY_MS = 250
 DESTINATION_HEAT_CHECKPOINT_INTERVAL = 8
 ESCAPE_CHARGE_LAST_KNOWN_MAX_PERCENT = 60
 ESCAPE_CHARGE_UNKNOWN_GRACE_MS = 4000
+DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES = 8
+MIN_TRACKING_HINT = 70
+MAX_TRACKING_HINT_X = 1850
+MAX_TRACKING_HINT_Y = 1010
 
-def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None):
+def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None):
+    presentation = None
+    occupied_bins = None
+    angular_runs = None
+    evidence_plane = None
+    evidence_quality = None
+    captured_at = None
+    if target != None:
+        presentation = target.get("presentation")
+        occupied_bins = target.get("occupiedAngularBins")
+        angular_runs = target.get("angularRuns")
+        evidence_plane = target.get("reticleEvidencePlane", target.get("evidencePlane"))
+        evidence_quality = target.get("reticleEvidenceQuality", target.get("evidenceQuality"))
+        captured_at = target.get("reticleCapturedAt")
     stream.emit(
         type="action.align-visible-target.update",
         payload={
@@ -39,6 +56,7 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
             "sample": sample,
             "commandCount": command_count,
             "targetState": None if target == None else target["state"],
+            "observationMode": observation_mode,
             "offsetX": None if target == None else target["offsetX"],
             "offsetY": None if target == None else target["offsetY"],
             "centerDistancePixels": None if target == None else target["centerDistancePixels"],
@@ -48,6 +66,12 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
             "heatState": heat_state,
             "heatPercent": heat_percent,
             "heatReason": heat_reason,
+            "presentation": presentation,
+            "occupiedAngularBins": occupied_bins,
+            "angularRuns": angular_runs,
+            "reticleEvidencePlane": evidence_plane,
+            "reticleEvidenceQuality": evidence_quality,
+            "reticleCapturedAt": captured_at,
             "reason": reason,
             "observationErrorCode": error_code,
             "observationError": error,
@@ -91,6 +115,9 @@ def choose_command(target, position_source):
         # Reference Y grows downward; Pitch Down moves a visible front target upward.
         return ["PITCH_DOWN" if offset_y > 0 else "PITCH_UP", hold_ms]
     return None
+
+def trackable_hint(target):
+    return target["referenceX"] >= MIN_TRACKING_HINT and target["referenceX"] <= MAX_TRACKING_HINT_X and target["referenceY"] >= MIN_TRACKING_HINT and target["referenceY"] <= MAX_TRACKING_HINT_Y
 
 def observe_destination_heat_checkpoint(target_name, sample, command_count, stable):
     high_heat_count = 0
@@ -139,6 +166,8 @@ def main(ctx):
     last_known_heat_percent = None
     last_known_heat_ms = None
     final_target = None
+    tracked_target = None
+    tracked_samples_since_identity = 0
     if position_source == "DESTINATION":
         observe_destination_heat_checkpoint(target_name, 0, command_count, stable)
     for sample in range(1, MAX_SAMPLES + 1):
@@ -183,51 +212,73 @@ def main(ctx):
                 elif unknown_heat_count >= MAX_UNKNOWN_HEAT_SAMPLES:
                     emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HEAT_UNKNOWN_LIMIT_REACHED", heat_state=heat_state, heat_percent=heat_percent)
                     fail("visible target alignment heat remained UNKNOWN for three consecutive samples")
+        observation_mode = "ESCAPE_VECTOR_POSITION"
         if position_source == "ESCAPE_VECTOR":
             attempt = action.try_call(id="elite-dangerous/escape-vector-visible-position", inputs={})
+        elif tracked_target != None and tracked_samples_since_identity < DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES and trackable_hint(tracked_target):
+            observation_mode = "RETICLE_TRACKING"
+            attempt = action.try_call(
+                id="elite-dangerous/supercruise-visible-reticle-position",
+                inputs={"hintX": int(tracked_target["referenceX"]), "hintY": int(tracked_target["referenceY"])},
+            )
         else:
+            observation_mode = "IDENTITY_ACQUISITION"
             attempt = action.try_call(id="elite-dangerous/supercruise-target-position", inputs={"targetName": target_name})
         if not attempt["ok"]:
             text = attempt["error"]
             bounded = text if len(text) <= 512 else text[:512]
             if attempt["errorCode"] == "JOB_DEADLINE_EXCEEDED":
                 deadline_count += 1
-                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_DEADLINE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent)
+                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_DEADLINE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
                 if deadline_count > MAX_DEADLINE_ERRORS:
                     fail("visible target deadline error limit exceeded after five skipped errors: " + text)
                 wait_for_cadence(started_ms, position_source)
                 continue
             if transient_wgc_region_capture_error(text):
                 wgc_capture_error_count += 1
-                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_WGC_CAPTURE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent)
+                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_WGC_CAPTURE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
                 if wgc_capture_error_count > MAX_WGC_CAPTURE_ERRORS:
                     fail("visible target WGC region capture error limit exceeded after five skipped errors: " + text)
                 wait_for_cadence(started_ms, position_source)
                 continue
-            emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_OBSERVATION_FAILED", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent)
+            emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_OBSERVATION_FAILED", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
             fail("visible target observation failed: " + text)
 
         target = attempt["output"]["target"]
+        if observation_mode == "RETICLE_TRACKING":
+            target["reticleCapturedAt"] = attempt["output"]["evidence"]["capturedAt"]
         final_target = target
         if target["state"] != "DETECTED":
             unknown_count += 1
             stable = 0
             entered_center_gate = False
             boundary_jitter_samples = 0
-            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent)
+            if observation_mode == "RETICLE_TRACKING":
+                tracked_target = None
+                tracked_samples_since_identity = 0
+                unknown_reason = "RETICLE_TRACKING_LOST_REACQUIRE_IDENTITY"
+            else:
+                unknown_reason = "VISIBLE_TARGET_UNKNOWN"
+            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason=unknown_reason, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
             if unknown_count >= TRANSIENT_UNKNOWN_LIMIT:
                 fail("visible target remained UNKNOWN after its bounded observation window")
             wait_for_cadence(started_ms, position_source)
             continue
         unknown_count = 0
+        if position_source == "DESTINATION":
+            tracked_target = target
+            if observation_mode == "IDENTITY_ACQUISITION":
+                tracked_samples_since_identity = 0
+            else:
+                tracked_samples_since_identity += 1
 
         if target["centerDistancePixels"] <= CENTER_RADIUS_PIXELS:
             entered_center_gate = True
             boundary_jitter_samples = 0
             stable += 1
-            emit_update("VERIFYING_CENTER", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_CENTER_CANDIDATE", heat_state=heat_state, heat_percent=heat_percent)
+            emit_update("VERIFYING_CENTER", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_CENTER_CANDIDATE", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
             if stable >= stable_confirmations_required:
-                emit_update("COMPLETED", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_STABLY_CENTERED", heat_state=heat_state, heat_percent=heat_percent)
+                emit_update("COMPLETED", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_STABLY_CENTERED", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
                 stream.activity(message="Visible target precisely aligned", level="info")
                 return {
                     "schemaVersion": 1,
@@ -245,7 +296,7 @@ def main(ctx):
         if position_source == "DESTINATION" and entered_center_gate and boundary_jitter_samples < DESTINATION_VERIFY_JITTER_SAMPLES and target["centerDistancePixels"] <= DESTINATION_VERIFY_JITTER_RADIUS_PIXELS:
             stable = 0
             boundary_jitter_samples += 1
-            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="CENTER_BOUNDARY_JITTER_TOLERATED", heat_state=heat_state, heat_percent=heat_percent)
+            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="CENTER_BOUNDARY_JITTER_TOLERATED", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
             wait_for_cadence(started_ms, position_source)
             continue
 
@@ -262,7 +313,7 @@ def main(ctx):
         result = action.call(id="elite-dangerous/ship-attitude-control", inputs={"control": command, "holdMs": hold_ms})
         command_count += 1
         stream.activity(message=command + " visible-target pulse for " + str(hold_ms) + " ms", level="info")
-        emit_update("ALIGNING", target_name, sample, command_count, target=target, command=command, hold_ms=hold_ms, reason=result["control"], heat_state=heat_state, heat_percent=heat_percent)
+        emit_update("ALIGNING", target_name, sample, command_count, target=target, command=command, hold_ms=hold_ms, reason=result["control"], heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
         wait_for_cadence(started_ms, position_source)
 
     fail("visible target did not reach stable center before the sample limit")
