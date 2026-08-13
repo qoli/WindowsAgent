@@ -16,7 +16,7 @@
         "rangeState": {"enum": ["ALLOWED", "DENIED", "UNKNOWN", null]},
         "distanceMeters": {"type": ["number", "null"], "minimum": 0},
         "requestDocking": {"enum": ["AVAILABLE", "FOCUSED", "UNAVAILABLE", "DOCKING_ACTIVE", "DENIED", "UNKNOWN", null]},
-        "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN", null]},
+        "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN", null]},
         "landingGear": {"enum": ["ON", "OFF", "UNKNOWN", null]},
         "autoDockSeen": {"type": "boolean"},
         "autoDockConsecutive": {"type": "integer", "minimum": 0, "maximum": 2},

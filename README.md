@@ -67,7 +67,9 @@ today:
   status-file, or throttle-command state
 - `elite-dangerous/flight-status` accepts the complete raw output of
   `elite-dangerous/flight-prompt-text`, combines OCR confidence with finite
-  phrase similarity, and returns one reviewed flight state or `UNKNOWN`
+  phrase similarity, and returns one reviewed flight state or `UNKNOWN`,
+  including the explicit `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` Gate for
+  `MOVE TO OBTAIN LINE OF SIGHT TO TARGET`
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,
@@ -169,8 +171,10 @@ The Action runtime and registration refactor is partially landed:
   workflow as an alternative while adding a `DROP` lifecycle owned by the
   in-game Assist computer: it enters Supercruise, visually selects the locked
   target's non-orbit Assist action, requires two
-  `SUPERCRUISE_ASSIST_ACTIVE` frames, then sends no flight input while waiting
-  for the game's automatic drop and three-frame visual stop;
+  `SUPERCRUISE_ASSIST_ACTIVE` frames, then normally sends no flight input while
+  waiting for the game's automatic drop and three-frame visual stop. Two
+  line-of-sight-required frames activate a bounded focus-frame-directed bypass,
+  Compass plus visible-target realignment, and fresh Assist ownership Gate;
 - `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
   It immediately returns a durable watch URL, asks the supervising model to
   arrange Auto Launch, and requires empty prompt text plus positive `KNOWN`

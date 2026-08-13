@@ -63,8 +63,27 @@ child completed repeats the complete correction cycle instead of trusting the
 child terminal state. `SUPERCRUISE ASSIST ACTIVE` must be classified twice
 before the game computer owns flight.
 
-After ownership begins, the Action sends no throttle, attitude, UI, or FSD
-input. It only watches `flight-status` and `ship-speed`. Up to five transient
+After ownership begins, the Action normally sends no throttle, attitude, UI,
+or FSD input. It only watches `flight-status` and `ship-speed`. The sole
+declared exception is two consecutive
+`SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` samples. That Gate means the game
+computer cannot continue because the selected destination is physically
+occluded; it is not ordinary Assist disappearance and must not accumulate
+toward `ASSIST_INTERRUPTED`.
+
+At that Gate the parent commands 0%, synchronously runs the independent
+`clear-supercruise-assist-line-of-sight` Streaming Action, then runs Compass
+coarse alignment followed by visible-target fine alignment. It re-reads the
+original prompt twice after those children complete. If the line-of-sight
+prompt returns, the complete bypass and realignment cycle repeats, bounded to
+three recoveries. Only after prompt-clear verification may the parent restore
+75% and require two fresh `SUPERCRUISE ASSIST ACTIVE` samples before treating
+the game computer as flight owner again. The output records the recovery count
+and truthfully sets `agentFlightInputAfterAssistActive=true` when this explicit
+recovery path issued flight input. No child completion substitutes for the
+original OCR Gate.
+
+Up to five transient
 failures from the same persistent WGC region-capture provider may be skipped
 while the game owns flight; the sixth consecutive failure, or any different
 observation error, remains terminal. A successful speed observation resets

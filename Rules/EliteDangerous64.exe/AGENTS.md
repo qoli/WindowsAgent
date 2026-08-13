@@ -126,11 +126,14 @@ similarity floor; high-confidence unrelated OCR remains `UNKNOWN`. It returns `S
 `WAITING_IN_QUEUE`, `SLOW_DOWN_FOR_AUTO_DOCK`, `FSD_CHARGING`,
 `FSD_THROTTLE_UP_REQUIRED`,
 `FSD_ALIGNMENT_REQUIRED`, `SUPERCRUISE_ASSIST_ACTIVE`,
+`SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED`,
 `SAFE_DISENGAGE_READY`, `AUTO_DOCK`, or
 evidence-preserving `UNKNOWN`. It
 performs no capture or OCR and malformed raw input fails schema validation.
 Multi-frame confirmation, event emission, and follow-up execution remain
-registration concerns.
+owning Action concerns. `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` is the
+exact `MOVE TO OBTAIN LINE OF SIGHT TO TARGET` Gate; it is not ordinary Assist
+loss or target alignment.
 
 `elite-dangerous/ship-status` is a finite composite Action over the reviewed
 lower-right HUD region. Its internal raw Action captures at reference density
@@ -552,10 +555,12 @@ registered 0% throttle compensation.
 computer workflow for `destinationMode=DROP`, initially targeting `NAV BEACON`.
 It requires the caller to have confirmed the destination lock, normal space,
 and the ship's `Auto Throttle` Assist setting. It aligns a Station as a STATIC
-target through Compass only: the strict NORMAL_SPACE profile owns pre-entry
-alignment, and the SUPERCRUISE_ASSIST profile owns later correction after
-entry. It does not invoke `align-visible-target` or replace an out-of-band OCR
-label with a blind search. It first enters Supercruise manually, then commands
+target through Compass first: the strict NORMAL_SPACE profile owns pre-entry
+alignment, and the SUPERCRUISE_ASSIST profile owns later coarse correction
+after entry. A persistent `ALIGN WITH TARGET DESTINATION` Gate then permits
+`align-visible-target` to own fine alignment, after Compass has entered that
+sensor's valid domain. It never replaces an out-of-band OCR label with a blind
+search. It first enters Supercruise manually, then commands
 minimum Supercruise throttle before opening the locked target's Navigation
 detail. Two OCR frames must identify the non-orbit
 `SUPERCRUISE ASSIST` action. The detail icon label is contextual, so the Action
@@ -563,9 +568,16 @@ sends one `RIGHT` from BACK and treats two matching label frames as focus
 evidence before `SELECT`. Missing module/button/focus
 evidence fails without a manual-flight fallback. The workflow may align only
 after commanding the configured 75% blue-zone throttle and observing a
-persistent alignment requirement. Two `SUPERCRUISE_ASSIST_ACTIVE` frames then transfer ownership to the game.
-After that transfer it emits observations but sends no throttle, attitude, UI,
-or FSD input. Completion is the conjunction of three missing-Assist frames and
+persistent alignment requirement. Two `SUPERCRUISE_ASSIST_ACTIVE` frames then
+transfer ownership to the game. After that transfer it normally emits
+observations without input. The only declared recovery is two
+`SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` samples: it commands 0%, delegates
+the bounded `clear-supercruise-assist-line-of-sight` workflow, realigns through
+Compass then visible-target CV, rechecks the original prompt twice, restores
+75%, and requires two new ownership frames. The direction sensor requires one
+named `DASHED` focus frame from `HSV_ORANGE`; ambiguous or near-centre evidence
+is `UNKNOWN` and authorizes no fixed default turn. Completion is the
+conjunction of three missing-Assist frames and
 three slashed-zero `STOPPED` frames. Thirty missing-Assist frames without the
 stop are `ASSIST_INTERRUPTED`. `SAFE_DISENGAGE_READY` remains observational;
 the Action never manually toggles FSD on arrival. `ASSIST AND ORBIT` is rejected

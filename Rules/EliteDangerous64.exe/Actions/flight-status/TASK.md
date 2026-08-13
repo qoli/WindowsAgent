@@ -26,6 +26,13 @@ ACTIVE` is a separate `SUPERCRUISE_ASSIST_ACTIVE` state rather than ordinary
 throttle inputs after the game computer takes control. `ALIGN WITH ESCAPE
 VECTOR` is classified separately as `FSD_ESCAPE_VECTOR_REQUIRED`; a workflow
 must not infer that Compass ownership changed from `FSD_CHARGING` alone.
+`MOVE TO OBTAIN LINE OF SIGHT TO TARGET` is the distinct
+`SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` Gate. It means the selected
+destination is occluded and the Assist computer cannot continue the direct
+approach. It does not authorize `align-visible-target`, prove a safe bypass
+direction, or mean Assist was cancelled. An owning Streaming Action must stop
+the direct approach, obtain fresh target-focus geometry, clear the obstruction,
+then re-read this prompt before restoring the Assist blue-zone throttle.
 The live `THROTTLE UP TO ENGAGE` prompt is
 `FSD_THROTTLE_UP_REQUIRED`: it proves the FSD reached its charged throttle
 handoff, but does not prove that Supercruise entry occurred.

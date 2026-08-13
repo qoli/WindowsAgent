@@ -296,6 +296,12 @@
         "reaction"
       ]
     },
+    "elite-dangerous/supercruise-line-of-sight-direction": {
+      "path": "Actions/supercruise-line-of-sight-direction",
+      "runtime": "windows-composite-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/escape-vector-visible-position": {
       "path": "Actions/escape-vector-visible-position",
       "runtime": "windows-composite-action-v1",
@@ -485,6 +491,12 @@
     },
     "elite-dangerous/supercruise-assist-to-destination": {
       "path": "Actions/supercruise-assist-to-destination",
+      "runtime": "windows-streaming-action-v1",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
+    "elite-dangerous/clear-supercruise-assist-line-of-sight": {
+      "path": "Actions/clear-supercruise-assist-line-of-sight",
       "runtime": "windows-streaming-action-v1",
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []

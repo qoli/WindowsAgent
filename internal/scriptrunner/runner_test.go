@@ -457,6 +457,21 @@ func TestEliteFlightStatusPackageSeparatesSupercruiseAssistActive(t *testing.T) 
 	}
 }
 
+func TestEliteFlightStatusPackageRecognizesSupercruiseAssistLineOfSightRequired(t *testing.T) {
+	for _, text := range []string{
+		"MOVE TO OBTAIN LINE OF SIGHT TO TARGET",
+		"MOVETOOBTAINLINEOFSIGHTTOTARGET",
+		"MOVE TO OBTAIN LINE OF S1GHT TO TARGET",
+	} {
+		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED" || status["known"] != true || decision["accepted"] != true {
+			t.Fatalf("text %q result = %#v", text, result)
+		}
+	}
+}
+
 func TestEliteFlightStatusPackageRecognizesSafeDisengageReady(t *testing.T) {
 	for _, text := range []string{"SAFE DISENGAGE READY", "SAFE DISENGAGEREADY", "SAFE DISENGAGE REAOY"} {
 		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))

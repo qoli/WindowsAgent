@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "direction"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "direction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "control", "reason", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "initialProjectionPixels", "reticleEvidencePlane", "shapeConfidencePermille", "focusFrameConfidencePermille", "identityConfirmed", "reticleCapturedAt"],
+      "properties": {
+        "state": {"enum": ["READY", "UNKNOWN"]},
+        "control": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT", null]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 128},
+        "targetPresentation": {"type": ["string", "null"], "enum": ["SOLID", "DASHED", null]},
+        "targetOffsetX": {"type": ["number", "null"]},
+        "targetOffsetY": {"type": ["number", "null"]},
+        "targetCenterDistancePixels": {"type": ["number", "null"], "minimum": 0},
+        "initialProjectionPixels": {"type": ["number", "null"], "minimum": 0},
+        "reticleEvidencePlane": {"type": ["string", "null"], "enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
+        "shapeConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "focusFrameConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "identityConfirmed": {"type": "boolean"},
+        "reticleCapturedAt": {"type": ["string", "null"]}
+      },
+      "oneOf": [
+        {"properties": {"state": {"const": "READY"}, "control": {"type": "string"}, "targetPresentation": {"const": "DASHED"}, "reticleEvidencePlane": {"const": "HSV_ORANGE"}, "initialProjectionPixels": {"type": "number", "minimum": 48}}},
+        {"properties": {"state": {"const": "UNKNOWN"}, "control": {"const": null}, "initialProjectionPixels": {"const": null}}}
+      ]
+    }
+  }
+}

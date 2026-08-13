@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.clear-supercruise-assist-line-of-sight.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "targetName", "flightStatus", "flightPromptText", "directionState", "control", "targetPresentation", "targetOffsetX", "targetOffsetY", "projectionPixels", "turnPulses", "noProgressPulses", "clearConfirmations", "commandedThrottle", "lastCommand", "reason"],
+      "properties": {
+        "phase": {"enum": ["CONFIRMING_GATE", "STOPPING_DIRECT_APPROACH", "SELECTING_DIRECTION", "TURNING_TO_BYPASS", "BYPASS_FLIGHT", "VERIFYING_CLEAR", "COMPLETED"]},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 160},
+        "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+        "flightStatus": {"type": ["string", "null"], "enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY", "UNKNOWN", null]},
+        "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
+        "directionState": {"type": ["string", "null"], "enum": ["READY", "UNKNOWN", null]},
+        "control": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT", null]},
+        "targetPresentation": {"type": ["string", "null"], "enum": ["SOLID", "DASHED", null]},
+        "targetOffsetX": {"type": ["number", "null"]},
+        "targetOffsetY": {"type": ["number", "null"]},
+        "projectionPixels": {"type": ["number", "null"]},
+        "turnPulses": {"type": "integer", "minimum": 0, "maximum": 16},
+        "noProgressPulses": {"type": "integer", "minimum": 0, "maximum": 4},
+        "clearConfirmations": {"type": "integer", "minimum": 0, "maximum": 2},
+        "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 75, null]},
+        "lastCommand": {"type": ["string", "null"], "maxLength": 64},
+        "reason": {"type": ["string", "null"], "maxLength": 192}
+      }
+    }
+  }
+}

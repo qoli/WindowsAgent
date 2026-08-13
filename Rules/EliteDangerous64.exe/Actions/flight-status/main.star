@@ -8,6 +8,10 @@ STATUS_RULES = [
         "aliases": ["SUPERCRUISE ASSIST ACTIVE"],
     },
     {
+        "state": "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED",
+        "aliases": ["MOVE TO OBTAIN LINE OF SIGHT TO TARGET"],
+    },
+    {
         "state": "SUPERCRUISE",
         "aliases": ["SUPERCRUISE"],
     },

@@ -31,6 +31,7 @@ type supercruiseAssistDestinationCaller struct {
 	supercruiseHUDStates   []string
 	supercruiseHUDIndex    int
 	speedErrors            []error
+	lineOfSightCalls       int
 }
 
 func focusedPixels(focused bool) []any {
@@ -123,6 +124,9 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 			"heatPolicy":      inputs["heatPolicy"],
 		})
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"sampleCount":4}`), nil
+	case "elite-dangerous/clear-supercruise-assist-line-of-sight":
+		c.lineOfSightCalls++
+		return json.RawMessage(`{"schemaVersion":1,"task":"CLEAR_SUPERCRUISE_ASSIST_LINE_OF_SIGHT","completed":true,"targetName":"NAV BEACON","control":"YAW_RIGHT","turnPulses":3,"bypassFlightSamples":2,"finalFlightStatus":"UNKNOWN","sampleCount":8}`), nil
 	case "elite-dangerous/supercruise-control":
 		c.supercruiseKeys++
 		c.recordFlightInput("FSD")
@@ -522,6 +526,45 @@ func TestEliteSupercruiseAssistInterruptionFailsWithoutManualFlightFallback(t *t
 	}
 	if caller.throttles[len(caller.throttles)-1] != 0 {
 		t.Fatalf("failure compensation did not end at 0%%: throttles=%v", caller.throttles)
+	}
+}
+
+func TestEliteSupercruiseAssistClearsLineOfSightThenReacquiresGameOwnership(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = []string{
+		"FSD_CHARGING", "SUPERCRUISE", "SUPERCRUISE", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED",
+		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	}
+	caller.speedStates = []string{"MOVING", "MOVING", "MOVING", "MOVING", "STOPPED", "STOPPED", "STOPPED"}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) ||
+		!contains(string(output), `"lineOfSightRecoveryCount":1`) ||
+		!contains(string(output), `"agentFlightInputAfterAssistActive":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.lineOfSightCalls != 1 || caller.alignmentCalls != 2 || caller.visibleAlignmentCalls != 1 {
+		t.Fatalf("lineOfSight=%d compass=%d visible=%d", caller.lineOfSightCalls, caller.alignmentCalls, caller.visibleAlignmentCalls)
+	}
+	wantThrottles := []int{0, 100, 0, 75, 0, 75}
+	if len(caller.throttles) != len(wantThrottles) {
+		t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+	}
+	for index := range wantThrottles {
+		if caller.throttles[index] != wantThrottles[index] {
+			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+		}
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"phase":"CLEARING_LINE_OF_SIGHT"`) ||
+		!contains(joined, `"phase":"REALIGNING_AFTER_LINE_OF_SIGHT"`) ||
+		!contains(joined, `"phase":"REACQUIRING_ASSIST"`) {
+		t.Fatalf("events=%s", joined)
 	}
 }
 
