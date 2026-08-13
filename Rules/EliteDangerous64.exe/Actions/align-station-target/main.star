@@ -41,13 +41,16 @@ SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS = 12
 HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS = 20
 SUPERCRUISE_HYPERSPACE_CHARGE_FINE_HOLD_MS = 300
 SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS = 40
+NAV_BEACON_VISIBLE_HANDOFF_FINE_DISTANCE_PIXELS = 8
+NAV_BEACON_VISIBLE_HANDOFF_FINE_HOLD_MS = 40
+NAV_BEACON_VISIBLE_HANDOFF_RECOVERY_HOLD_MS = 80
 CENTER_ENTRY_BRAKE_MS = 100
 SUPERCRUISE_CENTER_ENTRY_BRAKE_MS = 300
 SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS = 160
 RECOVERY_HOLD_MS = 400
 SUPERCRUISE_RECOVERY_HOLD_MS = 240
 TRACK_TRANSITION_SETTLE_SAMPLES = 1
-MIN_OBSERVED_MOVEMENT_PIXELS = 1
+MIN_CONTROL_PROGRESS_PIXELS = 2
 NO_MOVEMENT_LIMIT = 4
 AWAY_TREND_LIMIT = 5
 AMBIGUOUS_PRESENTATION_LIMIT = 12
@@ -80,7 +83,25 @@ def resolve_control_profile(requested_profile):
     profile = "SUPERCRUISE_ASSIST" if has_flag(status["data"]["Flags"], 16) else "NORMAL_SPACE"
     return {"profile": profile, "source": "STATUS_JSON"}
 
-def emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="NONE", command=None, command_result=None, reason=None, information=None, command_hold_ms=None, observed_movement_pixels=None, no_movement_count=0, distance_delta_pixels=None, away_trend_count=0, lease_id=None, lease_state=None, sample_started_ms=None, sample_duration_ms=None, sample_interval_ms=None, observation_error_code=None, observation_error=None):
+def motion_context_target(target, target_name, requested_target_motion, effective_target_motion, target_motion_source, observation=None):
+    contextual_target = {}
+    for key, value in target.items():
+        contextual_target[key] = value
+    contextual_target["targetName"] = target_name
+    contextual_target["requestedTargetMotion"] = requested_target_motion
+    contextual_target["effectiveTargetMotion"] = effective_target_motion
+    contextual_target["targetMotionSource"] = target_motion_source
+    contextual_target["compassCascadeMode"] = target["cascadeMode"] if "cascadeMode" in target else None
+    contextual_target["compassSelectedRoute"] = target["selectedRoute"] if "selectedRoute" in target else None
+    contextual_target["compassClassificationConfidence"] = target["classificationConfidence"] if "classificationConfidence" in target else None
+    contextual_target["compassStrictPrediction"] = observation["routes"]["strict"]["prediction"] if observation != None and "routes" in observation else None
+    contextual_target["compassOpponentPrediction"] = observation["routes"]["opponent"]["prediction"] if observation != None and "routes" in observation else None
+    contextual_target["compassSamplingPath"] = observation["samplingPath"] if observation != None and "samplingPath" in observation else None
+    contextual_target["compassFallbackUsed"] = observation["fallbackUsed"] if observation != None and "fallbackUsed" in observation else None
+    contextual_target["compassFallbackReason"] = observation["attempts"][0]["reason"] if observation != None and observation.get("fallbackUsed", False) and len(observation.get("attempts", [])) > 0 else None
+    return contextual_target
+
+def emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="NONE", command=None, command_result=None, reason=None, information=None, command_hold_ms=None, observed_movement_pixels=None, control_progress_pixels=None, no_movement_count=0, distance_delta_pixels=None, away_trend_count=0, lease_id=None, lease_state=None, sample_started_ms=None, sample_duration_ms=None, sample_interval_ms=None, observation_error_code=None, observation_error=None):
     stream.emit(
         type="action.align-station-target.update",
         payload={
@@ -91,6 +112,18 @@ def emit_update(phase, sample, command_count, target, stable_confirmations, cont
             "targetDetected": target["detected"],
             "targetPresentation": target["presentation"],
             "targetHemisphere": target["hemisphere"],
+            "targetName": target["targetName"] if "targetName" in target else None,
+            "requestedTargetMotion": target["requestedTargetMotion"] if "requestedTargetMotion" in target else None,
+            "effectiveTargetMotion": target["effectiveTargetMotion"] if "effectiveTargetMotion" in target else None,
+            "targetMotionSource": target["targetMotionSource"] if "targetMotionSource" in target else None,
+            "compassCascadeMode": target["compassCascadeMode"] if "compassCascadeMode" in target else None,
+            "compassSelectedRoute": target["compassSelectedRoute"] if "compassSelectedRoute" in target else None,
+            "compassClassificationConfidence": target["compassClassificationConfidence"] if "compassClassificationConfidence" in target else None,
+            "compassStrictPrediction": target["compassStrictPrediction"] if "compassStrictPrediction" in target else None,
+            "compassOpponentPrediction": target["compassOpponentPrediction"] if "compassOpponentPrediction" in target else None,
+            "compassSamplingPath": target["compassSamplingPath"] if "compassSamplingPath" in target else None,
+            "compassFallbackUsed": target["compassFallbackUsed"] if "compassFallbackUsed" in target else None,
+            "compassFallbackReason": target["compassFallbackReason"] if "compassFallbackReason" in target else None,
             "offsetX": target["offsetX"],
             "offsetY": target["offsetY"],
             "centerDistancePixels": target["centerDistancePixels"],
@@ -105,6 +138,7 @@ def emit_update(phase, sample, command_count, target, stable_confirmations, cont
             "sampleDurationMs": sample_duration_ms,
             "sampleIntervalMs": sample_interval_ms,
             "observedMovementPixels": observed_movement_pixels,
+            "controlProgressPixels": control_progress_pixels,
             "noMovementCount": no_movement_count,
             "distanceDeltaPixels": distance_delta_pixels,
             "awayTrendCount": away_trend_count,
@@ -124,6 +158,20 @@ def choose_front_control(target):
         # Screen Y grows downward. Pitch up moves the front marker downward.
         return "PITCH_DOWN" if offset_y > 0 else "PITCH_UP"
     return None
+
+def axis_progress(commanded_target, target, axis):
+    key = "offsetX" if axis == "YAW" else "offsetY"
+    return abs(commanded_target[key]) - abs(target[key])
+
+def directional_control_progress(commanded_target, target, control):
+    progress = None
+    if "YAW" in control:
+        progress = axis_progress(commanded_target, target, "YAW")
+    if "PITCH" in control:
+        pitch_progress = axis_progress(commanded_target, target, "PITCH")
+        if progress == None or pitch_progress > progress:
+            progress = pitch_progress
+    return progress
 
 def is_alignment_centered(target, radius_pixels):
     return (
@@ -273,7 +321,16 @@ def release_lease(lease_id, control, phase, sample, command_count, target, stabl
 def main(ctx):
     mode = ctx.inputs["mode"] if "mode" in ctx.inputs else "ALIGN"
     tracking_samples = int(ctx.inputs["trackingSamples"]) if "trackingSamples" in ctx.inputs else 120
-    target_motion = ctx.inputs["targetMotion"] if "targetMotion" in ctx.inputs else "MOVING"
+    requested_target_motion = ctx.inputs["targetMotion"] if "targetMotion" in ctx.inputs else "MOVING"
+    target_motion = requested_target_motion
+    target_name = ctx.inputs["targetName"].strip().upper() if "targetName" in ctx.inputs else None
+    nav_beacon_motion_override = target_name == "NAV BEACON" and requested_target_motion != "MOVING"
+    if target_name == "NAV BEACON":
+        # A Nav Beacon is an in-system moving contact. Its Compass marker can
+        # drift independently of ship input, so callers may not opt it into
+        # the STATIC controller or STATIC-only input-health inference.
+        target_motion = "MOVING"
+    target_motion_source = "NAV_BEACON_OVERRIDE" if nav_beacon_motion_override else "INPUT"
     alignment_purpose = ctx.inputs["alignmentPurpose"] if "alignmentPurpose" in ctx.inputs else "CENTER"
     stop_before_align = ctx.inputs["stopBeforeAlign"] if "stopBeforeAlign" in ctx.inputs else True
     requested_control_profile = ctx.inputs["controlProfile"] if "controlProfile" in ctx.inputs else "AUTO"
@@ -281,10 +338,10 @@ def main(ctx):
     control_profile = profile_resolution["profile"]
     control_profile_source = profile_resolution["source"]
     supercruise_profile = control_profile == "SUPERCRUISE_ASSIST"
-    if alignment_purpose == "VISIBLE_HANDOFF" and (mode != "ALIGN" or not supercruise_profile or target_motion != "STATIC"):
-        fail("VISIBLE_HANDOFF requires ALIGN with STATIC target motion and SUPERCRUISE_ASSIST control profile")
-    if alignment_purpose == "HYPERSPACE_CHARGE" and (mode != "ALIGN" or target_motion != "STATIC"):
-        fail("HYPERSPACE_CHARGE requires ALIGN with STATIC target motion")
+    if alignment_purpose == "VISIBLE_HANDOFF" and (mode != "ALIGN" or not supercruise_profile):
+        fail("VISIBLE_HANDOFF requires ALIGN with SUPERCRUISE_ASSIST control profile")
+    if alignment_purpose == "HYPERSPACE_CHARGE" and mode != "ALIGN":
+        fail("HYPERSPACE_CHARGE requires ALIGN")
     stable_confirmations_required = 2 if supercruise_profile else STABLE_CENTER_CONFIRMATIONS
     alignment_radius = SUPERCRUISE_CENTER_RADIUS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else ALIGN_CENTER_RADIUS_PIXELS
     alignment_hysteresis = SUPERCRUISE_CENTER_HYSTERESIS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else 0.0
@@ -294,9 +351,12 @@ def main(ctx):
     if control_profile == "SUPERCRUISE_ASSIST" and target_motion == "STATIC":
         alignment_radius = SUPERCRUISE_STATIC_ALIGN_CENTER_RADIUS_PIXELS if mode == "ALIGN" else SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS
         alignment_hysteresis = SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS
-        if alignment_purpose == "VISIBLE_HANDOFF":
-            alignment_radius = SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS
-            alignment_hysteresis = SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS
+    if alignment_purpose == "VISIBLE_HANDOFF":
+        # The visible-target child cannot recover a destination that Compass
+        # handed off outside its proposal domain. Keep the strict four-pixel
+        # Gate for moving contacts such as NAV BEACON as well as stations.
+        alignment_radius = SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS
+        alignment_hysteresis = 0.0 if target_name == "NAV BEACON" else SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS
     if alignment_purpose == "HYPERSPACE_CHARGE":
         # Exact reticle centering belongs to the required align-visible-target
         # child, but Compass must first place the target inside that child's
@@ -327,6 +387,22 @@ def main(ctx):
     sample_cadence_ms = SUPERCRUISE_STATIC_TRACK_CADENCE_MS if target_motion == "STATIC" and supercruise_profile else SAMPLE_CADENCE_MS
 
     stream.activity(message="Compass control profile " + control_profile + " selected from " + control_profile_source + " for " + alignment_purpose, level="info")
+    if nav_beacon_motion_override:
+        information = {
+            "code": "NAV_BEACON_TARGET_MOTION_OVERRIDE",
+            "message": "NAV BEACON overrides requestedTargetMotion=" + requested_target_motion + " with effectiveTargetMotion=MOVING because it is a moving in-system contact.",
+            "recommendedAction": "Interpret small Compass displacement as possible target motion; do not use STATIC no-progress or moving-away inference.",
+        }
+        stream.activity(message="NAV_BEACON_TARGET_MOTION_OVERRIDE requested=" + requested_target_motion + " effective=MOVING", level="warning")
+        emit_update(
+            "OBSERVING",
+            0,
+            0,
+            motion_context_target(empty_target(), target_name, requested_target_motion, target_motion, target_motion_source),
+            0,
+            reason="NAV_BEACON_TARGET_MOTION_OVERRIDE",
+            information=information,
+        )
     if mode == "TRACK":
         stream.activity(message="Target motion profile " + target_motion + " selected", level="info")
 
@@ -350,6 +426,7 @@ def main(ctx):
     away_trend_count = 0
     active_lease_id = None
     active_lease_control = None
+    active_lease_expires_ms = None
     previous_sample_started_ms = None
     ambiguous_presentation_count = 0
     last_clear_presentation = None
@@ -380,6 +457,7 @@ def main(ctx):
             # cannot STOP the same already-released lease again.
             active_lease_id = None
             active_lease_control = None
+            active_lease_expires_ms = None
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
@@ -407,26 +485,36 @@ def main(ctx):
 
         observation = attempt["output"]
         compass_not_visible_error_count = 0
-        target = observation["target"]
+        target = motion_context_target(
+            observation["target"],
+            target_name,
+            requested_target_motion,
+            target_motion,
+            target_motion_source,
+            observation,
+        )
         final_observation = observation
         observed_movement = None
+        control_progress = None
         distance_delta = None
         if commanded_target != None and target["detected"]:
             observed_movement = max(
                 abs(target["offsetX"] - commanded_target["offsetX"]),
                 abs(target["offsetY"] - commanded_target["offsetY"]),
             )
-            if observed_movement < MIN_OBSERVED_MOVEMENT_PIXELS:
+            control_progress = directional_control_progress(commanded_target, target, commanded_control)
+            if control_progress == None or abs(control_progress) < MIN_CONTROL_PROGRESS_PIXELS:
                 no_movement_count += 1
                 if mode == "TRACK" and no_movement_count > 2:
                     no_movement_count = 2
-                if commanded_control in ["PITCH_UP", "PITCH_DOWN"]:
+                if mode == "ALIGN" and no_movement_count > NO_MOVEMENT_LIMIT:
+                    no_movement_count = NO_MOVEMENT_LIMIT
+                if "PITCH" in commanded_control:
                     pitch_no_movement_count += 1
-                else:
-                    pitch_no_movement_count = 0
             else:
                 no_movement_count = 0
-                pitch_no_movement_count = 0
+                if "PITCH" in commanded_control:
+                    pitch_no_movement_count = 0
             distance_delta = target["centerDistancePixels"] - commanded_target["centerDistancePixels"]
             if mode == "ALIGN" and commanded_target["presentation"] == "SOLID" and target["presentation"] == "SOLID":
                 if distance_delta >= 1:
@@ -441,6 +529,7 @@ def main(ctx):
             released_lease_id = active_lease_id
             active_lease_id = None
             active_lease_control = None
+            active_lease_expires_ms = None
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
@@ -471,6 +560,7 @@ def main(ctx):
             released_lease_id = active_lease_id
             active_lease_id = None
             active_lease_control = None
+            active_lease_expires_ms = None
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
@@ -544,7 +634,15 @@ def main(ctx):
                 track_command_cooldown = TRACK_TRANSITION_SETTLE_SAMPLES
         if control_target["presentation"] == "SOLID":
             transition_control = None
-        if mode == "ALIGN" and no_movement_count >= NO_MOVEMENT_LIMIT:
+        if away_trend_count >= AWAY_TREND_LIMIT and mode == "ALIGN" and target_motion == "STATIC":
+            release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
+            emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_MOVING_AWAY", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            fail("Ship attitude control moved the front Compass target away from center")
+        # A consistent away trend is measurable control response, even when
+        # each individual frame advances by only one detector pixel. Let the
+        # dedicated bounded away-trend Gate classify it instead of reporting
+        # the controller as inactive one sample too early.
+        if mode == "ALIGN" and target_motion == "STATIC" and no_movement_count >= NO_MOVEMENT_LIMIT and away_trend_count == 0:
             if pitch_no_movement_count >= NO_MOVEMENT_LIMIT:
                 information = {
                     "code": "ED_PITCH_INPUT_CONTEXT_NOT_READY",
@@ -552,16 +650,11 @@ def main(ctx):
                     "recommendedAction": "Power on or reconnect the configured controller, then retry without restarting Elite Dangerous. Do not use XInput enumeration as the Gate.",
                 }
                 release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
-                emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ED_PITCH_INPUT_CONTEXT_NOT_READY", information=information, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+                emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ED_PITCH_INPUT_CONTEXT_NOT_READY", information=information, observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
                 fail("ED_PITCH_INPUT_CONTEXT_NOT_READY: repeated Pitch input produced no Compass movement; power on or reconnect the configured controller, then retry without restarting Elite Dangerous")
             release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
-            emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             fail("Ship attitude control produced no measurable Compass movement")
-        if away_trend_count >= AWAY_TREND_LIMIT and mode == "ALIGN":
-            release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
-            emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_MOVING_AWAY", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
-            fail("Ship attitude control moved the front Compass target away from center")
-
         active_alignment_radius = alignment_radius + alignment_hysteresis if stable_confirmations > 0 else alignment_radius
         alignment_centered = is_alignment_centered(control_target, active_alignment_radius)
         phase = "TURNING_TO_FRONT"
@@ -585,6 +678,7 @@ def main(ctx):
             action.clear_on_failure()
             active_lease_id = None
             active_lease_control = None
+            active_lease_expires_ms = None
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
@@ -594,7 +688,7 @@ def main(ctx):
             no_movement_count = 0
             pitch_no_movement_count = 0
             away_trend_count = 0
-            emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="SUSTAINED", command=released_control, command_result=release_result, lease_id=released_id, lease_state="RELEASED", sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUSTAINED_CONTROL_RELEASED", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="SUSTAINED", command=released_control, command_result=release_result, lease_id=released_id, lease_state="RELEASED", sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUSTAINED_CONTROL_RELEASED", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             if mode == "ALIGN" and supercruise_profile and alignment_centered:
                 brake_control = opposite_control(released_control)
                 if brake_control != None:
@@ -604,7 +698,7 @@ def main(ctx):
                     brake_result = pulse_control(brake_control, SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS)
                     command_count += 1
                     stream.activity(message=brake_control + " sustained-release brake for " + str(SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS) + " ms", level="info")
-                    emit_update("VERIFYING_CENTER", sample, command_count, target, 0, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUPERCRUISE_SUSTAINED_RELEASE_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+                    emit_update("VERIFYING_CENTER", sample, command_count, target, 0, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUPERCRUISE_SUSTAINED_RELEASE_BRAKE", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
                     # This command mutates attitude after the current Compass frame.
                     # Never complete from the pre-brake SOLID sample: live evidence
                     # showed a 300 ms brake could cross the antipode and leave the
@@ -661,7 +755,7 @@ def main(ctx):
                 command_count += 1
                 brake_applied = True
                 stream.activity(message=brake_control + " center-entry brake for " + str(brake_hold_ms) + " ms", level="info")
-                emit_update("VERIFYING_CENTER", sample, command_count, target, 0, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=brake_hold_ms, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="CENTER_ENTRY_BRAKE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+                emit_update("VERIFYING_CENTER", sample, command_count, target, 0, control_mode="PULSE", command=brake_control, command_result=brake_result, command_hold_ms=brake_hold_ms, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="CENTER_ENTRY_BRAKE", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
@@ -684,7 +778,10 @@ def main(ctx):
                 "schemaVersion": 3,
                 "task": "ALIGN_STATION_TARGET",
                 "mode": mode,
+                "targetName": target_name,
+                "requestedTargetMotion": requested_target_motion,
                 "targetMotion": target_motion,
+                "targetMotionSource": target_motion_source,
                 "alignmentPurpose": alignment_purpose,
                 "controlProfile": control_profile,
                 "controlProfileSource": control_profile_source,
@@ -706,14 +803,18 @@ def main(ctx):
                 action.clear_on_failure()
                 active_lease_id = None
                 active_lease_control = None
+                active_lease_expires_ms = None
                 emit_update("TRACKING_WINDOW_COMPLETED", sample, command_count, target, stable_confirmations, control_mode="SUSTAINED", command=released_control, command_result=release_result, lease_id=released_id, lease_state="RELEASED", sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="SUSTAINED_CONTROL_RELEASED_AT_TRACKING_WINDOW")
-            emit_update("TRACKING_WINDOW_COMPLETED", sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="BOUNDED_TRACKING_WINDOW_COMPLETED", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update("TRACKING_WINDOW_COMPLETED", sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="BOUNDED_TRACKING_WINDOW_COMPLETED", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             stream.activity(message="Moving-target tracking window completed", level="info")
             return {
                 "schemaVersion": 3,
                 "task": "ALIGN_STATION_TARGET",
                 "mode": mode,
+                "targetName": target_name,
+                "requestedTargetMotion": requested_target_motion,
                 "targetMotion": target_motion,
+                "targetMotionSource": target_motion_source,
                 "alignmentPurpose": alignment_purpose,
                 "controlProfile": control_profile,
                 "controlProfileSource": control_profile_source,
@@ -730,6 +831,32 @@ def main(ctx):
         if desired_sustained != None:
             hold_result = None
             reason = "SUSTAINED_CONTROL_RENEWED"
+            if (
+                active_lease_id != None and
+                active_lease_expires_ms != None and
+                task.elapsed_milliseconds() >= active_lease_expires_ms
+            ):
+                expired_id = active_lease_id
+                expired_control = active_lease_control
+                release_lease(
+                    expired_id,
+                    expired_control,
+                    phase,
+                    sample,
+                    command_count,
+                    target,
+                    stable_confirmations,
+                    "SUSTAINED_CONTROL_LEASE_EXPIRED_DURING_OBSERVATION",
+                    sample_started_ms,
+                    sample_duration_ms,
+                    sample_interval_ms,
+                )
+                active_lease_id = None
+                active_lease_control = None
+                active_lease_expires_ms = None
+                commanded_target = None
+                commanded_control = None
+                commanded_hold_ms = None
             if active_lease_id == None:
                 if command_count >= MAX_COMMANDS:
                     emit_update(phase, sample, command_count, target, stable_confirmations, reason="COMMAND_LIMIT_REACHED")
@@ -737,6 +864,7 @@ def main(ctx):
                 hold_result = start_hold(desired_sustained)
                 active_lease_id = hold_result["leaseId"]
                 active_lease_control = desired_sustained
+                active_lease_expires_ms = task.elapsed_milliseconds() + int(hold_result["leaseMs"])
                 if mode == "TRACK":
                     last_track_control = desired_sustained
                 register_hold_failure(active_lease_control, active_lease_id)
@@ -745,10 +873,11 @@ def main(ctx):
                 stream.activity(message=desired_sustained + " sustained hold at " + str(target["centerDistancePixels"]) + " px", level="info")
             else:
                 hold_result = renew_hold(active_lease_control, active_lease_id)
+                active_lease_expires_ms = task.elapsed_milliseconds() + int(hold_result["leaseMs"])
             commanded_target = target
             commanded_control = active_lease_control
             commanded_hold_ms = None
-            emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="SUSTAINED", command=active_lease_control, command_result=hold_result, lease_id=active_lease_id, lease_state="ACTIVE", sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=reason, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="SUSTAINED", command=active_lease_control, command_result=hold_result, lease_id=active_lease_id, lease_state="ACTIVE", sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=reason, observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
             continue
 
@@ -775,7 +904,7 @@ def main(ctx):
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
-            emit_update(phase, sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="TRACKING_POST_COMMAND_SETTLE", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update(phase, sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="TRACKING_POST_COMMAND_SETTLE", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
             continue
         if mode == "TRACK" and track_command_cooldown > 0:
@@ -783,7 +912,7 @@ def main(ctx):
             commanded_target = None
             commanded_control = None
             commanded_hold_ms = None
-            emit_update(phase, sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="TRACKING_COMMAND_COOLDOWN", observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update(phase, sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="TRACKING_COMMAND_COOLDOWN", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
             continue
         pulse = None
@@ -799,6 +928,7 @@ def main(ctx):
                 pulse = choose_pulse(control_target, no_movement_count, fine_distance, fine_hold, supercruise_profile, single_axis_fine)
                 if (
                     alignment_purpose in ["HYPERSPACE_CHARGE", "VISIBLE_HANDOFF"] and
+                    target_motion == "STATIC" and
                     control_target["presentation"] == "SOLID" and
                     target["centerDistancePixels"] <= HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS and
                     no_movement_count < 2 and
@@ -812,6 +942,19 @@ def main(ctx):
                     # target actually crosses the four-pixel center Gate.
                     # Normal space retains the calibrated 40 ms pulse.
                     pulse = [pulse[0], SUPERCRUISE_HYPERSPACE_CHARGE_FINE_HOLD_MS if supercruise_profile else SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS]
+                if (
+                    alignment_purpose == "VISIBLE_HANDOFF" and
+                    target_name == "NAV BEACON" and
+                    control_target["presentation"] == "SOLID" and
+                    target["centerDistancePixels"] <= NAV_BEACON_VISIBLE_HANDOFF_FINE_DISTANCE_PIXELS and
+                    pulse != None
+                ):
+                    # The moving Nav Beacon occupies a 3.6-5px quantized band
+                    # around the strict four-pixel Gate. Cap near-center input
+                    # well below the generic moving-target 120/240ms law so a
+                    # correction cannot repeatedly sweep across the Gate.
+                    pulse = [pulse[0], NAV_BEACON_VISIBLE_HANDOFF_RECOVERY_HOLD_MS if no_movement_count >= 2 else NAV_BEACON_VISIBLE_HANDOFF_FINE_HOLD_MS]
+                    pulse_reason = "NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE"
                 if (
                     mode == "TRACK" and
                     supercruise_profile and
@@ -849,7 +992,7 @@ def main(ctx):
             commanded_control = None
             commanded_hold_ms = None
             wait_reason = "TRACKING_NEAR_CENTER" if mode == "TRACK" else "WAITING_FOR_STABLE_CENTER"
-            emit_update(phase, sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=wait_reason, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+            emit_update(phase, sample, command_count, target, stable_confirmations, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=wait_reason, observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
             wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
             continue
         if command_count >= MAX_COMMANDS:
@@ -866,7 +1009,7 @@ def main(ctx):
         if mode == "TRACK":
             last_track_control = command
         stream.activity(message=command + " pulse for " + str(hold_ms) + " ms at " + str(target["centerDistancePixels"]) + " px", level="info")
-        emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="PULSE", command=command, command_result=command_result, command_hold_ms=hold_ms, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=pulse_reason, observed_movement_pixels=observed_movement, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+        emit_update(phase, sample, command_count, target, stable_confirmations, control_mode="PULSE", command=command, command_result=command_result, command_hold_ms=hold_ms, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason=pulse_reason, observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
         wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
 
     fail("Compass alignment exhausted the bounded sample limit")

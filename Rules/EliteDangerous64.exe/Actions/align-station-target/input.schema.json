@@ -3,6 +3,7 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
     "mode": {"enum": ["ALIGN", "TRACK"], "default": "ALIGN"},
     "targetMotion": {"enum": ["MOVING", "STATIC"], "default": "MOVING"},
     "alignmentPurpose": {"enum": ["CENTER", "VISIBLE_HANDOFF", "HYPERSPACE_CHARGE"], "default": "CENTER"},

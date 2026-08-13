@@ -14,16 +14,23 @@ before using a game-specific capability.
 `elite-dangerous/compass` is a finite, directly callable Action. It owns a
 fixed compass region in the 1920x1080 reference coordinate space and its HUD
 color interpretation. The game-neutral Observer maps that region through a
-centered 16:9 viewport and returns reference-density pixels. A changed
-foreground process or invalid compass evidence fails explicitly. Its target
-evidence also classifies the reviewed cyan topology as `SOLID`/front,
-`HOLLOW`/rear, or evidence-preserving `UNKNOWN`. Preprocessing builds a
-brightness-tolerant cyan response mask and removes isolated pixels without
-closing the hollow center. Marker bounds establish a topology center: a filled
-three-by-three center means front, while an empty center inside a sufficiently
-large ring means rear. Candidate/retained counts, the five-by-five core, and
-marker bounds remain visible diagnostic evidence; total cyan count alone never
-decides the hemisphere.
+centered 16:9 viewport. The package first evaluates a 96x96 reference sample
+and accepts it only when strict and opponent routes agree on the same confident
+non-NONE marker. Reference NONE, low confidence, disagreement, or insufficient
+annular geometry explicitly escalates to one native-density capture. The output
+retains `samplingPath`, `fallbackUsed`, and both attempts with their reason; an
+infrastructure or protocol failure never authorizes fallback. Each path locates
+the current orange Compass circle with a bounded Hough-style annulus search,
+then classifies native connected-component topology through independent
+opponent-color and strict-cyan routes. The opponent route is primary; strict
+may recover only under the declared confidence cascade. `SOLID` means front,
+`HOLLOW` means rear, and route disagreement remains evidence-preserving
+`UNKNOWN`. `target.cascadeMode`, `selectedRoute`, classification confidence,
+both route predictions/scores, and the observed circle geometry remain in the
+finite output. `align-station-target` copies this provenance into its streaming
+events. A changed foreground process, invalid native sample, or missing orange
+annular geometry fails explicitly; no ScreenParser, OCR, cached frame,
+alternative ROI, or hidden sampling fallback is used.
 
 `elite-dangerous/ship-attitude-control` is the finite binding-resolved flight
 primitive. It injects exactly one `PITCH_UP`, `PITCH_DOWN`, `YAW_LEFT`,

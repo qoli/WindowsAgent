@@ -7,12 +7,15 @@ is separate from the retained manual `supercruise-to-destination` workflow.
 The caller must first complete `select-and-lock-destination`, visually confirm
 normal space, and confirm the ship's Supercruise Assist setting is `Auto
 Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, then
-invokes `align-station-target` with `targetMotion=STATIC` and the explicit
-`VISIBLE_HANDOFF` purpose. The Compass child owns rear/coarse entry into a
-16-pixel front SOLID domain; `align-visible-target` owns the following precise
-screen-centre Gate. Before Supercruise
-entry it uses the strict `NORMAL_SPACE` Compass profile; after a confirmed
-Supercruise entry it uses `SUPERCRUISE_ASSIST`. The Compass child remains the
+invokes `align-station-target` with the named destination. The child owns the
+rule that `NAV BEACON` is always `targetMotion=MOVING`; ordinary stations retain
+the requested `STATIC` profile. Before Supercruise
+entry it uses the strict `NORMAL_SPACE` Compass profile with the
+`HYPERSPACE_CHARGE` purpose, which requires the tighter normal-space pre-FSD
+Gate. After a confirmed Supercruise entry it uses `SUPERCRUISE_ASSIST` with
+the explicit `VISIBLE_HANDOFF` purpose. The Compass child owns rear/coarse
+entry into the appropriate front SOLID domain; `align-visible-target` owns any
+following precise screen-centre Gate. The Compass child remains the
 coarse and initial alignment feedback source and must complete while throttle
 is 0% before acceleration is permitted. `ALIGN WITH TARGET DESTINATION` is a
 generic current-frame target-alignment prompt even though `flight-status`

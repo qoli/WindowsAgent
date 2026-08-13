@@ -109,12 +109,18 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 	case "elite-dangerous/align-station-target":
 		c.alignmentCalls++
 		c.alignmentInputs = append(c.alignmentInputs, map[string]any{
-			"mode":            inputs["mode"],
-			"targetMotion":    inputs["targetMotion"],
-			"stopBeforeAlign": inputs["stopBeforeAlign"],
-			"controlProfile":  inputs["controlProfile"],
+			"targetName":       inputs["targetName"],
+			"mode":             inputs["mode"],
+			"targetMotion":     inputs["targetMotion"],
+			"alignmentPurpose": inputs["alignmentPurpose"],
+			"stopBeforeAlign":  inputs["stopBeforeAlign"],
+			"controlProfile":   inputs["controlProfile"],
 		})
-		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_STATION_TARGET","completed":true,"sampleCount":3}`), nil
+		targetMotion, _ := inputs["targetMotion"].(string)
+		if inputs["targetName"] == "NAV BEACON" {
+			targetMotion = "MOVING"
+		}
+		return json.Marshal(map[string]any{"schemaVersion": 1, "task": "ALIGN_STATION_TARGET", "completed": true, "sampleCount": 3, "targetMotion": targetMotion})
 	case "elite-dangerous/align-visible-target":
 		c.visibleAlignmentCalls++
 		c.visibleAlignmentInputs = append(c.visibleAlignmentInputs, map[string]any{
@@ -273,6 +279,7 @@ func TestEliteSupercruiseAssistToDestinationHandsFlightToGameComputer(t *testing
 	if len(caller.alignmentInputs) != 1 ||
 		caller.alignmentInputs[0]["mode"] != "ALIGN" ||
 		caller.alignmentInputs[0]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[0]["alignmentPurpose"] != "HYPERSPACE_CHARGE" ||
 		caller.alignmentInputs[0]["stopBeforeAlign"] != false ||
 		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" {
 		t.Fatalf("initial alignment inputs=%v", caller.alignmentInputs)
@@ -351,8 +358,10 @@ func TestEliteSupercruiseAssistRequiresCompassVisibleAndPromptClearBeforeRestori
 	}
 	if len(caller.alignmentInputs) != 2 ||
 		caller.alignmentInputs[0]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[0]["alignmentPurpose"] != "HYPERSPACE_CHARGE" ||
 		caller.alignmentInputs[0]["controlProfile"] != "NORMAL_SPACE" ||
 		caller.alignmentInputs[1]["targetMotion"] != "STATIC" ||
+		caller.alignmentInputs[1]["alignmentPurpose"] != "VISIBLE_HANDOFF" ||
 		caller.alignmentInputs[1]["controlProfile"] != "SUPERCRUISE_ASSIST" {
 		t.Fatalf("alignment inputs=%v", caller.alignmentInputs)
 	}

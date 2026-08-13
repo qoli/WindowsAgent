@@ -343,12 +343,14 @@ def observe_supercruise_hud_stable():
     fail("Supercruise HUD did not produce two consecutive ACTIVE observations")
 
 def align_compass(target_name, control_profile):
+    alignment_purpose = "VISIBLE_HANDOFF" if control_profile == "SUPERCRUISE_ASSIST" else "HYPERSPACE_CHARGE"
     compass_result = action.call(
         id="elite-dangerous/align-station-target",
         inputs={
+            "targetName": target_name,
             "mode": "ALIGN",
             "targetMotion": "STATIC",
-            "alignmentPurpose": "VISIBLE_HANDOFF",
+            "alignmentPurpose": alignment_purpose,
             "stopBeforeAlign": False,
             "controlProfile": control_profile,
         },
@@ -358,7 +360,7 @@ def align_compass(target_name, control_profile):
         compass_result["sampleCount"],
         target_name,
         last_command="ALIGN_STATION_TARGET",
-        reason="SUPERVISED_STATIC_COMPASS_ALIGNMENT_COMPLETED:" + control_profile,
+        reason="SUPERVISED_COMPASS_ALIGNMENT_COMPLETED:" + compass_result["targetMotion"] + ":" + control_profile + ":" + alignment_purpose,
     )
     return compass_result["sampleCount"]
 

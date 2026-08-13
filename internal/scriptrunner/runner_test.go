@@ -30,8 +30,12 @@ type fixtureObserverCall struct {
 }
 
 type compassBroker struct {
-	pixels []any
-	calls  []fixtureObserverCall
+	pixels          []any
+	imageWidth      int64
+	imageHeight     int64
+	referencePixels []any
+	nativePixels    []any
+	calls           []fixtureObserverCall
 }
 
 type wideOcclusionBroker struct {
@@ -68,14 +72,39 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 	y, _ := arguments["y"].(int64)
 	w, _ := arguments["w"].(int64)
 	h, _ := arguments["h"].(int64)
+	sampling, _ := arguments["sampling"].(string)
+	if sampling == "" {
+		sampling = "reference"
+	}
+	imageWidth := b.imageWidth
+	imageHeight := b.imageHeight
+	pixels := b.pixels
+	capturedAt := "2026-08-07T01:02:03Z"
+	if sampling == "reference" && b.referencePixels != nil {
+		pixels = b.referencePixels
+		imageWidth = w
+		imageHeight = h
+	}
+	if sampling == "native" && b.nativePixels != nil {
+		pixels = b.nativePixels
+		imageWidth = w * 2
+		imageHeight = h * 2
+		capturedAt = "2026-08-07T01:02:04Z"
+	}
+	if imageWidth == 0 {
+		imageWidth = w
+	}
+	if imageHeight == 0 {
+		imageHeight = h
+	}
 	return map[string]any{
-		"sampling": "reference",
+		"sampling": sampling,
 		"coordinateSpace": map[string]any{
 			"width": int64(1920), "height": int64(1080), "fit": "centered-16:9",
 		},
 		"frame": map[string]any{
 			"width": int64(3840), "height": int64(2160),
-			"capturedAt": "2026-08-07T01:02:03Z",
+			"capturedAt": capturedAt,
 			"foreground": map[string]any{"processId": int64(7), "executableName": "EliteDangerous64.exe"},
 		},
 		"viewport": map[string]any{
@@ -88,8 +117,8 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 			"left": x * 2, "top": y * 2, "width": w * 2, "height": h * 2,
 		},
 		"image": map[string]any{
-			"width": w, "height": h,
-			"encoding": "rgb24-packed", "pixels": b.pixels,
+			"width": imageWidth, "height": imageHeight,
+			"encoding": "rgb24-packed", "pixels": pixels,
 		},
 	}, nil
 }
@@ -1678,24 +1707,75 @@ func TestEliteRequestDockingAvailabilityPrefersConfirmedCancelOverSameFrameDenia
 	}
 }
 
-func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
-	pixels := make([]any, 96*96)
+func compassFixture(size int, marker string, markerCenterX, markerCenterY int, markerColor uint32) []any {
+	pixels := make([]any, size*size)
 	for index := range pixels {
-		pixels[index] = uint32(0)
+		pixels[index] = uint32(0x05070A)
 	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	for y := 40; y < 43; y++ {
-		for x := 58; x < 62; x++ {
-			pixels[y*96+x] = uint32(0x40DDEB)
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			distance := math.Hypot(float64(x-size/2), float64(y-size/2))
+			if math.Abs(distance-float64(size)*30.0/96.0) <= float64(size)*1.25/96.0 {
+				pixels[y*size+x] = uint32(0xFF7700)
+			}
 		}
 	}
+	if marker == "SOLID" {
+		for y := markerCenterY - 7; y <= markerCenterY+7; y++ {
+			for x := markerCenterX - 7; x <= markerCenterX+7; x++ {
+				pixels[y*size+x] = markerColor
+			}
+		}
+	}
+	if marker == "HOLLOW" {
+		for y := markerCenterY - 7; y <= markerCenterY+7; y++ {
+			for x := markerCenterX - 7; x <= markerCenterX+7; x++ {
+				if x <= markerCenterX-5 || x >= markerCenterX+5 || y <= markerCenterY-5 || y >= markerCenterY+5 {
+					pixels[y*size+x] = markerColor
+				}
+			}
+		}
+	}
+	return pixels
+}
+
+func nativeCompassFixture(marker string, markerCenterX, markerCenterY int, markerColor uint32) []any {
+	return compassFixture(192, marker, markerCenterX, markerCenterY, markerColor)
+}
+
+func referenceCompassFixture(marker string, markerCenterX, markerCenterY int, markerColor uint32) []any {
+	return compassFixture(96, marker, markerCenterX, markerCenterY, markerColor)
+}
+
+func runCompassFixture(t *testing.T, referencePixels, nativePixels []any) (map[string]any, *compassBroker) {
+	t.Helper()
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broker := &compassBroker{referencePixels: referencePixels, nativePixels: nativePixels}
+	runner, err := New(broker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result, broker
+}
+
+func TestEliteCompassPackageUsesReferenceFastPathForDualRouteMarker(t *testing.T) {
+	pixels := referenceCompassFixture("SOLID", 59, 41, 0x40DDEB)
 	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
 	if err != nil {
 		t.Fatalf("load package: %v", err)
 	}
-	broker := &compassBroker{pixels: pixels}
+	broker := &compassBroker{referencePixels: pixels, nativePixels: nativeCompassFixture("NONE", 0, 0, 0)}
 	runner, err := New(broker)
 	if err != nil {
 		t.Fatal(err)
@@ -1720,11 +1800,71 @@ func TestEliteCompassPackageUsesFixedScreenRegion(t *testing.T) {
 	}
 	target := result["target"].(map[string]any)
 	zone := target["centerZone"].(map[string]any)
-	if target["detected"] != true || target["offsetX"] != float64(11) || target["offsetY"] != float64(-7) ||
+	if result["schemaVersion"] != float64(8) || result["samplingPath"] != "REFERENCE_FAST_PATH" || result["fallbackUsed"] != false ||
+		target["detected"] != true || target["presentation"] != "SOLID" ||
+		target["cascadeMode"] != "OPPONENT_PRIMARY" || target["selectedRoute"] != "OPPONENT" ||
+		target["offsetX"] != float64(11) || target["offsetY"] != float64(-7) ||
 		math.Abs(target["screenAngleDegrees"].(float64)-57.529) > 0.0001 ||
 		math.Abs(target["centerDistancePixels"].(float64)-13.038) > 0.0001 ||
 		zone["shape"] != "circle" || zone["radiusPixels"] != float64(4) || zone["inside"] != false {
 		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestEliteCompassPackageClassifiesNativeHollowMarker(t *testing.T) {
+	result, broker := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), nativeCompassFixture("HOLLOW", 96, 96, 0x40DDEB))
+	target := result["target"].(map[string]any)
+	if len(broker.calls) != 2 || result["samplingPath"] != "NATIVE_FALLBACK" || result["fallbackUsed"] != true ||
+		target["detected"] != true || target["presentation"] != "HOLLOW" || target["hemisphere"] != "REAR" ||
+		target["cascadeMode"] != "OPPONENT_PRIMARY" || target["offsetX"] != float64(0) || target["offsetY"] != float64(0) {
+		t.Fatalf("result=%#v target=%#v calls=%#v", result, target, broker.calls)
+	}
+	attempts := result["attempts"].([]any)
+	if attempts[0].(map[string]any)["reason"] != "REFERENCE_NO_MARKER" || attempts[1].(map[string]any)["reason"] != "NATIVE_FALLBACK_COMPLETED" {
+		t.Fatalf("attempts=%#v", attempts)
+	}
+}
+
+func TestEliteCompassPackageUsesOpponentRouteForRedWashedMarker(t *testing.T) {
+	result, _ := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), nativeCompassFixture("HOLLOW", 106, 88, 0xB4BBB9))
+	target := result["target"].(map[string]any)
+	routes := result["routes"].(map[string]any)
+	strictRoute := routes["strict"].(map[string]any)
+	opponentRoute := routes["opponent"].(map[string]any)
+	if target["detected"] != true || target["presentation"] != "HOLLOW" || target["selectedRoute"] != "OPPONENT" ||
+		strictRoute["prediction"] != "NONE" || opponentRoute["prediction"] != "HOLLOW" {
+		t.Fatalf("target=%#v routes=%#v", target, routes)
+	}
+}
+
+func TestEliteCompassPackageReturnsNoMarkerWithoutSubstitution(t *testing.T) {
+	result, _ := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), nativeCompassFixture("NONE", 0, 0, 0))
+	target := result["target"].(map[string]any)
+	zone := target["centerZone"].(map[string]any)
+	if target["detected"] != false || target["cascadeMode"] != "NO_MARKER" || target["selectedRoute"] != "NONE" ||
+		target["referenceX"] != nil || target["screenAngleDegrees"] != nil || zone["inside"] != nil {
+		t.Fatalf("target=%#v", target)
+	}
+}
+
+func TestEliteCompassPackageFailsWithoutNativeAnnularEvidence(t *testing.T) {
+	pixels := make([]any, 192*192)
+	for index := range pixels {
+		pixels[index] = uint32(0)
+	}
+	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	referencePixels := make([]any, 96*96)
+	for index := range referencePixels {
+		referencePixels[index] = uint32(0)
+	}
+	runner, _ := New(&compassBroker{referencePixels: referencePixels, nativePixels: pixels})
+	_, err = runner.Run(context.Background(), pkg, map[string]any{})
+	var runError *Error
+	if !errors.As(err, &runError) || runError.Code != "COMPASS_NOT_VISIBLE" {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -1948,248 +2088,6 @@ func TestEliteCockpitHUDPresenceSeparatesPresentAndAbsent(t *testing.T) {
 				t.Fatalf("output=%s", output)
 			}
 		})
-	}
-}
-
-func TestEliteCompassPackageReportsZeroDistanceAndUndefinedAngleAtCenter(t *testing.T) {
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	for y := 46; y < 51; y++ {
-		for x := 46; x < 51; x++ {
-			pixels[y*96+x] = uint32(0x40DDEB)
-		}
-	}
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatalf("load package: %v", err)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	output, err := runner.Run(context.Background(), pkg, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatal(err)
-	}
-	target := result["target"].(map[string]any)
-	zone := target["centerZone"].(map[string]any)
-	if target["detected"] != true || target["presentation"] != "SOLID" || target["hemisphere"] != "FRONT" ||
-		target["coreCyanPixelCount"] != float64(25) || target["offsetX"] != float64(0) || target["offsetY"] != float64(0) ||
-		target["screenAngleDegrees"] != nil || target["centerDistancePixels"] != float64(0) || zone["inside"] != true {
-		t.Fatalf("target = %#v", target)
-	}
-}
-
-func TestEliteCompassPackageClassifiesHollowRearMarker(t *testing.T) {
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	for position := 45; position <= 51; position++ {
-		pixels[45*96+position] = uint32(0x40DDEB)
-		pixels[51*96+position] = uint32(0x40DDEB)
-		pixels[position*96+45] = uint32(0x40DDEB)
-		pixels[position*96+51] = uint32(0x40DDEB)
-	}
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	output, err := runner.Run(context.Background(), pkg, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatal(err)
-	}
-	target := result["target"].(map[string]any)
-	if target["detected"] != true || target["presentation"] != "HOLLOW" || target["hemisphere"] != "REAR" ||
-		target["coreCyanPixelCount"] != float64(0) || target["centerDistancePixels"] != float64(0) {
-		t.Fatalf("target = %#v", target)
-	}
-}
-
-func TestEliteCompassPackageClassifiesAntialiasedHollowRearMarker(t *testing.T) {
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	for position := 45; position <= 51; position++ {
-		pixels[45*96+position] = uint32(0x40DDEB)
-		pixels[51*96+position] = uint32(0x40DDEB)
-		pixels[position*96+45] = uint32(0x40DDEB)
-		pixels[position*96+51] = uint32(0x40DDEB)
-	}
-	// Reference downsampling can retain three faint center pixels from a
-	// visually hollow 4K ring. This stays well below the seven-pixel SOLID Gate.
-	for _, x := range []int{47, 48, 49} {
-		pixels[48*96+x] = uint32(0x40DDEB)
-	}
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	output, err := runner.Run(context.Background(), pkg, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatal(err)
-	}
-	target := result["target"].(map[string]any)
-	if target["presentation"] != "HOLLOW" || target["hemisphere"] != "REAR" || target["centerCyanPixelCount"] != float64(3) {
-		t.Fatalf("target=%#v", target)
-	}
-}
-
-func TestEliteCompassPackagePreprocessesDarkHollowRearMarker(t *testing.T) {
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	// This reviewed topology mirrors the live rear marker. Its darker cyan
-	// (110,143,129) is below the retired absolute green threshold.
-	ring := map[int][]int{
-		-3: {-1, 0, 1},
-		-2: {-2, -1, 0, 1, 2},
-		-1: {-3, -2, 2, 3},
-		0:  {-3, 3},
-		1:  {-4, -3, 3, 4},
-		2:  {-3, 3},
-		3:  {-3, -2, -1, 0, 1, 2, 3},
-		4:  {-1, 0, 1, 2},
-	}
-	for offsetY, offsetsX := range ring {
-		for _, offsetX := range offsetsX {
-			pixels[(48+offsetY)*96+48+offsetX] = uint32(0x6E8F81)
-		}
-	}
-	// A chromatically valid but isolated pixel must not affect bounds or
-	// topology after preprocessing.
-	pixels[10*96+10] = uint32(0x6E8F81)
-
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	output, err := runner.Run(context.Background(), pkg, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatal(err)
-	}
-	if result["schemaVersion"] != float64(4) {
-		t.Fatalf("schemaVersion=%#v output=%s", result["schemaVersion"], output)
-	}
-	target := result["target"].(map[string]any)
-	bounds := target["markerBounds"].(map[string]any)
-	if target["detected"] != true || target["presentation"] != "HOLLOW" || target["hemisphere"] != "REAR" ||
-		target["candidateCyanPixelCount"] != float64(32) || target["cyanPixelCount"] != float64(31) ||
-		target["centerCyanPixelCount"] != float64(0) ||
-		bounds["x"] != float64(726) || bounds["y"] != float64(816) ||
-		bounds["w"] != float64(9) || bounds["h"] != float64(8) ||
-		bounds["centerX"] != float64(730) || bounds["centerY"] != float64(819) {
-		t.Fatalf("target=%#v output=%s", target, output)
-	}
-}
-
-func TestEliteCompassPackageDiscardsIsolatedCyanNoise(t *testing.T) {
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	for _, position := range [][2]int{{10, 10}, {30, 20}, {70, 60}, {80, 80}} {
-		pixels[position[1]*96+position[0]] = uint32(0x6E8F81)
-	}
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	output, err := runner.Run(context.Background(), pkg, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatal(err)
-	}
-	target := result["target"].(map[string]any)
-	if target["detected"] != false || target["candidateCyanPixelCount"] != float64(4) ||
-		target["cyanPixelCount"] != float64(0) || target["markerBounds"] != nil ||
-		target["presentation"] != "UNKNOWN" || target["hemisphere"] != "UNKNOWN" {
-		t.Fatalf("target=%#v output=%s", target, output)
-	}
-}
-
-func TestEliteCompassPackageFailsWhenCompassEvidenceIsAbsent(t *testing.T) {
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	_, err = runner.Run(context.Background(), pkg, map[string]any{})
-	var runError *Error
-	if !errors.As(err, &runError) || runError.Code != "COMPASS_NOT_VISIBLE" {
-		t.Fatalf("error = %#v", err)
-	}
-}
-
-func TestEliteCompassPackageReturnsNoTargetWithoutSubstitution(t *testing.T) {
-	pixels := make([]any, 96*96)
-	for index := range pixels {
-		pixels[index] = uint32(0)
-	}
-	for index := 0; index < 200; index++ {
-		pixels[index] = uint32(0xFF7700)
-	}
-	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, _ := New(&compassBroker{pixels: pixels})
-	output, err := runner.Run(context.Background(), pkg, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatal(err)
-	}
-	target := result["target"].(map[string]any)
-	zone := target["centerZone"].(map[string]any)
-	if target["detected"] != false || target["referenceX"] != nil || target["offsetX"] != nil ||
-		target["screenAngleDegrees"] != nil || target["centerDistancePixels"] != nil || zone["inside"] != nil {
-		t.Fatalf("target = %#v", target)
 	}
 }
 

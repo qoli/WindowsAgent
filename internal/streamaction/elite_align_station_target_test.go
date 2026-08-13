@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 )
@@ -24,6 +25,8 @@ type alignStationTargetCaller struct {
 	statusFlags       int64
 	statusState       string
 	statusError       error
+	elapsed           time.Duration
+	compassDurations  []time.Duration
 }
 
 func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -45,6 +48,9 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 		c.throttles = append(c.throttles, int(percent))
 		return json.RawMessage(`{"schemaVersion":1,"selection":"0","control":"SetSpeedZero"}`), nil
 	case "elite-dangerous/compass":
+		if c.index < len(c.compassDurations) {
+			c.elapsed += c.compassDurations[c.index]
+		}
 		if failures := c.compassFailuresAt[c.index]; len(failures) > 0 {
 			err := failures[0]
 			c.compassFailuresAt[c.index] = failures[1:]
@@ -100,6 +106,41 @@ func (c *alignStationTargetCaller) Call(_ context.Context, id string, inputs map
 	}
 }
 
+func TestEliteAlignStationTargetRestartsLeaseExpiredDuringNativeCompassFallback(t *testing.T) {
+	caller := &alignStationTargetCaller{
+		observations: []json.RawMessage{
+			alignObservation("HOLLOW", 0, 17, 17, false),
+			alignObservation("HOLLOW", 0, 18, 18, false),
+			alignObservation("SOLID", 0, 2, 2, true),
+			alignObservation("SOLID", 0, 1, 1, true),
+			alignObservation("SOLID", 0, 0, 0, true),
+		},
+		compassDurations: []time.Duration{0, 3 * time.Second},
+	}
+	base := time.Date(2026, 8, 13, 15, 19, 36, 0, time.UTC)
+	reporter := &fixtureReporter{}
+	output, err := (Runner{
+		Sleep: immediateSleep,
+		Now:   func() time.Time { return base.Add(caller.elapsed) },
+	}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	if got := strings.Join(caller.holdOps, ","); got != "START,STOP,START,STOP" {
+		t.Fatalf("expired lease must be stopped and restarted before final release: %s", got)
+	}
+	if !contains(joinEventPhases(reporter.payloads), `"reason":"SUSTAINED_CONTROL_LEASE_EXPIRED_DURING_OBSERVATION"`) {
+		t.Fatalf("missing expired-lease provenance: payloads=%v", reporter.payloads)
+	}
+}
+
 func TestEliteAlignStationTargetClearsReleasedLeaseAcrossConsecutiveCompassErrors(t *testing.T) {
 	caller := &alignStationTargetCaller{
 		observations: []json.RawMessage{
@@ -144,7 +185,7 @@ func TestEliteAlignStationTargetRetriesTransientCompassNotVisible(t *testing.T) 
 	}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +220,64 @@ func alignObservation(presentation string, offsetX, offsetY int, distance float6
 	return value
 }
 
+func alignObservationWithCompassProvenance() json.RawMessage {
+	value, _ := json.Marshal(map[string]any{
+		"schemaVersion": 8,
+		"samplingPath":  "NATIVE_FALLBACK",
+		"fallbackUsed":  true,
+		"attempts": []any{
+			map[string]any{"reason": "REFERENCE_CLASS_DISAGREEMENT"},
+			map[string]any{"reason": "NATIVE_FALLBACK_COMPLETED"},
+		},
+		"routes": map[string]any{
+			"strict":   map[string]any{"prediction": "HOLLOW"},
+			"opponent": map[string]any{"prediction": "NONE"},
+		},
+		"target": map[string]any{
+			"detected": true, "presentation": "HOLLOW", "hemisphere": "REAR",
+			"cascadeMode": "STRICT_RECOVERY", "selectedRoute": "STRICT", "classificationConfidence": 0.812,
+			"offsetX": 0, "offsetY": -20, "centerDistancePixels": 20.0,
+			"centerZone": map[string]any{"inside": false},
+		},
+	})
+	return value
+}
+
+func TestEliteAlignStationTargetReportsCompassCascadeProvenance(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservationWithCompassProvenance(),
+		alignObservation("SOLID", 0, 2, 2, true),
+		alignObservation("SOLID", 0, 1, 1, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, payload := range reporter.payloads {
+		text := string(payload)
+		if contains(text, `"compassCascadeMode":"STRICT_RECOVERY"`) &&
+			contains(text, `"compassSelectedRoute":"STRICT"`) &&
+			contains(text, `"compassClassificationConfidence":0.812`) &&
+			contains(text, `"compassStrictPrediction":"HOLLOW"`) &&
+			contains(text, `"compassOpponentPrediction":"NONE"`) &&
+			contains(text, `"compassSamplingPath":"NATIVE_FALLBACK"`) &&
+			contains(text, `"compassFallbackUsed":true`) &&
+			contains(text, `"compassFallbackReason":"REFERENCE_CLASS_DISAGREEMENT"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing Compass cascade provenance: payloads=%v", reporter.payloads)
+	}
+}
+
 func loadEliteAlignStationTargetPackage(t *testing.T) *Package {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "align-station-target"))
@@ -208,7 +307,7 @@ func TestEliteAlignStationTargetTurnsRearMarkerThenStablyCenters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != `{"alignmentPurpose":"CENTER","centerContactCount":3,"commandCount":2,"completed":true,"controlProfile":"NORMAL_SPACE","controlProfileSource":"STATUS_JSON","finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","sampleCount":6,"schemaVersion":3,"stableConfirmations":3,"targetMotion":"MOVING","task":"ALIGN_STATION_TARGET"}` {
+	if string(output) != `{"alignmentPurpose":"CENTER","centerContactCount":3,"commandCount":2,"completed":true,"controlProfile":"NORMAL_SPACE","controlProfileSource":"STATUS_JSON","finalObservation":{"schemaVersion":3,"target":{"centerDistancePixels":1,"centerZone":{"inside":true},"detected":true,"hemisphere":"FRONT","offsetX":1,"offsetY":0,"presentation":"SOLID"}},"finalPhase":"COMPLETED","maxConsecutiveCenter":3,"mode":"ALIGN","requestedTargetMotion":"MOVING","sampleCount":6,"schemaVersion":3,"stableConfirmations":3,"targetMotion":"MOVING","targetMotionSource":"INPUT","targetName":null,"task":"ALIGN_STATION_TARGET"}` {
 		t.Fatalf("output=%s", output)
 	}
 	if len(caller.throttles) != 1 || caller.throttles[0] != 0 {
@@ -241,7 +340,7 @@ func TestEliteAlignStationTargetBrakesResidualTurnDuringPresentationTransition(t
 	}}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -490,14 +589,79 @@ func TestEliteAlignStationTargetHyperspaceChargeAcceptsObservedNormalSpaceQuanti
 	}
 }
 
-func TestEliteAlignStationTargetRejectsVisibleHandoffOutsideSupercruiseStaticAlign(t *testing.T) {
+func TestEliteAlignStationTargetRejectsVisibleHandoffOutsideSupercruiseAlign(t *testing.T) {
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
 			"mode": "ALIGN", "targetMotion": "MOVING", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
 		}, &alignStationTargetCaller{}, &fixtureReporter{},
 	)
-	if err == nil || !contains(err.Error(), "VISIBLE_HANDOFF requires ALIGN with STATIC target motion and SUPERCRUISE_ASSIST") {
+	if err == nil || !contains(err.Error(), "VISIBLE_HANDOFF requires ALIGN with SUPERCRUISE_ASSIST") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestEliteAlignStationTargetNavBeaconOverridesStaticMotionAndReportsIt(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 2, 1, 2.236, true),
+		alignObservation("SOLID", 4, 4, 5.657, false),
+		alignObservation("SOLID", 4, 4, 5.657, false),
+		alignObservation("SOLID", 4, 4, 5.657, false),
+		alignObservation("SOLID", 2, 1, 2.236, true),
+		alignObservation("SOLID", 1, 1, 1.414, true),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"targetName": "NAV BEACON", "mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"targetName":"NAV BEACON"`) ||
+		!contains(string(output), `"requestedTargetMotion":"STATIC"`) ||
+		!contains(string(output), `"targetMotion":"MOVING"`) ||
+		!contains(string(output), `"targetMotionSource":"NAV_BEACON_OVERRIDE"`) ||
+		!contains(string(output), `"finalPhase":"COMPLETED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	pulseHolds := []string{}
+	for _, payload := range reporter.payloads {
+		text := string(payload)
+		if contains(text, `"reason":"NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE"`) {
+			if contains(text, `"commandHoldMs":40`) {
+				pulseHolds = append(pulseHolds, "40")
+			} else if contains(text, `"commandHoldMs":80`) {
+				pulseHolds = append(pulseHolds, "80")
+			}
+		}
+	}
+	if strings.Join(pulseHolds, ",") != "40,40,80" || !contains(string(output), `"sampleCount":6`) || !contains(string(output), `"commandCount":3`) {
+		t.Fatalf("NAV BEACON must reject the 5.657px hysteresis handoff and use one moving-profile correction: output=%s payloads=%v", output, reporter.payloads)
+	}
+	foundOverride := false
+	for _, payload := range reporter.payloads {
+		text := string(payload)
+		if contains(text, `"reason":"NAV_BEACON_TARGET_MOTION_OVERRIDE"`) &&
+			contains(text, `"code":"NAV_BEACON_TARGET_MOTION_OVERRIDE"`) &&
+			contains(text, `"targetName":"NAV BEACON"`) &&
+			contains(text, `"requestedTargetMotion":"STATIC"`) &&
+			contains(text, `"effectiveTargetMotion":"MOVING"`) &&
+			contains(text, `"targetMotionSource":"NAV_BEACON_OVERRIDE"`) &&
+			contains(text, `requestedTargetMotion=STATIC`) &&
+			contains(text, `effectiveTargetMotion=MOVING`) {
+			foundOverride = true
+		}
+	}
+	if !foundOverride {
+		t.Fatalf("missing structured motion override event: payloads=%v", reporter.payloads)
+	}
+	for _, payload := range reporter.payloads {
+		text := string(payload)
+		if contains(text, `"targetDetected":true`) &&
+			(!contains(text, `"targetName":"NAV BEACON"`) ||
+				!contains(text, `"requestedTargetMotion":"STATIC"`) ||
+				!contains(text, `"effectiveTargetMotion":"MOVING"`) ||
+				!contains(text, `"targetMotionSource":"NAV_BEACON_OVERRIDE"`)) {
+			t.Fatalf("observation event lost effective motion context: %s", payload)
+		}
 	}
 }
 
@@ -710,7 +874,7 @@ func TestEliteAlignStationTargetUsesSustainedControlOutsideFineBand(t *testing.T
 	}}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -764,7 +928,7 @@ func TestEliteAlignStationTargetReleasesSustainedControlAcrossTransientAmbiguous
 	}}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -841,7 +1005,7 @@ func TestEliteAlignStationTargetBrakesSupercruiseSustainedRelease(t *testing.T) 
 func TestEliteAlignStationTargetAutoProfileFailsWithoutAvailableStatus(t *testing.T) {
 	caller := &alignStationTargetCaller{statusState: "ABSENT"}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, &fixtureReporter{},
 	)
 	if err == nil || !contains(err.Error(), "requires AVAILABLE Status.json evidence") {
 		t.Fatalf("error=%v", err)
@@ -1073,7 +1237,7 @@ func TestEliteAlignStationTargetFailsAfterMeasuredNoProgress(t *testing.T) {
 		alignObservation("HOLLOW", 0, 0, 0, true),
 	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, &fixtureReporter{},
 	)
 	if err == nil || !contains(err.Error(), "ED_PITCH_INPUT_CONTEXT_NOT_READY") {
 		t.Fatalf("error=%v", err)
@@ -1093,7 +1257,7 @@ func TestEliteAlignStationTargetReportsKnownEDPitchInitializationState(t *testin
 	}}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, reporter,
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
 	)
 	if err == nil || !contains(err.Error(), "ED_PITCH_INPUT_CONTEXT_NOT_READY") || !contains(err.Error(), "power on or reconnect") {
 		t.Fatalf("error=%v", err)
@@ -1108,6 +1272,33 @@ func TestEliteAlignStationTargetReportsKnownEDPitchInitializationState(t *testin
 	if !contains(lastPayload, `"reason":"ED_PITCH_INPUT_CONTEXT_NOT_READY"`) ||
 		!contains(lastPayload, `"code":"ED_PITCH_INPUT_CONTEXT_NOT_READY"`) ||
 		!contains(lastPayload, `"recommendedAction":"Power on or reconnect`) {
+		t.Fatalf("last payload=%s", lastPayload)
+	}
+}
+
+func TestEliteAlignStationTargetOnePixelPitchJitterDoesNotMaskInputInitializationState(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -19, 19, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -19, 19, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -19, 19, false),
+	}}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
+	)
+	if err == nil || !contains(err.Error(), "ED_PITCH_INPUT_CONTEXT_NOT_READY") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 5 {
+		t.Fatalf("controls=%v holds=%v", caller.controls, caller.holds)
+	}
+	lastPayload := string(reporter.payloads[len(reporter.payloads)-1])
+	if !contains(lastPayload, `"observedMovementPixels":1`) ||
+		!contains(lastPayload, `"controlProgressPixels":1`) ||
+		!contains(lastPayload, `"reason":"ED_PITCH_INPUT_CONTEXT_NOT_READY"`) {
 		t.Fatalf("last payload=%s", lastPayload)
 	}
 }
@@ -1328,15 +1519,15 @@ func TestEliteAlignStationTargetSupercruiseAlignRetainsStricterCenterGate(t *tes
 
 func TestEliteAlignStationTargetFailsAfterSustainedFrontMovingAwayTrend(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
-		alignObservation("SOLID", 0, -10, 10, false),
-		alignObservation("SOLID", 0, -11, 11, false),
-		alignObservation("SOLID", 0, -12, 12, false),
-		alignObservation("SOLID", 0, -13, 13, false),
-		alignObservation("SOLID", 0, -14, 14, false),
-		alignObservation("SOLID", 0, -15, 15, false),
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -21, 21, false),
+		alignObservation("SOLID", 0, -22, 22, false),
+		alignObservation("SOLID", 0, -23, 23, false),
+		alignObservation("SOLID", 0, -24, 24, false),
+		alignObservation("SOLID", 0, -25, 25, false),
 	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
-		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{}, caller, &fixtureReporter{},
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, &fixtureReporter{},
 	)
 	if err == nil || !contains(err.Error(), "moved the front Compass target away") {
 		t.Fatalf("error=%v", err)

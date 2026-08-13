@@ -15,24 +15,25 @@ import (
 )
 
 type leaveStationCaller struct {
-	cycle                       int
-	forceMassOff                bool
-	massOffAt                   int
-	speedAlwaysUnknown          bool
-	promptGarbageAfterLaunch    bool
-	invalidUnknownSpeedValue    bool
-	unknownLowSpeedFrom         int
-	stopEvidenceNever           bool
-	departureSpeedAlwaysLow     bool
-	wgcFailuresAfterThrottle100 int
-	throttleZeroCommanded       bool
-	flightPromptCalls           int
-	shipStatusCalls             int
-	shipSpeedCalls              int
-	prepareAutoLaunchCalls      int
-	autoLaunchCycles            map[int]bool
-	speedByCycle                map[int]int
-	throttles                   []int
+	cycle                        int
+	forceMassOff                 bool
+	massOffAt                    int
+	speedAlwaysUnknown           bool
+	promptGarbageAfterLaunch     bool
+	invalidUnknownSpeedValue     bool
+	unknownLowSpeedFrom          int
+	stopEvidenceNever            bool
+	departureSpeedAlwaysLow      bool
+	wgcFailuresAfterThrottle100  int
+	wgcFailuresAfterThrottleZero int
+	throttleZeroCommanded        bool
+	flightPromptCalls            int
+	shipStatusCalls              int
+	shipSpeedCalls               int
+	prepareAutoLaunchCalls       int
+	autoLaunchCycles             map[int]bool
+	speedByCycle                 map[int]int
+	throttles                    []int
 }
 
 func (c *leaveStationCaller) isAutoLaunchCycle() bool {
@@ -96,6 +97,10 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 		return json.Marshal(map[string]any{"shipStatus": map[string]any{"massLock": map[string]any{"state": state}}})
 	case "elite-dangerous/ship-speed":
 		c.shipSpeedCalls++
+		if c.throttleZeroCommanded && c.wgcFailuresAfterThrottleZero > 0 {
+			c.wgcFailuresAfterThrottleZero--
+			return nil, capture.Failure("SCREEN_CAPTURE_FAILED", "observer screen.readRegion failed", errors.New("capture worker unavailable"))
+		}
 		if len(c.throttles) > 0 && c.throttles[len(c.throttles)-1] == 100 && c.wgcFailuresAfterThrottle100 > 0 {
 			c.wgcFailuresAfterThrottle100--
 			return nil, capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", errors.New("HRESULT 0x80070057"))
@@ -364,6 +369,30 @@ func TestEliteLeaveStationWorkflowSkipsFiveWGCErrorsAfterThrottle100(t *testing.
 	}
 	if errorsSeen != 5 {
 		t.Fatalf("observation errors=%d payloads=%v", errorsSeen, reporter.payloads)
+	}
+}
+
+func TestEliteLeaveStationWorkflowSkipsWrappedScreenCaptureFailureWhileVerifyingStop(t *testing.T) {
+	pkg := loadEliteLeaveStationPackage(t)
+	caller := &leaveStationCaller{massOffAt: 14, wgcFailuresAfterThrottleZero: 1}
+	reporter := &leaveStationReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), pkg, map[string]any{"stationConfirmed": true}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caller.throttles) != 2 || caller.throttles[0] != 100 || caller.throttles[1] != 0 {
+		t.Fatalf("throttle controls=%v", caller.throttles)
+	}
+	found := false
+	for _, payload := range reporter.payloads {
+		if payload["phase"] == "OBSERVATION_ERROR" && payload["observationScope"] == "SPEED_ONLY" && payload["observationErrorCount"] == float64(1) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing wrapped stop-verification observation error: %#v", reporter.payloads)
 	}
 }
 

@@ -279,13 +279,31 @@ started sustained control and caused the actual miss. The event retains the
 observed HOLLOW value and reports `STATIC_TRACK_PRESENTATION_CONTINUITY`, while
 control stays on the dominant continuous screen axis and remains bounded to
 80/160ms. STATIC never enters the rear sustained lease or an 800ms coarse
-pulse after ALIGN; MOVING TRACK keeps the ordinary explicit rear-recovery
-behavior. This
-distinction is required for goal
-semantics: the moving-target tolerance can follow a Nav Beacon but repeatedly
-missed a planet by roughly 1.2-1.6 kLs when reused as a collision-course Gate.
-The selected motion profile is emitted when the streaming Action starts and is
-returned in the final output.
+ pulse after ALIGN; MOVING TRACK keeps the ordinary explicit rear-recovery
+behavior. This distinction is required for goal semantics: the moving-target
+tolerance can follow a Nav Beacon but repeatedly missed a planet by roughly
+1.2-1.6 kLs when reused as a collision-course Gate. The selected motion profile
+is emitted when the streaming Action starts and is returned in the final
+output.
+
+When `targetName` normalizes to `NAV BEACON`, the Action always selects
+`targetMotion=MOVING`, even if a parent supplied `STATIC`. A Nav Beacon is a
+moving in-system contact, so its Compass drift cannot be used as STATIC proof
+that injected attitude input was accepted or rejected. Every
+observation-backed streaming event reports `targetName`,
+`requestedTargetMotion`, `effectiveTargetMotion`, and `targetMotionSource`.
+The override event and terminal output preserve both requested and effective
+profiles, so a supervising model cannot mistake Nav Beacon drift for STATIC
+control evidence. `VISIBLE_HANDOFF` retains its
+strict four-reference-pixel Compass Gate for this moving contact and applies no
+verification hysteresis: both required contacts must remain within four pixels.
+The STATIC-only 300 ms inner pulse is also disabled. Inside eight pixels,
+NAV BEACON uses a 40 ms micro-pulse and may escalate only to 80 ms after two
+measured no-progress samples; streaming events mark this as
+`NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE`. This prevents the generic moving-target
+120/240 ms law from repeatedly sweeping across the observed 3.6-5px quantized
+band. Target motion does not authorize an early handoff to
+`align-visible-target`.
 
 TRACK requires its first detected marker to be SOLID. An initial HOLLOW marker
 fails before sending attitude input because the invocation has no prior control
@@ -293,7 +311,8 @@ direction to reverse safely. The caller must run ALIGN immediately before
 TRACK; once TRACK has issued a front-marker command, later SOLID-to-HOLLOW
 transitions have the control history needed for deterministic recovery.
 
-Four consecutive binding-resolved Pitch commands with no Compass displacement
+Four consecutive binding-resolved Pitch commands with less than two reference
+pixels of signed movement on the commanded Pitch axis
 are a separately classified, reproduced Elite Dangerous input-initialization
 state. The terminal error and the last update use
 `ED_PITCH_INPUT_CONTEXT_NOT_READY` and include an `information` response telling
@@ -302,6 +321,10 @@ reconnected, then retry without restarting the game. This avoids reopening
 binding, scan-code, or Compass debugging for the known condition. Controller
 enumeration is deliberately not a Gate: the controller that restored Pitch in
 the reviewed live A/B test was not exposed by XInput.
+
+Raw marker displacement is retained separately from directional control
+progress. A one-pixel CV quantization change, cross-axis movement, or movement
+away from center does not prove that the commanded control was accepted.
 
 Each observation reports its start time, execution duration, and
 start-to-start interval together with `NONE`, `SUSTAINED`, or `PULSE` control
@@ -313,9 +336,30 @@ at least one reference pixel farther from center fail explicitly in ALIGN
 rather than trusting one delayed frame or exhausting the full command budget.
 TRACK consumes only its displacement count for bounded pulse sizing.
 
+The input hold lease remains a fixed 2500 ms safety boundary. A Compass sample
+may legitimately exceed that interval when the 96x96 fast path escalates to
+192x192 native analysis. The workflow records the lease deadline at every
+START or RENEW. If the following observation crosses that deadline, it sends
+the idempotent STOP for the expired lease, emits
+`SUSTAINED_CONTROL_LEASE_EXPIRED_DURING_OBSERVATION`, and starts a fresh bounded
+lease only if the new Compass result still requests the same sustained turn.
+It never assumes that an expired lease is still applying input, and it does not
+lengthen the generic input safety lease to hide inference latency.
+
 Every observation and command is emitted as
 `action.align-station-target.update`. Explicit `stream.activity` records expose
 phase transitions and control pulses to the Windows Action OSD. The Action
+also copies the current Compass classifier provenance into every
+observation-backed event: `compassCascadeMode`, `compassSelectedRoute`,
+`compassClassificationConfidence`, `compassStrictPrediction`,
+`compassOpponentPrediction`, `compassSamplingPath`, `compassFallbackUsed`, and
+`compassFallbackReason`. Error and non-observation events keep these fields
+null. A supervising model can therefore distinguish the 96x96 fast path from
+an explicit 192x192 fallback, see why the fallback was authorized, and separate
+opponent-primary evidence, strict recovery, or classifier disagreement from
+target-motion and control-law failures without inferring the route from visual
+prose.
+The Action
 fails rather than guessing when the compass target is absent, its hollow/solid
 topology is ambiguous, a child Action fails, or the bounded command limit is
 exhausted. Failure or cancellation runs the registered lease STOP compensation;

@@ -1,6 +1,6 @@
 # Elite Dangerous serviced Auto Launch and leave station
 
-This version 10 interruptible linear Streaming Action begins only after a supervising
+This version 11 interruptible linear Streaming Action begins only after a supervising
 model supplies `stationConfirmed: true` for the visible docked cockpit menu.
 It first delegates to `elite-dangerous/prepare-auto-launch` with
 `activateAutoLaunch=true`. The child reads the remembered four-tile service
@@ -51,6 +51,8 @@ independent visual speed observation.
 
 The fixed observation interval is 250 ms between sequential samples. The
 workflow skips at most five explicitly coded transient WGC capture failures,
+including the stable `SCREEN_CAPTURE_FAILED` wrapper returned by a failed
+screen observation child,
 emitting every skipped sample as `OBSERVATION_ERROR`; a sixth such failure or
 any non-WGC child failure terminates explicitly. Before commanding 100%, it
 registers a runtime failure compensation that unconditionally invokes throttle

@@ -13,6 +13,7 @@ ZERO_SPEED_CONFIRMATIONS = 3
 MAX_WGC_ERRORS = 5
 RETRYABLE_WGC_ERROR_CODES = [
 	"JOB_DEADLINE_EXCEEDED",
+	"SCREEN_CAPTURE_FAILED",
     "capture_device_failed",
     "capture_frame_failed",
     "capture_readback_failed",
