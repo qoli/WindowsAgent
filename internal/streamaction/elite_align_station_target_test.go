@@ -223,11 +223,11 @@ func alignObservation(presentation string, offsetX, offsetY int, distance float6
 func alignObservationWithCompassProvenance() json.RawMessage {
 	value, _ := json.Marshal(map[string]any{
 		"schemaVersion": 8,
-		"samplingPath":  "NATIVE_FALLBACK",
+		"samplingPath":  "WIDE_REFERENCE_FALLBACK",
 		"fallbackUsed":  true,
 		"attempts": []any{
 			map[string]any{"reason": "REFERENCE_CLASS_DISAGREEMENT"},
-			map[string]any{"reason": "NATIVE_FALLBACK_COMPLETED"},
+			map[string]any{"reason": "WIDE_192_LOCALIZED_REFERENCE_FALLBACK_COMPLETED"},
 		},
 		"routes": map[string]any{
 			"strict":   map[string]any{"prediction": "HOLLOW"},
@@ -267,7 +267,7 @@ func TestEliteAlignStationTargetReportsCompassCascadeProvenance(t *testing.T) {
 			contains(text, `"compassClassificationConfidence":0.812`) &&
 			contains(text, `"compassStrictPrediction":"HOLLOW"`) &&
 			contains(text, `"compassOpponentPrediction":"NONE"`) &&
-			contains(text, `"compassSamplingPath":"NATIVE_FALLBACK"`) &&
+			contains(text, `"compassSamplingPath":"WIDE_REFERENCE_FALLBACK"`) &&
 			contains(text, `"compassFallbackUsed":true`) &&
 			contains(text, `"compassFallbackReason":"REFERENCE_CLASS_DISAGREEMENT"`) {
 			found = true

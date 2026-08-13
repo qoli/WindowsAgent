@@ -579,7 +579,7 @@ func TestEliteSupercruiseAssistClearsLineOfSightThenReacquiresGameOwnership(t *t
 
 func TestEliteSupercruiseAssistEntryUnknownIsBoundedAndStopsShip(t *testing.T) {
 	caller := successfulSupercruiseAssistCaller()
-	caller.flightStates = make([]string, 30)
+	caller.flightStates = make([]string, 45)
 	for index := range caller.flightStates {
 		caller.flightStates[index] = "UNKNOWN"
 	}
@@ -590,11 +590,34 @@ func TestEliteSupercruiseAssistEntryUnknownIsBoundedAndStopsShip(t *testing.T) {
 	if err == nil || !contains(err.Error(), "FSD charging followed by Supercruise entry was not visually confirmed") {
 		t.Fatalf("error=%v", err)
 	}
-	if caller.flightIndex != 30 {
+	if caller.flightIndex != 45 {
 		t.Fatalf("flight observations=%d", caller.flightIndex)
 	}
 	if len(caller.throttles) != 3 || caller.throttles[0] != 0 || caller.throttles[1] != 100 || caller.throttles[2] != 0 {
 		t.Fatalf("failure compensation did not bound movement: throttles=%v", caller.throttles)
+	}
+}
+
+func TestEliteSupercruiseAssistEntryAllowsLateT9CountdownThenRequiresHUD(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.flightStates = make([]string, 0, 40)
+	for index := 0; index < 30; index++ {
+		caller.flightStates = append(caller.flightStates, "FSD_CHARGING")
+	}
+	caller.flightStates = append(caller.flightStates,
+		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	)
+	caller.supercruiseHUDStates = []string{"ACTIVE", "ACTIVE"}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.flightIndex <= 30 || caller.supercruiseHUDIndex != 2 {
+		t.Fatalf("flight observations=%d HUD observations=%d", caller.flightIndex, caller.supercruiseHUDIndex)
 	}
 }
 

@@ -43,7 +43,11 @@ The dedicated `Supercruise` binding is one 80 ms press. During the entry loop,
 `FSD_THROTTLE_UP_REQUIRED` is accepted as current OCR evidence that charging
 reached its throttle handoff; the Action reissues 100% throttle and still waits
 for independently observed Supercruise HUD entry. It does not treat that prompt
-as completed entry or issue a blind second FSD toggle.
+as completed entry or issue a blind second FSD toggle. The entry window permits
+45 observations because a live T9 charge can still be displaying its final
+countdown after the previous 30-observation bound. Exhausting the larger bound
+still fails explicitly and invokes the registered 0% throttle compensation;
+elapsed samples never substitute for two fresh persistent-HUD observations.
 
 Only after Supercruise entry does the Action command 0% minimum Supercruise
 throttle and reopen NAVIGATION. This avoids racing the version-dependent UI

@@ -26,7 +26,7 @@
         "compassClassificationConfidence": {"type": ["number", "null"], "minimum": 0},
         "compassStrictPrediction": {"type": ["string", "null"], "enum": ["NONE", "SOLID", "HOLLOW", null]},
         "compassOpponentPrediction": {"type": ["string", "null"], "enum": ["NONE", "SOLID", "HOLLOW", null]},
-        "compassSamplingPath": {"type": ["string", "null"], "enum": ["REFERENCE_FAST_PATH", "NATIVE_FALLBACK", null]},
+        "compassSamplingPath": {"type": ["string", "null"], "enum": ["REFERENCE_FAST_PATH", "WIDE_REFERENCE_FALLBACK", null]},
         "compassFallbackUsed": {"type": ["boolean", "null"]},
         "compassFallbackReason": {"type": ["string", "null"], "enum": ["REFERENCE_GEOMETRY_INSUFFICIENT", "REFERENCE_NO_MARKER", "REFERENCE_CLASS_DISAGREEMENT", "REFERENCE_LOW_CONFIDENCE", null]},
         "offsetX": {"type": ["integer", "null"], "minimum": -95, "maximum": 95},

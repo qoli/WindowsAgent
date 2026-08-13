@@ -17,18 +17,19 @@ color interpretation. The game-neutral Observer maps that region through a
 centered 16:9 viewport. The package first evaluates a 96x96 reference sample
 and accepts it only when strict and opponent routes agree on the same confident
 non-NONE marker. Reference NONE, low confidence, disagreement, or insufficient
-annular geometry explicitly escalates to one native-density capture. The output
-retains `samplingPath`, `fallbackUsed`, and both attempts with their reason; an
+annular geometry explicitly escalates to a 192x192 reference localization
+window and same-frame localized 96x96 classification crop. The output retains
+`samplingPath`, `fallbackUsed`, `localization`, and both attempts with their reason; an
 infrastructure or protocol failure never authorizes fallback. Each path locates
 the current orange Compass circle with a bounded Hough-style annulus search,
-then classifies native connected-component topology through independent
+then classifies localized connected-component topology through independent
 opponent-color and strict-cyan routes. The opponent route is primary; strict
 may recover only under the declared confidence cascade. `SOLID` means front,
 `HOLLOW` means rear, and route disagreement remains evidence-preserving
 `UNKNOWN`. `target.cascadeMode`, `selectedRoute`, classification confidence,
 both route predictions/scores, and the observed circle geometry remain in the
 finite output. `align-station-target` copies this provenance into its streaming
-events. A changed foreground process, invalid native sample, or missing orange
+events. A changed foreground process, invalid localization sample, or missing orange
 annular geometry fails explicitly; no ScreenParser, OCR, cached frame,
 alternative ROI, or hidden sampling fallback is used.
 

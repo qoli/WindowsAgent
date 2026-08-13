@@ -4,19 +4,27 @@ ROI_X = 682
 ROI_Y = 771
 ROI_WIDTH = 96
 ROI_HEIGHT = 96
+WIDE_ROI_X = ROI_X - 48
+WIDE_ROI_Y = ROI_Y - 48
+WIDE_ROI_WIDTH = 192
+WIDE_ROI_HEIGHT = 192
 MIN_ORANGE_PIXELS_REFERENCE = 150
 CENTER_ZONE_RADIUS = 4
 OUTPUT_SCALE = 1000.0
 
-HOUGH_RADII = [24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44]
+HOUGH_RADII = [24, 26, 28, 30, 32, 34]
+FAST_CENTER_MIN = 42
+FAST_CENTER_MAX_EXCLUSIVE = 55
+WIDE_CENTER_MIN = 48
+WIDE_CENTER_MAX_EXCLUSIVE = 145
 HOUGH_COS = [1.0, 0.966, 0.866, 0.707, 0.5, 0.259, 0.0, -0.259, -0.5, -0.707, -0.866, -0.966, -1.0, -0.966, -0.866, -0.707, -0.5, -0.259, 0.0, 0.259, 0.5, 0.707, 0.866, 0.966]
 HOUGH_SIN = [0.0, 0.259, 0.5, 0.707, 0.866, 0.966, 1.0, 0.966, 0.866, 0.707, 0.5, 0.259, 0.0, -0.259, -0.5, -0.707, -0.866, -0.966, -1.0, -0.966, -0.866, -0.707, -0.5, -0.259]
 HOUGH_MAX_EDGE_SAMPLES = 420
 HOUGH_MIN_VOTES = 4
 HOUGH_MAX_CANDIDATES = 8
+HOUGH_EDGE_OFFSET = 5
 HOUGH_MIN_ANGULAR_COVERAGE = 16
-HOUGH_MAX_ANNULUS_DENSITY = 0.75
-HOUGH_MAX_ORANGE_FRACTION = 0.55
+HOUGH_MIN_EDGE_VOTES = 8
 
 STRICT_THRESHOLDS = [128]
 OPPONENT_THRESHOLDS = [2, 4, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64]
@@ -78,20 +86,20 @@ def native_mask_to_reference(mask, native_width, native_height):
             reference.append(present)
     return reference
 
-def evaluate_circle(mask, center_x, center_y, radius):
+def evaluate_circle(mask, width, height, center_x, center_y, radius):
     angular_counts = []
     for _ in range(24):
         angular_counts.append(0)
     annulus_orange = 0
     annulus_area = 0
-    for y in range(ROI_HEIGHT):
-        for x in range(ROI_WIDTH):
+    for y in range(height):
+        for x in range(width):
             delta_x = x - center_x
             delta_y = y - center_y
             distance = math.hypot(delta_x, delta_y)
             if abs(distance - radius) <= 3.0:
                 annulus_area += 1
-                if mask[y * ROI_WIDTH + x]:
+                if mask[y * width + x]:
                     annulus_orange += 1
                     angle = math.atan2(delta_y, delta_x)
                     if angle < 0:
@@ -111,39 +119,49 @@ def evaluate_circle(mask, center_x, center_y, radius):
         "annulusDensity": density,
     }
 
-def locate_compass_circle(reference_orange, native_orange_count, native_pixel_count, native_scale):
+def locate_compass_circle(reference_orange, width, height, native_orange_count, native_pixel_count, center_min, center_max_exclusive):
     candidate_count = 0
     ranked = []
     # The ROI is already a reviewed Compass-local crop. Search a bounded
     # center/radius parameter grid and vote on the annulus directly instead of
     # back-projecting every orange edge into a large Starlark dictionary.
-    for center_y in range(30, 69, 3):
-        for center_x in range(30, 69, 3):
+    for center_y in range(center_min, center_max_exclusive, 3):
+        for center_x in range(center_min, center_max_exclusive, 3):
             for radius in HOUGH_RADII:
                 votes = 0
+                edge_votes = 0
                 for angle_index in range(24):
                     sample_x = int(math.round(center_x + radius * HOUGH_COS[angle_index]))
                     sample_y = int(math.round(center_y + radius * HOUGH_SIN[angle_index]))
-                    if sample_x >= 0 and sample_x < ROI_WIDTH and sample_y >= 0 and sample_y < ROI_HEIGHT and reference_orange[sample_y * ROI_WIDTH + sample_x]:
+                    if sample_x >= 0 and sample_x < width and sample_y >= 0 and sample_y < height and reference_orange[sample_y * width + sample_x]:
                         votes += 1
+                        inner_x = int(math.round(center_x + (radius - HOUGH_EDGE_OFFSET) * HOUGH_COS[angle_index]))
+                        inner_y = int(math.round(center_y + (radius - HOUGH_EDGE_OFFSET) * HOUGH_SIN[angle_index]))
+                        outer_x = int(math.round(center_x + (radius + HOUGH_EDGE_OFFSET) * HOUGH_COS[angle_index]))
+                        outer_y = int(math.round(center_y + (radius + HOUGH_EDGE_OFFSET) * HOUGH_SIN[angle_index]))
+                        inner_orange = inner_x >= 0 and inner_x < width and inner_y >= 0 and inner_y < height and reference_orange[inner_y * width + inner_x]
+                        outer_orange = outer_x >= 0 and outer_x < width and outer_y >= 0 and outer_y < height and reference_orange[outer_y * width + outer_x]
+                        if not inner_orange or not outer_orange:
+                            edge_votes += 1
                 if votes < HOUGH_MIN_VOTES:
                     continue
                 candidate_count += 1
-                candidate = [votes, center_x, center_y, radius]
+                candidate = [edge_votes, votes, center_x, center_y, radius]
                 if len(ranked) < HOUGH_MAX_CANDIDATES:
                     ranked.append(candidate)
                 else:
                     weakest_index = 0
                     for index in range(1, len(ranked)):
-                        if ranked[index][0] < ranked[weakest_index][0]:
+                        if ranked[index][0] < ranked[weakest_index][0] or (ranked[index][0] == ranked[weakest_index][0] and ranked[index][1] < ranked[weakest_index][1]):
                             weakest_index = index
-                    if votes > ranked[weakest_index][0]:
+                    if edge_votes > ranked[weakest_index][0] or (edge_votes == ranked[weakest_index][0] and votes > ranked[weakest_index][1]):
                         ranked[weakest_index] = candidate
 
     evaluated = []
     for candidate in ranked:
-        geometry = evaluate_circle(reference_orange, candidate[1], candidate[2], candidate[3])
-        geometry["votes"] = candidate[0]
+        geometry = evaluate_circle(reference_orange, width, height, candidate[2], candidate[3], candidate[4])
+        geometry["edgeVotes"] = candidate[0]
+        geometry["votes"] = candidate[1]
         evaluated.append(geometry)
 
     orange_fraction = native_orange_count / float(max(1, native_pixel_count))
@@ -151,10 +169,9 @@ def locate_compass_circle(reference_orange, native_orange_count, native_pixel_co
     for candidate in evaluated:
         if (
             candidate["angularCoverage"] >= HOUGH_MIN_ANGULAR_COVERAGE and
-            candidate["annulusDensity"] <= HOUGH_MAX_ANNULUS_DENSITY and
-            orange_fraction <= HOUGH_MAX_ORANGE_FRACTION
+            candidate["edgeVotes"] >= HOUGH_MIN_EDGE_VOTES
         ):
-            if selected == None or candidate["votes"] > selected["votes"]:
+            if selected == None or candidate["edgeVotes"] > selected["edgeVotes"] or (candidate["edgeVotes"] == selected["edgeVotes"] and candidate["votes"] > selected["votes"]):
                 selected = candidate
     if selected == None:
         return {
@@ -167,6 +184,7 @@ def locate_compass_circle(reference_orange, native_orange_count, native_pixel_co
             "radius": None,
             "angularCoverage": 0,
             "annulusDensity": None,
+            "edgeVotes": None,
             "votes": None,
         }
     return {
@@ -179,6 +197,7 @@ def locate_compass_circle(reference_orange, native_orange_count, native_pixel_co
         "radius": selected["radius"],
         "angularCoverage": selected["angularCoverage"],
         "annulusDensity": selected["annulusDensity"],
+        "edgeVotes": selected["edgeVotes"],
         "votes": selected["votes"],
     }
 
@@ -472,8 +491,12 @@ def analyze_sample(sample, expected_sampling):
     if coordinate_space["width"] != REFERENCE_WIDTH or coordinate_space["height"] != REFERENCE_HEIGHT or coordinate_space["fit"] != "centered-16:9":
         return job.fail(code="COMPASS_EVIDENCE_INVALID", message="screen coordinate space is not the reviewed centered 1920x1080 reference")
     region = sample["region"]
-    if region["x"] != ROI_X or region["y"] != ROI_Y or region["w"] != ROI_WIDTH or region["h"] != ROI_HEIGHT:
-        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="screen region does not match the reviewed absolute coordinates")
+    if (
+        region["w"] != ROI_WIDTH or region["h"] != ROI_HEIGHT or
+        region["x"] < WIDE_ROI_X or region["x"] > WIDE_ROI_X + WIDE_ROI_WIDTH - ROI_WIDTH or
+        region["y"] < WIDE_ROI_Y or region["y"] > WIDE_ROI_Y + WIDE_ROI_HEIGHT - ROI_HEIGHT
+    ):
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="screen region is outside the reviewed dynamic Compass window")
     image = sample["image"]
     image_width = image["width"]
     image_height = image["height"]
@@ -492,7 +515,7 @@ def analyze_sample(sample, expected_sampling):
     scale = (scale_x + scale_y) / 2.0
     responses = build_responses(pixels)
     reference_orange = native_mask_to_reference(responses["orange"], image_width, image_height)
-    geometry = locate_compass_circle(reference_orange, responses["orangeCount"], len(pixels), scale)
+    geometry = locate_compass_circle(reference_orange, ROI_WIDTH, ROI_HEIGHT, responses["orangeCount"], len(pixels), FAST_CENTER_MIN, FAST_CENTER_MAX_EXCLUSIVE)
     minimum_orange = int(MIN_ORANGE_PIXELS_REFERENCE * scale_x * scale_y)
     geometry_verified = responses["orangeCount"] >= minimum_orange and geometry["visible"]
     strict_route = empty_route(STRICT_SOLID_THRESHOLD, STRICT_HOLLOW_THRESHOLD, STRICT_MARGIN)
@@ -546,7 +569,36 @@ def attempt_output(analysis, outcome, reason):
         "reason": reason,
     }
 
-def result_output(analysis, sampling_path, attempts):
+def geometry_failure_summary(analysis):
+    geometry = analysis["geometry"]
+    return (
+        "sampling=" + analysis["sampling"] +
+        ",orange=" + str(analysis["responses"]["orangeCount"]) +
+        ",minimum=" + str(analysis["minimumOrange"]) +
+        ",candidates=" + str(geometry["circleCandidateCount"]) +
+        ",orangeFraction=" + str(round_output(geometry["orangeFraction"])) +
+        ",coverage=" + str(geometry["angularCoverage"]) +
+        ",density=" + str(None if geometry["annulusDensity"] == None else round_output(geometry["annulusDensity"])) +
+        ",edgeVotes=" + str(geometry["edgeVotes"]) +
+        ",votes=" + str(geometry["votes"])
+    )
+
+def localization_output(path, sample, geometry):
+    return {
+        "path": path,
+        "capturedAt": sample["frame"]["capturedAt"],
+        "region": sample["region"],
+        "circleCenterX": sample["region"]["x"] + geometry["centerX"],
+        "circleCenterY": sample["region"]["y"] + geometry["centerY"],
+        "circleRadiusPixels": geometry["radius"],
+        "houghEdgeVotes": geometry["edgeVotes"],
+        "houghVotes": geometry["votes"],
+        "angularCoverageBins": geometry["angularCoverage"],
+        "annulusDensity": round_output(geometry["annulusDensity"]),
+        "orangeFraction": round_output(geometry["orangeFraction"]),
+    }
+
+def result_output(analysis, sampling_path, attempts, localization):
     sample = analysis["sample"]
     coordinate_space = sample["coordinateSpace"]
     image_width = analysis["imageWidth"]
@@ -583,10 +635,12 @@ def result_output(analysis, sampling_path, attempts):
     }
     if selected != None and prediction != "NONE":
         selected_component = selected["bestSolid"] if prediction == "SOLID" else selected["bestHollow"]
-        reference_x = ROI_X + int(math.round(selected["centerX"] / scale_x))
-        reference_y = ROI_Y + int(math.round(selected["centerY"] / scale_y))
-        compass_reference_x = ROI_X + geometry["centerX"]
-        compass_reference_y = ROI_Y + geometry["centerY"]
+        region_x = sample["region"]["x"]
+        region_y = sample["region"]["y"]
+        reference_x = region_x + int(math.round(selected["centerX"] / scale_x))
+        reference_y = region_y + int(math.round(selected["centerY"] / scale_y))
+        compass_reference_x = region_x + geometry["centerX"]
+        compass_reference_y = region_y + geometry["centerY"]
         offset_x = reference_x - compass_reference_x
         offset_y = reference_y - compass_reference_y
         distance = math.hypot(offset_x, offset_y)
@@ -596,8 +650,8 @@ def result_output(analysis, sampling_path, attempts):
             if angle < 0:
                 angle += 360
             angle = round_output(angle)
-        marker_x = ROI_X + int(math.floor(selected_component["x"] / scale_x))
-        marker_y = ROI_Y + int(math.floor(selected_component["y"] / scale_y))
+        marker_x = region_x + int(math.floor(selected_component["x"] / scale_x))
+        marker_y = region_y + int(math.floor(selected_component["y"] / scale_y))
         marker_w = max(1, int(math.ceil(selected_component["w"] / scale_x)))
         marker_h = max(1, int(math.ceil(selected_component["h"] / scale_y)))
         target.update({
@@ -615,21 +669,23 @@ def result_output(analysis, sampling_path, attempts):
         "schemaVersion": 8,
         "profile": {"width": sample["frame"]["width"], "height": sample["frame"]["height"], "capturedAt": sample["frame"]["capturedAt"]},
         "coordinateSpace": coordinate_space,
-        "region": {"x": ROI_X, "y": ROI_Y, "w": ROI_WIDTH, "h": ROI_HEIGHT},
+        "region": sample["region"],
         "physicalRegion": sample["physicalRegion"],
+        "localization": localization,
         "samplingPath": sampling_path,
-        "fallbackUsed": sampling_path == "NATIVE_FALLBACK",
+        "fallbackUsed": sampling_path != "REFERENCE_FAST_PATH",
         "attempts": attempts,
         "sampling": {"mode": analysis["sampling"], "imageWidth": image_width, "imageHeight": image_height, "scaleX": round_output(scale_x), "scaleY": round_output(scale_y)},
         "compass": {
             "visible": True,
             "orangePixelCount": responses["orangeCount"],
             "minimumOrangePixelCount": minimum_orange,
-            "circleCenterX": ROI_X + geometry["centerX"],
-            "circleCenterY": ROI_Y + geometry["centerY"],
+            "circleCenterX": sample["region"]["x"] + geometry["centerX"],
+            "circleCenterY": sample["region"]["y"] + geometry["centerY"],
             "circleRadiusPixels": geometry["radius"],
             "circleCandidateCount": geometry["circleCandidateCount"],
             "houghPerimeterSamples": geometry["houghPerimeterSamples"],
+            "houghEdgeVotes": geometry["edgeVotes"],
             "houghVotes": geometry["votes"],
             "angularCoverageBins": geometry["angularCoverage"],
             "annulusDensity": round_output(geometry["annulusDensity"]),
@@ -637,6 +693,76 @@ def result_output(analysis, sampling_path, attempts):
         },
         "routes": {"strict": route_output(strict_route), "opponent": route_output(opponent_route)},
         "target": target,
+    }
+
+def localize_wide_reference(sample):
+    if sample["sampling"] != "reference":
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="wide Compass localization did not use reference sampling")
+    coordinate_space = sample["coordinateSpace"]
+    if coordinate_space["width"] != REFERENCE_WIDTH or coordinate_space["height"] != REFERENCE_HEIGHT or coordinate_space["fit"] != "centered-16:9":
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="wide Compass coordinate space is not the reviewed centered 1920x1080 reference")
+    region = sample["region"]
+    if region["x"] != WIDE_ROI_X or region["y"] != WIDE_ROI_Y or region["w"] != WIDE_ROI_WIDTH or region["h"] != WIDE_ROI_HEIGHT:
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="wide Compass region does not match the reviewed 192x192 localization window")
+    image = sample["image"]
+    if image["encoding"] != "rgb24-packed" or image["width"] != WIDE_ROI_WIDTH or image["height"] != WIDE_ROI_HEIGHT:
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="wide Compass reference image is not 192x192 rgb24-packed")
+    pixels = image["pixels"]
+    if len(pixels) != WIDE_ROI_WIDTH * WIDE_ROI_HEIGHT:
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="wide Compass reference pixel count is incomplete")
+    responses = build_responses(pixels)
+    geometry = locate_compass_circle(
+        responses["orange"],
+        WIDE_ROI_WIDTH,
+        WIDE_ROI_HEIGHT,
+        responses["orangeCount"],
+        len(pixels),
+        WIDE_CENTER_MIN,
+        WIDE_CENTER_MAX_EXCLUSIVE,
+    )
+    if responses["orangeCount"] < MIN_ORANGE_PIXELS_REFERENCE or not geometry["visible"]:
+        return job.fail(
+            code="COMPASS_NOT_VISIBLE",
+            message=(
+                "wide 192x192 reference localization lacks verified Compass geometry: orange=" + str(responses["orangeCount"]) +
+                ",candidates=" + str(geometry["circleCandidateCount"]) +
+                ",fraction=" + str(round_output(geometry["orangeFraction"]))
+            ),
+        )
+    return {"sample": sample, "geometry": geometry}
+
+def localized_reference_sample(wide_sample, geometry):
+    local_x = geometry["centerX"] - ROI_WIDTH // 2
+    local_y = geometry["centerY"] - ROI_HEIGHT // 2
+    if local_x < 0 or local_x + ROI_WIDTH > WIDE_ROI_WIDTH or local_y < 0 or local_y + ROI_HEIGHT > WIDE_ROI_HEIGHT:
+        return job.fail(code="COMPASS_EVIDENCE_INVALID", message="wide Compass localization cannot produce a complete 96x96 reference crop")
+    wide_pixels = wide_sample["image"]["pixels"]
+    pixels = []
+    for y in range(ROI_HEIGHT):
+        source_y = local_y + y
+        for x in range(ROI_WIDTH):
+            pixels.append(wide_pixels[source_y * WIDE_ROI_WIDTH + local_x + x])
+    physical = wide_sample["physicalRegion"]
+    physical_scale_x = physical["width"] / float(WIDE_ROI_WIDTH)
+    physical_scale_y = physical["height"] / float(WIDE_ROI_HEIGHT)
+    return {
+        "sampling": "reference",
+        "coordinateSpace": wide_sample["coordinateSpace"],
+        "frame": wide_sample["frame"],
+        "viewport": wide_sample["viewport"],
+        "region": {
+            "x": WIDE_ROI_X + local_x,
+            "y": WIDE_ROI_Y + local_y,
+            "w": ROI_WIDTH,
+            "h": ROI_HEIGHT,
+        },
+        "physicalRegion": {
+            "left": physical["left"] + int(math.round(local_x * physical_scale_x)),
+            "top": physical["top"] + int(math.round(local_y * physical_scale_y)),
+            "width": int(math.round(ROI_WIDTH * physical_scale_x)),
+            "height": int(math.round(ROI_HEIGHT * physical_scale_y)),
+        },
+        "image": {"width": ROI_WIDTH, "height": ROI_HEIGHT, "encoding": "rgb24-packed", "pixels": pixels},
     }
 
 def main(ctx):
@@ -650,18 +776,38 @@ def main(ctx):
     reference_analysis = analyze_sample(sample, "reference")
     escalation_reason = reference_escalation_reason(reference_analysis)
     if escalation_reason == None:
-        return result_output(reference_analysis, "REFERENCE_FAST_PATH", [attempt_output(reference_analysis, "ACCEPTED", "REFERENCE_DUAL_ROUTE_CONFIRMED")])
+        return result_output(
+            reference_analysis,
+            "REFERENCE_FAST_PATH",
+            [attempt_output(reference_analysis, "ACCEPTED", "REFERENCE_DUAL_ROUTE_CONFIRMED")],
+            localization_output("FIXED_96", sample, reference_analysis["geometry"]),
+        )
 
     attempts = [attempt_output(reference_analysis, "ESCALATED", escalation_reason)]
-    native_sample = observer.screen.read_region(
-        x = ROI_X,
-        y = ROI_Y,
-        w = ROI_WIDTH,
-        h = ROI_HEIGHT,
-        sampling = "native",
+    wide_sample = observer.screen.read_region(
+        x = WIDE_ROI_X,
+        y = WIDE_ROI_Y,
+        w = WIDE_ROI_WIDTH,
+        h = WIDE_ROI_HEIGHT,
+        sampling = "reference",
     )
-    native_analysis = analyze_sample(native_sample, "native")
-    if not native_analysis["geometryVerified"]:
-        return job.fail(code="COMPASS_NOT_VISIBLE", message="reference path escalated with " + escalation_reason + "; native Compass ROI lacks verified orange annular geometry")
-    attempts.append(attempt_output(native_analysis, "ACCEPTED", "NATIVE_FALLBACK_COMPLETED"))
-    return result_output(native_analysis, "NATIVE_FALLBACK", attempts)
+    wide = localize_wide_reference(wide_sample)
+    localized_sample = localized_reference_sample(wide_sample, wide["geometry"])
+    localized_analysis = analyze_sample(localized_sample, "reference")
+    if not localized_analysis["geometryVerified"]:
+        return job.fail(
+            code="COMPASS_NOT_VISIBLE",
+            message=(
+                "reference path escalated with " + escalation_reason +
+                " (" + geometry_failure_summary(reference_analysis) + "); " +
+                "wide localization found center " + str(wide["geometry"]["centerX"]) + "," + str(wide["geometry"]["centerY"]) +
+                "; localized reference Compass ROI lacks verified orange annular geometry (" + geometry_failure_summary(localized_analysis) + ")"
+            ),
+        )
+    attempts.append(attempt_output(localized_analysis, "ACCEPTED", "WIDE_192_LOCALIZED_REFERENCE_FALLBACK_COMPLETED"))
+    return result_output(
+        localized_analysis,
+        "WIDE_REFERENCE_FALLBACK",
+        attempts,
+        localization_output("WIDE_192", wide_sample, wide["geometry"]),
+    )

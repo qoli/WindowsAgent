@@ -34,6 +34,7 @@ type compassBroker struct {
 	imageWidth      int64
 	imageHeight     int64
 	referencePixels []any
+	widePixels      []any
 	nativePixels    []any
 	calls           []fixtureObserverCall
 }
@@ -82,6 +83,11 @@ func (b *compassBroker) Call(_ context.Context, namespace, operation string, arg
 	capturedAt := "2026-08-07T01:02:03Z"
 	if sampling == "reference" && b.referencePixels != nil {
 		pixels = b.referencePixels
+		imageWidth = w
+		imageHeight = h
+	}
+	if sampling == "reference" && w == 192 && h == 192 && b.widePixels != nil {
+		pixels = b.widePixels
 		imageWidth = w
 		imageHeight = h
 	}
@@ -1743,17 +1749,72 @@ func nativeCompassFixture(marker string, markerCenterX, markerCenterY int, marke
 	return compassFixture(192, marker, markerCenterX, markerCenterY, markerColor)
 }
 
+func wideReferenceCompassFixture(marker string, markerCenterX, markerCenterY int, markerColor uint32) []any {
+	pixels := make([]any, 192*192)
+	for index := range pixels {
+		pixels[index] = uint32(0x05070A)
+	}
+	for y := 0; y < 192; y++ {
+		for x := 0; x < 192; x++ {
+			distance := math.Hypot(float64(x-markerCenterX), float64(y-markerCenterY))
+			if math.Abs(distance-30) <= 1.25 {
+				pixels[y*192+x] = uint32(0xFF7700)
+			}
+		}
+	}
+	if marker == "SOLID" {
+		for y := markerCenterY - 3; y <= markerCenterY+3; y++ {
+			for x := markerCenterX - 3; x <= markerCenterX+3; x++ {
+				pixels[y*192+x] = markerColor
+			}
+		}
+	}
+	if marker == "HOLLOW" {
+		for y := markerCenterY - 3; y <= markerCenterY+3; y++ {
+			for x := markerCenterX - 3; x <= markerCenterX+3; x++ {
+				if x == markerCenterX-3 || x == markerCenterX+3 || y == markerCenterY-3 || y == markerCenterY+3 {
+					pixels[y*192+x] = markerColor
+				}
+			}
+		}
+	}
+	return pixels
+}
+
 func referenceCompassFixture(marker string, markerCenterX, markerCenterY int, markerColor uint32) []any {
 	return compassFixture(96, marker, markerCenterX, markerCenterY, markerColor)
 }
 
-func runCompassFixture(t *testing.T, referencePixels, nativePixels []any) (map[string]any, *compassBroker) {
+func redWashCompassFixture() []any {
+	pixels := make([]any, 96*96)
+	for y := 0; y < 96; y++ {
+		for x := 0; x < 96; x++ {
+			pixel := uint32(0x6A5362)
+			if y >= 51 || (x < 25 && y >= 18) {
+				pixel = uint32(0xC45C56)
+			}
+			distance := math.Hypot(float64(x-48), float64(y-48))
+			if math.Abs(distance-30) <= 1.5 {
+				pixel = uint32(0xFF7700)
+			}
+			pixels[y*96+x] = pixel
+		}
+	}
+	for y := 37; y <= 45; y++ {
+		for x := 55; x <= 63; x++ {
+			pixels[y*96+x] = uint32(0x40DDEB)
+		}
+	}
+	return pixels
+}
+
+func runCompassFixture(t *testing.T, referencePixels, widePixels []any) (map[string]any, *compassBroker) {
 	t.Helper()
 	pkg, err := scriptpackage.Load(compassPackageRoot(t), "elite-dangerous/compass")
 	if err != nil {
 		t.Fatal(err)
 	}
-	broker := &compassBroker{referencePixels: referencePixels, nativePixels: nativePixels}
+	broker := &compassBroker{referencePixels: referencePixels, widePixels: widePixels}
 	runner, err := New(broker)
 	if err != nil {
 		t.Fatal(err)
@@ -1775,7 +1836,7 @@ func TestEliteCompassPackageUsesReferenceFastPathForDualRouteMarker(t *testing.T
 	if err != nil {
 		t.Fatalf("load package: %v", err)
 	}
-	broker := &compassBroker{referencePixels: pixels, nativePixels: nativeCompassFixture("NONE", 0, 0, 0)}
+	broker := &compassBroker{referencePixels: pixels, widePixels: wideReferenceCompassFixture("NONE", 96, 96, 0)}
 	runner, err := New(broker)
 	if err != nil {
 		t.Fatal(err)
@@ -1811,22 +1872,22 @@ func TestEliteCompassPackageUsesReferenceFastPathForDualRouteMarker(t *testing.T
 	}
 }
 
-func TestEliteCompassPackageClassifiesNativeHollowMarker(t *testing.T) {
-	result, broker := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), nativeCompassFixture("HOLLOW", 96, 96, 0x40DDEB))
+func TestEliteCompassPackageClassifiesWideLocalizedHollowMarker(t *testing.T) {
+	result, broker := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), wideReferenceCompassFixture("HOLLOW", 96, 96, 0x40DDEB))
 	target := result["target"].(map[string]any)
-	if len(broker.calls) != 2 || result["samplingPath"] != "NATIVE_FALLBACK" || result["fallbackUsed"] != true ||
+	if len(broker.calls) != 2 || result["samplingPath"] != "WIDE_REFERENCE_FALLBACK" || result["fallbackUsed"] != true ||
 		target["detected"] != true || target["presentation"] != "HOLLOW" || target["hemisphere"] != "REAR" ||
 		target["cascadeMode"] != "OPPONENT_PRIMARY" || target["offsetX"] != float64(0) || target["offsetY"] != float64(0) {
 		t.Fatalf("result=%#v target=%#v calls=%#v", result, target, broker.calls)
 	}
 	attempts := result["attempts"].([]any)
-	if attempts[0].(map[string]any)["reason"] != "REFERENCE_NO_MARKER" || attempts[1].(map[string]any)["reason"] != "NATIVE_FALLBACK_COMPLETED" {
+	if attempts[0].(map[string]any)["reason"] != "REFERENCE_NO_MARKER" || attempts[1].(map[string]any)["reason"] != "WIDE_192_LOCALIZED_REFERENCE_FALLBACK_COMPLETED" {
 		t.Fatalf("attempts=%#v", attempts)
 	}
 }
 
 func TestEliteCompassPackageUsesOpponentRouteForRedWashedMarker(t *testing.T) {
-	result, _ := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), nativeCompassFixture("HOLLOW", 106, 88, 0xB4BBB9))
+	result, _ := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), wideReferenceCompassFixture("HOLLOW", 106, 88, 0xB4BBB9))
 	target := result["target"].(map[string]any)
 	routes := result["routes"].(map[string]any)
 	strictRoute := routes["strict"].(map[string]any)
@@ -1837,8 +1898,22 @@ func TestEliteCompassPackageUsesOpponentRouteForRedWashedMarker(t *testing.T) {
 	}
 }
 
+func TestEliteCompassPackageRetainsAnnularEdgeCandidateUnderBroadRedWash(t *testing.T) {
+	result, broker := runCompassFixture(t, redWashCompassFixture(), wideReferenceCompassFixture("NONE", 96, 96, 0))
+	target := result["target"].(map[string]any)
+	compass := result["compass"].(map[string]any)
+	if len(broker.calls) != 1 || result["samplingPath"] != "REFERENCE_FAST_PATH" ||
+		target["detected"] != true || target["presentation"] != "SOLID" ||
+		compass["houghEdgeVotes"].(float64) < 8 || compass["angularCoverageBins"].(float64) < 16 ||
+		compass["circleCenterX"].(float64) < 724 || compass["circleCenterX"].(float64) > 736 ||
+		compass["circleCenterY"].(float64) < 813 || compass["circleCenterY"].(float64) > 825 ||
+		compass["circleRadiusPixels"].(float64) > 34 {
+		t.Fatalf("result=%#v target=%#v calls=%#v", result, target, broker.calls)
+	}
+}
+
 func TestEliteCompassPackageReturnsNoMarkerWithoutSubstitution(t *testing.T) {
-	result, _ := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), nativeCompassFixture("NONE", 0, 0, 0))
+	result, _ := runCompassFixture(t, referenceCompassFixture("NONE", 0, 0, 0), wideReferenceCompassFixture("NONE", 96, 96, 0))
 	target := result["target"].(map[string]any)
 	zone := target["centerZone"].(map[string]any)
 	if target["detected"] != false || target["cascadeMode"] != "NO_MARKER" || target["selectedRoute"] != "NONE" ||
@@ -1860,7 +1935,7 @@ func TestEliteCompassPackageFailsWithoutNativeAnnularEvidence(t *testing.T) {
 	for index := range referencePixels {
 		referencePixels[index] = uint32(0)
 	}
-	runner, _ := New(&compassBroker{referencePixels: referencePixels, nativePixels: pixels})
+	runner, _ := New(&compassBroker{referencePixels: referencePixels, widePixels: pixels})
 	_, err = runner.Run(context.Background(), pkg, map[string]any{})
 	var runError *Error
 	if !errors.As(err, &runError) || runError.Code != "COMPASS_NOT_VISIBLE" {

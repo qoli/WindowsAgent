@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "samplingPath", "fallbackUsed", "attempts", "sampling", "compass", "routes", "target"],
+  "required": ["schemaVersion", "profile", "coordinateSpace", "region", "physicalRegion", "localization", "samplingPath", "fallbackUsed", "attempts", "sampling", "compass", "routes", "target"],
   "properties": {
     "schemaVersion": {"const": 8},
     "profile": {
@@ -30,8 +30,8 @@
       "additionalProperties": false,
       "required": ["x", "y", "w", "h"],
       "properties": {
-        "x": {"const": 682},
-        "y": {"const": 771},
+        "x": {"type": "integer", "minimum": 634, "maximum": 730},
+        "y": {"type": "integer", "minimum": 723, "maximum": 819},
         "w": {"const": 96},
         "h": {"const": 96}
       }
@@ -47,7 +47,35 @@
         "height": {"type": "integer", "minimum": 1, "maximum": 16384}
       }
     },
-    "samplingPath": {"enum": ["REFERENCE_FAST_PATH", "NATIVE_FALLBACK"]},
+    "localization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "capturedAt", "region", "circleCenterX", "circleCenterY", "circleRadiusPixels", "houghEdgeVotes", "houghVotes", "angularCoverageBins", "annulusDensity", "orangeFraction"],
+      "properties": {
+        "path": {"enum": ["FIXED_96", "WIDE_192"]},
+        "capturedAt": {"type": "string", "format": "date-time", "maxLength": 64},
+        "region": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["x", "y", "w", "h"],
+          "properties": {
+            "x": {"enum": [634, 682]},
+            "y": {"enum": [723, 771]},
+            "w": {"enum": [96, 192]},
+            "h": {"enum": [96, 192]}
+          }
+        },
+        "circleCenterX": {"type": "integer", "minimum": 682, "maximum": 778},
+        "circleCenterY": {"type": "integer", "minimum": 771, "maximum": 867},
+        "circleRadiusPixels": {"type": "integer", "minimum": 24, "maximum": 34},
+        "houghEdgeVotes": {"type": "integer", "minimum": 8, "maximum": 24},
+        "houghVotes": {"type": "integer", "minimum": 4, "maximum": 24},
+        "angularCoverageBins": {"type": "integer", "minimum": 16, "maximum": 24},
+        "annulusDensity": {"type": "number", "minimum": 0, "maximum": 1},
+        "orangeFraction": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "samplingPath": {"enum": ["REFERENCE_FAST_PATH", "WIDE_REFERENCE_FALLBACK"]},
     "fallbackUsed": {"type": "boolean"},
     "attempts": {
       "type": "array",
@@ -70,20 +98,21 @@
     "compass": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["visible", "orangePixelCount", "minimumOrangePixelCount", "circleCenterX", "circleCenterY", "circleRadiusPixels", "circleCandidateCount", "houghPerimeterSamples", "houghVotes", "angularCoverageBins", "annulusDensity", "orangeFraction"],
+      "required": ["visible", "orangePixelCount", "minimumOrangePixelCount", "circleCenterX", "circleCenterY", "circleRadiusPixels", "circleCandidateCount", "houghPerimeterSamples", "houghEdgeVotes", "houghVotes", "angularCoverageBins", "annulusDensity", "orangeFraction"],
       "properties": {
         "visible": {"const": true},
         "orangePixelCount": {"type": "integer", "minimum": 1, "maximum": 65536},
         "minimumOrangePixelCount": {"type": "integer", "minimum": 1, "maximum": 65536},
-        "circleCenterX": {"type": "integer", "minimum": 682, "maximum": 777},
-        "circleCenterY": {"type": "integer", "minimum": 771, "maximum": 866},
-        "circleRadiusPixels": {"type": "integer", "minimum": 24, "maximum": 44},
+        "circleCenterX": {"type": "integer", "minimum": 676, "maximum": 784},
+        "circleCenterY": {"type": "integer", "minimum": 765, "maximum": 873},
+        "circleRadiusPixels": {"type": "integer", "minimum": 24, "maximum": 34},
         "circleCandidateCount": {"type": "integer", "minimum": 1},
         "houghPerimeterSamples": {"const": 24},
+        "houghEdgeVotes": {"type": "integer", "minimum": 1, "maximum": 24},
         "houghVotes": {"type": "integer", "minimum": 4},
         "angularCoverageBins": {"type": "integer", "minimum": 16, "maximum": 24},
-        "annulusDensity": {"type": "number", "minimum": 0, "maximum": 0.75},
-        "orangeFraction": {"type": "number", "minimum": 0, "maximum": 0.55}
+        "annulusDensity": {"type": "number", "minimum": 0, "maximum": 1},
+        "orangeFraction": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
     "routes": {
@@ -111,16 +140,16 @@
           "additionalProperties": false,
           "required": ["x", "y", "w", "h", "centerX", "centerY"],
           "properties": {
-            "x": {"type": "integer", "minimum": 682, "maximum": 777},
-            "y": {"type": "integer", "minimum": 771, "maximum": 866},
+            "x": {"type": "integer", "minimum": 634, "maximum": 825},
+            "y": {"type": "integer", "minimum": 723, "maximum": 914},
             "w": {"type": "integer", "minimum": 1, "maximum": 96},
             "h": {"type": "integer", "minimum": 1, "maximum": 96},
-            "centerX": {"type": "integer", "minimum": 682, "maximum": 777},
-            "centerY": {"type": "integer", "minimum": 771, "maximum": 866}
+            "centerX": {"type": "integer", "minimum": 634, "maximum": 825},
+            "centerY": {"type": "integer", "minimum": 723, "maximum": 914}
           }
         },
-        "referenceX": {"type": ["integer", "null"], "minimum": 682, "maximum": 777},
-        "referenceY": {"type": ["integer", "null"], "minimum": 771, "maximum": 866},
+        "referenceX": {"type": ["integer", "null"], "minimum": 634, "maximum": 825},
+        "referenceY": {"type": ["integer", "null"], "minimum": 723, "maximum": 914},
         "offsetX": {"type": ["integer", "null"], "minimum": -95, "maximum": 95},
         "offsetY": {"type": ["integer", "null"], "minimum": -95, "maximum": 95},
         "screenAngleDegrees": {"type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 360},
@@ -154,7 +183,7 @@
         "opponentPrediction": {"enum": ["NONE", "SOLID", "HOLLOW"]},
         "opponentConfidence": {"type": "number", "minimum": 0},
         "outcome": {"enum": ["ACCEPTED", "ESCALATED"]},
-        "reason": {"enum": ["REFERENCE_DUAL_ROUTE_CONFIRMED", "REFERENCE_GEOMETRY_INSUFFICIENT", "REFERENCE_NO_MARKER", "REFERENCE_CLASS_DISAGREEMENT", "REFERENCE_LOW_CONFIDENCE", "NATIVE_FALLBACK_COMPLETED"]}
+        "reason": {"enum": ["REFERENCE_DUAL_ROUTE_CONFIRMED", "REFERENCE_GEOMETRY_INSUFFICIENT", "REFERENCE_NO_MARKER", "REFERENCE_CLASS_DISAGREEMENT", "REFERENCE_LOW_CONFIDENCE", "WIDE_192_LOCALIZED_REFERENCE_FALLBACK_COMPLETED"]}
       }
     },
     "route": {

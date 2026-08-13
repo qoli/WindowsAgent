@@ -338,7 +338,7 @@ TRACK consumes only its displacement count for bounded pulse sizing.
 
 The input hold lease remains a fixed 2500 ms safety boundary. A Compass sample
 may legitimately exceed that interval when the 96x96 fast path escalates to
-192x192 native analysis. The workflow records the lease deadline at every
+same-source 192x192 reference localization. The workflow records the lease deadline at every
 START or RENEW. If the following observation crosses that deadline, it sends
 the idempotent STOP for the expired lease, emits
 `SUSTAINED_CONTROL_LEASE_EXPIRED_DURING_OBSERVATION`, and starts a fresh bounded
