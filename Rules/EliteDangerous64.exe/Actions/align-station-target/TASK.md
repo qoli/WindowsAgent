@@ -9,8 +9,9 @@ before starting this Action.
 `alignmentPurpose=CENTER` preserves the standalone Compass-centering contract.
 `alignmentPurpose=VISIBLE_HANDOFF` is a narrower Supercruise STATIC ALIGN
 contract for an owning workflow that immediately delegates final geometry to
-`align-visible-target`: it requires two current SOLID samples within a
-10-reference-pixel entry radius and 12-pixel verification exit, and does
+`align-visible-target`: it requires two current SOLID samples after entering
+the four-reference-pixel Compass center zone, with a six-pixel verification
+exit, and does
 not issue a center-entry counter-pulse. It only proves that the rear/coarse
 Compass phase has placed the destination in the visible-target controller's
 domain; it is not precise alignment and is rejected for TRACK, MOVING targets,
@@ -18,24 +19,37 @@ or a non-Supercruise control profile.
 
 Live Houssay Ring evidence bounded that coarse domain: a 19.105-pixel Compass
 contact satisfied the former 16+4 Gate while the destination label remained at
-the extreme left edge of the forward HUD. The tighter entry and verification
-limits keep the label inside the OCR-first proposal domain without asking
-Compass to replace the following local reticle measurement.
-The first tighter live run then exposed a 9-to-12-pixel oscillation because the
-same Yaw correction jumped from 40 ms to 160 ms at the twelve-pixel boundary.
-`VISIBLE_HANDOFF` now keeps its 40 ms pulse through 24 pixels; once a current
-sample enters ten pixels, it stops injecting and verifies one fresh sample
-within the 12-pixel exit instead of driving through the useful heading.
+the extreme left edge of the forward HUD. A later Supercruise Assist run
+reproduced a 15-to-23-pixel cycle while the visible-target detector still had
+no usable proposal. `VISIBLE_HANDOFF` now shares the proven 300 ms inner pulse
+through 24 pixels and requires the true four/six-pixel center Gate before it
+delegates local reticle geometry.
 
-`alignmentPurpose=HYPERSPACE_CHARGE` is the strict pre-FSD Compass handoff. It
+`alignmentPurpose=HYPERSPACE_CHARGE` is the pre-FSD Compass-to-visible-target
+handoff. It
 is valid for STATIC ALIGN in normal space or Supercruise; the start mode must
 select the matching control profile. It requires three consecutive SOLID
-Compass observations within four reference pixels, with a two-pixel
-verification hysteresis. Live Supercruise evidence showed the earlier 120/160
-ms law oscillating between 8 and 13 pixels for the full 120-command budget; the
-FSD purpose uses 40 ms ultra-fine pulses throughout the inner 20 pixels so
-that the four-pixel Gate remains achievable without weakening alignment. The caller
-must still require exact visible-target completion and recheck the
+Compass observations after entering ten reference pixels in normal space, or
+the actual four-pixel Compass center zone in Supercruise, with a two-pixel
+verification hysteresis. A 45-second normal-space Evidence interval with zero
+gaps or missing frames showed the 40 ms control law repeatedly cycling through
+roughly 5-15 pixels until the full 120-command budget was exhausted, even
+though the destination reticle remained visible to the next controller. The
+ten/twelve-pixel Gate stops injecting at that useful handoff instead of asking
+Compass to perform the following controller's job. A later 81-second
+Supercruise Evidence interval with 81 frames, zero gaps, and zero missing slots
+showed the former 40 ms inner-band pulses being lost to heading drift and
+trapping the Compass at roughly 15-21 pixels. Replacing them with 160 ms
+pulses reached a second 9-13-pixel band, but a following 24-frame, zero-gap
+Evidence interval proved that handing off at 19.647 pixels left both the target
+label and its three-quarter focus frame outside the visible-target pipeline's
+valid ROI, and a direct visible-target check after a ten/twelve-pixel completion
+still returned `TARGET_TEXT_NOT_FOUND`. A bounded 300 ms diagnostic Yaw pulse
+moved the same current target from 13 pixels to 5 pixels. Supercruise therefore
+uses that effective inner-band pulse and must enter the true four-pixel Compass
+center zone, then remain within six pixels for three current observations,
+before handoff. Normal space retains its calibrated 40 ms pulse and
+ten/twelve-pixel Gate. The caller must still require exact visible-target completion and recheck the
 stellar `safeToCharge` Gate before sending FSD input.
 
 By default the Action first commands 0% throttle, then repeatedly reads

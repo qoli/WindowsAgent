@@ -13,11 +13,13 @@ SUPERCRUISE_CENTER_RADIUS_PIXELS = 16.0
 SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS = 20.0
 SUPERCRUISE_CENTER_HYSTERESIS_PIXELS = 4.0
 SUPERCRUISE_STATIC_ALIGN_CENTER_RADIUS_PIXELS = 8.0
-SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS = 10.0
+SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS = 4.0
 SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_VISIBLE_HANDOFF_ULTRA_FINE_DISTANCE_PIXELS = 24
-HYPERSPACE_CHARGE_RADIUS_PIXELS = 4.0
+HYPERSPACE_CHARGE_RADIUS_PIXELS = 10.0
 HYPERSPACE_CHARGE_HYSTERESIS_PIXELS = 2.0
+SUPERCRUISE_HYPERSPACE_CHARGE_RADIUS_PIXELS = 4.0
+SUPERCRUISE_HYPERSPACE_CHARGE_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS = 4.0
 SUPERCRUISE_STATIC_TRACK_HYSTERESIS_PIXELS = 2.0
 SUSTAINED_DISTANCE_PIXELS = 40
@@ -37,6 +39,7 @@ SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS = 80
 SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS = 160
 SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS = 12
 HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS = 20
+SUPERCRUISE_HYPERSPACE_CHARGE_FINE_HOLD_MS = 300
 SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS = 40
 CENTER_ENTRY_BRAKE_MS = 100
 SUPERCRUISE_CENTER_ENTRY_BRAKE_MS = 300
@@ -295,10 +298,13 @@ def main(ctx):
             alignment_radius = SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS
             alignment_hysteresis = SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS
     if alignment_purpose == "HYPERSPACE_CHARGE":
-        # The start mode selects the calibrated motion profile, but the pre-FSD
-        # visual Gate is identical in normal space and Supercruise.
-        alignment_radius = HYPERSPACE_CHARGE_RADIUS_PIXELS
-        alignment_hysteresis = HYPERSPACE_CHARGE_HYSTERESIS_PIXELS
+        # Exact reticle centering belongs to the required align-visible-target
+        # child, but Compass must first place the target inside that child's
+        # OCR-first proposal domain. Live Supercruise verification requires
+        # the actual four-pixel Compass center zone before that handoff;
+        # normal space retains its calibrated ten/twelve-pixel Gate.
+        alignment_radius = SUPERCRUISE_HYPERSPACE_CHARGE_RADIUS_PIXELS if supercruise_profile else HYPERSPACE_CHARGE_RADIUS_PIXELS
+        alignment_hysteresis = SUPERCRUISE_HYPERSPACE_CHARGE_HYSTERESIS_PIXELS if supercruise_profile else HYPERSPACE_CHARGE_HYSTERESIS_PIXELS
         stable_confirmations_required = STABLE_CENTER_CONFIRMATIONS
     elif control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK" and target_motion != "STATIC":
         alignment_radius = SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS
@@ -792,13 +798,20 @@ def main(ctx):
             else:
                 pulse = choose_pulse(control_target, no_movement_count, fine_distance, fine_hold, supercruise_profile, single_axis_fine)
                 if (
-                    alignment_purpose == "HYPERSPACE_CHARGE" and
+                    alignment_purpose in ["HYPERSPACE_CHARGE", "VISIBLE_HANDOFF"] and
                     control_target["presentation"] == "SOLID" and
                     target["centerDistancePixels"] <= HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS and
                     no_movement_count < 2 and
                     pulse != None
                 ):
-                    pulse = [pulse[0], SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS]
+                    # Live Supercruise evidence showed that 40-160 ms pulses inside
+                    # 20 px were fully lost to heading drift and trapped the
+                    # target in successive 15-21 px and 9-13 px bands. A
+                    # bounded 300 ms diagnostic pulse moved the same target
+                    # from 13 px to 5 px. Keep that effective pulse until the
+                    # target actually crosses the four-pixel center Gate.
+                    # Normal space retains the calibrated 40 ms pulse.
+                    pulse = [pulse[0], SUPERCRUISE_HYPERSPACE_CHARGE_FINE_HOLD_MS if supercruise_profile else SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS]
                 if (
                     mode == "TRACK" and
                     supercruise_profile and
@@ -828,6 +841,8 @@ def main(ctx):
                         not (mode == "ALIGN" and no_movement_count >= 2)
                     )
                     static_hold_ms = SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS if static_ultra_fine_pulse else (SUPERCRUISE_STATIC_TRACK_FINE_HOLD_MS if static_fine_pulse else SUPERCRUISE_STATIC_TRACK_MID_HOLD_MS)
+                    if static_ultra_fine_pulse and alignment_purpose in ["HYPERSPACE_CHARGE", "VISIBLE_HANDOFF"]:
+                        static_hold_ms = SUPERCRUISE_HYPERSPACE_CHARGE_FINE_HOLD_MS
                     pulse = [pulse[0], static_hold_ms]
         if pulse == None:
             commanded_target = None

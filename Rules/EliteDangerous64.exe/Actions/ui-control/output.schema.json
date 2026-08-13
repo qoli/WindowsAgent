@@ -5,8 +5,8 @@
   "required": ["schemaVersion", "selection", "control", "key", "activePreset", "bindingFile", "bindingSource", "backend", "scanCode", "extended", "holdMs"],
   "properties": {
     "schemaVersion": {"const": 1},
-    "selection": {"enum": ["FOCUS_LEFT_PANEL", "OPEN_GALAXY_MAP", "NEXT_PANEL", "PREVIOUS_PANEL", "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK"]},
-    "control": {"enum": ["FocusLeftPanel", "GalaxyMapOpen", "CycleNextPanel", "CyclePreviousPanel", "UI_Up", "UI_Down", "UI_Left", "UI_Right", "UI_Select", "UI_Back"]},
+    "selection": {"enum": ["FOCUS_LEFT_PANEL", "OPEN_GALAXY_MAP", "TARGET_NEXT_ROUTE_SYSTEM", "NEXT_PANEL", "PREVIOUS_PANEL", "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "BACK"]},
+    "control": {"enum": ["FocusLeftPanel", "GalaxyMapOpen", "TargetNextRouteSystem", "CycleNextPanel", "CyclePreviousPanel", "UI_Up", "UI_Down", "UI_Left", "UI_Right", "UI_Select", "UI_Back"]},
     "key": {"type": "string", "pattern": "^Key_[A-Za-z0-9]+$", "maxLength": 32},
     "activePreset": {"type": "string", "minLength": 1, "maxLength": 128},
     "bindingFile": {"type": "string", "pattern": "^[^/\\\\]+\\.binds$", "maxLength": 260},

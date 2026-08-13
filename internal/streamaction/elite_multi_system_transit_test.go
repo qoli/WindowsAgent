@@ -10,15 +10,23 @@ import (
 )
 
 type multiSystemTransitCaller struct {
-	statusIndex       int
-	planCalls         int
-	changeRouteAtPlan int
-	jumpTargets       []string
-	jumpModes         []string
-	clearanceTargets  []string
-	throttles         []int64
-	fuelMain          float64
-	resumeAtSecond    bool
+	statusIndex             int
+	planCalls               int
+	changeRouteAtPlan       int
+	jumpTargets             []string
+	jumpModes               []string
+	clearanceTargets        []string
+	throttles               []int64
+	fuelMain                float64
+	resumeAtSecond          bool
+	missingDestination      bool
+	lockAcquired            bool
+	routeTargetControls     int
+	journalPositionEvent    string
+	routeTargetNeedsRefresh bool
+	routeContextRefreshed   bool
+	plotRouteCalls          int
+	executedJumps           int
 }
 
 func (c *multiSystemTransitCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -33,7 +41,7 @@ func (c *multiSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		}
 		return json.Marshal(map[string]any{
 			"state": "READY", "routeId": routeID, "freshness": "UNKNOWN", "jumpCount": int64(2),
-			"origin": map[string]any{"name": "Origin"},
+			"origin": map[string]any{"name": "Origin", "systemAddress": int64(1)},
 			"hops": []any{
 				map[string]any{"index": int64(1), "name": "Middle", "systemAddress": int64(2)},
 				map[string]any{"index": int64(2), "name": "Destination", "systemAddress": int64(3)},
@@ -51,21 +59,49 @@ func (c *multiSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		}
 		destinationName := "Middle"
 		destinationAddress := int64(2)
-		if c.statusIndex >= 3 || c.resumeAtSecond {
+		if c.executedJumps >= 1 || c.resumeAtSecond {
 			destinationName = "Destination"
 			destinationAddress = 3
+		}
+		data := map[string]any{
+			"Fuel": map[string]any{"FuelMain": fuelMain},
+		}
+		if !c.missingDestination || c.lockAcquired {
+			data["Destination"] = map[string]any{"Name": destinationName, "System": destinationAddress}
 		}
 		return json.Marshal(map[string]any{
 			"state": "AVAILABLE", "freshness": freshness,
 			"source": map[string]any{"sourceTimestamp": "2026-08-10T08:00:0" + string(rune('0'+c.statusIndex)) + "Z"},
-			"data": map[string]any{
-				"Fuel":        map[string]any{"FuelMain": fuelMain},
-				"Destination": map[string]any{"Name": destinationName, "System": destinationAddress},
-			},
+			"data":   data,
 		})
+	case "elite-dangerous/filesystem/journal-navigation-tail":
+		event := c.journalPositionEvent
+		if event == "" {
+			event = "FSDJump"
+		}
+		return json.Marshal(map[string]any{"events": []any{map[string]any{
+			"event": event, "timestamp": "2026-08-10T07:59:00Z", "StarSystem": "Origin", "SystemAddress": int64(1),
+		}}})
+	case "elite-dangerous/ui-control":
+		if inputs["control"] != "TARGET_NEXT_ROUTE_SYSTEM" {
+			return nil, errors.New("unexpected UI control")
+		}
+		c.routeTargetControls++
+		if !c.routeTargetNeedsRefresh || c.routeContextRefreshed {
+			c.lockAcquired = true
+		}
+		return json.RawMessage(`{"selection":"TARGET_NEXT_ROUTE_SYSTEM","control":"TargetNextRouteSystem"}`), nil
+	case "elite-dangerous/plot-route-to-system":
+		if inputs["targetSystem"] != "Destination" || inputs["maxJumps"] != int64(4) || inputs["refreshExistingContext"] != true {
+			return nil, errors.New("unexpected route-context refresh input")
+		}
+		c.plotRouteCalls++
+		c.routeContextRefreshed = true
+		return json.RawMessage(`{"result":"REFRESHED","routeId":"2026-08-10T08:00:00Z:3:2"}`), nil
 	case "elite-dangerous/hyperspace-jump-to-system":
 		c.jumpTargets = append(c.jumpTargets, inputs["targetSystem"].(string))
 		c.jumpModes = append(c.jumpModes, inputs["startMode"].(string))
+		c.executedJumps++
 		return json.RawMessage(`{"completed":true,"finalPhase":"ARRIVED_IN_SUPERCRUISE","arrivalBrakeSent":true}`), nil
 	case "elite-dangerous/clear-hyperspace-occlusion":
 		c.clearanceTargets = append(c.clearanceTargets, inputs["targetName"].(string))
@@ -81,6 +117,69 @@ func (c *multiSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		return json.RawMessage(`{"completed":true}`), nil
 	default:
 		return nil, errors.New("unexpected multi-System child Action: " + id)
+	}
+}
+
+func TestEliteMultiSystemTransitRestoresMissingRouteTargetFromJournalPosition(t *testing.T) {
+	pkg, err := Load(multiSystemPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &multiSystemTransitCaller{missingDestination: true, fuelMain: 64}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, multiSystemInputs(), caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.routeTargetControls != 1 {
+		t.Fatalf("routeTargetControls=%d", caller.routeTargetControls)
+	}
+	if !contains(string(output), `"completedJumps":2`) || !contains(joinEventPhases(reporter.payloads), "RESTORING_ROUTE_TARGET") {
+		t.Fatalf("output=%s events=%s", output, joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteMultiSystemTransitRestoresMissingRouteTargetFromLoginLocation(t *testing.T) {
+	pkg, err := Load(multiSystemPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &multiSystemTransitCaller{missingDestination: true, journalPositionEvent: "Location", fuelMain: 64}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, multiSystemInputs(), caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.routeTargetControls != 1 || !contains(string(output), `"completedJumps":2`) || !contains(joinEventPhases(reporter.payloads), "RESTORING_ROUTE_TARGET") {
+		t.Fatalf("routeTargetControls=%d output=%s events=%s", caller.routeTargetControls, output, joinEventPhases(reporter.payloads))
+	}
+}
+
+func TestEliteMultiSystemTransitRefreshesGalaxyMapContextWhenFirstRouteTargetRequestIsRejected(t *testing.T) {
+	pkg, err := Load(multiSystemPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &multiSystemTransitCaller{
+		missingDestination: true, journalPositionEvent: "Location", routeTargetNeedsRefresh: true, fuelMain: 64,
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: func(context.Context, time.Duration) error { return nil }}).Run(
+		context.Background(), pkg, multiSystemInputs(), caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caller.routeTargetControls != 2 || caller.plotRouteCalls != 1 || !contains(string(output), `"completedJumps":2`) {
+		t.Fatalf("routeTargetControls=%d plotRouteCalls=%d output=%s", caller.routeTargetControls, caller.plotRouteCalls, output)
+	}
+	phases := joinEventPhases(reporter.payloads)
+	if !contains(phases, "REFRESHING_ROUTE_CONTEXT") || !contains(phases, "RESTORING_ROUTE_TARGET") {
+		t.Fatalf("events=%s", phases)
 	}
 }
 
@@ -153,7 +252,7 @@ func TestEliteMultiSystemTransitConsumesFrozenRouteInOrder(t *testing.T) {
 	if len(caller.clearanceTargets) != 1 || caller.clearanceTargets[0] != "Destination" {
 		t.Fatalf("clearanceTargets=%v", caller.clearanceTargets)
 	}
-	if caller.planCalls != 3 || len(caller.throttles) != 0 {
+	if caller.planCalls != 2 || len(caller.throttles) != 0 {
 		t.Fatalf("planCalls=%d throttles=%v", caller.planCalls, caller.throttles)
 	}
 	joined := joinEventPhases(reporter.payloads)

@@ -44,6 +44,10 @@ Exact matches use a linear scan and do not spend edit-distance steps on every
 other visible row. Fuzzy similarity is evaluated only when no exact row exists,
 so the full eight-input visible-list traversal remains inside the declared
 Starlark step budget.
+When the requested name contains digits, a fuzzy row must preserve the exact
+digit sequence. A different numeric identity is rejected rather than treated
+as a tolerable OCR edit, so `23 ARIETIS` cannot authorize movement for
+`47 ARIETIS`.
 Keyboard focus is the unique strongest row-fill sample, not merely every row
 above one absolute threshold. The strongest sample must reach 0.40 and lead
 the runner-up by 0.10, which tolerates HUD skew while rejecting ambiguous focus.

@@ -6,8 +6,10 @@ acquires the named Navigation target. With `targetLockConfirmed=true` it uses
 the caller's explicit evidence boundary and does not reopen Navigation. It first
 requires the current stellar `safeToCharge` Gate and completes any necessary
 stellar-angle clearance. Only then does it align at 0% through the strict
-`HYPERSPACE_CHARGE` Compass purpose (four-pixel entry, then three consecutive
-SOLID observations within the six-pixel verification band). It immediately rechecks substantial stellar coverage
+`HYPERSPACE_CHARGE` Compass purpose (ten-pixel entry, then three consecutive
+SOLID observations within the twelve-pixel verification band). This is only a
+bounded handoff to the required `align-visible-target` child, which owns exact
+reticle centering before any FSD input. It immediately rechecks substantial stellar coverage
 from that Compass-aligned target line before visible-target fine alignment, so
 a destination behind the arrival star is cleared before its reticle becomes
 washed out. It then fine-aligns, rechecks substantial stellar coverage again,
@@ -24,6 +26,15 @@ SystemAddress, is the primary arrival Gate. This accepts an all-caps HUD name
 against the Journal's canonical title casing without fuzzy identity matching.
 Two stable cockpit-HUD-absent samples remain a visual transition path when the
 Journal evidence is unavailable.
+
+During the FSD countdown and cockpit transition, `hyperspace-state` may lose a
+WGC region read while the game replaces its render surface. The owning workflow
+skips at most five explicitly identified persistent-WGC region capture errors
+across that transition and emits each skipped sample. A skipped frame does not
+count as charging, cockpit absence, or cockpit return. A sixth such error, or
+any non-WGC child failure, remains fatal and retains the registered 0% throttle
+compensation. This bounded retry never substitutes an old frame or another
+state source.
 
 If neither visual charging nor a newer matching Journal `StartJump` appears
 within approximately five seconds, the owning Action reissues the same resolved

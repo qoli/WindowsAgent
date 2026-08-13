@@ -186,6 +186,29 @@ func TestElitePlotRouteAcceptsOnlyExistingExactRouteWithoutOpeningMap(t *testing
 	}
 }
 
+func TestElitePlotRouteRefreshesExistingRouteContextWithoutReplotting(t *testing.T) {
+	absent := galaxyOCR()
+	mapOnly := galaxyOCR(galaxyRegion("GALAXY MAP I REALISTIC", 50))
+	caller := &plotRouteCaller{
+		routeReady: true,
+		search:     []json.RawMessage{absent, absent, mapOnly, mapOnly, absent, absent},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), plotRoutePackage(t), map[string]any{
+			"targetSystem": "LHS 178", "maxJumps": int64(1), "refreshExistingContext": true,
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"result":"REFRESHED"`) || !contains(string(output), `"routeId":"2026-08-12T00:00:00Z:178:1"`) {
+		t.Fatalf("output=%s", output)
+	}
+	if !equalStrings(caller.controls, []string{"OPEN_GALAXY_MAP", "OPEN_GALAXY_MAP"}) || len(caller.pointer) != 0 || len(caller.textKeys) != 0 || len(caller.holdMS) != 0 || caller.navPlanCalls != 2 {
+		t.Fatalf("controls=%v pointer=%v text=%v holdMS=%v navPlanCalls=%d", caller.controls, caller.pointer, caller.textKeys, caller.holdMS, caller.navPlanCalls)
+	}
+}
+
 func TestElitePlotRouteRejectsPartialSuggestionAndClosesOwnedMap(t *testing.T) {
 	absent := galaxyOCR()
 	mapOnly := galaxyOCR(galaxyRegion("GALAXY MAP I REALISTIC", 50))

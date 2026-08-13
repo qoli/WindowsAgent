@@ -409,6 +409,25 @@ func TestEliteSelectAndLockDestinationFailsWithoutNamedVisibleTarget(t *testing.
 	}
 }
 
+func TestEliteSelectAndLockDestinationRejectsDifferentNumericIdentity(t *testing.T) {
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{"NAVIGATION", "NAVIGATION"},
+		regions: []json.RawMessage{
+			navigationTargetRow("23 ARIETIS"), navigationTargetRow("23 ARIETIS"),
+			navigationTargetRow("23 ARIETIS"), navigationTargetRow("23 ARIETIS"),
+		},
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "47 ARIETIS"}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "named Navigation target did not produce two consecutive known observations") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("different numeric identity triggered controls=%v", caller.controls)
+	}
+}
+
 func TestEliteSelectAndLockDestinationUsesObservedTabStatesToReachNavigation(t *testing.T) {
 	caller := &selectAndLockDestinationCaller{
 		contacts: []string{

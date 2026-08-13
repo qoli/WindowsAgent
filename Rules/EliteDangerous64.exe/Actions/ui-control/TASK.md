@@ -11,6 +11,10 @@ opens or closes the Target panel. It is not interchangeable with `LEFT`, which
 resolves `UI_Left` and only navigates within an already focused interface.
 `OPEN_GALAXY_MAP` resolves Frontier's `GalaxyMapOpen` control. It only toggles
 the map; it does not claim that a route was plotted or that map focus moved.
+`TARGET_NEXT_ROUTE_SYSTEM` resolves Frontier's dedicated
+`TargetNextRouteSystem` control. It sends one request to restore the next hop
+of an already plotted route; callers must verify the resulting
+`Status.json Destination` name and SystemAddress before flight.
 `NEXT_PANEL` and `PREVIOUS_PANEL` resolve Frontier's dedicated
 `CycleNextPanel` and `CyclePreviousPanel` controls. They are the only logical
 controls in this Action that may change the active Target-panel tab; do not use

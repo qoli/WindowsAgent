@@ -1,8 +1,13 @@
 # Plot an exact Galaxy Map route
 
 This interruptible linear Streaming Action owns exact System route creation
-from a forward cockpit view or an already-open Galaxy Map. It first accepts an already plotted route only
-when `NavRoute.json` validates to the same complete destination. Otherwise it
+from a forward cockpit view or an already-open Galaxy Map. It first accepts an
+already plotted route only when `NavRoute.json` validates to the same complete
+destination. With `refreshExistingContext=true`, an exact existing route is
+not re-plotted or cleared: the Action opens the Galaxy Map, confirms its title,
+revalidates the same route identity, closes the map, and confirms the restored
+forward view. This bounded refresh initializes the game's live plotted-route
+context after a reconnect while preserving the exact route. Otherwise it
 requires Galaxy Map to be absent, opens it, confirms the map title, focuses the
 fixed search field, clears up to the maximum permitted name length with bounded
 Backspace inputs, enters every character of the complete System name, and
@@ -24,6 +29,6 @@ compensation before touching the field. On success it closes Galaxy Map and requ
 Galaxy Map title. When it opened the map it registers the same close operation
 as failure compensation. Partial names, fuzzy suggestions, unsupported text
 characters, ambiguous exact suggestion boxes, a different selected System,
-an unchanged or mismatched route, an excessive hop count, and an un-restored
+an unexpectedly changed or mismatched route, an excessive hop count, and an un-restored
 forward view fail explicitly. It never substitutes another suggestion, route,
 destination, text provider, or input backend.

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 1,
+  "version": 2,
   "title": "Read the bounded Elite Dangerous navigation Journal tail",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

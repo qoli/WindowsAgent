@@ -193,6 +193,7 @@ def completed(target_system, result, plan, exact_suggestion, selected_system, op
 def main(ctx):
     target_system = ctx.inputs["targetSystem"]
     max_jumps = ctx.inputs["maxJumps"]
+    refresh_existing_context = ctx.inputs.get("refreshExistingContext", False)
     if len(normalize_text(target_system)) < 2:
         fail("targetSystem must contain at least two letters or digits")
     for index in range(len(target_system)):
@@ -200,10 +201,40 @@ def main(ctx):
 
     emit_update("CHECKING_ROUTE", target_system, reason="NAV_ROUTE_EXACT_DESTINATION")
     existing = route_attempt(target_system, max_jumps)
-    if existing["ok"]:
+    if existing["ok"] and not refresh_existing_context:
         stream.activity(message="Exact Galaxy Map route already plotted: " + target_system, level="info")
         emit_update("COMPLETED", target_system, observation=existing["plan"], reason="EXISTING_EXACT_ROUTE")
         return completed(target_system, "EXISTING", existing["plan"], False, False, False, 1)
+
+    if existing["ok"]:
+        observation_count = 0
+        initial = observe_initial_map_state(target_system)
+        observation_count += initial["count"]
+        if initial["present"]:
+            action.on_failure(id="elite-dangerous/ui-control", inputs={"control": "OPEN_GALAXY_MAP"})
+            opened_map = False
+        else:
+            emit_update("OPENING_MAP", target_system, command="OPEN_GALAXY_MAP", observation=initial["observation"], reason="REFRESH_EXISTING_ROUTE_CONTEXT")
+            action.call(id="elite-dangerous/ui-control", inputs={"control": "OPEN_GALAXY_MAP"})
+            action.on_failure(id="elite-dangerous/ui-control", inputs={"control": "OPEN_GALAXY_MAP"})
+            opened_map = True
+            task.sleep(milliseconds=UI_SETTLE_MS)
+            opened = observe_map_stable(target_system, True, "OPENING_MAP")
+            observation_count += opened["count"]
+
+        refreshed = route_attempt(target_system, max_jumps)
+        observation_count += 1
+        if not refreshed["ok"] or refreshed["plan"]["routeId"] != existing["plan"]["routeId"]:
+            fail("existing NavRoute identity changed while refreshing Galaxy Map context")
+        emit_update("RESTORING_VIEW", target_system, command="OPEN_GALAXY_MAP", observation=refreshed["plan"], reason="EXISTING_ROUTE_CONTEXT_REFRESHED")
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "OPEN_GALAXY_MAP"})
+        task.sleep(milliseconds=UI_SETTLE_MS)
+        closed = observe_map_stable(target_system, False, "RESTORING_VIEW")
+        observation_count += closed["count"]
+        action.clear_on_failure()
+        stream.activity(message="Existing Galaxy Map route context refreshed: " + target_system, level="info")
+        emit_update("COMPLETED", target_system, observation=refreshed["plan"], reason="REFRESHED_EXACT_ROUTE+FORWARD_VIEW_RESTORED")
+        return completed(target_system, "REFRESHED", refreshed["plan"], False, False, opened_map, observation_count)
 
     observation_count = 0
     initial = observe_initial_map_state(target_system)

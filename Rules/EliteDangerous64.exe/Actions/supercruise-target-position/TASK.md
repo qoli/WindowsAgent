@@ -58,6 +58,15 @@ confirms the complete `AASGANANU` identity in the lower-left HUD and the local
 3/4-annulus measurement passes all shape and layout Gates. It is not a general
 partial-text match.
 
+Some System names begin with a short numeric token, such as `47 ARIETIS`.
+When a cockpit pillar removes that token from the forward label, the remaining
+complete name word may provide a spatial proposal only when the same invocation
+independently reads the complete requested identity from the lower-left HUD.
+The omitted token must be one to three digits, the surviving word must pass the
+normal exact-or-one-edit rule, and the local 3/4-annulus plus layout confidence
+Gates remain mandatory. A bare name word without current exact identity or a
+non-numeric omitted prefix remains `UNKNOWN`.
+
 The middle-left band covers reference x=0–960 and y=360–626. Houssay Ring
 evidence placed its selected label near reference x=35, y=474, inside the
 previous x=0–800, y=400–480 gap between upper-left and lower-wide OCR. This is

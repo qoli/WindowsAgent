@@ -30,6 +30,14 @@ def normalize(text):
             result += character
     return result
 
+def is_short_numeric_word(text):
+    if len(text) == 0 or len(text) > 3:
+        return False
+    for index in range(len(text)):
+        if text[index] not in "0123456789":
+            return False
+    return True
+
 def normalized_words(text):
     words = []
     current = ""
@@ -400,10 +408,24 @@ def main(ctx):
             fused_pillar = identity_corroborated_fused_pillar_label(region["text"], expected_words, identity_confirmed)
             normalized_region = normalize(region["text"])
             single_word_fragment = identity_corroborated_single_word_fragment(normalized_region, expected_words, identity_confirmed)
+            omitted_numeric_prefix = (
+                identity_confirmed and
+                len(expected_words) == 2 and
+                is_short_numeric_word(expected_words[0]) and
+                one_edit_or_exact(normalized_region, expected_words[1])
+            )
             identity_prefix_hint = identity_confirmed and len(expected_words) == 2 and len(normalized_region) >= 3 and normalized_region[:3] == expected_words[0][:3]
-            if not exact_or_one_edit and not occluded_same_line and not identity_fragment and not fused_pillar and not single_word_fragment and not identity_prefix_hint:
+            if not exact_or_one_edit and not occluded_same_line and not identity_fragment and not fused_pillar and not single_word_fragment and not omitted_numeric_prefix and not identity_prefix_hint:
                 continue
-            if single_word_fragment and not exact_or_one_edit:
+            if omitted_numeric_prefix and not exact_or_one_edit:
+                region = {
+                    "text": region["text"],
+                    "detectionConfidence": region["detectionConfidence"],
+                    "recognitionConfidence": region["recognitionConfidence"],
+                    "referencePoints": region["referencePoints"],
+                    "matchReason": "OCCLUDED_SHORT_NUMERIC_PREFIX_AND_EXACT_SELECTED_IDENTITY_CONFIRMED",
+                }
+            elif single_word_fragment and not exact_or_one_edit:
                 region = {
                     "text": region["text"],
                     "detectionConfidence": region["detectionConfidence"],

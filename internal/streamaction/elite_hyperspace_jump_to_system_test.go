@@ -13,6 +13,7 @@ import (
 
 type hyperspaceJumpCaller struct {
 	hyperspaceObservations int
+	hyperspaceFailuresAt   map[int][]error
 	hyperspaceControls     int
 	alignVisibleError      error
 	throttles              []int
@@ -62,6 +63,11 @@ func (c *hyperspaceJumpCaller) Call(_ context.Context, id string, inputs map[str
 		}
 		return json.RawMessage(`{"heat":{"state":"KNOWN","percent":46}}`), nil
 	case "elite-dangerous/hyperspace-state":
+		if failures := c.hyperspaceFailuresAt[c.hyperspaceObservations]; len(failures) > 0 {
+			err := failures[0]
+			c.hyperspaceFailuresAt[c.hyperspaceObservations] = failures[1:]
+			return nil, err
+		}
 		c.hyperspaceObservations++
 		state := "COCKPIT_PRESENT"
 		cockpit := "PRESENT"
@@ -205,6 +211,19 @@ func TestEliteHyperspaceJumpAcceptsCanonicalJournalCaseForUppercaseHUDTarget(t *
 	}
 	if len(caller.throttles) < 2 || caller.throttles[len(caller.throttles)-1] != 0 {
 		t.Fatalf("Journal arrival must send the arrival brake, throttles=%v", caller.throttles)
+	}
+}
+
+func TestEliteHyperspaceJumpSkipsBoundedWGCFailureDuringCountdownTransition(t *testing.T) {
+	caller := &hyperspaceJumpCaller{hyperspaceFailuresAt: map[int][]error{
+		2: {errors.New("child Action elite-dangerous/flight-prompt-text failed: capture OCR Action region: persistent WGC worker region capture: persistent region capture failed: mapped region texture has an invalid row pitch")},
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err != nil || !strings.Contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.throttles) < 2 || caller.throttles[len(caller.throttles)-1] != 0 {
+		t.Fatalf("transient WGC recovery must still complete with arrival brake: throttles=%v", caller.throttles)
 	}
 }
 

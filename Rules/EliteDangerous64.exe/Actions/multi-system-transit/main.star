@@ -1,5 +1,6 @@
 READINESS_LIMIT = 20
 READINESS_POLL_MS = 1000
+ROUTE_TARGET_RESTORE_LIMIT = 5
 
 def emit_update(phase, hop_index, jump_count, from_system=None, to_system=None, next_system=None, route_id=None, child_action=None, commanded_throttle=None, fuel_main=None, temperature=None, status_timestamp=None, reason=None):
     stream.emit(
@@ -52,21 +53,72 @@ def wait_readiness(hop_index, jump_count, route_id, from_system, to_system, prev
         if expected_target_name != None:
             destination = data.get("Destination")
             if type(destination) != "dict" or destination.get("Name") != expected_target_name or destination.get("System") != expected_target_address:
-                fail("Status.json Destination does not match the frozen route target before hop " + str(hop_index))
+                emit_update("WAITING_READINESS", hop_index, jump_count, from_system=from_system, to_system=to_system, route_id=route_id, commanded_throttle=0, fuel_main=fuel_main, status_timestamp=timestamp, reason="AWAITING_FROZEN_ROUTE_TARGET")
+                task.sleep(milliseconds=READINESS_POLL_MS)
+                continue
         return {"fuelMain": fuel_main, "sourceTimestamp": timestamp, "freshness": status["freshness"]}
     fail("route readiness did not become current and safe before the bounded wait limit")
 
-def current_route_progress(hops):
+def same_system(actual_name, actual_address, expected_name, expected_address):
+    return actual_name == expected_name and actual_address == expected_address
+
+def journal_route_progress(origin, hops):
+    tail = action.call(id="elite-dangerous/filesystem/journal-navigation-tail", inputs={})
+    latest = None
+    for event in tail["events"]:
+        if event["event"] not in ["Location", "FSDJump"] or event["timestamp"] == None:
+            continue
+        if latest == None or event["timestamp"] > latest["timestamp"]:
+            latest = event
+    if latest == None:
+        fail("Status.json Destination is unavailable and Journal has no Location or FSDJump route-position evidence")
+    if same_system(latest["StarSystem"], latest["SystemAddress"], origin["name"], origin["systemAddress"]):
+        return 1
+    for hop in hops:
+        if same_system(latest["StarSystem"], latest["SystemAddress"], hop["name"], hop["systemAddress"]):
+            if hop["index"] >= len(hops):
+                fail("Status.json Destination is unavailable and Journal already places the ship at the final frozen-route System")
+            return hop["index"] + 1
+    fail("Status.json Destination is unavailable and latest Journal route position is outside the frozen route")
+
+def wait_route_target_activation(hop_index, jump_count, from_system, target, route_id):
+    for _ in range(ROUTE_TARGET_RESTORE_LIMIT):
+        status = action.call(id="elite-dangerous/filesystem/status", inputs={})
+        if status["state"] != "AVAILABLE":
+            fail("Status.json is unavailable while restoring the frozen route target")
+        destination = status["data"].get("Destination")
+        if type(destination) == "dict":
+            if destination.get("Name") == target["name"] and destination.get("System") == target["systemAddress"]:
+                return True
+            fail("Status.json Destination changed to a non-route target while restoring the frozen route target")
+        emit_update("WAITING_READINESS", hop_index, jump_count, from_system=from_system, to_system=target["name"], route_id=route_id, commanded_throttle=0, status_timestamp=status["source"]["sourceTimestamp"], reason="AWAITING_FROZEN_ROUTE_TARGET")
+        task.sleep(milliseconds=READINESS_POLL_MS)
+    return False
+
+def current_route_progress(origin, hops, jump_count, route_id, destination_system, max_jumps):
     status = action.call(id="elite-dangerous/filesystem/status", inputs={})
     if status["state"] != "AVAILABLE":
         fail("Status.json is unavailable while resolving current route progress")
     destination = status["data"].get("Destination")
-    if type(destination) != "dict":
-        fail("Status.json Destination is unavailable while resolving current route progress")
-    for hop in hops:
-        if destination.get("Name") == hop["name"] and destination.get("System") == hop["systemAddress"]:
-            return hop["index"]
-    fail("Status.json Destination is not one of the frozen route hops")
+    if type(destination) == "dict":
+        for hop in hops:
+            if destination.get("Name") == hop["name"] and destination.get("System") == hop["systemAddress"]:
+                return hop["index"]
+        fail("Status.json Destination is not one of the frozen route hops")
+
+    hop_index = journal_route_progress(origin, hops)
+    target = hops[hop_index - 1]
+    from_system = origin["name"] if hop_index == 1 else hops[hop_index - 2]["name"]
+    emit_update("RESTORING_ROUTE_TARGET", hop_index, jump_count, from_system=from_system, to_system=target["name"], route_id=route_id, child_action="elite-dangerous/ui-control", commanded_throttle=0, status_timestamp=status["source"]["sourceTimestamp"], reason="STATUS_DESTINATION_ABSENT+JOURNAL_ROUTE_POSITION+TARGET_NEXT_ROUTE_SYSTEM")
+    action.call(id="elite-dangerous/ui-control", inputs={"control": "TARGET_NEXT_ROUTE_SYSTEM"})
+    if not wait_route_target_activation(hop_index, jump_count, from_system, target, route_id):
+        emit_update("REFRESHING_ROUTE_CONTEXT", hop_index, jump_count, from_system=from_system, to_system=target["name"], route_id=route_id, child_action="elite-dangerous/plot-route-to-system", commanded_throttle=0, reason="TARGET_NEXT_ROUTE_SYSTEM_REJECTED+REFRESH_EXISTING_GALAXY_MAP_CONTEXT")
+        refreshed = action.call(id="elite-dangerous/plot-route-to-system", inputs={"targetSystem": destination_system, "maxJumps": max_jumps, "refreshExistingContext": True})
+        if refreshed["result"] != "REFRESHED" or refreshed["routeId"] != route_id:
+            fail("Galaxy Map route-context refresh changed the frozen route")
+        emit_update("RESTORING_ROUTE_TARGET", hop_index, jump_count, from_system=from_system, to_system=target["name"], route_id=route_id, child_action="elite-dangerous/ui-control", commanded_throttle=0, reason="GALAXY_MAP_CONTEXT_REFRESHED+TARGET_NEXT_ROUTE_SYSTEM")
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "TARGET_NEXT_ROUTE_SYSTEM"})
+    return hop_index
 
 def main(ctx):
     destination_system = ctx.inputs["destinationSystem"]
@@ -97,7 +149,7 @@ def main(ctx):
     else:
         current_mode = start_mode
 
-    start_hop_index = current_route_progress(plan["hops"])
+    start_hop_index = current_route_progress(plan["origin"], plan["hops"], jump_count, route_id, destination_system, max_jumps)
     current_system = origin_system if start_hop_index == 1 else plan["hops"][start_hop_index - 2]["name"]
     previous_status_timestamp = None
     carried_readiness = None
@@ -140,11 +192,17 @@ def main(ctx):
                 fail("arrival stellar-clearance child returned an invalid completion result after route hop " + str(hop_index))
             emit_update("ARRIVAL_CLEARANCE_COMPLETED", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, fuel_main=final_readiness["fuelMain"], status_timestamp=final_readiness["sourceTimestamp"], reason=clearance["entryAlignmentEvidence"] + ":" + str(clearance["supercruiseEscapeDurationMs"]) + "MS")
 
-        emit_update("REVALIDATING_ROUTE", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/nav-route-plan", commanded_throttle=0)
-        current_plan = read_route_plan(destination_system, max_jumps)
-        if current_plan["routeId"] != route_id:
-            fail("NavRoute identity changed during multi-System transit")
-        emit_update("ROUTE_REVALIDATED", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/nav-route-plan", commanded_throttle=0, reason=current_plan["freshness"])
+        # ED normally emits NavRouteClear after the final FSDJump. The fresh
+        # Status/Journal-backed arrival Gate above already proves that final
+        # frozen hop, so requiring NavRoute.json again would turn successful
+        # arrival into ED_NAV_ROUTE_CLEARED. Revalidate only while another hop
+        # still depends on the plotted route.
+        if hop_index < jump_count:
+            emit_update("REVALIDATING_ROUTE", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/nav-route-plan", commanded_throttle=0)
+            current_plan = read_route_plan(destination_system, max_jumps)
+            if current_plan["routeId"] != route_id:
+                fail("NavRoute identity changed during multi-System transit")
+            emit_update("ROUTE_REVALIDATED", hop_index, jump_count, from_system=current_system, to_system=target_system, next_system=next_system, route_id=route_id, child_action="elite-dangerous/nav-route-plan", commanded_throttle=0, reason=current_plan["freshness"])
         previous_status_timestamp = final_readiness["sourceTimestamp"]
         carried_readiness = final_readiness
         current_system = target_system

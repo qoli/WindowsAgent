@@ -7,7 +7,7 @@
     "schemaVersion": {"const": 1},
     "task": {"const": "PLOT_ROUTE_TO_SYSTEM"},
     "completed": {"const": true},
-    "result": {"enum": ["EXISTING", "PLOTTED"]},
+    "result": {"enum": ["EXISTING", "REFRESHED", "PLOTTED"]},
     "targetSystem": {"type": "string", "minLength": 2, "maxLength": 96},
     "exactSuggestionConfirmed": {"type": "boolean"},
     "selectedSystemConfirmed": {"type": "boolean"},

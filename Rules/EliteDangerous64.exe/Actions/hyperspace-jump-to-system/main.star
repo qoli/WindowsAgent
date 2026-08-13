@@ -4,6 +4,7 @@ TRANSIT_ABSENT_CONFIRMATIONS = 2
 ARRIVAL_PRESENT_CONFIRMATIONS = 2
 ARRIVAL_LIMIT = 240
 SUPERCRUISE_HUD_CONFIRMATIONS = 2
+MAX_TRANSIENT_WGC_OBSERVATION_ERRORS = 5
 POST_ALIGNMENT_HEAT_LIMIT = 60
 POST_ALIGNMENT_HEAT_CONFIRMATIONS = 3
 POST_ALIGNMENT_HEAT_SAMPLES = 12
@@ -31,8 +32,9 @@ def coarse_align_target(target_system, sample, phase, control_profile):
     emit_update(phase, sample, target_system, child_action="elite-dangerous/align-station-target", commanded_throttle=0, reason="COMPASS_COARSE_ALIGNMENT")
     result = action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "HYPERSPACE_CHARGE", "stopBeforeAlign": True, "controlProfile": control_profile})
     target = result["finalObservation"]["target"]
-    if not target["detected"] or target["presentation"] != "SOLID" or target["centerDistancePixels"] > 6.0 or result["stableConfirmations"] < 3:
-        fail("pre-FSD Compass alignment did not satisfy the four-pixel entry and six-pixel three-frame verification Gate")
+    maximum_handoff_distance = 6.0 if control_profile == "SUPERCRUISE_ASSIST" else 12.0
+    if not target["detected"] or target["presentation"] != "SOLID" or target["centerDistancePixels"] > maximum_handoff_distance or result["stableConfirmations"] < 3:
+        fail("pre-FSD Compass handoff did not satisfy the profile-specific three-frame center Gate")
     return result
 
 def post_alignment_heat_gate(target_system, sample):
@@ -127,6 +129,9 @@ def observe_hyperspace():
         "cockpitHud": observation["cockpitHud"]["state"],
         "promptText": observation["promptText"],
     }
+
+def transient_wgc_region_capture_error(text):
+    return "persistent WGC worker region capture" in text and "persistent region capture failed" in text
 
 def require_supercruise_hud(sample, target_system):
     confirmations = 0
@@ -233,9 +238,28 @@ def main(ctx):
     transit_absent = 0
     throttle_100_sent = False
     retry_sent = False
+    transient_wgc_errors = 0
     for _ in range(CHARGING_LIMIT):
         sample += 1
-        observation = observe_hyperspace()
+        observation_attempt = action.try_call(id="elite-dangerous/hyperspace-state", inputs={})
+        if not observation_attempt["ok"]:
+            error_text = observation_attempt["error"]
+            if not transient_wgc_region_capture_error(error_text):
+                fail("hyperspace visual observation failed: " + error_text)
+            transient_wgc_errors += 1
+            phase = "FSD_CHARGING" if charging_seen else "AWAITING_FSD_CHARGING"
+            emit_update(phase, sample, target_system, child_action="elite-dangerous/hyperspace-state", commanded_throttle=100 if throttle_100_sent else 0, reason="TRANSIENT_WGC_OBSERVATION_SKIPPED_" + str(transient_wgc_errors))
+            if transient_wgc_errors > MAX_TRANSIENT_WGC_OBSERVATION_ERRORS:
+                fail("hyperspace visual observation exceeded five transient WGC region-capture errors: " + error_text)
+            task.sleep(milliseconds=POLL_MS)
+            continue
+        observation_raw = observation_attempt["output"]["hyperspaceState"]
+        observation = {
+            "state": observation_raw["state"],
+            "flightStatus": observation_raw["flightStatus"],
+            "cockpitHud": observation_raw["cockpitHud"]["state"],
+            "promptText": observation_raw["promptText"],
+        }
         state = observation["state"]
         command = None
         phase = "AWAITING_FSD_CHARGING"
@@ -296,7 +320,24 @@ def main(ctx):
     arrival_stop_sent = False
     for _ in range(ARRIVAL_LIMIT):
         sample += 1
-        observation = observe_hyperspace()
+        observation_attempt = action.try_call(id="elite-dangerous/hyperspace-state", inputs={})
+        if not observation_attempt["ok"]:
+            error_text = observation_attempt["error"]
+            if not transient_wgc_region_capture_error(error_text):
+                fail("hyperspace arrival visual observation failed: " + error_text)
+            transient_wgc_errors += 1
+            emit_update("AWAITING_COCKPIT_RETURN", sample, target_system, child_action="elite-dangerous/hyperspace-state", commanded_throttle=0 if arrival_stop_sent else 100, reason="TRANSIENT_WGC_OBSERVATION_SKIPPED_" + str(transient_wgc_errors))
+            if transient_wgc_errors > MAX_TRANSIENT_WGC_OBSERVATION_ERRORS:
+                fail("hyperspace arrival observation exceeded five transient WGC region-capture errors: " + error_text)
+            task.sleep(milliseconds=POLL_MS)
+            continue
+        observation_raw = observation_attempt["output"]["hyperspaceState"]
+        observation = {
+            "state": observation_raw["state"],
+            "flightStatus": observation_raw["flightStatus"],
+            "cockpitHud": observation_raw["cockpitHud"]["state"],
+            "promptText": observation_raw["promptText"],
+        }
         command = None
         phase = "AWAITING_COCKPIT_RETURN"
         if observation["cockpitHud"] == "PRESENT":

@@ -5,6 +5,7 @@
   "required": ["targetSystem", "maxJumps"],
   "properties": {
     "targetSystem": {"type": "string", "minLength": 2, "maxLength": 96, "pattern": "^\\S(?:.*\\S)?$"},
-    "maxJumps": {"type": "integer", "minimum": 1, "maximum": 32}
+    "maxJumps": {"type": "integer", "minimum": 1, "maximum": 32},
+    "refreshExistingContext": {"type": "boolean", "default": false}
   }
 }

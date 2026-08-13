@@ -9,6 +9,23 @@ result to `elite-dangerous/nav-route-plan`. It then matches the live
 `Status.json Destination` name and SystemAddress to exactly one frozen hop. A
 first-hop match starts normally; a later-hop match resumes after the preceding
 hops and emits `ROUTE_RESUMED`. A destination outside the frozen route fails.
+If a game reconnect preserves the exact NavRoute but removes
+`Status.json Destination`, the Action may recover only from the newest
+allowlisted Journal route-position event. A login `Location` or a completed
+`FSDJump` must place the ship exactly at the route origin or a non-final frozen
+hop. It then emits
+`RESTORING_ROUTE_TARGET`, sends the binding-resolved Frontier
+`TargetNextRouteSystem` control once, and waits for a newer Status snapshot to
+report the same unique next-hop name and SystemAddress before any flight
+command. If five bounded Status observations remain without Destination, the
+Action delegates `plot-route-to-system` in its exact existing-route context
+refresh mode, requires the same route identity, sends `TargetNextRouteSystem`
+once more, and then returns to the ordinary exact Status readiness Gate. This
+handles the game reconnect state where `NavRoute.json` and the Galaxy Map route
+remain valid but the cockpit target context is not initialized. Missing,
+out-of-route, or already-final Journal position evidence
+fails explicitly; an
+existing mismatched Status destination is never overwritten by this recovery.
 A docked start delegates departure
 to `leave-station`; its supervised Auto Launch boundary remains visible. Every
 route hop delegates exactly one jump to `hyperspace-jump-to-system`. The first
@@ -34,9 +51,13 @@ newer source timestamp, then records fuel and freshness evidence. The
 caller must separately assert `routeFuelConfirmed=true` because the Status
 snapshot does not expose the fuel cost of every future route hop.
 
-After every hop, including the final hop, the workflow re-reads NavRoute and
-requires the same route identity. A missing, cleared, rewritten, malformed, or
-destination-mismatched route fails explicitly. So do unavailable Status,
+After every intermediate hop, the workflow re-reads NavRoute and requires the
+same route identity. A missing, cleared, rewritten, malformed, or
+destination-mismatched intermediate route fails explicitly. After the final
+child jump and fresh Status readiness prove the final frozen hop, the workflow
+does not re-read NavRoute: Elite Dangerous normally writes `NavRouteClear` on
+successful route completion, so that file is no longer a valid terminal Gate.
+Unavailable Status,
 insufficient fuel, a missing post-hop timestamp transition, target mismatch,
 child failure, or cancellation. All failure paths retain registered 0% throttle compensation.
 No network route, prior route, alternate binding, or hidden perception fallback

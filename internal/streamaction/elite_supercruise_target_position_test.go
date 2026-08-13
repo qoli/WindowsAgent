@@ -144,6 +144,40 @@ func TestEliteSupercruiseTargetPositionFindsIdentityCorroboratedMiddleRightSyste
 	}
 }
 
+func TestEliteSupercruiseTargetPositionFindsIdentityCorroboratedOmittedNumericPrefix(t *testing.T) {
+	regions := supercruiseTargetPositionBands(
+		targetPositionRegions("ARIETIS", 1430, 350),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("47 ARIETIS", 172, 780),
+	)
+	caller := &supercruiseTargetPositionCaller{regions: regions}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "47 Arietis"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
+		!contains(string(output), `"reason":"OCCLUDED_SHORT_NUMERIC_PREFIX_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"referenceX":1400`) || !contains(string(output), `"referenceY":362`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
+func TestEliteSupercruiseTargetPositionRejectsUncorroboratedOmittedNumericPrefix(t *testing.T) {
+	regions := supercruiseTargetPositionBands(
+		targetPositionRegions("ARIETIS", 1430, 350),
+		targetPositionRegions("", 0, 0),
+		targetPositionRegions("", 0, 0),
+	)
+	caller := &supercruiseTargetPositionCaller{regions: regions}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "47 Arietis"}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) || !contains(string(output), `"reason":"TARGET_TEXT_NOT_FOUND"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
 func TestEliteSupercruiseTargetPositionFindsUpperLeftTarget(t *testing.T) {
 	regions := supercruiseTargetPositionBands(
 		targetPositionRegions("", 0, 0),

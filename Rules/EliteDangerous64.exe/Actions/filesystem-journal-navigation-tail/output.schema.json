@@ -27,7 +27,7 @@
         "required": ["timestamp", "event", "StarSystem", "SystemAddress", "JumpType", "RemainingJumpsInRoute"],
         "properties": {
           "timestamp": {"type": ["string", "null"]},
-          "event": {"enum": ["StartJump", "FSDJump", "FSDTarget"]},
+          "event": {"enum": ["Location", "StartJump", "FSDJump", "FSDTarget"]},
           "StarSystem": {"type": ["string", "null"]},
           "SystemAddress": {"type": ["integer", "null"], "minimum": 1},
           "JumpType": {"type": ["string", "null"]},

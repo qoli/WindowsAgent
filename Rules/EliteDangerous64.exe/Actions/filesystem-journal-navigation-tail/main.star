@@ -1,4 +1,4 @@
-ALLOWED_EVENTS = ["StartJump", "FSDJump", "FSDTarget"]
+ALLOWED_EVENTS = ["Location", "StartJump", "FSDJump", "FSDTarget"]
 ALLOWED_FIELDS = ["timestamp", "event", "StarSystem", "SystemAddress", "JumpType", "RemainingJumpsInRoute"]
 
 def selected_event(item):

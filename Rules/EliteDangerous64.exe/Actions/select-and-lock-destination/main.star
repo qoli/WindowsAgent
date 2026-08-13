@@ -38,6 +38,13 @@ def normalize_text(text):
             normalized += character
     return normalized
 
+def digits(text):
+    result = ""
+    for index in range(len(text)):
+        if text[index] in "0123456789":
+            result += text[index]
+    return result
+
 def edit_distance(left, right):
     previous = []
     for index in range(len(right) + 1):
@@ -141,6 +148,12 @@ def inspect_target(raw, target_name):
         return {"state": "UNKNOWN", "locked": None, "focused": None, "direction": None, "text": exact[0]["region"]["text"], "similarity": 1.0, "margin": 0.0, "meaningfulRegionCount": meaningful, "focusFillRatio": None, "reason": "DUPLICATE_EXACT_TARGET_ROWS"}
     else:
         for candidate in candidates:
+            # A different numeric identity is a different System or Station,
+            # not an OCR-tolerable fuzzy name. This prevents, for example,
+            # 23 ARIETIS from authorizing movement toward 47 ARIETIS.
+            expected_digits = digits(expected)
+            if len(expected_digits) > 0 and digits(candidate["normalized"]) != expected_digits:
+                continue
             text_similarity = similarity(candidate["normalized"], expected)
             score = candidate["region"]["recognitionConfidence"] * text_similarity
             candidate["similarity"] = text_similarity
