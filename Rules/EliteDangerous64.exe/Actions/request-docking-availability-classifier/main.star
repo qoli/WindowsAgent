@@ -142,7 +142,11 @@ def is_bright(red, green, blue):
     return red >= 190 and green >= 110 and blue <= 100 and red >= green + 25
 
 def is_dark_fill(red, green, blue):
-    return red >= 65 and green >= 15 and green <= 90 and blue <= 45 and red >= green + 20
+    # The reviewed non-focused row from the native 4K Contacts panel is a dim
+    # red-orange fill around RGB(48, 11, 0). It is deliberately far below the
+    # focused yellow threshold above, so this only proves that the OCR-aligned
+    # action row is visibly present; it cannot prove focus.
+    return red >= 40 and green >= 7 and green <= 90 and blue <= 45 and red >= green + 20
 
 def classify_visual(region):
     context = region["leftContext"]

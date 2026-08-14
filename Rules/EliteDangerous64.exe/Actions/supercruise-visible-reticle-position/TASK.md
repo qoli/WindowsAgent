@@ -21,6 +21,12 @@ reason is
 `OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION`; no provider,
 capture, ROI, or prior-frame evidence changes silently. Exact current identity
 and layout remain parent Gates before this local shape can authorize control.
+`HUD_OVERLAY_AWARE` applies the same explicit same-frame plane order for normal
+visible-target alignment when a selected body or orbit overlay fills the
+adaptive orange planes. It is requested only by the identity-bound alignment
+controller; strict RGB still cannot rescue missing identity, invalid layout,
+or an invalid three-quarter shape. Its selection reason is
+`HUD_OVERLAY_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION`.
 
 Each plane evaluates a fixed grid of candidate centres. Its score rewards
 pixels in the reviewed 34–58-pixel annulus, penalizes pixels in the adjacent

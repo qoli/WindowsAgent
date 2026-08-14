@@ -492,6 +492,49 @@ func TestEliteFlightStatusPackageSeparatesSupercruiseAssistActive(t *testing.T) 
 	}
 }
 
+func TestEliteFlightStatusPackageAcceptsAlignWithPrefixDespiteDestinationOverlap(t *testing.T) {
+	for _, text := range []string{
+		"ALIGN WITH TARGE DEH A1152REACH",
+		"ALIGN WITH TARGE DHA102REACH",
+		"ALIGN WITH TARGEDSHATOREACH",
+		"ALIGNWITH TARGEIAUOMA REACH",
+		"ALIGN WITH TARGE DETIMATOAMA REACH",
+		"ALIGN WITH TARGE DIETIZTOBAMA REACH",
+		"ALIGN WITH TARGEBAMA REACH",
+	} {
+		result := runFlightStatusPackage(t, flightPromptRawInput(text, 0.95))
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "FSD_ALIGNMENT_REQUIRED" || status["known"] != true ||
+			decision["accepted"] != true || decision["matchStrategy"] != "ALIGN_WITH_PREFIX" {
+			t.Fatalf("text %q result = %#v", text, result)
+		}
+	}
+}
+
+func TestEliteFlightStatusPackageKeepsSpecificEscapeVectorPrefix(t *testing.T) {
+	result := runFlightStatusPackage(t, flightPromptRawInput("ALIGN WITH ESCAPE VECTOR", 0.95))
+	status := result["flightStatus"].(map[string]any)
+	decision := result["decision"].(map[string]any)
+	if status["state"] != "FSD_ESCAPE_VECTOR_REQUIRED" || decision["matchStrategy"] != "ALIGN_WITH_PREFIX" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestEliteFlightStatusPackageRejectsIncompleteOrLowConfidenceAlignPrefix(t *testing.T) {
+	for _, input := range []map[string]any{
+		flightPromptRawInput("ALIGN", 0.95),
+		flightPromptRawInput("ALIGN WITH TARGE", 0.29),
+	} {
+		result := runFlightStatusPackage(t, input)
+		status := result["flightStatus"].(map[string]any)
+		decision := result["decision"].(map[string]any)
+		if status["state"] != "UNKNOWN" || decision["accepted"] != false {
+			t.Fatalf("input %#v result = %#v", input, result)
+		}
+	}
+}
+
 func TestEliteFlightStatusPackageRecognizesSupercruiseAssistLineOfSightRequired(t *testing.T) {
 	for _, text := range []string{
 		"MOVE TO OBTAIN LINE OF SIGHT TO TARGET",
@@ -1553,6 +1596,36 @@ func TestEliteRequestDockingAvailabilityUsesDynamicOCRBoxAndSameFrameFocusPixels
 	}
 }
 
+func TestEliteRequestDockingAvailabilityAcceptsReviewedDimAvailableFill(t *testing.T) {
+	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	regions := requestDockingRegionsInput("REQUEST DOCKING", .86, .99, 0, 0)
+	for _, rawRegion := range regions["regions"].([]any) {
+		region := rawRegion.(map[string]any)
+		if region["text"] != "REQUEST DOCKING" {
+			continue
+		}
+		pixels := region["leftContext"].(map[string]any)["pixels"].([]any)
+		for index := range pixels {
+			pixels[index] = uint32(0x300B00)
+		}
+	}
+	runner, _ := New(&fixtureBroker{})
+	output, err := runner.Run(context.Background(), pkg, map[string]any{
+		"contacts": map[string]any{"activeTab": map[string]any{"state": "CONTACTS"}},
+		"regions":  regions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(output), `"state":"AVAILABLE"`) ||
+		!strings.Contains(string(output), `"reason":"REQUEST_DOCKING_VISIBLE"`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
 func TestEliteRequestDockingAvailabilityAlignsActionZoneToShiftedFactionAnchor(t *testing.T) {
 	pkg, err := scriptpackage.Load(eliteActionPackageRoot(t, "request-docking-availability-classifier"), "elite-dangerous/request-docking-availability-classifier")
 	if err != nil {
@@ -2002,13 +2075,15 @@ func TestEliteSupercruiseVisibleReticleOcclusionAwareSelectsStrictRGBOnlyAfterAd
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name       string
-		inputs     map[string]any
-		wantState  string
-		wantPolicy string
+		name          string
+		inputs        map[string]any
+		wantState     string
+		wantPolicy    string
+		wantSelection string
 	}{
 		{name: "default adaptive policy remains fail closed", inputs: map[string]any{"hintX": 960, "hintY": 540}, wantState: "UNKNOWN", wantPolicy: "ADAPTIVE_ORANGE"},
-		{name: "explicit occlusion policy selects strict plane", inputs: map[string]any{"hintX": 960, "hintY": 540, "evidencePolicy": "OCCLUSION_AWARE"}, wantState: "DETECTED", wantPolicy: "OCCLUSION_AWARE"},
+		{name: "explicit occlusion policy selects strict plane", inputs: map[string]any{"hintX": 960, "hintY": 540, "evidencePolicy": "OCCLUSION_AWARE"}, wantState: "DETECTED", wantPolicy: "OCCLUSION_AWARE", wantSelection: "OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION"},
+		{name: "explicit HUD overlay policy selects strict plane", inputs: map[string]any{"hintX": 960, "hintY": 540, "evidencePolicy": "HUD_OVERLAY_AWARE"}, wantState: "DETECTED", wantPolicy: "HUD_OVERLAY_AWARE", wantSelection: "HUD_OVERLAY_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runner, err := New(&compassBroker{pixels: pixels})
@@ -2029,7 +2104,7 @@ func TestEliteSupercruiseVisibleReticleOcclusionAwareSelectsStrictRGBOnlyAfterAd
 				t.Fatalf("target=%#v evidence=%#v", target, evidence)
 			}
 			if test.wantState == "DETECTED" && (target["evidencePlane"] != "STRICT_RGB" ||
-				evidence["selectionReason"] != "OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION") {
+				evidence["selectionReason"] != test.wantSelection) {
 				t.Fatalf("target=%#v evidence=%#v", target, evidence)
 			}
 		})

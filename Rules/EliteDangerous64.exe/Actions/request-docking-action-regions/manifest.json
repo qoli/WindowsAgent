@@ -6,6 +6,6 @@
   "referenceRegion": {"x": 700, "y": 300, "w": 650, "h": 400},
   "sampling": "reference",
   "maxPixels": 260000,
-  "leftContextWidth": 32,
+  "leftContextWidth": 12,
   "verticalPadding": 8
 }

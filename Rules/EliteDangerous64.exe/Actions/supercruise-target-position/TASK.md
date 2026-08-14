@@ -17,7 +17,9 @@ band, then lower-wide band, followed by the normal independent lower-left
 identity observation. It does not silently expand to the other five bands.
 This bounded ordering prevents a residual closing target from changing scale
 for the duration of seven sequential OCR calls. The caller also declares the
-reticle evidence policy passed unchanged to every local CV candidate.
+reticle evidence policy passed unchanged to every local CV candidate. This
+includes the identity-bound `HUD_OVERLAY_AWARE` policy used by visible-target
+alignment when a body or orbit overlay fills the adaptive orange planes.
 The central band covers reference `y=80..400`: live Supercruise evidence placed
 an already Compass-aligned planetary marker around `y=185`, above the retired
 `y=240..400` strip. Its 800 by 320 shape retains the same 256k reference-pixel

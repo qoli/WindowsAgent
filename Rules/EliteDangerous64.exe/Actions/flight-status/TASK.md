@@ -9,7 +9,9 @@ This is the public semantic boundary. Callers pass an empty input object and
 receive one fail-closed status plus the selected raw text, normalized text, OCR
 confidence, semantic decision, executed route summaries, Gate evidence,
 transitions, selected route, terminal reason, model/provider provenance, and
-timing. Callers must not manually reconstruct the OCR cascade. OCR, schema,
+timing. The semantic decision also reports whether catalog similarity or the
+explicit `ALIGN WITH` prefix rule accepted the sample. Callers must not
+manually reconstruct the OCR cascade. OCR, schema,
 process, capture, preprocessing, or classifier failures remain terminal; only
 ambiguous domain evidence becomes `UNKNOWN`.
 

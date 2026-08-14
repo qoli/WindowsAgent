@@ -43,6 +43,14 @@ selected while the destination is not aligned. Owning workflows must interpret
 this current-frame target-alignment Gate in their own phase and must verify the
 prompt disappears after correction; this finite classifier performs neither
 alignment nor multi-frame disappearance confirmation.
+The normalized `ALIGN WITH` prefix is itself accepted as explicit
+`FSD_ALIGNMENT_REQUIRED` evidence when OCR confidence is at least `0.30`.
+This handles live HUD overlap where the destination name corrupts the suffix
+while preserving the stable prompt prefix. The complete `ALIGN WITH ESCAPE
+VECTOR` prefix remains the more specific `FSD_ESCAPE_VECTOR_REQUIRED` state.
+Text that contains only `ALIGN`, lacks the `WITH` token, or falls below the OCR
+confidence threshold remains `UNKNOWN`; this is a primary classifier rule, not
+a substitute OCR source or hidden fallback.
 Missing, unrelated, ambiguous, or
 low-confidence content remains `UNKNOWN`; never choose a status merely because
 it is the closest catalog phrase.

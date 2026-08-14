@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 9,
+  "version": 10,
   "title": "Read Elite Dangerous flight status",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

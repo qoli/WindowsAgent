@@ -343,9 +343,9 @@ def main(ctx):
             adaptive_viable.append([selection_score, plane])
     viable = adaptive_viable
     selection_reason = "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY"
-    if len(viable) == 0 and evidence_policy == "OCCLUSION_AWARE" and strict_viable != None:
+    if len(viable) == 0 and evidence_policy in ["OCCLUSION_AWARE", "HUD_OVERLAY_AWARE"] and strict_viable != None:
         viable = [strict_viable]
-        selection_reason = "OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION"
+        selection_reason = evidence_policy + "_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION"
     if len(viable) == 0:
         return unknown("NO_EVIDENCE_PLANE_CONFIRMED_RETICLE", planes, sample, roi_x, roi_y, evidence_policy)
     selected = viable[0]

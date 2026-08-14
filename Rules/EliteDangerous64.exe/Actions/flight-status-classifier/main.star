@@ -2,6 +2,8 @@
 MIN_STATUS_CONFIDENCE = 0.30
 MIN_STATUS_MARGIN = 0.10
 MIN_TEXT_SIMILARITY = 0.60
+ALIGN_WITH_PREFIX = "ALIGNWITH"
+ALIGN_WITH_ESCAPE_VECTOR_PREFIX = "ALIGNWITHESCAPEVECTOR"
 
 STATUS_RULES = [
     {
@@ -133,6 +135,34 @@ def empty_decision():
         "textSimilarity": 0.0,
         "runnerUpState": None,
         "runnerUpConfidence": 0.0,
+        "matchStrategy": "CATALOG_SIMILARITY",
+    }
+
+def alignment_prefix_decision(normalized_text, ocr_confidence):
+    if len(normalized_text) < len(ALIGN_WITH_PREFIX) or normalized_text[:len(ALIGN_WITH_PREFIX)] != ALIGN_WITH_PREFIX:
+        return None
+    state = "FSD_ALIGNMENT_REQUIRED"
+    alias = "ALIGN WITH ..."
+    if len(normalized_text) >= len(ALIGN_WITH_ESCAPE_VECTOR_PREFIX) and normalized_text[:len(ALIGN_WITH_ESCAPE_VECTOR_PREFIX)] == ALIGN_WITH_ESCAPE_VECTOR_PREFIX:
+        state = "FSD_ESCAPE_VECTOR_REQUIRED"
+        alias = "ALIGN WITH ESCAPE VECTOR"
+    accepted = ocr_confidence >= MIN_STATUS_CONFIDENCE
+    return {
+        "state": state if accepted else "UNKNOWN",
+        "decision": {
+            "accepted": accepted,
+            "confidence": ocr_confidence,
+            "threshold": MIN_STATUS_CONFIDENCE,
+            "margin": ocr_confidence,
+            "marginThreshold": MIN_STATUS_MARGIN,
+            "similarityThreshold": MIN_TEXT_SIMILARITY,
+            "candidateState": state,
+            "candidateAlias": alias,
+            "textSimilarity": 1.0,
+            "runnerUpState": None,
+            "runnerUpConfidence": 0.0,
+            "matchStrategy": "ALIGN_WITH_PREFIX",
+        },
     }
 
 def main(ctx):
@@ -141,24 +171,30 @@ def main(ctx):
     decision = empty_decision()
     state = "UNKNOWN"
     if len(normalized_text) > 0 and raw["confidence"] > 0.0:
-        best, runner_up = classify(normalized_text, raw["confidence"])
-        margin = best["confidence"] - runner_up["confidence"]
-        accepted = best["confidence"] >= MIN_STATUS_CONFIDENCE and best["textSimilarity"] >= MIN_TEXT_SIMILARITY and margin >= MIN_STATUS_MARGIN
-        if accepted:
-            state = best["state"]
-        decision = {
-            "accepted": accepted,
-            "confidence": best["confidence"],
-            "threshold": MIN_STATUS_CONFIDENCE,
-            "margin": margin,
-            "marginThreshold": MIN_STATUS_MARGIN,
-            "similarityThreshold": MIN_TEXT_SIMILARITY,
-            "candidateState": best["state"],
-            "candidateAlias": best["alias"],
-            "textSimilarity": best["textSimilarity"],
-            "runnerUpState": runner_up["state"],
-            "runnerUpConfidence": runner_up["confidence"],
-        }
+        prefix = alignment_prefix_decision(normalized_text, raw["confidence"])
+        if prefix != None:
+            state = prefix["state"]
+            decision = prefix["decision"]
+        else:
+            best, runner_up = classify(normalized_text, raw["confidence"])
+            margin = best["confidence"] - runner_up["confidence"]
+            accepted = best["confidence"] >= MIN_STATUS_CONFIDENCE and best["textSimilarity"] >= MIN_TEXT_SIMILARITY and margin >= MIN_STATUS_MARGIN
+            if accepted:
+                state = best["state"]
+            decision = {
+                "accepted": accepted,
+                "confidence": best["confidence"],
+                "threshold": MIN_STATUS_CONFIDENCE,
+                "margin": margin,
+                "marginThreshold": MIN_STATUS_MARGIN,
+                "similarityThreshold": MIN_TEXT_SIMILARITY,
+                "candidateState": best["state"],
+                "candidateAlias": best["alias"],
+                "textSimilarity": best["textSimilarity"],
+                "runnerUpState": runner_up["state"],
+                "runnerUpConfidence": runner_up["confidence"],
+                "matchStrategy": "CATALOG_SIMILARITY",
+            }
     return {
         "schemaVersion": 1,
 		"routeDecision": {

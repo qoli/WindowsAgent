@@ -24,7 +24,7 @@ func (c *flightStatusCompositeCaller) Call(_ context.Context, id string, inputs 
 		  "schemaVersion":2,"text":"THROTTLE UP TO ENGAGE","confidence":0.99,"decoding":{},"evidence":{},"model":{},"timing":{},
 		  "cascade":{"policy":"EXPLICIT_PERFORMANCE_FIRST","selectedRoute":"REFERENCE_RAW_RGB","terminalReason":"primary-accepted","attemptCount":1,"gate":null,"transitions":[],
 		    "attempts":[{"routeId":"REFERENCE_RAW_RGB","text":"THROTTLE UP TO ENGAGE","confidence":0.99,"timing":{},"decision":{"routeDecision":{"accepted":true,"state":"FSD_THROTTLE_UP_REQUIRED"}}}],
-		    "selectedDecision":{"schemaVersion":1,"routeDecision":{"accepted":true,"state":"FSD_THROTTLE_UP_REQUIRED"},"flightStatus":{"state":"FSD_THROTTLE_UP_REQUIRED","known":true},"source":{"text":"THROTTLE UP TO ENGAGE","normalizedText":"THROTTLEUPTOENGAGE","ocrConfidence":0.99},"decision":{"accepted":true,"confidence":0.99,"threshold":0.3,"margin":0.5,"marginThreshold":0.1,"similarityThreshold":0.6,"candidateState":"FSD_THROTTLE_UP_REQUIRED","candidateAlias":"THROTTLE UP TO ENGAGE","textSimilarity":1.0,"runnerUpState":"FSD_CHARGING","runnerUpConfidence":0.49}}
+		    "selectedDecision":{"schemaVersion":1,"routeDecision":{"accepted":true,"state":"FSD_THROTTLE_UP_REQUIRED"},"flightStatus":{"state":"FSD_THROTTLE_UP_REQUIRED","known":true},"source":{"text":"THROTTLE UP TO ENGAGE","normalizedText":"THROTTLEUPTOENGAGE","ocrConfidence":0.99},"decision":{"accepted":true,"confidence":0.99,"threshold":0.3,"margin":0.5,"marginThreshold":0.1,"similarityThreshold":0.6,"candidateState":"FSD_THROTTLE_UP_REQUIRED","candidateAlias":"THROTTLE UP TO ENGAGE","textSimilarity":1.0,"runnerUpState":"FSD_CHARGING","runnerUpConfidence":0.49,"matchStrategy":"CATALOG_SIMILARITY"}}
 		  }
 		}`), nil
 	default:

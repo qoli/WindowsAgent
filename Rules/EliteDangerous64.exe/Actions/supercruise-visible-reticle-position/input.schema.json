@@ -6,6 +6,6 @@
   "properties": {
     "hintX": {"type": "integer", "minimum": 70, "maximum": 1850},
     "hintY": {"type": "integer", "minimum": 70, "maximum": 1010},
-    "evidencePolicy": {"enum": ["ADAPTIVE_ORANGE", "OCCLUSION_AWARE"]}
+    "evidencePolicy": {"enum": ["ADAPTIVE_ORANGE", "OCCLUSION_AWARE", "HUD_OVERLAY_AWARE"]}
   }
 }

@@ -21,7 +21,9 @@ The focused-fill threshold is calibrated against reviewed settled 4K/HDR
 samples whose dynamic left-context bright ratios were `0.0892` and `0.0934`.
 Ratios below `0.08` do not prove focus; the measured bright and dark ratios
 remain in the output so live behavior can be audited without relying on the
-threshold alone.
+threshold alone. The non-focused row uses a separate dim red-orange predicate,
+calibrated from the reviewed native sample around RGB `(48, 11, 0)`; this can
+prove `AVAILABLE`, but never `FOCUSED`.
 
 Missing or ambiguous `FACTION` evidence returns `UNKNOWN`; no fixed action-row
 coordinate is substituted. Weak or contradictory text and color evidence

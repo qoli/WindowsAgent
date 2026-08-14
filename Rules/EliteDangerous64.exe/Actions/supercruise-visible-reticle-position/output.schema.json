@@ -36,7 +36,7 @@
         "physicalRegion": {"type": "object"},
         "capturedAt": {"type": "string"},
         "selectedPlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
-        "requestedPolicy": {"enum": ["ADAPTIVE_ORANGE", "OCCLUSION_AWARE"]},
+        "requestedPolicy": {"enum": ["ADAPTIVE_ORANGE", "OCCLUSION_AWARE", "HUD_OVERLAY_AWARE"]},
         "selectionReason": {"type": "string"},
         "planes": {
           "type": "array",
