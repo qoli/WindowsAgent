@@ -57,6 +57,7 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 			visiblePosition(8, 6, 10),
 			visiblePosition(7, 5, 8.6),
 			visiblePosition(6, 4, 7.3),
+			visiblePosition(5, 3, 5.8),
 		},
 	}
 	reporter := &fixtureReporter{}
@@ -70,6 +71,7 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 		"elite-dangerous/supercruise-target-position",
 		"elite-dangerous/supercruise-visible-reticle-position",
 		"elite-dangerous/supercruise-visible-reticle-position",
+		"elite-dangerous/supercruise-visible-reticle-position",
 	}
 	if len(caller.positionActions) != len(want) {
 		t.Fatalf("position Actions=%v want=%v", caller.positionActions, want)
@@ -81,7 +83,7 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 	}
 	events := joinEventPhases(reporter.payloads)
 	if !contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) ||
-		strings.Count(events, `"observationMode":"RETICLE_TRACKING"`) != 3 {
+		strings.Count(events, `"observationMode":"RETICLE_TRACKING"`) != 4 {
 		t.Fatalf("events=%s", events)
 	}
 }
@@ -131,6 +133,7 @@ func TestEliteAlignVisibleTargetTrackingLossReacquiresIdentityWithoutSteering(t 
 			visiblePosition(8, 6, 10),
 			visiblePosition(7, 5, 8.6),
 			visiblePosition(6, 4, 7.3),
+			visiblePosition(5, 3, 5.8),
 		},
 	}
 	reporter := &fixtureReporter{}
@@ -140,7 +143,7 @@ func TestEliteAlignVisibleTargetTrackingLossReacquiresIdentityWithoutSteering(t 
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if len(caller.controls) != 1 {
+	if len(caller.controls) != 0 {
 		t.Fatalf("tracking loss authorized control: %v", caller.controls)
 	}
 	events := joinEventPhases(reporter.payloads)
@@ -225,7 +228,7 @@ func TestEliteAlignVisibleTargetSkipsOneTransientWGCRegionCaptureFailure(t *test
 	caller := &alignVisibleTargetCaller{
 		heats:     []json.RawMessage{visibleHeat("KNOWN", 23)},
 		posErrors: []error{transientWGCRegionError()},
-		positions: []json.RawMessage{visiblePosition(8, 6, 10), visiblePosition(8, 6, 10), visiblePosition(8, 6, 10)},
+		positions: []json.RawMessage{visiblePosition(8, 6, 10), visiblePosition(8, 6, 10), visiblePosition(8, 6, 10), visiblePosition(8, 6, 10)},
 	}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
@@ -264,6 +267,7 @@ func TestEliteAlignVisibleTargetUsesRaisedMidFineDestinationPulse(t *testing.T) 
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			visiblePosition(0, -30, 30),
+			visiblePosition(0, -30, 30),
 			visiblePosition(0, -10, 10),
 			visiblePosition(0, -9, 9),
 			visiblePosition(0, -8, 8),
@@ -281,10 +285,44 @@ func TestEliteAlignVisibleTargetUsesRaisedMidFineDestinationPulse(t *testing.T) 
 	}
 }
 
+func TestEliteAlignVisibleTargetConfirmsFreshTrackAndCapsCoarsePulseToTrackerDomain(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 24)},
+		positions: []json.RawMessage{
+			visiblePosition(-54, -173, 181.2), // identity hint only
+			visiblePosition(-53, -171, 179.0), // fresh local track authorizes control
+			visiblePosition(-40, -140, 145.6),
+			visiblePosition(8, 6, 10),
+			visiblePosition(7, 5, 8.6),
+			visiblePosition(6, 4, 7.3),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "OBAMA REACH", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) < 1 || caller.controls[0] != "PITCH_UP" {
+		t.Fatalf("controls=%v", caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `IDENTITY_ACQUIRED_AWAITING_FRESH_RETICLE_TRACK`) ||
+		!contains(events, `"observationMode":"RETICLE_TRACKING"`) ||
+		!contains(events, `"commandHoldMs":120`) {
+		t.Fatalf("events=%s", events)
+	}
+	if len(caller.positionActions) < 2 || caller.positionActions[0] != "elite-dangerous/supercruise-target-position" || caller.positionActions[1] != "elite-dangerous/supercruise-visible-reticle-position" {
+		t.Fatalf("position actions=%v", caller.positionActions)
+	}
+}
+
 func TestEliteAlignVisibleTargetUsesRaisedNearDestinationYawPulse(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
+			visiblePosition(15, 6, 16.2),
 			visiblePosition(15, 6, 16.2),
 			visiblePosition(8, 6, 10),
 			visiblePosition(8, 6, 10),
@@ -308,6 +346,7 @@ func TestEliteAlignVisibleTargetObservesDestinationBoundaryJitterWithoutSteering
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
+			visiblePosition(15, 6, 16.2),
 			visiblePosition(15, 6, 16.2),
 			visiblePosition(8, 6, 10),
 			visiblePosition(11, 7, 13.1),
@@ -337,6 +376,7 @@ func TestEliteAlignVisibleTargetAllowsTwoBoundarySamplesOnlyAfterEnteringGate(t 
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			visiblePosition(15, 6, 16.2),
+			visiblePosition(15, 6, 16.2),
 			visiblePosition(8, 6, 10),
 			visiblePosition(11, 7, 13.1),
 			visiblePosition(10, 8, 12.8),
@@ -364,6 +404,7 @@ func TestEliteAlignVisibleTargetDoesNotTolerateBoundaryBeforeEnteringGate(t *tes
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
+			visiblePosition(11, 7, 13.1),
 			visiblePosition(11, 7, 13.1),
 			visiblePosition(10, 8, 12.8),
 			visiblePosition(8, 6, 10),
@@ -397,6 +438,7 @@ func TestEliteAlignVisibleTargetRecoversAfterFiveUnknownDestinationHeatSamples(t
 			visibleHeat("KNOWN", 23),
 		},
 		positions: []json.RawMessage{
+			visiblePosition(8, 6, 10),
 			visiblePosition(8, 6, 10),
 			visiblePosition(8, 6, 10),
 			visiblePosition(8, 6, 10),

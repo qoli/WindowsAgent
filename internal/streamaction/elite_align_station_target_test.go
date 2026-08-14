@@ -496,13 +496,14 @@ func TestEliteAlignStationTargetVisibleHandoffStopsCompassCorrectionBeforeVisibl
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", 3, -2, 3.606, true),
 		alignObservation("SOLID", 4, -3, 5, false),
+		alignObservation("SOLID", 3, -3, 4.243, false),
 	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
 			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
 		}, caller, &fixtureReporter{},
 	)
-	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"alignmentPurpose":"VISIBLE_HANDOFF"`) || !contains(string(output), `"stableConfirmations":2`) {
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"alignmentPurpose":"VISIBLE_HANDOFF"`) || !contains(string(output), `"stableConfirmations":3`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 	if len(caller.controls) != 0 || len(caller.holdOps) != 0 {
@@ -514,14 +515,16 @@ func TestEliteAlignStationTargetVisibleHandoffRejectsFormerNineteenPixelCompleti
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
 		alignObservation("SOLID", -19, -2, 19.105, false),
 		alignObservation("SOLID", -3, -2, 3.606, true),
-		alignObservation("SOLID", -4, -2, 4.472, false),
+		alignObservation("SOLID", -3, -2, 3.606, true),
+		alignObservation("SOLID", -3, -2, 3.606, true),
+		alignObservation("SOLID", -3, -1, 3.162, true),
 	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
 			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
 		}, caller, &fixtureReporter{},
 	)
-	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":3`) {
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"sampleCount":5`) || !contains(string(output), `"stableConfirmations":3`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 	if strings.Join(caller.controls, ",") != "YAW_LEFT" || len(caller.holds) != 1 || caller.holds[0] != 300 {
@@ -608,6 +611,8 @@ func TestEliteAlignStationTargetNavBeaconOverridesStaticMotionAndReportsIt(t *te
 		alignObservation("SOLID", 4, 4, 5.657, false),
 		alignObservation("SOLID", 2, 1, 2.236, true),
 		alignObservation("SOLID", 1, 1, 1.414, true),
+		alignObservation("SOLID", 2, 1, 2.236, true),
+		alignObservation("SOLID", 1, 1, 1.414, true),
 	}}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
@@ -633,7 +638,7 @@ func TestEliteAlignStationTargetNavBeaconOverridesStaticMotionAndReportsIt(t *te
 			}
 		}
 	}
-	if strings.Join(pulseHolds, ",") != "40,40,80" || !contains(string(output), `"sampleCount":6`) || !contains(string(output), `"commandCount":3`) {
+	if strings.Join(pulseHolds, ",") != "40,40,80" || !contains(string(output), `"sampleCount":8`) || !contains(string(output), `"commandCount":3`) || !contains(string(output), `"stableConfirmations":3`) {
 		t.Fatalf("NAV BEACON must reject the 5.657px hysteresis handoff and use one moving-profile correction: output=%s payloads=%v", output, reporter.payloads)
 	}
 	foundOverride := false
@@ -1070,6 +1075,39 @@ func TestEliteAlignStationTargetDoesNotBrakeSupercruiseRecoveryCenterEntry(t *te
 	}
 }
 
+func TestEliteAlignStationTargetVisibleHandoffPreservesOuterBandRecoveryPulse(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", -3, -26, 26.173, false),
+		alignObservation("SOLID", -3, -26, 26.173, false),
+		alignObservation("SOLID", -3, -26, 26.173, false),
+		alignObservation("SOLID", -3, -2, 3.606, true),
+		alignObservation("SOLID", -3, -2, 3.606, true),
+		alignObservation("SOLID", -2, -2, 2.828, true),
+		alignObservation("SOLID", -1, -2, 2.236, true),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"targetName": "OBAMA REACH", "mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "VISIBLE_HANDOFF", "stopBeforeAlign": false, "controlProfile": "SUPERCRUISE_ASSIST",
+		}, caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"stableConfirmations":3`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	want := []int{160, 160, 240}
+	if len(caller.holds) != len(want) {
+		t.Fatalf("holds=%v", caller.holds)
+	}
+	for index := range want {
+		if caller.holds[index] != want[index] {
+			t.Fatalf("holds=%v want=%v", caller.holds, want)
+		}
+	}
+	if !contains(joinEventPhases(reporter.payloads), `VISIBLE_HANDOFF_WAITING_FOR_PASSIVE_SETTLE`) {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
 func TestEliteAlignStationTargetToleratesTransientMissingMarkerAfterDetection(t *testing.T) {
 	missing := json.RawMessage(`{"schemaVersion":3,"target":{"detected":false,"presentation":"UNKNOWN","hemisphere":"UNKNOWN","offsetX":null,"offsetY":null,"centerDistancePixels":null,"centerZone":{"inside":null}}}`)
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
@@ -1300,6 +1338,62 @@ func TestEliteAlignStationTargetOnePixelPitchJitterDoesNotMaskInputInitializatio
 		!contains(lastPayload, `"controlProgressPixels":1`) ||
 		!contains(lastPayload, `"reason":"ED_PITCH_INPUT_CONTEXT_NOT_READY"`) {
 		t.Fatalf("last payload=%s", lastPayload)
+	}
+}
+
+func TestEliteAlignStationTargetDoesNotRegressVerifiedPitchContextAfterLocalStall(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+		alignObservation("SOLID", 0, 0, 0, true),
+	}}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s", output)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if contains(events, `ED_PITCH_INPUT_CONTEXT_NOT_READY`) || !contains(events, `"noMovementCount":6`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignStationTargetReportsStallAfterVerifiedPitchContext(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, -20, 20, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+		alignObservation("SOLID", 0, -17, 17, false),
+	}}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{"targetMotion": "STATIC"}, caller, reporter,
+	)
+	if err == nil || !contains(err.Error(), "stopped producing measurable Compass movement") {
+		t.Fatalf("error=%v", err)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if contains(events, `ED_PITCH_INPUT_CONTEXT_NOT_READY`) || !contains(events, `"reason":"ATTITUDE_CONTROL_NO_PROGRESS"`) || !contains(events, `"noMovementCount":8`) {
+		t.Fatalf("events=%s", events)
 	}
 }
 

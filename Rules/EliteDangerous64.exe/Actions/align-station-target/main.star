@@ -4,6 +4,7 @@ MAX_SLEEP_STEP_MS = 250
 MAX_COMMANDS = 120
 MAX_SAMPLES = 240
 STABLE_CENTER_CONFIRMATIONS = 3
+VISIBLE_HANDOFF_SETTLE_CONFIRMATIONS = 3
 ALIGN_CENTER_RADIUS_PIXELS = 4.0
 NORMAL_SPACE_STATIC_ALIGN_CENTER_RADIUS_PIXELS = 16.0
 NORMAL_SPACE_STATIC_ALIGN_HYSTERESIS_PIXELS = 4.0
@@ -52,6 +53,7 @@ SUPERCRUISE_RECOVERY_HOLD_MS = 240
 TRACK_TRANSITION_SETTLE_SAMPLES = 1
 MIN_CONTROL_PROGRESS_PIXELS = 2
 NO_MOVEMENT_LIMIT = 4
+VERIFIED_CONTEXT_STALL_LIMIT = 8
 AWAY_TREND_LIMIT = 5
 AMBIGUOUS_PRESENTATION_LIMIT = 12
 TRANSIENT_MISSING_LIMIT = 3
@@ -357,6 +359,7 @@ def main(ctx):
         # Gate for moving contacts such as NAV BEACON as well as stations.
         alignment_radius = SUPERCRUISE_VISIBLE_HANDOFF_RADIUS_PIXELS
         alignment_hysteresis = 0.0 if target_name == "NAV BEACON" else SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS
+        stable_confirmations_required = VISIBLE_HANDOFF_SETTLE_CONFIRMATIONS
     if alignment_purpose == "HYPERSPACE_CHARGE":
         # Exact reticle centering belongs to the required align-visible-target
         # child, but Compass must first place the target inside that child's
@@ -423,6 +426,7 @@ def main(ctx):
     commanded_hold_ms = None
     no_movement_count = 0
     pitch_no_movement_count = 0
+    pitch_response_observed = False
     away_trend_count = 0
     active_lease_id = None
     active_lease_control = None
@@ -496,6 +500,7 @@ def main(ctx):
         final_observation = observation
         observed_movement = None
         control_progress = None
+        pitch_progress = None
         distance_delta = None
         if commanded_target != None and target["detected"]:
             observed_movement = max(
@@ -503,18 +508,22 @@ def main(ctx):
                 abs(target["offsetY"] - commanded_target["offsetY"]),
             )
             control_progress = directional_control_progress(commanded_target, target, commanded_control)
+            if "PITCH" in commanded_control:
+                pitch_progress = axis_progress(commanded_target, target, "PITCH")
             if control_progress == None or abs(control_progress) < MIN_CONTROL_PROGRESS_PIXELS:
                 no_movement_count += 1
                 if mode == "TRACK" and no_movement_count > 2:
                     no_movement_count = 2
-                if mode == "ALIGN" and no_movement_count > NO_MOVEMENT_LIMIT:
-                    no_movement_count = NO_MOVEMENT_LIMIT
-                if "PITCH" in commanded_control:
-                    pitch_no_movement_count += 1
+                if mode == "ALIGN" and no_movement_count > VERIFIED_CONTEXT_STALL_LIMIT:
+                    no_movement_count = VERIFIED_CONTEXT_STALL_LIMIT
             else:
                 no_movement_count = 0
-                if "PITCH" in commanded_control:
+            if "PITCH" in commanded_control:
+                if pitch_progress == None or abs(pitch_progress) < MIN_CONTROL_PROGRESS_PIXELS:
+                    pitch_no_movement_count += 1
+                else:
                     pitch_no_movement_count = 0
+                    pitch_response_observed = True
             distance_delta = target["centerDistancePixels"] - commanded_target["centerDistancePixels"]
             if mode == "ALIGN" and commanded_target["presentation"] == "SOLID" and target["presentation"] == "SOLID":
                 if distance_delta >= 1:
@@ -643,7 +652,7 @@ def main(ctx):
         # dedicated bounded away-trend Gate classify it instead of reporting
         # the controller as inactive one sample too early.
         if mode == "ALIGN" and target_motion == "STATIC" and no_movement_count >= NO_MOVEMENT_LIMIT and away_trend_count == 0:
-            if pitch_no_movement_count >= NO_MOVEMENT_LIMIT:
+            if pitch_no_movement_count >= NO_MOVEMENT_LIMIT and not pitch_response_observed:
                 information = {
                     "code": "ED_PITCH_INPUT_CONTEXT_NOT_READY",
                     "message": "Elite Dangerous accepted binding-resolved Pitch injections but produced no Compass movement. This matches the reproduced ED startup state where Pitch remains inactive until the configured controller is powered on or reconnected.",
@@ -652,9 +661,10 @@ def main(ctx):
                 release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
                 emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ED_PITCH_INPUT_CONTEXT_NOT_READY", information=information, observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
                 fail("ED_PITCH_INPUT_CONTEXT_NOT_READY: repeated Pitch input produced no Compass movement; power on or reconnect the configured controller, then retry without restarting Elite Dangerous")
-            release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
-            emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
-            fail("Ship attitude control produced no measurable Compass movement")
+            if no_movement_count >= VERIFIED_CONTEXT_STALL_LIMIT:
+                release_lease(active_lease_id, active_lease_control, "OBSERVING", sample, command_count, target, 0, "SUSTAINED_CONTROL_RELEASED_BEFORE_FAILURE", sample_started_ms, sample_duration_ms, sample_interval_ms)
+                emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
+                fail("Ship attitude control stopped producing measurable Compass movement after earlier verified response")
         active_alignment_radius = alignment_radius + alignment_hysteresis if stable_confirmations > 0 else alignment_radius
         alignment_centered = is_alignment_centered(control_target, active_alignment_radius)
         phase = "TURNING_TO_FRONT"
@@ -726,6 +736,24 @@ def main(ctx):
                 max_consecutive_center = stable_confirmations
         else:
             stable_confirmations = 0
+
+        if alignment_purpose == "VISIBLE_HANDOFF" and alignment_centered and commanded_target != None:
+            # The first centered Compass frame can still be the measured
+            # response to the preceding pulse. Live Evidence showed that a
+            # two-frame handoff completed while the visible focus frame kept
+            # substantial residual angular velocity. Treat this frame only as
+            # center contact, clear the command-response state, and require
+            # three subsequent no-input center observations before handoff.
+            commanded_target = None
+            commanded_control = None
+            commanded_hold_ms = None
+            no_movement_count = 0
+            pitch_no_movement_count = 0
+            away_trend_count = 0
+            stable_confirmations = 0
+            emit_update("VERIFYING_CENTER", sample, command_count, target, 0, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="VISIBLE_HANDOFF_WAITING_FOR_PASSIVE_SETTLE")
+            wait_for_sample_cadence(sample_started_ms, sample_cadence_ms)
+            continue
 
         should_brake_center_entry = (
             mode == "ALIGN" and
@@ -969,6 +997,13 @@ def main(ctx):
                     supercruise_profile and
                     control_target["presentation"] == "SOLID" and
                     target["centerDistancePixels"] <= SUPERCRUISE_TRACK_NEAR_DISTANCE_PIXELS and
+                    (
+                        mode == "TRACK" or
+                        no_movement_count < 2 or
+                        target["centerDistancePixels"] <= (
+                            HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS if alignment_purpose == "HYPERSPACE_CHARGE" else (SUPERCRUISE_VISIBLE_HANDOFF_ULTRA_FINE_DISTANCE_PIXELS if alignment_purpose == "VISIBLE_HANDOFF" else SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_DISTANCE_PIXELS)
+                        )
+                    ) and
                     pulse != None
                 ):
                     static_ultra_fine_pulse = (

@@ -44,7 +44,7 @@
         "sampleIntervalMs": {"type": ["integer", "null"], "minimum": 0},
         "observedMovementPixels": {"type": ["number", "null"], "minimum": 0, "maximum": 96},
         "controlProgressPixels": {"type": ["number", "null"], "minimum": -96, "maximum": 96},
-        "noMovementCount": {"type": "integer", "minimum": 0, "maximum": 4},
+        "noMovementCount": {"type": "integer", "minimum": 0, "maximum": 8},
         "distanceDeltaPixels": {"type": ["number", "null"], "minimum": -68, "maximum": 68},
         "awayTrendCount": {"type": "integer", "minimum": 0, "maximum": 5},
         "reason": {"type": ["string", "null"], "maxLength": 256},

@@ -7,7 +7,9 @@ identity and a confirmed reticle centre while no attitude command is active.
 It then feeds each current reticle centre into
 `elite-dangerous/supercruise-visible-reticle-position` as the next bounded local
 CV hint. Only that fresh tracked centre can authorize the next dominant-axis
-Pitch or Yaw pulse. Identity is reacquired after 32 tracked samples,
+Pitch or Yaw pulse. The OCR identity result only establishes identity and a
+hint; it never directly authorizes steering. The Action immediately requires a
+current-frame local CV confirmation before issuing a pulse. Identity is reacquired after 32 tracked samples,
 whenever tracking returns `UNKNOWN`, or whenever the centre leaves the local
 tracker's valid hint range. A tracking miss sends no input and the event stream
 exposes the transition back to identity acquisition.
@@ -51,9 +53,11 @@ miss from authorizing blind steering.
 The Escape Vector profile is time-sensitive: it samples at 350 ms cadence,
 uses 500/300/160 ms correction pulses above 40/20/12 pixels, and accepts two
 consecutive within-12-pixel frames. The ordinary destination profile retains
-its 750 ms cadence and three confirmations. It uses 300 ms above 120 pixels,
-160 ms through 40–120 pixels, 120 ms through 20–40 pixels, and the proven 80 ms
-pulse only inside 20 pixels. Live v9 evidence needed eleven 80 ms pulses to
+its 750 ms cadence and three confirmations. Destination pulses are capped at
+120 ms while local tracking is active. Live Evidence measured a 300 ms Pitch
+pulse moving the reticle 50–53 reference pixels, outside the local tracker's
+28-pixel candidate span; 120 ms retains a conservative closed-loop margin. The
+profile retains the proven 80 ms pulse inside 20 pixels. Live v9 evidence needed eleven 80 ms pulses to
 traverse roughly 36 to 13 pixels; the split raises only that inefficient
 mid-fine band while preserving the near-centre gain.
 Near-centre destination Yaw uses 120 ms while Pitch remains at 80 ms. Live

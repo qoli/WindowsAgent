@@ -15,6 +15,7 @@ MEDIUM_HOLD_MS = 160
 FINE_HOLD_MS = 120
 NEAR_HOLD_MS = 80
 DESTINATION_NEAR_YAW_HOLD_MS = 120
+DESTINATION_TRACKING_SAFE_MAX_HOLD_MS = 120
 ESCAPE_VECTOR_COARSE_HOLD_MS = 500
 ESCAPE_VECTOR_MEDIUM_HOLD_MS = 300
 ESCAPE_VECTOR_FINE_HOLD_MS = 160
@@ -107,6 +108,14 @@ def choose_command(target, position_source):
         hold_ms = MEDIUM_HOLD_MS
     elif distance <= NEAR_DISTANCE_PIXELS:
         hold_ms = NEAR_HOLD_MS
+    if position_source == "DESTINATION" and hold_ms > DESTINATION_TRACKING_SAFE_MAX_HOLD_MS:
+        # The local reticle tracker searches only within 28 reference pixels
+        # of its current hint. Live Evidence measured a 300 ms Pitch pulse
+        # moving the destination reticle by 50-53 pixels, which deterministically
+        # discarded the fast track and fell back to multi-second OCR. Keep each
+        # destination pulse inside the measured tracker domain so the next
+        # current-frame CV sample can close the loop.
+        hold_ms = DESTINATION_TRACKING_SAFE_MAX_HOLD_MS
     if abs(offset_x) >= abs(offset_y) and offset_x != 0:
         if position_source == "DESTINATION" and distance <= NEAR_DISTANCE_PIXELS:
             hold_ms = DESTINATION_NEAR_YAW_HOLD_MS
@@ -269,6 +278,16 @@ def main(ctx):
             tracked_target = target
             if observation_mode == "IDENTITY_ACQUISITION":
                 tracked_samples_since_identity = 0
+                # OCR establishes the requested identity and supplies a local
+                # hint, but its sequential bands can make the returned position
+                # several seconds old. Never steer from that coordinate. Take
+                # an immediate current-frame local CV observation first; only
+                # RETICLE_TRACKING may authorize the next control pulse.
+                stable = 0
+                entered_center_gate = False
+                boundary_jitter_samples = 0
+                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="IDENTITY_ACQUIRED_AWAITING_FRESH_RETICLE_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
+                continue
             else:
                 tracked_samples_since_identity += 1
 

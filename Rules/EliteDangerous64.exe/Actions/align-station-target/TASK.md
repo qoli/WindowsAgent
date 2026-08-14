@@ -9,9 +9,10 @@ before starting this Action.
 `alignmentPurpose=CENTER` preserves the standalone Compass-centering contract.
 `alignmentPurpose=VISIBLE_HANDOFF` is a narrower Supercruise STATIC ALIGN
 contract for an owning workflow that immediately delegates final geometry to
-`align-visible-target`: it requires two current SOLID samples after entering
-the four-reference-pixel Compass center zone, with a six-pixel verification
-exit, and does
+`align-visible-target`: the first centered frame after a command is only a
+center contact, not settlement proof. It then requires three current SOLID
+no-input samples in the four-reference-pixel Compass center zone, with a
+six-pixel verification exit, and does
 not issue a center-entry counter-pulse. It only proves that the rear/coarse
 Compass phase has placed the destination in the visible-target controller's
 domain; it is not precise alignment and is rejected for TRACK, MOVING targets,
@@ -120,6 +121,12 @@ TRACK's four-pixel entry and six-pixel hysteresis. The owning Supercruise
 Assist workflow now performs its collision-course refinement from the visible
 destination after the game emits `FSD_ALIGNMENT_REQUIRED`, so this Compass
 Gate is deliberately only the front/coarse handoff.
+In the outer 24–30-pixel `VISIBLE_HANDOFF` band, two consecutive 160 ms
+no-progress observations preserve the generic bounded 240 ms recovery pulse.
+The prior static-gain override accidentally replaced that recovery with another
+160 ms pulse indefinitely; live Evidence reproduced eight such ineffective
+pulses at roughly 26 pixels. The inner calibrated band retains its existing
+160/300 ms law so this recovery does not widen the center Gate.
 When two consecutive 40 ms `STATIC` ALIGN pulses inside twelve pixels produce no
 measurable Compass displacement, the next pulse is promoted only to the
 existing bounded 160 ms mid-band duration. A 40 ms or 80 ms pulse that enters
@@ -296,7 +303,7 @@ The override event and terminal output preserve both requested and effective
 profiles, so a supervising model cannot mistake Nav Beacon drift for STATIC
 control evidence. `VISIBLE_HANDOFF` retains its
 strict four-reference-pixel Compass Gate for this moving contact and applies no
-verification hysteresis: both required contacts must remain within four pixels.
+verification hysteresis: all three passive settle contacts must remain within four pixels.
 The STATIC-only 300 ms inner pulse is also disabled. Inside eight pixels,
 NAV BEACON uses a 40 ms micro-pulse and may escalate only to 80 ms after two
 measured no-progress samples; streaming events mark this as
@@ -321,6 +328,15 @@ reconnected, then retry without restarting the game. This avoids reopening
 binding, scan-code, or Compass debugging for the known condition. Controller
 enumeration is deliberately not a Gate: the controller that restored Pitch in
 the reviewed live A/B test was not exposed by XInput.
+
+This initialization diagnosis is allowed only until the current invocation has
+observed at least two reference pixels of Pitch-axis response to a
+binding-resolved Pitch command. That proof is latched for the rest of the
+invocation. Later CV quantization or a short local stall cannot regress a
+working controller to `ED_PITCH_INPUT_CONTEXT_NOT_READY`. After Pitch response
+is proven, the recovery pulse law may consume up to eight consecutive
+sub-threshold samples; eight such samples fail as
+`ATTITUDE_CONTROL_NO_PROGRESS` instead of recommending controller reconnection.
 
 Raw marker displacement is retained separately from directional control
 progress. A one-pixel CV quantization change, cross-axis movement, or movement
