@@ -166,7 +166,7 @@
     },
     "elite-dangerous/flight-status-classifier": {
       "path": "Actions/flight-status-classifier",
-      "runtime": "windows-observation-v1",
+      "runtime": "windows-pure-decision-v1",
       "exposure": "internal",
       "execution": {"completion": "return"},
       "registrableAs": []

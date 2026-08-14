@@ -3,8 +3,10 @@ package actionlaunch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,11 +23,24 @@ import (
 
 type fakeObservationExecutor struct{}
 
-func (fakeObservationExecutor) Run(context.Context, scriptlaunch.Invocation) (json.RawMessage, error) {
+func (fakeObservationExecutor) Run(_ context.Context, invocation scriptlaunch.Invocation) (json.RawMessage, error) {
+	if invocation.Capability == "elite-dangerous/flight-status-classifier" {
+		return json.RawMessage(`{"ok":true,"output":{"schemaVersion":1,"routeDecision":{"accepted":true,"state":"FSD_ALIGNMENT_REQUIRED"},"flightStatus":{"state":"FSD_ALIGNMENT_REQUIRED","known":true},"source":{"text":"ALIGN WITH TARGET DESTINATION","normalizedText":"ALIGNWITHTARGETDESTINATION","ocrConfidence":0.998932},"decision":{"accepted":true}}}`), nil
+	}
 	return json.RawMessage(`{"ok":true,"output":{"ready":true}}`), nil
 }
 
 type fakeRegionCapturer struct{ result capture.RegionResult }
+
+type countingRegionCapturer struct {
+	result   capture.RegionResult
+	requests []capture.RegionRequest
+}
+
+func (c *countingRegionCapturer) CaptureRegion(_ context.Context, request capture.RegionRequest) (capture.RegionResult, error) {
+	c.requests = append(c.requests, request)
+	return c.result, nil
+}
 
 type fakeInputExecutor struct{}
 
@@ -46,6 +61,56 @@ func (f fakeRegionCapturer) CaptureRegion(context.Context, capture.RegionRequest
 type fakeStreamingReporter struct {
 	types    []string
 	payloads []json.RawMessage
+}
+
+type sequenceOCRRecognizer struct {
+	texts    []string
+	requests []ocrworker.Request
+	failAt   int
+}
+
+func (r *sequenceOCRRecognizer) Recognize(_ context.Context, _, _ string, request ocrworker.Request) (ocrworker.Result, error) {
+	r.requests = append(r.requests, request)
+	if r.failAt > 0 && len(r.requests) == r.failAt {
+		return ocrworker.Result{}, errors.New("fixture OCR failure")
+	}
+	if len(r.requests) > len(r.texts) {
+		return ocrworker.Result{}, errors.New("unexpected OCR route")
+	}
+	text := r.texts[len(r.requests)-1]
+	return ocrworker.Result{
+		RequestID: request.RequestID, Text: text, Confidence: 0.99,
+		Evidence: ocrworker.Evidence{ArtifactID: request.ArtifactID, CapturedAt: request.CapturedAt, Width: request.Width, Height: request.Height, RGBSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		Model:    ocrworker.Model{ArtifactID: "fixture", Provider: "DirectML", AdapterIndex: 0, InputWidth: 480, InputHeight: 48},
+		Timing:   ocrworker.Timing{TotalMS: 10},
+	}, nil
+}
+
+func (r *sequenceOCRRecognizer) DetectTextRegions(context.Context, string, string, ocrworker.Request) (ocrworker.TextRegionsResult, error) {
+	return ocrworker.TextRegionsResult{}, nil
+}
+
+type cascadeDecisionExecutor struct{}
+
+func (cascadeDecisionExecutor) Run(_ context.Context, invocation scriptlaunch.Invocation) (json.RawMessage, error) {
+	text, _ := invocation.Inputs["text"].(string)
+	state := "UNKNOWN"
+	switch text {
+	case "SUPERCRUISE":
+		state = "SUPERCRUISE"
+	case "AUTO LAUNCH IN PROGRESS":
+		state = "AUTO_LAUNCH"
+	case "CHARGING":
+		state = "FSD_CHARGING"
+	}
+	accepted := state != "UNKNOWN"
+	encoded, _ := json.Marshal(map[string]any{"ok": true, "output": map[string]any{
+		"schemaVersion": 1, "routeDecision": map[string]any{"accepted": accepted, "state": state},
+		"flightStatus": map[string]any{"state": state, "known": accepted},
+		"source":       map[string]any{"text": text, "normalizedText": text, "ocrConfidence": 0.99},
+		"decision":     map[string]any{"accepted": accepted},
+	}})
+	return encoded, nil
 }
 
 func (f *fakeStreamingReporter) Emit(_ context.Context, eventType string, payload json.RawMessage) (eventstream.Event, error) {
@@ -299,6 +364,125 @@ func TestOCRActionReturnsRawTextEvidence(t *testing.T) {
 	}
 	if recognizer.request.RGB[0] != 1 || recognizer.request.RGB[1] != 2 || recognizer.request.RGB[2] != 3 {
 		t.Fatal("packed pixels were not converted to RGB24")
+	}
+}
+
+func TestOCRActionRunsExplicitSameCaptureCascade(t *testing.T) {
+	rulesRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ruleStore, err := rules.New(rulesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Date(2026, 8, 14, 8, 8, 19, 0, time.UTC)
+	foregroundInfo := foreground.Info{ObservedAt: observedAt, ProcessID: 42, ExecutableName: "EliteDangerous64.exe"}
+
+	gatePositivePixels := make([]uint32, 800*80)
+	for y := 40; y < 80; y++ {
+		for x := 0; x < 800; x++ {
+			if x%2 == 1 {
+				gatePositivePixels[y*800+x] = 0xffffff
+			}
+		}
+	}
+	tests := []struct {
+		name           string
+		pixels         []uint32
+		texts          []string
+		wantState      string
+		wantReason     string
+		wantSelected   string
+		wantDimensions [][2]int
+	}{
+		{name: "primary short circuit", pixels: make([]uint32, 800*80), texts: []string{"SUPERCRUISE"}, wantState: "SUPERCRUISE", wantReason: "primary-accepted", wantSelected: "REFERENCE_RAW_RGB", wantDimensions: [][2]int{{400, 40}}},
+		{name: "gate rejection", pixels: make([]uint32, 800*80), texts: []string{"NOISE"}, wantState: "UNKNOWN", wantReason: "primary-unknown-and-cheap-gate-rejected", wantSelected: "REFERENCE_RAW_RGB", wantDimensions: [][2]int{{400, 40}}},
+		{name: "eligible recovery", pixels: gatePositivePixels, texts: []string{"NOISE", "AUTO LAUNCH IN PROGRESS"}, wantState: "AUTO_LAUNCH", wantReason: "eligible-recovery-state-accepted", wantSelected: "REFERENCE_BOTTOM_HALF_RGB", wantDimensions: [][2]int{{400, 40}, {400, 20}}},
+		{name: "validator agreement", pixels: gatePositivePixels, texts: []string{"NOISE", "CHARGING", "CHARGING"}, wantState: "FSD_CHARGING", wantReason: "validator-agreement", wantSelected: "REFERENCE_BOTTOM_HALF_RGB", wantDimensions: [][2]int{{400, 40}, {400, 20}, {400, 20}}},
+		{name: "validator disagreement", pixels: gatePositivePixels, texts: []string{"NOISE", "CHARGING", "NOISE"}, wantState: "UNKNOWN", wantReason: "validator-disagreement", wantSelected: "REFERENCE_RAW_RGB", wantDimensions: [][2]int{{400, 40}, {400, 20}, {400, 20}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			capturer := &countingRegionCapturer{result: capture.RegionResult{
+				Pixels: test.pixels, ImageWidth: 800, ImageHeight: 80,
+				FrameWidth: 3840, FrameHeight: 2160,
+				PhysicalRegion: capture.PixelRegion{Left: 1520, Top: 720, Width: 800, Height: 80},
+				Foreground:     foregroundInfo,
+			}}
+			recognizer := &sequenceOCRRecognizer{texts: test.texts}
+			executor, err := New(ruleStore, cascadeDecisionExecutor{}, capturer, recognizer, fakeInputExecutor{}, fakePointerExecutor{}, func() (foreground.Info, error) { return foregroundInfo, nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := executor.Run(context.Background(), scriptlaunch.Invocation{Capability: "elite-dangerous/flight-prompt-text", Inputs: map[string]any{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response struct {
+				Output struct {
+					Cascade struct {
+						FinalState, TerminalReason, SelectedRoute string
+						AttemptCount                              int
+					} `json:"cascade"`
+				} `json:"output"`
+			}
+			if err := json.Unmarshal(encoded, &response); err != nil {
+				t.Fatal(err)
+			}
+			cascade := response.Output.Cascade
+			if cascade.FinalState != test.wantState || cascade.TerminalReason != test.wantReason || cascade.SelectedRoute != test.wantSelected || cascade.AttemptCount != len(test.wantDimensions) {
+				t.Fatalf("cascade = %#v", cascade)
+			}
+			if len(capturer.requests) != 1 || capturer.requests[0].Sampling != capture.SamplingNative || capturer.requests[0].MaxPixels != 65536 {
+				t.Fatalf("capture requests = %#v", capturer.requests)
+			}
+			if len(recognizer.requests) != len(test.wantDimensions) {
+				t.Fatalf("OCR request count = %d", len(recognizer.requests))
+			}
+			for index, dimensions := range test.wantDimensions {
+				request := recognizer.requests[index]
+				if request.Width != dimensions[0] || request.Height != dimensions[1] || !request.CapturedAt.Equal(observedAt) {
+					t.Fatalf("OCR request %d = %dx%d capturedAt=%s", index, request.Width, request.Height, request.CapturedAt)
+				}
+			}
+		})
+	}
+}
+
+func TestOCRActionCascadeFailureIsTerminal(t *testing.T) {
+	rulesRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ruleStore, err := rules.New(rulesRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observedAt := time.Date(2026, 8, 14, 8, 8, 19, 0, time.UTC)
+	foregroundInfo := foreground.Info{ObservedAt: observedAt, ProcessID: 42, ExecutableName: "EliteDangerous64.exe"}
+	pixels := make([]uint32, 800*80)
+	for y := 40; y < 80; y++ {
+		for x := 0; x < 800; x++ {
+			if x%2 == 1 {
+				pixels[y*800+x] = 0xffffff
+			}
+		}
+	}
+	recognizer := &sequenceOCRRecognizer{texts: []string{"NOISE", "AUTO LAUNCH IN PROGRESS"}, failAt: 2}
+	executor, err := New(ruleStore, cascadeDecisionExecutor{}, fakeRegionCapturer{result: capture.RegionResult{
+		Pixels: pixels, ImageWidth: 800, ImageHeight: 80, FrameWidth: 3840, FrameHeight: 2160,
+		Foreground: foregroundInfo,
+	}}, recognizer, fakeInputExecutor{}, fakePointerExecutor{}, func() (foreground.Info, error) { return foregroundInfo, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = executor.Run(context.Background(), scriptlaunch.Invocation{Capability: "elite-dangerous/flight-prompt-text", Inputs: map[string]any{}})
+	if err == nil || !strings.Contains(err.Error(), "REFERENCE_BOTTOM_HALF_RGB") || !strings.Contains(err.Error(), "fixture OCR failure") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(recognizer.requests) != 2 {
+		t.Fatalf("OCR request count = %d", len(recognizer.requests))
 	}
 }
 

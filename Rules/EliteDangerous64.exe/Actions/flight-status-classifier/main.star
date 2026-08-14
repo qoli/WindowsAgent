@@ -161,6 +161,10 @@ def main(ctx):
         }
     return {
         "schemaVersion": 1,
+		"routeDecision": {
+			"accepted": state != "UNKNOWN",
+			"state": state,
+		},
         "flightStatus": {
             "state": state,
             "known": state != "UNKNOWN",

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 7,
+  "version": 8,
   "title": "Classify Elite Dangerous flight prompt text (internal)",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

@@ -22,16 +22,17 @@ import (
 const SchemaVersion = 1
 
 const (
-	CodeRuleLoadFailed    = "RULE_LOAD_FAILED"
-	CodePackageLoadFailed = "PACKAGE_LOAD_FAILED"
-	CodeStarlarkInvalid   = "STARLARK_INVALID"
-	CodeDynamicActionID   = "DYNAMIC_ACTION_ID"
-	CodeIndirectActionUse = "INDIRECT_ACTION_USE"
-	CodeMissingAction     = "MISSING_ACTION"
-	CodeCrossRuleAction   = "CROSS_RULE_ACTION"
-	CodeStreamingChild    = "STREAMING_CHILD_ACTION"
-	CodeSelfDependency    = "SELF_DEPENDENCY"
-	CodeDependencyCycle   = "DEPENDENCY_CYCLE"
+	CodeRuleLoadFailed        = "RULE_LOAD_FAILED"
+	CodePackageLoadFailed     = "PACKAGE_LOAD_FAILED"
+	CodeStarlarkInvalid       = "STARLARK_INVALID"
+	CodeDynamicActionID       = "DYNAMIC_ACTION_ID"
+	CodeIndirectActionUse     = "INDIRECT_ACTION_USE"
+	CodeMissingAction         = "MISSING_ACTION"
+	CodeCrossRuleAction       = "CROSS_RULE_ACTION"
+	CodeStreamingChild        = "STREAMING_CHILD_ACTION"
+	CodeSelfDependency        = "SELF_DEPENDENCY"
+	CodeDependencyCycle       = "DEPENDENCY_CYCLE"
+	CodeInvalidDecisionAction = "INVALID_DECISION_ACTION"
 )
 
 // Result is the stable machine-readable validation report.
@@ -118,6 +119,16 @@ func Check(rulesRoot string) (Result, error) {
 
 	refs := make([]reference, 0)
 	for _, item := range loaded {
+		if item.action.Runtime == rules.PpOcrActionRuntimeV1 {
+			config, loadErr := ocraction.Load(item.action.Root)
+			if loadErr == nil && config.Cascade != nil {
+				refs = append(refs, reference{
+					caller: item.action, primitive: "ocr.cascade.decisionAction",
+					dependency: config.Cascade.DecisionActionID,
+					path:       relativePath(rulesRoot, filepath.Join(item.action.Root, "manifest.json")),
+				})
+			}
+		}
 		if len(item.script) == 0 {
 			continue
 		}
@@ -180,6 +191,26 @@ func Check(rulesRoot string) (Result, error) {
 				fmt.Sprintf("Action %q cannot call itself", child.ID)))
 			continue
 		}
+		if ref.primitive == "ocr.cascade.decisionAction" &&
+			(child.Runtime != rules.PureDecisionRuntimeV1 || child.Exposure != rules.ActionExposureInternal || child.Execution.Completion != rules.CompletionReturn) {
+			result.Issues = append(result.Issues, issueForReference(ref, CodeInvalidDecisionAction,
+				fmt.Sprintf("OCR cascade decision Action %q must be an internal finite pure decision Action", child.ID)))
+			continue
+		}
+		if ref.primitive == "ocr.cascade.decisionAction" {
+			pkg, loadErr := scriptpackage.Load(child.Root, child.ID)
+			if loadErr != nil {
+				result.Issues = append(result.Issues, issueForReference(ref, CodeInvalidDecisionAction,
+					fmt.Sprintf("load OCR cascade decision Action %q: %v", child.ID, loadErr)))
+				continue
+			}
+			permissions := pkg.Manifest.Permissions
+			if permissions.Memory != nil || permissions.File != nil || permissions.Screen != nil || len(pkg.Manifest.NativeLibraries) != 0 {
+				result.Issues = append(result.Issues, issueForReference(ref, CodeInvalidDecisionAction,
+					fmt.Sprintf("OCR cascade decision Action %q must not declare permissions or native libraries", child.ID)))
+				continue
+			}
+		}
 		graph[ref.caller.ID] = append(graph[ref.caller.ID], ref)
 	}
 	result.Issues = append(result.Issues, cycleIssues(graph)...)
@@ -191,6 +222,8 @@ func Check(rulesRoot string) (Result, error) {
 func loadPackage(action rules.Action) (entrypoint string, script []byte, err error) {
 	switch action.Runtime {
 	case rules.ObservationRuntimeV1:
+		_, err = scriptpackage.Load(action.Root, action.ID)
+	case rules.PureDecisionRuntimeV1:
 		_, err = scriptpackage.Load(action.Root, action.ID)
 	case rules.PpOcrActionRuntimeV1:
 		_, err = ocraction.Load(action.Root)

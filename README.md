@@ -68,14 +68,19 @@ today:
   covered or ambiguous values remain `UNKNOWN` without consulting journal,
   status-file, or throttle-command state
 - `elite-dangerous/flight-status` takes no inputs, captures fresh prompt OCR
-  through `elite-dangerous/flight-prompt-text`, applies its Rule-internal
-  classifier, and returns one reviewed flight state or `UNKNOWN`,
+  through `elite-dangerous/flight-prompt-text`, and returns one reviewed flight
+  state or `UNKNOWN`. The child performs one same-capture, explicitly
+  provenance-bearing performance cascade while the Rule-internal classifier
+  remains the only owner of phrase and confidence semantics,
   including the explicit `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` Gate for
   `MOVE TO OBTAIN LINE OF SIGHT TO TARGET`
 - the Go launcher resolves any registered `windows-observation-v1` capability
   from its owning Rule, validates its input schema and package resource
   declarations,
   and never contains a capability allowlist
+- `windows-pure-decision-v1` runs only internal, permission-free Starlark JSON
+  mappings in-process; it cannot access the Observer, native libraries, input,
+  pointer, Actions, or streams, and it does not replace isolated observation
 - the job returns one schema-validated JSON result with per-call provenance
 - the Go host launches only the runner and observer directly under one bounded
   Windows Job Object; it does not use PowerShell or a polling loop
@@ -141,12 +146,14 @@ The Action runtime and registration refactor is partially landed:
   verified FP16 ScreenParser v2 ONNX model and then exits;
 - Elite Dangerous declares a Rule-resident `ocr/w480` DirectML worker and the
   finite `elite-dangerous/flight-prompt-text` Action. The Action captures one
-  reviewed 400x40 reference-density region and returns raw OCR text, confidence,
-  provenance, model identity, and timing;
+  reviewed local region, derives only the manifest-selected 400x40 reference
+  routes from that same frame, and returns selected raw OCR text plus route,
+  Gate, provenance, model identity, and timing evidence;
 - its composite `elite-dangerous/flight-status` Action owns the complete fresh
-  OCR-to-semantic pipeline. Its Rule-internal pure classifier accepts a finite
-  status only when both combined-confidence and best-candidate-margin
-  thresholds pass; unresolved content remains `UNKNOWN`;
+  OCR-to-semantic boundary. Its Rule-internal pure classifier is also the
+  cascade decision Action and accepts a finite status only when confidence,
+  phrase-similarity, and best-candidate-margin thresholds pass; unresolved
+  content remains `UNKNOWN`;
 - Elite Dangerous also declares `ocr/text-regions`, a resident PP-OCRv6 small
   detection-plus-recognition profile. The generic raw Action returns text
   quadrilaterals, recognition evidence, and bounded same-frame left context;
@@ -1001,6 +1008,8 @@ internal/httpapi/                current HTTP surface
 internal/pixels/                 SDR and HDR pixel conversion
 internal/rules/                  live Rule plugin loading and navigation
 internal/scriptlaunch/           strict generic launcher request contract
+internal/puredecision/           bounded permission-free in-process Starlark decisions
+internal/ocraction/              fixed-region raw OCR and same-capture route contracts
 internal/streamaction/            bounded streaming Starlark orchestration runtime
 internal/wgc/                    Request and persistent WGC / Direct3D 11 implementations
 internal/wgcworker/              Versioned worker protocol and Agent-side generation owner

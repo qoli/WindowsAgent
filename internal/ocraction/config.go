@@ -27,6 +27,46 @@ type Config struct {
 	MaxPixels           uint64                  `json:"maxPixels"`
 	CharacterConstraint string                  `json:"characterConstraint"`
 	PixelFilter         *PixelFilter            `json:"pixelFilter,omitempty"`
+	Cascade             *CascadeConfig          `json:"cascade,omitempty"`
+}
+
+type CascadeConfig struct {
+	NativeCaptureMaxPixels uint64          `json:"nativeCaptureMaxPixels"`
+	DecisionActionID       string          `json:"decisionActionId"`
+	DecisionAcceptedPath   string          `json:"decisionAcceptedPath"`
+	DecisionStatePath      string          `json:"decisionStatePath"`
+	UnknownState           string          `json:"unknownState"`
+	Primary                RouteConfig     `json:"primary"`
+	Gate                   GateConfig      `json:"gate"`
+	Recovery               RouteConfig     `json:"recovery"`
+	RecoveryAllowedStates  []string        `json:"recoveryAllowedStates"`
+	Validator              ValidatorConfig `json:"validator"`
+}
+
+type RouteConfig struct {
+	ID             string `json:"id"`
+	TopPermille    int    `json:"topPermille"`
+	BottomPermille int    `json:"bottomPermille"`
+}
+
+type GateConfig struct {
+	TopPermille                    int     `json:"topPermille"`
+	BottomPermille                 int     `json:"bottomPermille"`
+	OrangeThreshold                int     `json:"orangeThreshold"`
+	CenterLeftPermille             int     `json:"centerLeftPermille"`
+	CenterRightPermille            int     `json:"centerRightPermille"`
+	MinimumCenterOrangeRatio       float64 `json:"minimumCenterOrangeRatio"`
+	LowOrangeThreshold             int     `json:"lowOrangeThreshold"`
+	ActiveColumnPixelRatio         float64 `json:"activeColumnPixelRatio"`
+	MaximumActiveOrangeColumnRatio float64 `json:"maximumActiveOrangeColumnRatio"`
+	HorizontalEdgeThreshold        int     `json:"horizontalEdgeThreshold"`
+	MinimumHorizontalEdgeRatio     float64 `json:"minimumHorizontalEdgeRatio"`
+}
+
+type ValidatorConfig struct {
+	TriggerState  string      `json:"triggerState"`
+	RequiredState string      `json:"requiredState"`
+	Route         RouteConfig `json:"route"`
 }
 
 type PixelFilter struct {
@@ -112,8 +152,8 @@ func Load(root string) (Config, error) {
 }
 
 func (c Config) Validate(root string) error {
-	if c.SchemaVersion != 2 {
-		return errors.New("OCR Action manifest schemaVersion must equal 2")
+	if c.SchemaVersion != 2 && c.SchemaVersion != 3 {
+		return errors.New("OCR Action manifest schemaVersion must equal 2 or 3")
 	}
 	if strings.TrimSpace(c.Title) == "" || strings.TrimSpace(c.Title) != c.Title {
 		return errors.New("OCR Action title must be non-empty and canonical")
@@ -144,6 +184,20 @@ func (c Config) Validate(root string) error {
 	if c.PixelFilter != nil {
 		if err := c.PixelFilter.Validate(); err != nil {
 			return err
+		}
+	}
+	if c.SchemaVersion == 2 && c.Cascade != nil {
+		return errors.New("OCR Action cascade requires manifest schemaVersion 3")
+	}
+	if c.SchemaVersion == 3 {
+		if c.Cascade == nil {
+			return errors.New("OCR Action manifest schemaVersion 3 requires cascade")
+		}
+		if c.PixelFilter != nil {
+			return errors.New("OCR Action cascade cannot also declare pixelFilter")
+		}
+		if err := c.Cascade.Validate(); err != nil {
+			return fmt.Errorf("OCR Action cascade: %w", err)
 		}
 	}
 	return nil

@@ -51,6 +51,11 @@ The raw prompt is bounded to 128 characters because the upstream OCR Action
 reads one narrow, single-line HUD region. This also keeps edit-distance work
 bounded when unrelated screen text reaches the OCR output.
 
-This Rule-internal Action performs no screen capture, OCR inference, event emission, or
+This Rule-internal Action also returns the small generic `routeDecision`
+interface consumed by the same-capture OCR cascade. `routeDecision.accepted`
+and `routeDecision.state` are derived from the same result as
+`flightStatus`—they are not a second classifier or threshold set.
+
+This Action performs no screen capture, OCR inference, event emission, or
 follow-up execution. It preserves the raw text and OCR confidence in its
 output. Malformed raw OCR input fails schema validation explicitly.

@@ -257,7 +257,7 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 		t.Fatalf("flight-status action = %+v", flightStatus)
 	}
 	flightStatusClassifier, err := store.ResolveAction("elite-dangerous/flight-status-classifier")
-	if err != nil || flightStatusClassifier.Runtime != ObservationRuntimeV1 || flightStatusClassifier.Exposure != ActionExposureInternal || len(flightStatusClassifier.RegistrableAs) != 0 {
+	if err != nil || flightStatusClassifier.Runtime != PureDecisionRuntimeV1 || flightStatusClassifier.Exposure != ActionExposureInternal || len(flightStatusClassifier.RegistrableAs) != 0 {
 		t.Fatalf("flight-status classifier = %+v, err = %v", flightStatusClassifier, err)
 	}
 	if _, err := store.ResolvePublicAction("elite-dangerous/flight-status-classifier"); !errors.Is(err, fs.ErrNotExist) {

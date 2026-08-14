@@ -4,6 +4,7 @@ package actionlaunch
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +22,10 @@ import (
 	"github.com/qoli/WindowsAgent/internal/ocrregionsaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/pointeraction"
+	"github.com/qoli/WindowsAgent/internal/puredecision"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
+	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
 )
 
@@ -98,6 +101,15 @@ func (e *Executor) RunAction(ctx context.Context, invocation scriptlaunch.Invoca
 		output, err = observationOutput(raw)
 		if err != nil {
 			return Result{}, fmt.Errorf("decode observation Action output: %w", err)
+		}
+	case rules.PureDecisionRuntimeV1:
+		pkg, err := scriptpackage.Load(action.Root, action.ID)
+		if err != nil {
+			return Result{}, fmt.Errorf("load pure decision Action %q: %w", action.ID, err)
+		}
+		output, err = puredecision.Run(ctx, pkg, invocation.Inputs)
+		if err != nil {
+			return Result{}, err
 		}
 	case rules.PpOcrActionRuntimeV1:
 		output, err = e.runOCR(ctx, action, invocation.Inputs)
@@ -298,8 +310,14 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		return nil, err
 	}
 	started := time.Now()
+	sampling := config.Sampling
+	maxPixels := config.MaxPixels
+	if config.Cascade != nil {
+		sampling = capture.SamplingNative
+		maxPixels = config.Cascade.NativeCaptureMaxPixels
+	}
 	region, err := e.capturer.CaptureRegion(ctx, capture.RegionRequest{
-		Region: config.ReferenceRegion, Sampling: config.Sampling, MaxPixels: config.MaxPixels,
+		Region: config.ReferenceRegion, Sampling: sampling, MaxPixels: maxPixels,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("capture OCR Action region: %w", err)
@@ -311,12 +329,14 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 	if region.ImageWidth <= 0 || region.ImageHeight <= 0 || len(region.Pixels) != region.ImageWidth*region.ImageHeight {
 		return nil, errors.New("OCR Action captured an invalid pixel region")
 	}
-	rgb := make([]byte, len(region.Pixels)*3)
-	for index, pixel := range region.Pixels {
-		rgb[index*3] = byte(pixel >> 16)
-		rgb[index*3+1] = byte(pixel >> 8)
-		rgb[index*3+2] = byte(pixel)
+	image, err := ocraction.ImageFromPixels(region.Pixels, region.ImageWidth, region.ImageHeight)
+	if err != nil {
+		return nil, fmt.Errorf("prepare OCR Action RGB region: %w", err)
 	}
+	if config.Cascade != nil {
+		return e.runOCRCascade(ctx, action, config, region, image, started, captureMS)
+	}
+	rgb := image.RGB
 	filteredPixelCount := 0
 	if config.PixelFilter != nil {
 		filteredPixelCount, err = config.PixelFilter.Apply(rgb)
@@ -377,6 +397,255 @@ func (e *Executor) runOCR(ctx context.Context, action rules.Action, inputs map[s
 		return nil, fmt.Errorf("encode OCR Action result: %w", err)
 	}
 	return encoded, nil
+}
+
+type cascadeAttempt struct {
+	RouteID  string
+	Image    ocraction.RGBImage
+	Result   ocrworker.Result
+	Decision json.RawMessage
+	Accepted bool
+	State    string
+}
+
+func (e *Executor) runOCRCascade(
+	ctx context.Context,
+	action rules.Action,
+	config ocraction.Config,
+	region capture.RegionResult,
+	native ocraction.RGBImage,
+	started time.Time,
+	captureMS float64,
+) (json.RawMessage, error) {
+	cascade := config.Cascade
+	if cascade == nil {
+		return nil, errors.New("OCR cascade configuration is required")
+	}
+	resizeStarted := time.Now()
+	reference, err := ocraction.ResizeHalfPixel(native, config.ReferenceRegion.Width, config.ReferenceRegion.Height)
+	if err != nil {
+		return nil, fmt.Errorf("resize OCR cascade reference image: %w", err)
+	}
+	resizeMS := float64(time.Since(resizeStarted).Microseconds()) / 1000
+	capturedAt := region.Foreground.ObservedAt.UTC()
+	identity := capturedAt.Format("20060102T150405.000000000Z")
+
+	recognize := func(route ocraction.RouteConfig) (cascadeAttempt, error) {
+		image, cropErr := reference.Crop(route)
+		if cropErr != nil {
+			return cascadeAttempt{}, fmt.Errorf("prepare OCR cascade route %s: %w", route.ID, cropErr)
+		}
+		result, recognizeErr := e.ocr.Recognize(ctx, action.RuleID, action.RuntimeProfile, ocrworker.Request{
+			RequestID:  "ocr-action-" + identity + "-" + strings.ToLower(route.ID),
+			ArtifactID: "screen-region-" + identity + "-" + strings.ToLower(route.ID),
+			CapturedAt: capturedAt, Width: image.Width, Height: image.Height, RGB: image.RGB,
+			CharacterConstraint: ocrworker.CharacterConstraint(config.CharacterConstraint),
+		})
+		if recognizeErr != nil {
+			return cascadeAttempt{}, fmt.Errorf("run resident OCR cascade route %s with profile %s: %w", route.ID, action.RuntimeProfile, recognizeErr)
+		}
+		decision, accepted, state, decisionErr := e.runOCRCascadeDecision(ctx, action, *cascade, result)
+		if decisionErr != nil {
+			return cascadeAttempt{}, fmt.Errorf("decide OCR cascade route %s: %w", route.ID, decisionErr)
+		}
+		return cascadeAttempt{RouteID: route.ID, Image: image, Result: result, Decision: decision, Accepted: accepted, State: state}, nil
+	}
+
+	primary, err := recognize(cascade.Primary)
+	if err != nil {
+		return nil, err
+	}
+	attempts := []cascadeAttempt{primary}
+	selected := primary
+	finalState := primary.State
+	terminalReason := "primary-accepted"
+	var gate *ocraction.GateEvidence
+	gateMS := 0.0
+	transitions := []map[string]any{}
+	if !primary.Accepted {
+		gateStarted := time.Now()
+		gateEvidence, gateErr := ocraction.EvaluateGate(native, cascade.Gate)
+		gateMS = float64(time.Since(gateStarted).Microseconds()) / 1000
+		if gateErr != nil {
+			return nil, fmt.Errorf("evaluate OCR cascade gate: %w", gateErr)
+		}
+		gate = &gateEvidence
+		finalState = cascade.UnknownState
+		terminalReason = "primary-unknown-and-cheap-gate-rejected"
+		if gateEvidence.Accepted {
+			transitions = append(transitions, map[string]any{"from": cascade.Primary.ID, "to": cascade.Recovery.ID, "reason": "primary-unknown-and-cheap-gate-accepted"})
+			recovery, recoveryErr := recognize(cascade.Recovery)
+			if recoveryErr != nil {
+				return nil, recoveryErr
+			}
+			attempts = append(attempts, recovery)
+			allowed := false
+			for _, state := range cascade.RecoveryAllowedStates {
+				if recovery.State == state {
+					allowed = true
+					break
+				}
+			}
+			switch {
+			case !recovery.Accepted:
+				terminalReason = "recovery-unknown"
+			case !allowed:
+				terminalReason = "recovery-state-not-eligible"
+			case recovery.State != cascade.Validator.TriggerState:
+				selected = recovery
+				finalState = recovery.State
+				terminalReason = "eligible-recovery-state-accepted"
+			default:
+				transitions = append(transitions, map[string]any{"from": cascade.Recovery.ID, "to": cascade.Validator.Route.ID, "reason": "recovery-state-requires-validator-agreement"})
+				validator, validatorErr := recognize(cascade.Validator.Route)
+				if validatorErr != nil {
+					return nil, validatorErr
+				}
+				attempts = append(attempts, validator)
+				if validator.Accepted && validator.State == cascade.Validator.RequiredState {
+					selected = recovery
+					finalState = recovery.State
+					terminalReason = "validator-agreement"
+				} else {
+					terminalReason = "validator-disagreement"
+				}
+			}
+		}
+	}
+
+	attemptOutputs := make([]map[string]any, 0, len(attempts))
+	ocrTotalMS := 0.0
+	for _, attempt := range attempts {
+		ocrTotalMS += attempt.Result.Timing.TotalMS
+		attemptOutputs = append(attemptOutputs, map[string]any{
+			"routeId": attempt.RouteID, "text": attempt.Result.Text, "confidence": attempt.Result.Confidence,
+			"decision": attempt.Decision,
+			"evidence": map[string]any{
+				"artifactId": attempt.Result.Evidence.ArtifactID, "capturedAt": attempt.Result.Evidence.CapturedAt,
+				"rgbSha256": attempt.Result.Evidence.RGBSHA256,
+				"image":     map[string]any{"width": attempt.Image.Width, "height": attempt.Image.Height, "encoding": "rgb24"},
+			},
+			"decoding": attempt.Result.Decoding, "model": attempt.Result.Model, "timing": attempt.Result.Timing,
+		})
+	}
+	nativeDigest := sha256.Sum256(native.RGB)
+	response := map[string]any{
+		"schemaVersion": 2,
+		"text":          selected.Result.Text, "confidence": selected.Result.Confidence,
+		"decoding": selected.Result.Decoding,
+		"evidence": map[string]any{
+			"artifactId": selected.Result.Evidence.ArtifactID, "capturedAt": selected.Result.Evidence.CapturedAt,
+			"rgbSha256":       selected.Result.Evidence.RGBSHA256,
+			"sourceRgbSha256": fmt.Sprintf("%x", nativeDigest),
+			"frame":           map[string]any{"width": region.FrameWidth, "height": region.FrameHeight, "foreground": map[string]any{"processId": region.Foreground.ProcessID, "executableName": region.Foreground.ExecutableName}},
+			"coordinateSpace": map[string]any{"width": capture.ReferenceWidth, "height": capture.ReferenceHeight, "fit": "centered-16:9"},
+			"referenceRegion": config.ReferenceRegion, "physicalRegion": region.PhysicalRegion,
+			"sourceImage": map[string]any{"width": native.Width, "height": native.Height, "sampling": "native", "encoding": "rgb24"},
+		},
+		"model": selected.Result.Model,
+		"timing": map[string]any{
+			"captureMs": captureMS, "referenceResizeMs": resizeMS, "gateMs": gateMS,
+			"ocrTotalMs": ocrTotalMS, "totalMs": float64(time.Since(started).Microseconds()) / 1000,
+		},
+		"cascade": map[string]any{
+			"policy": "EXPLICIT_PERFORMANCE_FIRST", "attempts": attemptOutputs, "attemptCount": len(attemptOutputs),
+			"gate": gate, "transitions": transitions, "selectedRoute": selected.RouteID,
+			"finalState": finalState, "terminalReason": terminalReason, "selectedDecision": selected.Decision,
+		},
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("encode OCR cascade result: %w", err)
+	}
+	return encoded, nil
+}
+
+func (e *Executor) runOCRCascadeDecision(
+	ctx context.Context,
+	parent rules.Action,
+	config ocraction.CascadeConfig,
+	result ocrworker.Result,
+) (json.RawMessage, bool, string, error) {
+	decisionAction, err := e.rules.ResolveAction(config.DecisionActionID)
+	if err != nil {
+		return nil, false, "", fmt.Errorf("resolve decision Action %q: %w", config.DecisionActionID, err)
+	}
+	if decisionAction.RuleID != parent.RuleID || decisionAction.Runtime != rules.PureDecisionRuntimeV1 ||
+		decisionAction.Exposure != rules.ActionExposureInternal || decisionAction.Execution.Completion != rules.CompletionReturn {
+		return nil, false, "", errors.New("OCR cascade decision Action must be an internal same-Rule finite pure decision Action")
+	}
+	decisionPackage, err := scriptpackage.Load(decisionAction.Root, decisionAction.ID)
+	if err != nil {
+		return nil, false, "", fmt.Errorf("load OCR cascade decision Action: %w", err)
+	}
+	permissions := decisionPackage.Manifest.Permissions
+	if permissions.Memory != nil || permissions.File != nil || permissions.Screen != nil || len(decisionPackage.Manifest.NativeLibraries) != 0 {
+		return nil, false, "", errors.New("OCR cascade decision Action must not declare permissions or native libraries")
+	}
+	inputs := map[string]any{
+		"schemaVersion": 1, "text": result.Text, "confidence": result.Confidence,
+		"decoding": map[string]any{
+			"characterConstraint": result.Decoding.CharacterConstraint,
+			"rawText":             result.Decoding.RawText, "rawConfidence": result.Decoding.RawConfidence,
+			"constrainedText": result.Decoding.ConstrainedText, "constrainedConfidence": result.Decoding.ConstrainedConfidence,
+			"rawConstraintMargin": result.Decoding.RawConstraintMargin,
+		},
+		"evidence": map[string]any{
+			"artifactId": result.Evidence.ArtifactID, "capturedAt": result.Evidence.CapturedAt,
+			"width": result.Evidence.Width, "height": result.Evidence.Height, "rgbSha256": result.Evidence.RGBSHA256,
+		},
+		"model": map[string]any{
+			"artifactId": result.Model.ArtifactID, "provider": result.Model.Provider,
+			"adapterIndex": result.Model.AdapterIndex, "inputWidth": result.Model.InputWidth, "inputHeight": result.Model.InputHeight,
+		},
+		"timing": map[string]any{
+			"preprocessMs": result.Timing.PreprocessMS, "inferenceMs": result.Timing.InferenceMS,
+			"postprocessMs": result.Timing.PostprocessMS, "totalMs": result.Timing.TotalMS,
+		},
+	}
+	decisionOutput, err := puredecision.Run(ctx, decisionPackage, inputs)
+	if err != nil {
+		return nil, false, "", fmt.Errorf("run decision Action %q: %w", config.DecisionActionID, err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(decisionOutput, &document); err != nil {
+		return nil, false, "", fmt.Errorf("decode decision Action output: %w", err)
+	}
+	acceptedValue, err := dottedObjectValue(document, config.DecisionAcceptedPath)
+	if err != nil {
+		return nil, false, "", err
+	}
+	accepted, ok := acceptedValue.(bool)
+	if !ok {
+		return nil, false, "", fmt.Errorf("decision path %q must resolve to a boolean", config.DecisionAcceptedPath)
+	}
+	stateValue, err := dottedObjectValue(document, config.DecisionStatePath)
+	if err != nil {
+		return nil, false, "", err
+	}
+	state, ok := stateValue.(string)
+	if !ok || state == "" {
+		return nil, false, "", fmt.Errorf("decision path %q must resolve to a non-empty string", config.DecisionStatePath)
+	}
+	if accepted == (state == config.UnknownState) {
+		return nil, false, "", errors.New("OCR cascade decision accepted flag is inconsistent with the declared unknownState")
+	}
+	return append(json.RawMessage(nil), decisionOutput...), accepted, state, nil
+}
+
+func dottedObjectValue(document map[string]any, path string) (any, error) {
+	var current any = document
+	for _, part := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("decision path %q crosses a non-object at %q", path, part)
+		}
+		current, ok = object[part]
+		if !ok {
+			return nil, fmt.Errorf("decision path %q is missing %q", path, part)
+		}
+	}
+	return current, nil
 }
 
 func (e *Executor) runOCRTextRegions(ctx context.Context, action rules.Action, inputs map[string]any) (json.RawMessage, error) {

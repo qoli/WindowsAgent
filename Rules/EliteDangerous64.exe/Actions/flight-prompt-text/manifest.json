@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "title": "Read Elite Dangerous central prompt text",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -11,5 +11,33 @@
   },
   "sampling": "reference",
   "maxPixels": 16000,
-  "characterConstraint": "none"
+  "characterConstraint": "none",
+  "cascade": {
+    "nativeCaptureMaxPixels": 65536,
+    "decisionActionId": "elite-dangerous/flight-status-classifier",
+    "decisionAcceptedPath": "routeDecision.accepted",
+    "decisionStatePath": "routeDecision.state",
+    "unknownState": "UNKNOWN",
+    "primary": {"id": "REFERENCE_RAW_RGB", "topPermille": 0, "bottomPermille": 1000},
+    "gate": {
+      "topPermille": 500,
+      "bottomPermille": 1000,
+      "orangeThreshold": 40,
+      "centerLeftPermille": 250,
+      "centerRightPermille": 750,
+      "minimumCenterOrangeRatio": 0.18,
+      "lowOrangeThreshold": 10,
+      "activeColumnPixelRatio": 0.05,
+      "maximumActiveOrangeColumnRatio": 0.35,
+      "horizontalEdgeThreshold": 60,
+      "minimumHorizontalEdgeRatio": 0.021
+    },
+    "recovery": {"id": "REFERENCE_BOTTOM_HALF_RGB", "topPermille": 500, "bottomPermille": 1000},
+    "recoveryAllowedStates": ["AUTO_DOCK", "AUTO_LAUNCH", "FSD_CHARGING"],
+    "validator": {
+      "triggerState": "FSD_CHARGING",
+      "requiredState": "FSD_CHARGING",
+      "route": {"id": "REFERENCE_CENTER_BAND_RGB", "topPermille": 300, "bottomPermille": 800}
+    }
+  }
 }

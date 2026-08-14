@@ -32,6 +32,7 @@ const (
 	RegistrationsMediaType          = "application/json; charset=utf-8"
 	RuntimesMediaType               = "application/json; charset=utf-8"
 	ObservationRuntimeV1            = "windows-observation-v1"
+	PureDecisionRuntimeV1           = "windows-pure-decision-v1"
 	PpOcrActionRuntimeV1            = "ppocr-w480-text-v1"
 	PpOcrTextRegionsActionRuntimeV1 = "ppocr-text-regions-v1"
 	CompositeActionRuntimeV1        = "windows-composite-action-v1"
@@ -697,6 +698,9 @@ func validateDescriptor(descriptor Descriptor) error {
 		}
 		if resolvedActionExposure(declaration.Exposure) == ActionExposureInternal && len(declaration.RegistrableAs) != 0 {
 			return fmt.Errorf("internal action %s cannot declare registration eligibility", id)
+		}
+		if declaration.Runtime == PureDecisionRuntimeV1 && resolvedActionExposure(declaration.Exposure) != ActionExposureInternal {
+			return fmt.Errorf("pure decision action %s must be internal", id)
 		}
 		if err := validateActionExecution(declaration.Execution); err != nil {
 			return fmt.Errorf("action %s execution: %w", id, err)

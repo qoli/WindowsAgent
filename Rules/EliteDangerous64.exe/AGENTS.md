@@ -123,21 +123,27 @@ hemispheres every second. Above 40px it keeps the sustained lease; inside 16px
 it only observes.
 
 `elite-dangerous/flight-prompt-text` is a second finite Action. It captures the
-reviewed central prompt as a 400x40 reference-density RGB line and sends it to
-the Rule-declared `ocr/w480` resident DirectML worker. Its output is
-raw OCR text evidence only.
+reviewed central prompt once, retains the native local crop only for the
+declared cheap CV Gate, and derives reference-density OCR routes from that same
+frame. The primary route short-circuits on an accepted classifier result;
+Gate-positive primary `UNKNOWN` evidence may run the declared bottom-half and
+charging-validator routes. Its output preserves selected raw OCR plus all
+executed route, Gate, transition, provider, and timing evidence. Infrastructure
+failure is terminal and is never a semantic `UNKNOWN`.
 
-`elite-dangerous/flight-status` is its finite, pure post-processing Action. It
-accepts the complete raw OCR output and combines OCR confidence with reviewed
-phrase similarity. A candidate must also meet the explicit `0.60` phrase
+`elite-dangerous/flight-status` is the finite public semantic boundary. Its
+Rule-internal pure classifier is invoked for each executed OCR route and
+combines OCR confidence with reviewed phrase similarity. A candidate must also
+meet the explicit `0.60` phrase
 similarity floor; high-confidence unrelated OCR remains `UNKNOWN`. It returns `SUPERCRUISE`, `AUTO_LAUNCH`,
 `WAITING_IN_QUEUE`, `SLOW_DOWN_FOR_AUTO_DOCK`, `FSD_CHARGING`,
 `FSD_THROTTLE_UP_REQUIRED`,
 `FSD_ALIGNMENT_REQUIRED`, `SUPERCRUISE_ASSIST_ACTIVE`,
 `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED`,
 `SAFE_DISENGAGE_READY`, `AUTO_DOCK`, or
-evidence-preserving `UNKNOWN`. It
-performs no capture or OCR and malformed raw input fails schema validation.
+evidence-preserving `UNKNOWN`. The public result includes the cascade
+provenance selected by the child Action; malformed raw or decision input fails
+schema validation.
 Multi-frame confirmation, event emission, and follow-up execution remain
 owning Action concerns. `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` is the
 exact `MOVE TO OBTAIN LINE OF SIGHT TO TARGET` Gate; it is not ordinary Assist

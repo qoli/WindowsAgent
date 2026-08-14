@@ -87,6 +87,54 @@ func TestLoadRejectsUnknownPixelFilterMode(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsExplicitCascadeDecisionAction(t *testing.T) {
+	root := writeFixture(t, `{
+  "schemaVersion":3,
+  "title":"Read routed prompt",
+  "inputSchema":"input.schema.json",
+  "outputSchema":"output.schema.json",
+  "referenceRegion":{"x":760,"y":360,"w":400,"h":40},
+  "sampling":"reference",
+  "maxPixels":16000,
+  "characterConstraint":"none",
+  "cascade":{
+    "nativeCaptureMaxPixels":65536,
+    "decisionActionId":"game/prompt-classifier",
+    "decisionAcceptedPath":"routeDecision.accepted",
+    "decisionStatePath":"routeDecision.state",
+    "unknownState":"UNKNOWN",
+    "primary":{"id":"REFERENCE_RAW_RGB","topPermille":0,"bottomPermille":1000},
+    "gate":{"topPermille":500,"bottomPermille":1000,"orangeThreshold":40,"centerLeftPermille":250,"centerRightPermille":750,"minimumCenterOrangeRatio":0.18,"lowOrangeThreshold":10,"activeColumnPixelRatio":0.05,"maximumActiveOrangeColumnRatio":0.35,"horizontalEdgeThreshold":60,"minimumHorizontalEdgeRatio":0.021},
+    "recovery":{"id":"REFERENCE_BOTTOM_HALF_RGB","topPermille":500,"bottomPermille":1000},
+    "recoveryAllowedStates":["AUTO_DOCK","FSD_CHARGING"],
+    "validator":{"triggerState":"FSD_CHARGING","requiredState":"FSD_CHARGING","route":{"id":"REFERENCE_CENTER_BAND_RGB","topPermille":300,"bottomPermille":800}}
+  }
+}`)
+	config, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Cascade == nil || config.Cascade.DecisionActionID != "game/prompt-classifier" || config.Cascade.NativeCaptureMaxPixels != 65536 {
+		t.Fatalf("cascade = %#v", config.Cascade)
+	}
+}
+
+func TestLoadRejectsCascadeWithoutExplicitDecisionPath(t *testing.T) {
+	root := writeFixture(t, `{
+  "schemaVersion":3,"title":"Read routed prompt","inputSchema":"input.schema.json","outputSchema":"output.schema.json",
+  "referenceRegion":{"x":760,"y":360,"w":400,"h":40},"sampling":"reference","maxPixels":16000,"characterConstraint":"none",
+  "cascade":{"nativeCaptureMaxPixels":65536,"decisionActionId":"game/prompt-classifier","decisionAcceptedPath":"","decisionStatePath":"routeDecision.state","unknownState":"UNKNOWN",
+    "primary":{"id":"REFERENCE_RAW_RGB","topPermille":0,"bottomPermille":1000},
+    "gate":{"topPermille":500,"bottomPermille":1000,"orangeThreshold":40,"centerLeftPermille":250,"centerRightPermille":750,"minimumCenterOrangeRatio":0.18,"lowOrangeThreshold":10,"activeColumnPixelRatio":0.05,"maximumActiveOrangeColumnRatio":0.35,"horizontalEdgeThreshold":60,"minimumHorizontalEdgeRatio":0.021},
+    "recovery":{"id":"REFERENCE_BOTTOM_HALF_RGB","topPermille":500,"bottomPermille":1000},"recoveryAllowedStates":["AUTO_DOCK","FSD_CHARGING"],
+    "validator":{"triggerState":"FSD_CHARGING","requiredState":"FSD_CHARGING","route":{"id":"REFERENCE_CENTER_BAND_RGB","topPermille":300,"bottomPermille":800}}}
+}`)
+	_, err := Load(root)
+	if err == nil || !strings.Contains(err.Error(), "decisionAcceptedPath") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func writeFixture(t *testing.T, manifest string) string {
 	t.Helper()
 	root := t.TempDir()

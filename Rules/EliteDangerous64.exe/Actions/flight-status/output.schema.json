@@ -2,9 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "flightStatus", "source", "decision"],
+  "required": ["schemaVersion", "flightStatus", "source", "decision", "recognition"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "flightStatus": {
       "type": "object",
       "additionalProperties": false,
@@ -60,6 +60,45 @@
         "textSimilarity": {"type": "number", "minimum": 0, "maximum": 1},
         "runnerUpState": {"type": ["string", "null"], "enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_THROTTLE_UP_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", null]},
         "runnerUpConfidence": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "recognition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "selectedRoute", "terminalReason", "attemptCount", "attempts", "gate", "transitions", "evidence", "model", "timing"],
+      "properties": {
+        "policy": {"const": "EXPLICIT_PERFORMANCE_FIRST"},
+        "selectedRoute": {"enum": ["REFERENCE_RAW_RGB", "REFERENCE_BOTTOM_HALF_RGB"]},
+        "terminalReason": {
+          "enum": [
+            "primary-accepted", "primary-unknown-and-cheap-gate-rejected", "recovery-unknown",
+            "recovery-state-not-eligible", "eligible-recovery-state-accepted", "validator-agreement",
+            "validator-disagreement"
+          ]
+        },
+        "attemptCount": {"type": "integer", "minimum": 1, "maximum": 3},
+        "attempts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["routeId", "text", "confidence", "routeDecision", "timing"],
+            "properties": {
+              "routeId": {"enum": ["REFERENCE_RAW_RGB", "REFERENCE_BOTTOM_HALF_RGB", "REFERENCE_CENTER_BAND_RGB"]},
+              "text": {"type": "string"},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "routeDecision": {"type": "object"},
+              "timing": {"type": "object"}
+            }
+          }
+        },
+        "gate": {"type": ["object", "null"]},
+        "transitions": {"type": "array", "maxItems": 2, "items": {"type": "object"}},
+        "evidence": {"type": "object"},
+        "model": {"type": "object"},
+        "timing": {"type": "object"}
       }
     }
   },

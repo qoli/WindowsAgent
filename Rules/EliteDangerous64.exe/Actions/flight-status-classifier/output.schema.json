@@ -1,4 +1,37 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["routeDecision"],
+  "properties": {
+    "routeDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "state"],
+      "properties": {
+        "accepted": {"type": "boolean"},
+        "state": {
+          "enum": [
+            "SUPERCRUISE_ASSIST_ACTIVE",
+            "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED",
+            "SUPERCRUISE",
+            "AUTO_LAUNCH",
+            "WAITING_IN_QUEUE",
+            "SLOW_DOWN_FOR_AUTO_DOCK",
+            "FSD_CHARGING",
+            "FSD_THROTTLE_UP_REQUIRED",
+            "FSD_ALIGNMENT_REQUIRED",
+            "FSD_ESCAPE_VECTOR_REQUIRED",
+            "SAFE_DISENGAGE_READY",
+            "AUTO_DOCK",
+            "UNKNOWN"
+          ]
+        }
+      },
+      "oneOf": [
+        {"properties": {"accepted": {"const": true}, "state": {"not": {"const": "UNKNOWN"}}}},
+        {"properties": {"accepted": {"const": false}, "state": {"const": "UNKNOWN"}}}
+      ]
+    }
+  }
 }

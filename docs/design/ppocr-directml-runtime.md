@@ -40,21 +40,27 @@ The Elite Dangerous path is:
 
 ```text
 1920x1080 reference rectangle
-  -> centered 16:9 reference-density 400x40 WGC region capture
-  -> RGB24 w480 text-line worker request
-  -> unrestricted CTC text, confidence, provenance, model identity, and timing
+  -> one centered 16:9 native local WGC region capture
+  -> same-frame 400x40 reference RGB route
+  -> pure Rule-internal semantic decision
+  -> optional declared native CV Gate
+  -> optional same-frame bottom-half / center-band reference RGB routes
+  -> selected unrestricted CTC text plus route, Gate, provenance, model, timing
 ```
 
 The preprocessor preserves the supplied region's aspect ratio at height 48 and
 right-pads the remaining model width instead of stretching the content. For
 the 10:1 flight-prompt region this still fills 480x48 exactly. The Action
 returns no semantic `state` field. The separately declared pure
-`elite-dangerous/flight-status` Action
-accepts its complete raw result and decides whether text such as
+`elite-dangerous/flight-status-classifier` is the single decision Action used
+for every executed route; Core does not duplicate its aliases or thresholds.
+The public `elite-dangerous/flight-status` Action accepts the selected decision
+and reports whether text such as
 `SUPERCRUISE`, docking, or FSD alignment reaches the reviewed confidence and
 separation thresholds. It returns `UNKNOWN` when the evidence does not support
-a finite state. Connecting repeated OCR results to events remains an explicit
-registration concern.
+a finite state. Capture, preprocessing, OCR, decision, or provider failures are
+terminal and never become `UNKNOWN` or authorize another route. Connecting
+repeated OCR results to events remains an explicit registration concern.
 
 The Elite Dangerous ship-status path uses a second profile and three finite
 layers:
@@ -180,6 +186,18 @@ median was `30.76 ms` and p95 was `48.07 ms`. The separate semantic Action uses
 `OCR confidence * phrase similarity >= 0.30` and a best-versus-runner-up margin
 of at least `0.10`. In the reviewed set, the weakest accepted example scored
 `0.3149`, while the strongest unknown interference scored `0.2382`.
+
+On 2026-08-14, an OCR-blind review grouped 1,195 historical screenshots into
+1,076 exact central-prompt ROI representatives. The explicit performance-first
+cascade retained all 107 catalog-supported visible states, kept all seven
+reviewed out-of-catalog prompts as `UNKNOWN`, and ran one, two, or three OCR
+routes for 1,040, 31, and 5 representatives respectively. Its macOS
+CPUExecutionProvider replay measured p50 `15.258 ms`, p95 `17.776 ms`, and p99
+`32.245 ms` including the selected inference calls. This corpus participated
+in threshold exploration and is not an untouched holdout; the provider was not
+DirectML. These numbers justify the checked-in route contract and regression
+fixtures, but do not constitute live Windows, DirectML, UI-scale, or
+generalization acceptance.
 
 On 2026-08-08, the text-regions worker processed the reviewed Elite Dangerous
 ship-status crop at the configured 320x150 reference density. It returned

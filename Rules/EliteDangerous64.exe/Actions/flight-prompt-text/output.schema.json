@@ -1,15 +1,63 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["schemaVersion", "text", "confidence", "decoding", "evidence", "model", "timing"],
+  "required": ["schemaVersion", "text", "confidence", "decoding", "evidence", "model", "timing", "cascade"],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": { "const": 2 },
     "text": { "type": "string" },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "decoding": { "type": "object" },
     "evidence": { "type": "object" },
     "model": { "type": "object" },
-    "timing": { "type": "object" }
+    "timing": { "type": "object" },
+    "cascade": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "attempts", "attemptCount", "gate", "transitions", "selectedRoute", "finalState", "terminalReason", "selectedDecision"],
+      "properties": {
+        "policy": {"const": "EXPLICIT_PERFORMANCE_FIRST"},
+        "attempts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["routeId", "text", "confidence", "decision", "evidence", "decoding", "model", "timing"],
+            "properties": {
+              "routeId": {"enum": ["REFERENCE_RAW_RGB", "REFERENCE_BOTTOM_HALF_RGB", "REFERENCE_CENTER_BAND_RGB"]},
+              "text": {"type": "string"},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "decision": {"type": "object"},
+              "evidence": {"type": "object"},
+              "decoding": {"type": "object"},
+              "model": {"type": "object"},
+              "timing": {"type": "object"}
+            }
+          }
+        },
+        "attemptCount": {"type": "integer", "minimum": 1, "maximum": 3},
+        "gate": {"type": ["object", "null"]},
+        "transitions": {"type": "array", "maxItems": 2, "items": {"type": "object"}},
+        "selectedRoute": {"enum": ["REFERENCE_RAW_RGB", "REFERENCE_BOTTOM_HALF_RGB"]},
+        "finalState": {
+          "enum": [
+            "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE",
+            "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING",
+            "FSD_THROTTLE_UP_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED",
+            "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN"
+          ]
+        },
+        "terminalReason": {
+          "enum": [
+            "primary-accepted", "primary-unknown-and-cheap-gate-rejected", "recovery-unknown",
+            "recovery-state-not-eligible", "eligible-recovery-state-accepted", "validator-agreement",
+            "validator-disagreement"
+          ]
+        },
+        "selectedDecision": {"type": "object"}
+      }
+    }
   },
   "additionalProperties": false
 }

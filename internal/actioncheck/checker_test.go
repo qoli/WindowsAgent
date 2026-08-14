@@ -175,6 +175,51 @@ func TestCheckReportsInvalidPackageAndStarlark(t *testing.T) {
 	}
 }
 
+func TestCheckTreatsOCRCascadeDecisionAsStaticDependency(t *testing.T) {
+	source, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name, decisionActionID, expectedCode string
+	}{
+		{name: "missing", decisionActionID: "elite-dangerous/missing-classifier", expectedCode: CodeMissingAction},
+		{name: "self", decisionActionID: "elite-dangerous/flight-prompt-text", expectedCode: CodeSelfDependency},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			destination := filepath.Join(root, "EliteDangerous64.exe")
+			if err := os.CopyFS(destination, os.DirFS(source)); err != nil {
+				t.Fatal(err)
+			}
+			manifestPath := filepath.Join(destination, "Actions", "flight-prompt-text", "manifest.json")
+			var manifest map[string]any
+			data, err := os.ReadFile(manifestPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			manifest["cascade"].(map[string]any)["decisionActionId"] = test.decisionActionID
+			encoded, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			result, err := Check(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasIssueCode(result.Issues, test.expectedCode) {
+				t.Fatalf("issues = %+v, expected %s", result.Issues, test.expectedCode)
+			}
+		})
+	}
+}
+
 func TestWriteTextIncludesLocationAndDependency(t *testing.T) {
 	result := Result{
 		SchemaVersion: 1,

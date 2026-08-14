@@ -24,17 +24,21 @@ The maintained capability layers are:
    package through the Script Runner and the read-only Observer inside a
    Windows Job Object. Memory, file, screen-region, and native-library access
    remain permission-bounded and package-declared.
-3. **Actions** — a Rule v6 Action is the only executable game capability.
+3. **Pure decisions** — `windows-pure-decision-v1` runs one internal,
+   permission-free Starlark JSON mapping in-process for bounded composition. It
+   cannot access Observer, native, input, pointer, Action, or stream APIs and
+   does not replace isolated finite observation.
+4. **Actions** — a Rule v6 Action is the only executable game capability.
    Finite Actions return one terminal result. Streaming Actions own bounded
    asynchronous observe/decide/operate workflows, durable events,
    cancellation, and failure compensation.
-4. **Ephemeral Action Sequences** — a Rule may allow one immutable, fully
+5. **Ephemeral Action Sequences** — a Rule may allow one immutable, fully
    preflighted sequence of 1–20 existing Actions. A sequence has no variables,
    branches, loops, retries, nesting, persistence, or hidden provider change.
-5. **Resident inference runtimes** — Rule-declared runtime profiles may keep a
+6. **Resident inference runtimes** — Rule-declared runtime profiles may keep a
    pinned OCR worker resident while that Rule is active. Residency is lifecycle
    configuration, not an Action and not a registration.
-6. **Event and companion processes** — the event stream is a separate
+7. **Event and companion processes** — the event stream is a separate
    loopback-only authenticated journal. The Action OSD is display-only,
    click-through, non-activating, and capture-excluded. The watchdog is an
    external one-way lifecycle owner; monitored modules must not know about it,
