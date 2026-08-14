@@ -228,7 +228,11 @@ binary update. It validates source, builds and hashes all ten deployed
 executables, uploads one ZIP over SSH, stops the installed Watchdog and its
 currently configured targets, replaces only their binaries, maintains bounded
 process-scoped crash dumps for the Agent and WGC worker, then restarts the
-Watchdog and waits for its existing target set to become healthy.
+Watchdog and waits for its existing target set to become healthy. Before the
+first replacement it copies and verifies every installed binary under one
+deployment-ID transaction. A replacement or health failure restores those
+exact hashes, restarts the previous runtime, and verifies every configured
+process/session and HTTP probe again.
 
 It reads the installed Watchdog configuration and Scheduled Task actions as the
 only deployment map. It does not ship a Watchdog configuration, register or
@@ -239,11 +243,20 @@ includes the Visual Log model endpoint.
 
 ```bash
 ./scripts/deploy-windows-agent.sh --host Ronnie-PC
+./scripts/deploy-windows-agent.sh --host Ronnie-PC --validate-only
 ```
 
 `Ronnie-PC` is the default host, so `--host` may be omitted. A dirty worktree is
-rejected unless `--allow-dirty` is explicitly supplied. Failed remote staging
-is retained for diagnosis.
+rejected unless `--allow-dirty` is explicitly supplied. `--validate-only`
+builds and transfers the candidate, verifies its hashes, resolves the existing
+Watchdog-owned deployment map, and records Task actions, Task results,
+process/session identity, and HTTP probe results without stopping a process or
+replacing a binary. Successful remote staging is removed; failed staging and
+all binary transaction directories are retained for diagnosis or recovery.
+Both successful and failed runs write a JSON receipt under
+`.build/binary-deployments/`; publishing runs also persist the Windows-side
+receipt and the verified previous binaries under the installed data directory.
+Neither mode changes Scheduled Task actions or the Watchdog configuration.
 
 ### Deploy the complete Rules tree from macOS
 
