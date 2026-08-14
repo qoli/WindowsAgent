@@ -851,6 +851,20 @@ func TestEliteShipStatusClassifierUsesPrefixLabelsAndIndependentColors(t *testin
 	}
 }
 
+func TestEliteShipStatusClassifierAcceptsDimInactiveOrange(t *testing.T) {
+	result := runShipStatusClassifier(t, shipStatusClassifierInput(
+		[]string{"MASS LOCKED", "LANDING GEAR", "CARGO SCOOP"},
+		[]uint32{0x7A2A12, 0x7A2A12, 0x7A2A12},
+	))
+	statuses := result["shipStatus"].(map[string]any)
+	for _, name := range []string{"massLock", "landingGear", "cargoScoop"} {
+		status := statuses[name].(map[string]any)
+		if status["state"] != "OFF" || status["on"] != false || status["color"] != "orange" {
+			t.Fatalf("%s = %#v", name, status)
+		}
+	}
+}
+
 func TestEliteShipStatusClassifierDoesNotGuessMissingLabel(t *testing.T) {
 	result := runShipStatusClassifier(t, shipStatusClassifierInput(
 		[]string{"LANDING GEAR", "CARGO SCOOP"}, []uint32{0x40DDEB, 0xFF7700},

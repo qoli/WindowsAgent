@@ -362,6 +362,81 @@ func TestEliteSelectAndLockDestinationUsesUniqueRelativeFocusBelowOldThreshold(t
 	}
 }
 
+func TestEliteSelectAndLockDestinationAcceptsStrongTargetFillDespiteAdjacentContextSpill(t *testing.T) {
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{"NAVIGATION", "NAVIGATION", "ABSENT", "ABSENT"},
+		regions: []json.RawMessage{
+			navigationRowsWithFocusRatios("NAV BEACON", 520, 2, "OBAMA REACH", 480, 7),
+			navigationRowsWithFocusRatios("NAV BEACON", 520, 2, "OBAMA REACH", 480, 7),
+			navigationRowsWithFocusRatios("NAV BEACON", 520, 6, "OBAMA REACH", 480, 5),
+			navigationRowsWithFocusRatios("NAV BEACON", 520, 6, "OBAMA REACH", 480, 5),
+			navigationRows("< NAV BEACON", 520, "< NAV BEACON", 520), navigationRows("< NAV BEACON", 520, "< NAV BEACON", 520),
+		},
+		buttons: []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details: []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "NAV BEACON"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"DOWN", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) || !contains(string(output), `"result":"ACQUIRED"`) || !contains(string(output), `"reason":"NAVIGATION_DESTINATION_BRACKETS_CONFIRMED"`) {
+		t.Fatalf("controls=%v output=%s", caller.controls, output)
+	}
+}
+
+func TestEliteSelectAndLockDestinationIgnoresBrightSingleCharacterPanelControl(t *testing.T) {
+	withControl := func(targetSamples, focusedSamples int) json.RawMessage {
+		base := navigationRowsWithFocusRatios("OBAMA REACH", 520, targetSamples, "< NAV BEACON >", 480, focusedSamples)
+		var decoded map[string]any
+		if err := json.Unmarshal(base, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		pixels := make([]any, 80)
+		for index := range pixels {
+			pixels[index] = 0
+		}
+		for index := 0; index < 7; index++ {
+			pixels[index*8] = 0xff9000
+		}
+		regions := decoded["regions"].([]any)
+		regions = append(regions, map[string]any{
+			"detectionConfidence": 0.92, "recognitionConfidence": 0.98, "text": "X",
+			"referencePoints": []any{
+				map[string]any{"x": 450, "y": 390}, map[string]any{"x": 470, "y": 390},
+				map[string]any{"x": 470, "y": 410}, map[string]any{"x": 450, "y": 410},
+			},
+			"leftContext": map[string]any{"w": 80, "h": 1, "pixels": pixels},
+		})
+		decoded["regions"] = regions
+		value, _ := json.Marshal(decoded)
+		return value
+	}
+	caller := &selectAndLockDestinationCaller{
+		contacts: []string{"NAVIGATION", "NAVIGATION", "ABSENT", "ABSENT"},
+		regions: []json.RawMessage{
+			withControl(2, 6), withControl(2, 6),
+			navigationRowsWithFocusRatios("OBAMA REACH", 520, 6, "< NAV BEACON >", 480, 2),
+			navigationRowsWithFocusRatios("OBAMA REACH", 520, 6, "< NAV BEACON >", 480, 2),
+			navigationRows("< OBAMA REACH", 520, "< OBAMA REACH", 520), navigationRows("< OBAMA REACH", 520, "< OBAMA REACH", 520),
+		},
+		buttons: []json.RawMessage{lockDestinationButton("FOCUSED"), lockDestinationButton("FOCUSED")},
+		details: []json.RawMessage{lockDestinationOCR("LOCK DESTINATION"), lockDestinationOCR("LOCK DESTINATION")},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSelectAndLockDestinationPackage(t), map[string]any{"targetName": "OBAMA REACH"}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantControls := []string{"DOWN", "SELECT", "SELECT", "FOCUS_LEFT_PANEL"}
+	if !equalStrings(caller.controls, wantControls) || !contains(string(output), `"result":"ACQUIRED"`) {
+		t.Fatalf("controls=%v output=%s", caller.controls, output)
+	}
+}
+
 func TestEliteSelectAndLockDestinationReachesExactTargetOnEighthInputWithinStepBudget(t *testing.T) {
 	regions := make([]json.RawMessage, 0, 20)
 	for focusedIndex := 0; focusedIndex <= 8; focusedIndex++ {

@@ -10,6 +10,7 @@ MIN_TEXT_SIMILARITY = 0.75
 MIN_TEXT_MARGIN = 0.15
 FOCUSED_FILL_MINIMUM = 0.40
 FOCUSED_FILL_MARGIN = 0.10
+FOCUSED_STRONG_TARGET_MINIMUM = 0.60
 LIST_MIN_Y = 320.0
 LIST_MAX_Y = 760.0
 LIST_MAX_X = 920.0
@@ -132,7 +133,10 @@ def inspect_target(raw, target_name):
         if normalized == expected:
             exact.append(candidate)
         ratio = focus_fill_ratio(region)
-        if ratio != None:
+        # Single-character OCR regions in this ROI are panel controls such as
+        # the filter-clear X, not Navigation destination rows. Their icon
+        # background can be brighter than the actual focused row.
+        if ratio != None and len(normalized) >= 2:
             focus_candidate = {"text": region["text"], "normalized": normalized, "centerY": box["centerY"], "fillRatio": ratio}
             if focus_best == None or ratio > focus_best["fillRatio"]:
                 if focus_best != None and focus_best["fillRatio"] > focus_runner_up:
@@ -180,14 +184,16 @@ def inspect_target(raw, target_name):
     elif has_trailing_bracket:
         bracket_evidence = "TRAILING_ONLY"
     target_fill = focus_fill_ratio(best["region"])
-    focus_unique = focus_best != None and focus_best["fillRatio"] >= FOCUSED_FILL_MINIMUM and focus_best["fillRatio"] - focus_runner_up >= FOCUSED_FILL_MARGIN
-    focused = focus_unique and focus_best["normalized"] == expected
+    focus_margin = 0.0 if focus_best == None else focus_best["fillRatio"] - focus_runner_up
+    focus_unique = focus_best != None and focus_best["fillRatio"] >= FOCUSED_FILL_MINIMUM and focus_margin >= FOCUSED_FILL_MARGIN
+    strong_target_focus = focus_best != None and focus_best["normalized"] == expected and target_fill != None and target_fill >= FOCUSED_STRONG_TARGET_MINIMUM
+    focused = strong_target_focus or (focus_unique and focus_best["normalized"] == expected)
     # These rows belong specifically to NAVIGATION: angle brackets are direct
     # LOCK DESTINATION evidence here. CONTACTS uses the same glyphs for a
     # different ship-target concept and is classified by another Action.
     state = "LOCKED" if locked else ("FOCUSED" if focused else "VISIBLE")
     direction = None
-    reason = "NAVIGATION_DESTINATION_BRACKETS_CONFIRMED" if locked else ("TARGET_ROW_FOCUSED" if focused else "TARGET_ROW_VISIBLE")
+    reason = "NAVIGATION_DESTINATION_BRACKETS_CONFIRMED" if locked else ("TARGET_ROW_FOCUSED_STRONG_FILL" if strong_target_focus else ("TARGET_ROW_FOCUSED" if focused else "TARGET_ROW_VISIBLE"))
     if not locked and not focused:
         if not focus_unique:
             state = "UNKNOWN"
@@ -199,7 +205,7 @@ def inspect_target(raw, target_name):
         else:
             state = "UNKNOWN"
             reason = "FOCUS_GEOMETRY_AMBIGUOUS"
-    return {"state": state, "locked": locked, "bracketEvidence": bracket_evidence, "focused": focused, "direction": direction, "text": text, "similarity": best["similarity"], "margin": margin, "meaningfulRegionCount": meaningful, "focusFillRatio": target_fill, "reason": reason}
+    return {"state": state, "locked": locked, "bracketEvidence": bracket_evidence, "focused": focused, "direction": direction, "text": text, "similarity": best["similarity"], "margin": margin, "meaningfulRegionCount": meaningful, "focusFillRatio": target_fill, "focusLeaderText": None if focus_best == None else focus_best["text"], "focusLeaderFillRatio": None if focus_best == None else focus_best["fillRatio"], "focusRunnerUpFillRatio": focus_runner_up, "focusFillMargin": focus_margin, "reason": reason}
 
 def observe_target_stable(target_name, phase, panel_cycles, navigation_count, opened_panel):
     previous = None

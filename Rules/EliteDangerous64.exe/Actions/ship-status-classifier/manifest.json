@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 1,
+  "version": 2,
   "title": "Classify Elite Dangerous OCR-anchored ship status indicators",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

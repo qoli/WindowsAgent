@@ -52,7 +52,11 @@ def pixel_channels(pixel):
     return pixel // 65536, (pixel // 256) % 256, pixel % 256
 
 def is_orange(red, green, blue):
-    return red >= 165 and green >= 45 and green <= 215 and blue <= 125 and red >= green + 30
+    # Elite renders inactive indicator outlines as dim orange. The OCR-derived
+    # left context already bounds this test to the indicator beside one label,
+    # so requiring the much brighter text/HUD orange incorrectly turns a clear
+    # OFF box into UNKNOWN.
+    return red >= 110 and green >= 25 and green <= 180 and blue <= 100 and red >= green + 25
 
 def is_cyan(red, green, blue):
     return green >= 130 and blue >= 120 and red <= 190 and green >= red + 15 and blue >= red
