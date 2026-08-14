@@ -102,6 +102,23 @@ class DeployWindowsRulesTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             deploy.parse_args(["--host=-oProxyCommand=bad"])
 
+    def test_remote_apply_does_not_read_unset_native_exit_code(self):
+        script = deploy.remote_apply_script(
+            "windowsagent-rules-deploy-test",
+            prune_unknown=False,
+            validate_only=False,
+            timeout_seconds=60,
+        )
+        self.assertNotIn("LASTEXITCODE", script)
+        self.assertIn("$ErrorActionPreference='Stop'", script)
+        self.assertIn("-TimeoutSeconds 60", script)
+
+    def test_ssh_transport_pins_windows_compatible_kex(self):
+        self.assertEqual(
+            deploy.SSH_TRANSPORT_OPTIONS,
+            ["-o", "KexAlgorithms=ecdh-sha2-nistp256"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,10 @@ CHECKER_NAME = "windows-action-check.exe"
 FORBIDDEN_NAMES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 RULES_DEVELOPMENT_FILES = {"AGENTS.md"}
 SSH_HOST_PATTERN = re.compile(r"^(?!-)[A-Za-z0-9_.@-]+$")
+SSH_TRANSPORT_OPTIONS = [
+    "-o",
+    "KexAlgorithms=ecdh-sha2-nistp256",
+]
 
 
 class DeployError(RuntimeError):
@@ -228,6 +232,7 @@ def ssh_powershell(host: str, script: str, repo_root: Path) -> subprocess.Comple
     return run(
         [
             "ssh",
+            *SSH_TRANSPORT_OPTIONS,
             "-o",
             "BatchMode=yes",
             "-o",
@@ -242,6 +247,21 @@ def ssh_powershell(host: str, script: str, repo_root: Path) -> subprocess.Comple
             powershell_encoded(script),
         ],
         cwd=repo_root,
+    )
+
+
+def remote_apply_script(
+    remote_name: str, *, prune_unknown: bool, validate_only: bool, timeout_seconds: int
+) -> str:
+    prune = "$true" if prune_unknown else "$false"
+    validate = "$true" if validate_only else "$false"
+    return (
+        "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
+        f"$stage=Join-Path $env:USERPROFILE '{remote_name}';"
+        f"Expand-Archive -LiteralPath (Join-Path $stage '{REMOTE_ARCHIVE}') -DestinationPath $stage -Force;"
+        f"& (Join-Path $stage '{REMOTE_EXECUTOR}') -PayloadRoot $stage -PruneUnknown:{prune} "
+        f"-ValidateOnly:{validate} "
+        f"-TimeoutSeconds {timeout_seconds}"
     )
 
 
@@ -303,22 +323,25 @@ def deploy(args: argparse.Namespace) -> dict[str, object]:
 
         remote_archive = f"{remote_name}/{REMOTE_ARCHIVE}"
         uploaded = run(
-            ["scp", "-q", "-o", "ConnectTimeout=10", str(archive), f"{args.host}:{remote_archive}"],
+            [
+                "scp",
+                "-q",
+                *SSH_TRANSPORT_OPTIONS,
+                "-o",
+                "ConnectTimeout=10",
+                str(archive),
+                f"{args.host}:{remote_archive}",
+            ],
             cwd=repo_root,
         )
         if uploaded.returncode != 0:
             raise DeployError(f"upload Rule archive: {uploaded.stderr.strip() or uploaded.stdout.strip()}")
 
-        prune = "$true" if args.prune_unknown else "$false"
-        validate_only = "$true" if args.validate_only else "$false"
-        apply_script = (
-            "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
-            f"$stage=Join-Path $env:USERPROFILE '{remote_name}';"
-            f"Expand-Archive -LiteralPath (Join-Path $stage '{REMOTE_ARCHIVE}') -DestinationPath $stage -Force;"
-            f"& (Join-Path $stage '{REMOTE_EXECUTOR}') -PayloadRoot $stage -PruneUnknown:{prune} "
-            f"-ValidateOnly:{validate_only} "
-            f"-TimeoutSeconds {args.timeout_seconds};"
-            "if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}"
+        apply_script = remote_apply_script(
+            remote_name,
+            prune_unknown=args.prune_unknown,
+            validate_only=args.validate_only,
+            timeout_seconds=args.timeout_seconds,
         )
         applied = ssh_powershell(args.host, apply_script, repo_root)
         if applied.returncode != 0:
