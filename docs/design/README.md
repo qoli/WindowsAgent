@@ -12,6 +12,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Windows observer protocol](observation-worker-protocol.md) | Landed | Unify finite read-only memory, file, and reference/native sampled screen-region calls behind framed process boundaries. |
 | [Script Runner native-library FFI](native-library-ffi.md) | Landed | Load package-owned DLL aliases and execute package-owned ABIs through a provider-neutral Windows amd64 FFI. |
 | [Event stream runtime](event-stream-runtime.md) | Partially landed | Persist strict ordered events and expose authenticated local append/replay for independent modules. |
+| [Event Web runtime](event-web-runtime.md) | Landed | Project the durable event timeline and exact Action OSD state through an authenticated, explicitly bound, windowless Web executable. |
 | [Visual log runtime](visual-log-runtime.md) | Partially landed | Run an optional single-frame Gemma description loop as an untrusted timeline index without controlling evidence recording. |
 | [Evidence recorder runtime](evidence-recorder-runtime.md) | Partially landed | Run independent, authenticated, finite borderless 1 FPS 1080p recordings with a 20-minute default and one-hour hard limit, publish recording presence, export UTC ranges, and build exact-timestamp contact sheets from committed MP4 evidence. |
 | [Action registration model](action-registration-model.md) | Partially landed | Declare executable Actions and separately register selected Actions as timer-driven Monitors or event-driven Reactions. |

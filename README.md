@@ -103,6 +103,10 @@ The Action runtime and registration refactor is partially landed:
   or event-driven Reactions;
 - `windows-event-stream.exe` owns a strict append-only JSONL journal and an
   authenticated loopback append/replay/time-range API;
+- `windows-event-web.exe` is an optional independent, windowless Web projection
+  of that journal and the exact Action OSD state. It accepts only an explicit
+  loopback or private-LAN listener and uses a browser-facing token distinct from
+  the loopback journal credential;
 - `windows-visual-log.exe` is an optional independent producer that warms one
   exactly configured oMLX model, reads the newest frame from the Evidence
   recorder's PC-local shared-memory tap on its own loop tick, and appends an
@@ -212,7 +216,8 @@ and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
 validation,
 `windows-action-osd.exe` for the display-only capture, Action, and
 Evidence-recording overlay, and the optional `windows-watchdog.exe` and independent
-`windows-evidence-recorder.exe` and `windows-visual-log.exe`. It also emits the
+`windows-evidence-recorder.exe`, `windows-visual-log.exe`, and
+`windows-event-web.exe`. It also emits the
 Event Stream and all three observation runtimes required by the persistent
 installer. It verifies the expected PE subsystem for every emitted executable.
 
@@ -365,6 +370,23 @@ $tokenRng.GetBytes($tokenBytes)
   --token-file (Join-Path $PWD "event-stream.token") `
   --log-file (Join-Path $PWD "event-stream.jsonl")
 ```
+
+Install the optional browser projection after the Event Stream is healthy:
+
+```powershell
+.\scripts\install-windows-event-web.ps1 `
+  -ExecutablePath .\.build\windows-event-web.exe
+```
+
+The installer creates a distinct local Web bearer token, starts a hidden
+interactive-user Scheduled Task, and verifies that the executable has no main
+window. The default page is `http://127.0.0.1:8790/`. An operator may explicitly
+pass a private address such as `-WebListen <PC-LAN-IP>:8790` for trusted-LAN
+access; wildcard and public listeners are rejected and the installer does not
+alter Windows Firewall. Private-LAN HTTP is not transport encrypted. The page
+prompts for the Web token; do not put either token in a URL. The event journal
+remains on authenticated loopback `127.0.0.1:8788` and is never exposed to the
+browser.
 
 Run the partially landed Elite Dangerous visual log as its own process after
 the Evidence recorder and event stream are healthy. Both processes may remain
@@ -931,6 +953,7 @@ cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
 cmd/windows-event-stream/        authenticated local event journal service
+cmd/windows-event-web/           windowless read-only browser projection
 cmd/windows-visual-log/          optional independent oMLX scene-description producer
 cmd/windows-watchdog/            external one-way process observer and recovery
 cmd/windows-screen-scene-reducer/ retired raw-screen reducer reference
@@ -951,6 +974,7 @@ internal/actioncheck/            offline Action package and dependency validatio
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
+internal/eventweb/               authenticated Web UI, replay, stream, and OSD projection
 internal/evidence/               finite recording lifecycle, authoritative video store, range archive, and contact sheets
 internal/evidencehttp/           authenticated Evidence run-control and read interface
 internal/mfvideo/                native Media Foundation Evidence encoder and decoder
