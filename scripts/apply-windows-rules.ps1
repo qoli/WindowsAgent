@@ -141,13 +141,49 @@ function Get-LoopbackOrigin {
     return "http://127.0.0.1:$port"
 }
 
+function Invoke-JSONRequest {
+    param([Parameter(Mandatory = $true)][string]$URI)
+    $statusCode = 0
+    $content = ""
+    try {
+        $response = Invoke-WebRequest -Uri $URI -UseBasicParsing -TimeoutSec $TimeoutSeconds
+        $statusCode = [int]$response.StatusCode
+        $content = [string]$response.Content
+    } catch {
+        $failure = $_
+        $webResponse = $failure.Exception.Response
+        if ($null -eq $webResponse) {
+            throw "live catalog request failed without an HTTP response: ${URI}: $($failure.Exception.Message)"
+        }
+        $statusCode = [int]$webResponse.StatusCode
+        if ($null -ne $failure.ErrorDetails -and -not [string]::IsNullOrWhiteSpace([string]$failure.ErrorDetails.Message)) {
+            $content = [string]$failure.ErrorDetails.Message
+        } else {
+            $stream = $webResponse.GetResponseStream()
+            if ($null -ne $stream) {
+                $reader = [IO.StreamReader]::new($stream)
+                try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            }
+        }
+    }
+    $body = $null
+    if (-not [string]::IsNullOrWhiteSpace($content)) {
+        try {
+            $body = $content | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw "live catalog response is not JSON: uri=${URI} status=$statusCode"
+        }
+    }
+    return [pscustomobject]@{ StatusCode = $statusCode; Body = $body; Content = $content }
+}
+
 function Invoke-JSONGet {
     param([Parameter(Mandatory = $true)][string]$URI)
-    $response = Invoke-WebRequest -Uri $URI -UseBasicParsing -TimeoutSec $TimeoutSeconds
-    if ([int]$response.StatusCode -ne 200) {
-        throw "live catalog request returned HTTP $($response.StatusCode): $URI"
+    $result = Invoke-JSONRequest -URI $URI
+    if ([int]$result.StatusCode -ne 200) {
+        throw "live catalog request failed: uri=${URI} status=$($result.StatusCode) body=$($result.Content)"
     }
-    return $response.Content | ConvertFrom-Json -ErrorAction Stop
+    return $result.Body
 }
 
 function Get-SortedStrings {
@@ -209,23 +245,41 @@ function Assert-LiveCatalogs {
         Assert-SameStrings -Expected $expectedScripts -Actual @($scripts.scripts | ForEach-Object { $_.id }) `
             -Label "live Script catalog for Rule $ruleID"
 
-        $registrations = Invoke-JSONGet -URI ($Origin + "/v3/rules/$encodedRule/registrations")
-        Assert-SameStrings -Expected @($descriptor.registrations.PSObject.Properties.Name) `
-            -Actual @($registrations.registrations | ForEach-Object { $_.id }) `
-            -Label "live registration catalog for Rule $ruleID"
+		$registrations = Invoke-JSONGet -URI ($Origin + "/v3/rules/$encodedRule/registrations")
+		Assert-SameStrings -Expected @($descriptor.registrations.PSObject.Properties | ForEach-Object { [string]$_.Name }) `
+			-Actual @($registrations.registrations | ForEach-Object { $_.id }) `
+			-Label "live registration catalog for Rule $ruleID"
 
-        $runtimes = Invoke-JSONGet -URI ($Origin + "/v4/rules/$encodedRule/runtimes")
-        Assert-SameStrings -Expected @($descriptor.runtimeProfiles.PSObject.Properties.Name) `
-            -Actual @($runtimes.runtimes | ForEach-Object { $_.id }) `
+		$runtimes = Invoke-JSONGet -URI ($Origin + "/v4/rules/$encodedRule/runtimes")
+		Assert-SameStrings -Expected @($descriptor.runtimeProfiles.PSObject.Properties | ForEach-Object { [string]$_.Name }) `
+			-Actual @($runtimes.runtimes | ForEach-Object { $_.id }) `
             -Label "live runtime catalog for Rule $ruleID"
 
-        [void](Invoke-JSONGet -URI ($Origin + "/v3/rules/$encodedRule/action-sequence-tool"))
+        $sequenceURI = $Origin + "/v3/rules/$encodedRule/action-sequence-tool"
+        $sequenceDeclaration = $descriptor.PSObject.Properties["ephemeralActionSequence"]
+        $allowedSequenceActions = @()
+        if ($null -ne $sequenceDeclaration) {
+            $allowedSequenceActions = @($sequenceDeclaration.Value.allowedActions)
+        }
+        $sequenceResult = Invoke-JSONRequest -URI $sequenceURI
+        if ($allowedSequenceActions.Count -eq 0) {
+            if ([int]$sequenceResult.StatusCode -ne 404 -or
+                $null -eq $sequenceResult.Body -or
+                [string]$sequenceResult.Body.error.code -cne "action_sequence_unavailable") {
+                throw "disabled Action Sequence tool contract mismatch: uri=${sequenceURI} status=$($sequenceResult.StatusCode) body=$($sequenceResult.Content)"
+            }
+        } elseif ([int]$sequenceResult.StatusCode -ne 200 -or
+            $null -eq $sequenceResult.Body -or
+            [string]$sequenceResult.Body.name -cne "run_action_sequence") {
+            throw "enabled Action Sequence tool contract mismatch: uri=${sequenceURI} status=$($sequenceResult.StatusCode) body=$($sequenceResult.Content)"
+        }
         $catalogs += [pscustomobject]@{
             rule_id = $ruleID
             public_action_count = @($actions.actions).Count
             script_count = @($scripts.scripts).Count
             registration_count = @($registrations.registrations).Count
             runtime_count = @($runtimes.runtimes).Count
+            action_sequence_enabled = ($allowedSequenceActions.Count -gt 0)
         }
     }
     return $catalogs

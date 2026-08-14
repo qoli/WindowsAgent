@@ -43,7 +43,7 @@ const (
 
 type Journal interface {
 	Append(context.Context, eventstream.AppendRequest) (eventstream.Event, error)
-	Replay(context.Context, uint64, int) ([]eventstream.Event, uint64, uint64, error)
+	ReplayStream(context.Context, uint64, int, string) ([]eventstream.Event, uint64, uint64, error)
 	Stream(context.Context, uint64, func(eventstream.Event) error) error
 }
 
@@ -122,7 +122,7 @@ func NewManager(ruleStore *rules.Store, executor Executor, journal Journal, fore
 		now: time.Now, random: rand.Reader, logger: logger, runs: map[string]*run{},
 		sequenceByRule: map[string]string{}, activeExternal: map[string]uint32{},
 	}
-	recoveryContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	recoveryContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := manager.recoverInterrupted(recoveryContext); err != nil {
 		return nil, fmt.Errorf("recover interrupted Action invocations: %w", err)
@@ -141,7 +141,7 @@ func (m *Manager) recoverInterrupted(ctx context.Context) error {
 	restartTerminated := map[string]*run{}
 	var cursor uint64
 	for {
-		events, next, last, err := m.journal.Replay(ctx, cursor, eventstream.MaxReplayLimit)
+		events, next, last, err := m.journal.ReplayStream(ctx, cursor, eventstream.MaxReplayLimit, StreamName)
 		if err != nil {
 			return err
 		}

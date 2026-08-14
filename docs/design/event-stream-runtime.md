@@ -39,6 +39,14 @@ explicit conflict. Journal startup rejects malformed, non-newline-terminated,
 oversized, unknown-field, or non-contiguous records; it never truncates or
 repairs them automatically.
 
+An optional canonical `stream=<name>` selector filters the replay response.
+`nextCursor` still advances across every scanned journal record, including
+unmatched streams, so a stream-specific consumer can reach the current tail
+without transferring unrelated event bodies. Omitting `stream` preserves the
+unfiltered replay contract. The journal builds per-stream sequence/offset
+indexes during its mandatory startup validation and extends them on append;
+filtered replay therefore does not rescan unrelated records.
+
 `GET /v1/events/stream?after=<sequence>` replays any committed events after the
 cursor and then waits for newly committed records as NDJSON. It does not emit
 invented heartbeat or summary events.

@@ -564,6 +564,16 @@ func TestActionSequenceToolAndInvokeContracts(t *testing.T) {
 	}
 }
 
+func TestActionSequenceToolReportsUndeclaredCapabilityWithoutInternalError(t *testing.T) {
+	service := &fakeActionService{toolSchemaErr: actionsequence.ErrNoAllowedActions}
+	server, _ := newTestServerWithActionService(t, service)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v3/rules/game.exe/action-sequence-tool", nil))
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"action_sequence_unavailable"`) {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
 func TestActionSequenceRequestRejectsUnknownShapeAndRuleConflict(t *testing.T) {
 	service := &fakeActionService{sequenceErr: actionrun.ErrRuleSequenceActive}
 	server, _ := newTestServerWithActionService(t, service)

@@ -7,6 +7,8 @@ import (
 	"sort"
 )
 
+var ErrNoAllowedActions = errors.New("Action Sequence requires at least one allowed Action")
+
 // Candidate is one Rule-approved Action exposed to the model-facing tool.
 type Candidate struct {
 	ID          string
@@ -28,7 +30,7 @@ func BuildToolSchema(ruleID string, candidates []Candidate) (ToolSchema, error) 
 		return ToolSchema{}, errors.New("Action Sequence tool schema requires a Rule ID")
 	}
 	if len(candidates) == 0 {
-		return ToolSchema{}, errors.New("Action Sequence requires at least one allowed Action")
+		return ToolSchema{}, ErrNoAllowedActions
 	}
 	ordered := append([]Candidate(nil), candidates...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })

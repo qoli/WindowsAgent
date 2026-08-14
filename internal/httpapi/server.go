@@ -273,6 +273,10 @@ func (s *Server) handleActionResource(w http.ResponseWriter, r *http.Request, re
 			writeError(w, requestID, http.StatusNotFound, "rule_not_found", "rule not found")
 			return
 		}
+		if errors.Is(err, actionsequence.ErrNoAllowedActions) {
+			writeError(w, requestID, http.StatusNotFound, "action_sequence_unavailable", "Rule does not declare any Action Sequence candidates")
+			return
+		}
 		if err != nil {
 			s.writeMappedError(w, requestID, err)
 			return

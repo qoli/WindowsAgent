@@ -155,4 +155,8 @@ func TestClientReadsCurrentLastSequence(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].Sequence != 1 || next != 1 || replayLast != 1 {
 		t.Fatalf("events=%+v next=%d last=%d error=%v", events, next, replayLast, err)
 	}
+	filtered, next, replayLast, err := client.ReplayStream(context.Background(), 0, 10, "action.runs")
+	if err != nil || len(filtered) != 1 || filtered[0].Sequence != 1 || next != 1 || replayLast != 1 {
+		t.Fatalf("filtered=%+v next=%d last=%d error=%v", filtered, next, replayLast, err)
+	}
 }

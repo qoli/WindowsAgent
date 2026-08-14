@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -85,17 +86,27 @@ type TimeRangeResult struct {
 }
 
 type Store struct {
-	mu           sync.Mutex
-	root         string
-	path         string
-	file         *os.File
-	lastSequence uint64
-	offsets      []int64
-	fatalErr     error
-	closed       bool
-	notify       chan struct{}
-	now          func() time.Time
-	random       io.Reader
+	mu            sync.Mutex
+	root          string
+	path          string
+	file          *os.File
+	lastSequence  uint64
+	offsets       []int64
+	streamOffsets map[string][]streamOffset
+	fatalErr      error
+	closed        bool
+	notify        chan struct{}
+	now           func() time.Time
+	random        io.Reader
+}
+
+type streamOffset struct {
+	sequence uint64
+	offset   int64
+}
+
+func ValidateStreamName(stream string) error {
+	return validateIdentifier("stream", stream, true)
 }
 
 func Open(root string) (*Store, error) {
@@ -115,8 +126,10 @@ func Open(root string) (*Store, error) {
 		return nil, fmt.Errorf("open event journal: %w", err)
 	}
 	var offsets []int64
-	last, err := scanJournal(file, func(_ Event, offset int64) error {
+	streamOffsets := map[string][]streamOffset{}
+	last, err := scanJournal(file, func(event Event, offset int64) error {
 		offsets = append(offsets, offset)
+		streamOffsets[event.Stream] = append(streamOffsets[event.Stream], streamOffset{sequence: event.Sequence, offset: offset})
 		return nil
 	})
 	if err != nil {
@@ -124,14 +137,15 @@ func Open(root string) (*Store, error) {
 		return nil, fmt.Errorf("validate event journal: %w", err)
 	}
 	return &Store{
-		root:         canonicalRoot,
-		path:         path,
-		file:         file,
-		lastSequence: last,
-		offsets:      offsets,
-		notify:       make(chan struct{}),
-		now:          time.Now,
-		random:       rand.Reader,
+		root:          canonicalRoot,
+		path:          path,
+		file:          file,
+		lastSequence:  last,
+		offsets:       offsets,
+		streamOffsets: streamOffsets,
+		notify:        make(chan struct{}),
+		now:           time.Now,
+		random:        rand.Reader,
 	}, nil
 }
 
@@ -219,6 +233,7 @@ func (s *Store) Append(ctx context.Context, request AppendRequest) (Event, error
 	}
 	s.lastSequence = event.Sequence
 	s.offsets = append(s.offsets, offset)
+	s.streamOffsets[event.Stream] = append(s.streamOffsets[event.Stream], streamOffset{sequence: event.Sequence, offset: offset})
 	close(s.notify)
 	s.notify = make(chan struct{})
 	return event, nil
@@ -303,6 +318,71 @@ func (s *Store) ReadAfter(ctx context.Context, after uint64, limit int) ([]Event
 		events = append(events, event)
 	}
 	return events, nil
+}
+
+// ReadStreamAfter replays only events from stream while keeping the returned
+// cursor authoritative for every journal record that was scanned. This lets a
+// stream-specific consumer resume without transferring unrelated event bodies.
+func (s *Store) ReadStreamAfter(ctx context.Context, after uint64, stream string, limit int) ([]Event, uint64, error) {
+	if s == nil {
+		return nil, 0, errors.New("event journal store is required")
+	}
+	if ctx == nil {
+		return nil, 0, errors.New("context is required")
+	}
+	if err := ValidateStreamName(stream); err != nil {
+		return nil, 0, err
+	}
+	if limit < 1 || limit > MaxReplayLimit {
+		return nil, 0, fmt.Errorf("event replay limit must be between 1 and %d", MaxReplayLimit)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.available(); err != nil {
+		return nil, 0, err
+	}
+	if after > s.lastSequence {
+		return nil, 0, fmt.Errorf("%w: cursor=%d lastSequence=%d", ErrCursorAhead, after, s.lastSequence)
+	}
+	if after == s.lastSequence {
+		return []Event{}, after, nil
+	}
+	indexed := s.streamOffsets[stream]
+	start := sort.Search(len(indexed), func(index int) bool { return indexed[index].sequence > after })
+	if start == len(indexed) {
+		return []Event{}, s.lastSequence, nil
+	}
+	end := start + limit
+	if end > len(indexed) {
+		end = len(indexed)
+	}
+	events := make([]Event, 0, end-start)
+	for _, entry := range indexed[start:end] {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
+		if _, err := s.file.Seek(entry.offset, io.SeekStart); err != nil {
+			return nil, 0, fmt.Errorf("seek event sequence %d: %w", entry.sequence, err)
+		}
+		reader := bufio.NewReaderSize(s.file, 64<<10)
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return nil, 0, fmt.Errorf("read event sequence %d: %w", entry.sequence, err)
+		}
+		event, err := decodeJournalRecord(line, entry.sequence)
+		if err != nil {
+			return nil, 0, fmt.Errorf("replay event journal: %w", err)
+		}
+		if event.Stream != stream {
+			return nil, 0, fmt.Errorf("event journal stream index mismatch at sequence %d", event.Sequence)
+		}
+		events = append(events, event)
+	}
+	cursor := events[len(events)-1].Sequence
+	if end == len(indexed) {
+		cursor = s.lastSequence
+	}
+	return events, cursor, nil
 }
 
 // ReadTimeRange returns events whose producer observation time is in [from, to).
@@ -469,7 +549,7 @@ func validateAppendRequest(request AppendRequest) error {
 	if err := validateIdentifier("sessionId", request.SessionID, false); err != nil {
 		return err
 	}
-	if err := validateIdentifier("stream", request.Stream, true); err != nil {
+	if err := ValidateStreamName(request.Stream); err != nil {
 		return err
 	}
 	if err := validateIdentifier("type", request.Type, true); err != nil {

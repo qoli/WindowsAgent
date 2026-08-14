@@ -226,7 +226,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
-	if unknown := unknownQuery(r, "after", "limit"); unknown != "" {
+	if unknown := unknownQuery(r, "after", "limit", "stream"); unknown != "" {
 		writeError(w, http.StatusBadRequest, "invalid_replay_request", "unknown query parameter: "+unknown)
 		return
 	}
@@ -252,7 +252,28 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = int(limitValue)
 	}
-	events, err := s.store.ReadAfter(r.Context(), after, limit)
+	stream := ""
+	if streamValues, specified := r.URL.Query()["stream"]; specified {
+		if len(streamValues) != 1 || streamValues[0] == "" {
+			writeError(w, http.StatusBadRequest, "invalid_replay_request", "stream must appear exactly once and be non-empty")
+			return
+		}
+		stream = streamValues[0]
+		if err := eventstream.ValidateStreamName(stream); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_replay_request", err.Error())
+			return
+		}
+	}
+	var events []eventstream.Event
+	next := after
+	if stream == "" {
+		events, err = s.store.ReadAfter(r.Context(), after, limit)
+		if len(events) != 0 {
+			next = events[len(events)-1].Sequence
+		}
+	} else {
+		events, next, err = s.store.ReadStreamAfter(r.Context(), after, stream, limit)
+	}
 	if errors.Is(err, eventstream.ErrCursorAhead) {
 		writeError(w, http.StatusConflict, "event_cursor_ahead", err.Error())
 		return
@@ -265,10 +286,6 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "event_replay_failed", err.Error())
 		return
-	}
-	next := after
-	if len(events) != 0 {
-		next = events[len(events)-1].Sequence
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, replayResponse{Events: events, NextCursor: next, LastSequence: last})

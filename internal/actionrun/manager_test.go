@@ -30,18 +30,14 @@ func (j storeJournal) Append(ctx context.Context, request eventstream.AppendRequ
 	return j.store.Append(ctx, request)
 }
 
-func (j storeJournal) Replay(ctx context.Context, after uint64, limit int) ([]eventstream.Event, uint64, uint64, error) {
-	events, err := j.store.ReadAfter(ctx, after, limit)
+func (j storeJournal) ReplayStream(ctx context.Context, after uint64, limit int, stream string) ([]eventstream.Event, uint64, uint64, error) {
+	events, next, err := j.store.ReadStreamAfter(ctx, after, stream, limit)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	last, err := j.store.LastSequence()
 	if err != nil {
 		return nil, 0, 0, err
-	}
-	next := after
-	if len(events) != 0 {
-		next = events[len(events)-1].Sequence
 	}
 	return events, next, last, nil
 }

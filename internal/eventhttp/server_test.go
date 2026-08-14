@@ -47,6 +47,37 @@ func TestAuthenticatedAppendAndReplay(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedReplayFiltersByStreamAndAdvancesCursor(t *testing.T) {
+	server := testServer(t)
+	for _, stream := range []string{"screen/ui", "action.runs", "screen/ui"} {
+		request := testRequest()
+		request.Stream = stream
+		body, _ := json.Marshal(request)
+		httpRequest := httptest.NewRequest(http.MethodPost, "/v1/events", bytes.NewReader(body))
+		httpRequest.Header.Set("Content-Type", "application/json")
+		httpRequest.Header.Set("Authorization", "Bearer "+testToken)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httpRequest)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("append status = %d body=%s", response.Code, response.Body.String())
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/events?after=0&limit=10&stream=action.runs", nil)
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	var replay replayResponse
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &replay); err != nil {
+		t.Fatal(err)
+	}
+	if len(replay.Events) != 1 || replay.Events[0].Sequence != 2 || replay.NextCursor != 3 || replay.LastSequence != 3 {
+		t.Fatalf("replay = %+v", replay)
+	}
+}
+
 func TestEventAPIRejectsMissingAuthentication(t *testing.T) {
 	server := testServer(t)
 	response := httptest.NewRecorder()
@@ -74,6 +105,17 @@ func TestEventAPIRejectsExplicitZeroReplayLimit(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte("limit must be positive")) {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestEventAPIRejectsInvalidReplayStream(t *testing.T) {
+	server := testServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/v1/events?after=0&stream=not%20canonical", nil)
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || !bytes.Contains(response.Body.Bytes(), []byte("invalid_replay_request")) {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }

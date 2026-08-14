@@ -92,6 +92,38 @@ func TestReadAfterUsesIndexedRecordOffset(t *testing.T) {
 	}
 }
 
+func TestReadStreamAfterFiltersEventsAndAdvancesAcrossUnmatchedRecords(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for index, stream := range []string{"screen/ui", "action.runs", "screen/ui", "action.runs", "screen/ui"} {
+		store.random = strings.NewReader("0123456789abcdef")
+		request := testAppendRequest()
+		request.Stream = stream
+		request.Type = "test.event"
+		request.Payload = json.RawMessage(`{"index":` + string(rune('0'+index)) + `}`)
+		if _, err := store.Append(context.Background(), request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, next, err := store.ReadStreamAfter(context.Background(), 0, "action.runs", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].Sequence != 2 || next != 2 {
+		t.Fatalf("first=%+v next=%d", first, next)
+	}
+	second, next, err := store.ReadStreamAfter(context.Background(), next, "action.runs", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 || second[0].Sequence != 4 || next != 5 {
+		t.Fatalf("second=%+v next=%d", second, next)
+	}
+}
+
 func TestAppendRejectsInvalidPayloadWithoutWriting(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {

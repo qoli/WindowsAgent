@@ -51,6 +51,9 @@ package input schema and returns the strict function declaration
 one discriminated branch per allowed Action. This makes the accepted Action
 IDs and their exact inputs visible to the model before generation.
 Rule-internal Actions are never candidates.
+For a Rule whose allowlist is empty, the tool endpoint returns the explicit
+`action_sequence_unavailable` response instead of treating the undeclared
+capability as an internal server failure.
 
 ## Execution
 

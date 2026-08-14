@@ -162,13 +162,30 @@ func (c *Client) LastSequence(ctx context.Context) (uint64, error) {
 }
 
 func (c *Client) Replay(ctx context.Context, after uint64, limit int) ([]eventstream.Event, uint64, uint64, error) {
+	return c.replay(ctx, after, limit, "")
+}
+
+func (c *Client) ReplayStream(ctx context.Context, after uint64, limit int, stream string) ([]eventstream.Event, uint64, uint64, error) {
+	if err := eventstream.ValidateStreamName(stream); err != nil {
+		return nil, 0, 0, err
+	}
+	return c.replay(ctx, after, limit, stream)
+}
+
+func (c *Client) replay(ctx context.Context, after uint64, limit int, stream string) ([]eventstream.Event, uint64, uint64, error) {
 	if c == nil || ctx == nil {
 		return nil, 0, 0, errors.New("event client and context are required")
 	}
 	if limit < 1 || limit > eventstream.MaxReplayLimit {
 		return nil, 0, 0, fmt.Errorf("event replay limit must be between 1 and %d", eventstream.MaxReplayLimit)
 	}
-	endpoint := c.baseURL + "/v1/events?after=" + strconv.FormatUint(after, 10) + "&limit=" + strconv.Itoa(limit)
+	query := url.Values{}
+	query.Set("after", strconv.FormatUint(after, 10))
+	query.Set("limit", strconv.Itoa(limit))
+	if stream != "" {
+		query.Set("stream", stream)
+	}
+	endpoint := c.baseURL + "/v1/events?" + query.Encode()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, 0, 0, err
