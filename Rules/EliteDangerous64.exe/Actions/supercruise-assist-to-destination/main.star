@@ -495,7 +495,37 @@ def resolve_assist_line_of_sight_prompt(target_name, sample, recovery_count):
             reason="LINE_OF_SIGHT_CHILD_COMPLETED_CYCLE_" + str(cycle),
         )
 
+        emit_update(
+            "REALIGNING_COMPASS_AFTER_SEPARATION",
+            sample,
+            target_name,
+            line_of_sight_recovery_count=recovery_count,
+            line_of_sight_control=control,
+            commanded_throttle=0,
+            last_command="ALIGN_STATION_TARGET",
+            reason="SPHERE_EXIT_AND_30_SECOND_SEPARATION_COMPLETED:START_COMPASS_HANDOFF",
+        )
         compass_samples = align_compass(target_name, "SUPERCRUISE_ASSIST")
+        emit_update(
+            "COMPASS_HANDOFF_CONFIRMED",
+            sample,
+            target_name,
+            line_of_sight_recovery_count=recovery_count,
+            line_of_sight_control=control,
+            commanded_throttle=0,
+            last_command="ALIGN_STATION_TARGET",
+            reason="COMPASS_COARSE_ALIGNMENT_COMPLETED:" + str(compass_samples),
+        )
+        emit_update(
+            "REALIGNING_VISIBLE_TARGET_AFTER_SEPARATION",
+            sample,
+            target_name,
+            line_of_sight_recovery_count=recovery_count,
+            line_of_sight_control=control,
+            commanded_throttle=0,
+            last_command="ALIGN_VISIBLE_TARGET",
+            reason="START_VISIBLE_FOCUS_FRAME_FINE_ALIGNMENT",
+        )
         visible_samples = align_visible_destination(target_name)
         emit_update(
             "REALIGNING_AFTER_LINE_OF_SIGHT",
@@ -505,7 +535,7 @@ def resolve_assist_line_of_sight_prompt(target_name, sample, recovery_count):
             line_of_sight_control=control,
             commanded_throttle=0,
             last_command="ALIGN_STATION_TARGET+ALIGN_VISIBLE_TARGET",
-            reason="POST_BYPASS_REALIGNMENT_COMPLETED:" + str(compass_samples) + "+" + str(visible_samples),
+            reason="POST_SEPARATION_REALIGNMENT_COMPLETED:" + str(compass_samples) + "+" + str(visible_samples),
         )
 
         clear_confirmations = 0
@@ -537,7 +567,10 @@ def resolve_assist_line_of_sight_prompt(target_name, sample, recovery_count):
                 }
             if state not in ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE", "SAFE_DISENGAGE_READY", "UNKNOWN"]:
                 fail("unexpected known flight status after clearing Assist line of sight: " + state)
-            clear_confirmations += 1
+            if state == "UNKNOWN":
+                clear_confirmations = 0
+            else:
+                clear_confirmations += 1
             active_confirmations = clear_confirmations if state == "SUPERCRUISE_ASSIST_ACTIVE" else 0
             emit_update(
                 "VERIFYING_LINE_OF_SIGHT_CLEAR",
@@ -887,12 +920,12 @@ def main(ctx):
                 if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
                     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
                     reacquiring_assist = True
-                    emit_update("REACQUIRING_ASSIST", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=75, last_command="SET_THROTTLE_75", reason="POST_BYPASS_ALIGNMENT_CLEAR_RESTORING_BLUE_ZONE:" + throttle["control"])
+                    emit_update("REACQUIRING_ASSIST", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=75, last_command="SET_THROTTLE_75", reason="POST_SEPARATION_ALIGNMENT_CLEAR_RESTORING_BLUE_ZONE:" + throttle["control"])
                 else:
                     reacquiring_assist = False
         elif last_flight_status == "FSD_ALIGNMENT_REQUIRED" and reacquiring_assist:
             throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-            emit_update("CORRECTING_ASSIST_ALIGNMENT", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=0, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="POST_BYPASS_ASSIST_ALIGNMENT_REQUIRED:" + throttle["control"])
+            emit_update("CORRECTING_ASSIST_ALIGNMENT", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=0, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="POST_SEPARATION_ASSIST_ALIGNMENT_REQUIRED:" + throttle["control"])
             alignment = resolve_assist_alignment_prompt(target_name, sample)
             sample = alignment["sample"]
             last_flight_status = alignment["flight"]["state"]
@@ -900,7 +933,7 @@ def main(ctx):
             assist_active_confirmations = alignment["assistActiveConfirmations"]
             if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
-                emit_update("REACQUIRING_ASSIST", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=75, last_command="SET_THROTTLE_75", reason="POST_BYPASS_ALIGNMENT_PROMPT_CLEAR_RESTORING_BLUE_ZONE:" + throttle["control"])
+                emit_update("REACQUIRING_ASSIST", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=75, last_command="SET_THROTTLE_75", reason="POST_SEPARATION_ALIGNMENT_PROMPT_CLEAR_RESTORING_BLUE_ZONE:" + throttle["control"])
             else:
                 reacquiring_assist = False
         elif last_flight_status in ["UNKNOWN", "SUPERCRUISE"]:
@@ -920,7 +953,7 @@ def main(ctx):
         else:
             stopped_confirmations = 0
         phase = "REACQUIRING_ASSIST" if reacquiring_assist else ("CONFIRMING_LINE_OF_SIGHT" if line_of_sight_required_samples > 0 else ("VERIFYING_STOP" if assist_missing_samples > 0 else "GAME_CONTROLLED_APPROACH"))
-        reason = "POST_BYPASS_WAITING_FOR_ASSIST_OWNERSHIP" if reacquiring_assist else ("LINE_OF_SIGHT_GATE_PENDING_DEBOUNCE" if line_of_sight_required_samples > 0 else "GAME_OWNS_FLIGHT_UNLESS_EXPLICIT_LINE_OF_SIGHT_RECOVERY_IS_ACTIVE")
+        reason = "POST_SEPARATION_WAITING_FOR_ASSIST_OWNERSHIP" if reacquiring_assist else ("LINE_OF_SIGHT_GATE_PENDING_DEBOUNCE" if line_of_sight_required_samples > 0 else "GAME_OWNS_FLIGHT_UNLESS_EXPLICIT_LINE_OF_SIGHT_RECOVERY_IS_ACTIVE")
         emit_update(phase, sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, assist_missing_samples=assist_missing_samples, line_of_sight_required_confirmations=line_of_sight_required_samples, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, stopped_confirmations=stopped_confirmations, commanded_throttle=None, reason=reason)
         if not reacquiring_assist and line_of_sight_required_samples == 0 and assist_missing_samples >= STOPPED_CONFIRMATIONS and stopped_confirmations >= STOPPED_CONFIRMATIONS:
             action.clear_on_failure()

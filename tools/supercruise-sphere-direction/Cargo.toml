@@ -1,0 +1,14 @@
+[package]
+name = "elite-supercruise-sphere-cv"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+strip = true

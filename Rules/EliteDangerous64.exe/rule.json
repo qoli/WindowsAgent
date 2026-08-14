@@ -313,6 +313,13 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/supercruise-sphere-direction": {
+      "path": "Actions/supercruise-sphere-direction",
+      "runtime": "windows-observation-v1",
+      "exposure": "internal",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/escape-vector-visible-position": {
       "path": "Actions/escape-vector-visible-position",
       "runtime": "windows-composite-action-v1",

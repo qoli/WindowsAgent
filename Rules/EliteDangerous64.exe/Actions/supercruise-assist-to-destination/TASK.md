@@ -112,17 +112,21 @@ computer cannot continue because the selected destination is physically
 occluded; it is not ordinary Assist disappearance and must not accumulate
 toward `ASSIST_INTERRUPTED`.
 
-At that Gate the parent commands 0%, synchronously runs the independent
-`clear-supercruise-assist-line-of-sight` Streaming Action, then runs Compass
-coarse alignment followed by visible-target fine alignment. It re-reads the
-original prompt twice after those children complete. If the line-of-sight
-prompt returns, the complete bypass and realignment cycle repeats, bounded to
-three recoveries. Only after prompt-clear verification may the parent restore
-75% and require two fresh `SUPERCRUISE ASSIST ACTIVE` samples before treating
-the game computer as flight owner again. The output records the recovery count
-and truthfully sets `agentFlightInputAfterAssistActive=true` when this explicit
-recovery path issued flight input. No child completion substitutes for the
-original OCR Gate.
+At that Gate the parent commands 0% and synchronously runs the independent
+`clear-supercruise-assist-line-of-sight` Streaming Action. That child must
+confirm the obstruction body left the viewport, fly outward for the complete
+30-second separation lease, and return at 0%. The parent then owns the explicit
+4.5 handoff in this exact order: Compass coarse alignment, confirmed Compass
+handoff, and visible focus-frame fine alignment. Durable phases expose all
+three steps before the parent re-reads the original prompt twice. `UNKNOWN`
+does not count as prompt absence. If the line-of-sight prompt returns, the
+complete escape, separation, and realignment cycle repeats, bounded to three
+recoveries. Only after positive prompt-clear verification may the parent
+restore 75% and require two fresh `SUPERCRUISE ASSIST ACTIVE` samples before
+treating the game computer as flight owner again. The output records the
+recovery count and truthfully sets `agentFlightInputAfterAssistActive=true`
+when this explicit recovery path issued flight input. No child completion
+substitutes for the original OCR Gate.
 
 Up to five transient
 failures from the same persistent WGC region-capture provider may be skipped

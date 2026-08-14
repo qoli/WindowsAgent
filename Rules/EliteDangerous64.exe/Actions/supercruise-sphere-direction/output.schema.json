@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sphere", "direction", "evidence"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "sphere": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "centerX", "centerY", "radiusPixels", "signedLimbClearancePixels", "confidencePermille", "occupiedAngularBins", "inlierCount", "boundaryPointCount", "medianResidualPixels", "candidateCount", "reason"],
+      "properties": {
+        "state": {"enum": ["DETECTED", "ABSENT", "UNKNOWN"]},
+        "centerX": {"type": ["number", "null"]},
+        "centerY": {"type": ["number", "null"]},
+        "radiusPixels": {"type": ["number", "null"], "minimum": 0},
+        "signedLimbClearancePixels": {"type": ["number", "null"]},
+        "confidencePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "occupiedAngularBins": {"type": "integer", "minimum": 0, "maximum": 72},
+        "inlierCount": {"type": "integer", "minimum": 0},
+        "boundaryPointCount": {"type": "integer", "minimum": 0, "maximum": 6000},
+        "medianResidualPixels": {"type": ["number", "null"], "minimum": 0},
+        "candidateCount": {"type": "integer", "minimum": 0},
+        "reason": {"type": "string", "maxLength": 128}
+      }
+    },
+    "direction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "control", "reason"],
+      "properties": {
+        "state": {"enum": ["READY", "UNKNOWN"]},
+        "control": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT", null]},
+        "reason": {"type": "string", "maxLength": 128}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sampling", "width", "height", "capturedAt", "algorithm", "otsuThreshold", "blackPermille", "whitePermille"],
+      "properties": {
+        "sampling": {"const": "reference"},
+        "width": {"const": 256},
+        "height": {"const": 144},
+        "capturedAt": {"type": "string", "minLength": 1, "maxLength": 64},
+        "algorithm": {"const": "GAUSSIAN_9X9_OTSU_ROBUST_CIRCLE_REFERENCE_256X144"},
+        "otsuThreshold": {"type": "integer", "minimum": 0, "maximum": 255},
+        "blackPermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+        "whitePermille": {"type": "integer", "minimum": 0, "maximum": 1000}
+      }
+    }
+  }
+}

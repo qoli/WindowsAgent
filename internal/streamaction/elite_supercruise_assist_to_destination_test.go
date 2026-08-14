@@ -161,7 +161,7 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true,"sampleCount":4}`), nil
 	case "elite-dangerous/clear-supercruise-assist-line-of-sight":
 		c.lineOfSightCalls++
-		return json.RawMessage(`{"schemaVersion":1,"task":"CLEAR_SUPERCRUISE_ASSIST_LINE_OF_SIGHT","completed":true,"targetName":"NAV BEACON","control":"YAW_RIGHT","turnPulses":3,"bypassFlightSamples":2,"finalFlightStatus":"UNKNOWN","sampleCount":8}`), nil
+		return json.RawMessage(`{"schemaVersion":2,"task":"CLEAR_SUPERCRUISE_ASSIST_LINE_OF_SIGHT","completed":true,"targetName":"NAV BEACON","control":"YAW_RIGHT","turnPulses":4,"sphereExitConfirmed":true,"separationDurationMs":30000,"separationSamples":60,"finalFlightStatus":"SUPERCRUISE","sampleCount":68}`), nil
 	case "elite-dangerous/supercruise-control":
 		c.supercruiseKeys++
 		c.recordFlightInput("FSD")
@@ -528,7 +528,7 @@ func TestEliteSupercruiseAssistRequiresCompassVisibleAndPromptClearBeforeRestori
 	caller.flightStates = []string{
 		"FSD_CHARGING", "SUPERCRUISE",
 		"FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ALIGNMENT_REQUIRED",
-		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE", "SUPERCRUISE",
 		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 		"UNKNOWN", "UNKNOWN", "UNKNOWN",
 	}
@@ -734,7 +734,7 @@ func TestEliteSupercruiseAssistClearsLineOfSightThenReacquiresGameOwnership(t *t
 	caller.flightStates = []string{
 		"FSD_CHARGING", "SUPERCRUISE", "SUPERCRUISE", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 		"SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED",
-		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE", "SUPERCRUISE",
 		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 		"UNKNOWN", "UNKNOWN", "UNKNOWN",
 	}
@@ -762,9 +762,21 @@ func TestEliteSupercruiseAssistClearsLineOfSightThenReacquiresGameOwnership(t *t
 	}
 	joined := joinEventPhases(reporter.payloads)
 	if !contains(joined, `"phase":"CLEARING_LINE_OF_SIGHT"`) ||
+		!contains(joined, `"phase":"REALIGNING_COMPASS_AFTER_SEPARATION"`) ||
+		!contains(joined, `"phase":"COMPASS_HANDOFF_CONFIRMED"`) ||
+		!contains(joined, `"phase":"REALIGNING_VISIBLE_TARGET_AFTER_SEPARATION"`) ||
 		!contains(joined, `"phase":"REALIGNING_AFTER_LINE_OF_SIGHT"`) ||
 		!contains(joined, `"phase":"REACQUIRING_ASSIST"`) {
 		t.Fatalf("events=%s", joined)
+	}
+	ordered := []string{"CLEARING_LINE_OF_SIGHT", "REALIGNING_COMPASS_AFTER_SEPARATION", "COMPASS_HANDOFF_CONFIRMED", "REALIGNING_VISIBLE_TARGET_AFTER_SEPARATION", "REALIGNING_AFTER_LINE_OF_SIGHT", "REACQUIRING_ASSIST"}
+	last := -1
+	for _, phase := range ordered {
+		index := strings.Index(joined, `"phase":"`+phase+`"`)
+		if index <= last {
+			t.Fatalf("phase order=%v events=%s", ordered, joined)
+		}
+		last = index
 	}
 }
 
@@ -774,7 +786,7 @@ func TestEliteSupercruiseAssistDoesNotRequestBlueZoneWhenRestoredFrameRequiresLi
 	caller.flightStates = []string{
 		"FSD_CHARGING", "SUPERCRUISE",
 		"SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED",
-		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE", "SUPERCRUISE",
 		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 		"UNKNOWN", "UNKNOWN", "UNKNOWN",
 	}

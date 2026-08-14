@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 28,
+  "version": 29,
   "title": "Elite Dangerous Supercruise Assist to destination",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
