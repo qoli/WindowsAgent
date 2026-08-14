@@ -27,8 +27,10 @@ The model submits one immutable JSON AST:
 
 The contract permits from one through twenty steps. Each step contains exactly
 one existing Action ID and one literal JSON input object. Variables, output
-references, branches, loops, nesting, mutation, and implicit defaults in the
-model tool schema do not exist.
+references, branches, loops, nesting, and mutation do not exist. Because the
+strict model-tool format requires every declared property, an optional Action
+input is represented as nullable: `null` is canonicalized back to omission
+before package validation, preserving the Action's ordinary default behavior.
 
 ## Declaration and model schema
 
@@ -48,6 +50,7 @@ package input schema and returns the strict function declaration
 `run_action_sequence`. Its `steps` array has `minItems: 1`, `maxItems: 20`, and
 one discriminated branch per allowed Action. This makes the accepted Action
 IDs and their exact inputs visible to the model before generation.
+Rule-internal Actions are never candidates.
 
 ## Execution
 

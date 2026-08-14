@@ -249,6 +249,12 @@ across Rules. Action paths stay below the owning Rule's `Actions/` directory.
 Every Action explicitly declares return or stream completion and an explicit
 `registrableAs` list, including an empty list.
 
+An omitted `exposure` is `public`. `exposure: "internal"` keeps an
+implementation Action available to same-Rule composite and streaming child
+calls while excluding it from public catalogs, direct invocation, v1 Script
+projection, registrations, and Ephemeral Action Sequences. Internal Actions
+must declare an empty `registrableAs` list.
+
 `registrableAs` grants eligibility only. Monitor scheduling and Reaction
 subscription/dispatch have not passed the required live acceptance and are not
 usable capabilities under the current v1 operating contract. Do not create,

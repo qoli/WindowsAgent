@@ -237,7 +237,7 @@ func (m *Manager) Invoke(ctx context.Context, invocation scriptlaunch.Invocation
 	if invocation.Capability == "" || strings.TrimSpace(invocation.Capability) != invocation.Capability || invocation.Inputs == nil {
 		return Invocation{}, errors.New("canonical capability and inputs object are required")
 	}
-	action, err := m.rules.ResolveAction(invocation.Capability)
+	action, err := m.rules.ResolvePublicAction(invocation.Capability)
 	if err != nil {
 		return Invocation{}, fmt.Errorf("resolve Action %q: %w", invocation.Capability, err)
 	}
@@ -310,7 +310,17 @@ func (m *Manager) InvokeSequence(ctx context.Context, request actionsequence.Req
 	if resolution.ID != cloned.RuleID {
 		return Invocation{}, fmt.Errorf("Action Sequence ruleId must use canonical Rule ID %q", resolution.ID)
 	}
-	for index, step := range cloned.Steps {
+	for index := range cloned.Steps {
+		step := &cloned.Steps[index]
+		contract, err := m.executor.Contract(step.Action)
+		if err != nil {
+			return Invocation{}, fmt.Errorf("preflight Action Sequence step %d contract: %w", index+1, err)
+		}
+		canonicalInputs, err := actionsequence.CanonicalInputs(contract.InputSchema, step.Inputs)
+		if err != nil {
+			return Invocation{}, fmt.Errorf("preflight Action Sequence step %d inputs: %w", index+1, err)
+		}
+		step.Inputs = canonicalInputs
 		action, err := m.executor.ValidateAction(scriptlaunch.Invocation{Capability: step.Action, Inputs: step.Inputs})
 		if err != nil {
 			return Invocation{}, fmt.Errorf("preflight Action Sequence step %d: %w", index+1, err)

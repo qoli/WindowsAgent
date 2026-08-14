@@ -153,18 +153,18 @@ func (c *dockAtStationCaller) Call(_ context.Context, id string, inputs map[stri
 		}
 		return json.RawMessage(`{"control":"SetSpeedZero"}`), nil
 	case "elite-dangerous/flight-prompt-text":
+		return nil, errors.New("workflow bypassed public flight-status Action")
+	case "elite-dangerous/flight-status":
 		if c.flightPromptFailures > 0 {
 			c.flightPromptFailures--
 			return nil, errors.New("capture OCR Action region: primary monitor capture size is invalid")
 		}
-		return json.RawMessage(`{"text":""}`), nil
-	case "elite-dangerous/flight-status":
 		if c.flightIndex >= len(c.flightStates) {
 			return nil, errors.New("unexpected flight-status observation")
 		}
 		state := c.flightStates[c.flightIndex]
 		c.flightIndex++
-		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}, "source": map[string]any{"text": "fixture"}})
 	case "elite-dangerous/ship-status":
 		if c.gearIndex >= len(c.gearStates) {
 			return nil, errors.New("unexpected ship-status observation")

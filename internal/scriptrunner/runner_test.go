@@ -347,7 +347,7 @@ func shipSpeedZeroGlyphPackageRoot(t *testing.T) string {
 
 func flightStatusPackageRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "flight-status"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "flight-status-classifier"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func flightPromptRawInput(text string, confidence float64) map[string]any {
 
 func runFlightStatusPackage(t *testing.T, inputs map[string]any) map[string]any {
 	t.Helper()
-	pkg, err := scriptpackage.Load(flightStatusPackageRoot(t), "elite-dangerous/flight-status")
+	pkg, err := scriptpackage.Load(flightStatusPackageRoot(t), "elite-dangerous/flight-status-classifier")
 	if err != nil {
 		t.Fatalf("load package: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestEliteFlightStatusPackageRejectsHighConfidenceUnrelatedText(t *testing.T
 }
 
 func TestEliteFlightStatusPackageRejectsMalformedRawOCRInput(t *testing.T) {
-	pkg, err := scriptpackage.Load(flightStatusPackageRoot(t), "elite-dangerous/flight-status")
+	pkg, err := scriptpackage.Load(flightStatusPackageRoot(t), "elite-dangerous/flight-status-classifier")
 	if err != nil {
 		t.Fatal(err)
 	}

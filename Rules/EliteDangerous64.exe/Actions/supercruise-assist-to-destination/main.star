@@ -323,9 +323,8 @@ def close_panel(target_name, sample):
         fail("left panel remained visible after requesting Supercruise Assist")
 
 def observe_flight():
-    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
-    classified = action.call(id="elite-dangerous/flight-status", inputs=raw)
-    return {"state": classified["flightStatus"]["state"], "text": raw["text"]}
+    classified = action.call(id="elite-dangerous/flight-status", inputs={})
+    return {"state": classified["flightStatus"]["state"], "text": classified["source"]["text"]}
 
 def observe_supercruise_hud_stable():
     confirmations = 0

@@ -77,22 +77,19 @@ func (c *enterPlanetGravityWellCaller) Call(_ context.Context, id string, inputs
 	case "elite-dangerous/ship-status":
 		return json.RawMessage(`{"shipStatus":{"massLock":{"state":"OFF"},"landingGear":{"state":"OFF"},"cargoScoop":{"state":"OFF"}}}`), nil
 	case "elite-dangerous/flight-prompt-text":
+		return nil, errors.New("workflow bypassed public flight-status Action")
+	case "elite-dangerous/flight-status":
 		c.flightCalls++
+		state := "FSD_THROTTLE_UP_REQUIRED"
 		text := "THROTTLE UP TO ENGAGE"
 		if c.activeProbeEscape && c.charging {
+			state = "FSD_ESCAPE_VECTOR_REQUIRED"
 			text = "ALIGN WITH ESCAPE VECTOR"
 		} else if c.supercruise {
+			state = "SUPERCRUISE"
 			text = "SUPERCRUISE"
 		}
-		return json.Marshal(map[string]any{"schemaVersion": 1, "text": text, "confidence": 0.99, "evidence": map[string]any{}, "model": map[string]any{}, "timing": map[string]any{}})
-	case "elite-dangerous/flight-status":
-		state := "FSD_THROTTLE_UP_REQUIRED"
-		if c.activeProbeEscape && c.charging {
-			state = "FSD_ESCAPE_VECTOR_REQUIRED"
-		} else if c.supercruise {
-			state = "SUPERCRUISE"
-		}
-		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state, "known": true}})
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state, "known": true}, "source": map[string]any{"text": text}})
 	case "elite-dangerous/align-station-target":
 		c.alignCompass++
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_STATION_TARGET","completed":true}`), nil

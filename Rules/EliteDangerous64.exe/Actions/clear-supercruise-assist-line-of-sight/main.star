@@ -10,9 +10,8 @@ BYPASS_OVERSHOOT_PIXELS = 96.0
 MAX_BYPASS_FLIGHT_SAMPLES = 120
 
 def observe_flight():
-    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
-    classified = action.call(id="elite-dangerous/flight-status", inputs=raw)
-    return {"state": classified["flightStatus"]["state"], "text": raw["text"]}
+    classified = action.call(id="elite-dangerous/flight-status", inputs={})
+    return {"state": classified["flightStatus"]["state"], "text": classified["source"]["text"]}
 
 def emit_update(phase, sample, target_name, flight=None, direction=None, target=None, projection=None, turn_pulses=0, no_progress=0, clear_confirmations=0, commanded_throttle=None, last_command=None, reason=None):
     stream.emit(

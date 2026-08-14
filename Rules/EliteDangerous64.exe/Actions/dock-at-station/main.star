@@ -310,11 +310,7 @@ def close_panel(sample, contact_index, range_state, distance_meters):
     task.sleep(milliseconds=UI_SETTLE_MS)
 
 def observe_flight_and_gear():
-    raw_attempt = action.try_call(id="elite-dangerous/flight-prompt-text", inputs={})
-    if not raw_attempt["ok"]:
-        return {"ok": False, "error": raw_attempt["error"]}
-    raw = raw_attempt["output"]
-    flight_attempt = action.try_call(id="elite-dangerous/flight-status", inputs=raw)
+    flight_attempt = action.try_call(id="elite-dangerous/flight-status", inputs={})
     if not flight_attempt["ok"]:
         return {"ok": False, "error": flight_attempt["error"]}
     ship_attempt = action.try_call(id="elite-dangerous/ship-status", inputs={})
@@ -326,7 +322,7 @@ def observe_flight_and_gear():
         "ok": True,
         "error": None,
         "flightStatus": flight["flightStatus"]["state"],
-        "flightPromptText": raw["text"],
+        "flightPromptText": flight["source"]["text"],
         "landingGear": ship["shipStatus"]["landingGear"]["state"],
     }
 

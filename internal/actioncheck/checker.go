@@ -93,7 +93,7 @@ func Check(rulesRoot string) (Result, error) {
 	allActions := make(map[string]rules.Action)
 	loaded := make([]loadedAction, 0)
 	for _, ruleID := range ruleIDs {
-		actions, _, readErr := store.ReadActions(ruleID)
+		actions, _, readErr := store.ReadAllActions(ruleID)
 		if readErr != nil {
 			result.Issues = append(result.Issues, Issue{
 				Code: CodeRuleLoadFailed, RuleID: ruleID,

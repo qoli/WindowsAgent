@@ -148,7 +148,7 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		if state == "SUPERCRUISE_ASSIST_ACTIVE" && c.flightIndex >= 4 {
 			c.assistOwnershipActive = true
 		}
-		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}, "source": map[string]any{"text": "fixture"}})
 	case "elite-dangerous/supercruise-hud-state":
 		state := "INACTIVE"
 		if c.supercruiseHUDIndex < len(c.supercruiseHUDStates) {

@@ -127,6 +127,48 @@ func TestStoreReadsActionsAndExplicitRegistrations(t *testing.T) {
 	}
 }
 
+func TestStoreKeepsInternalActionsOutOfPublicSurfaces(t *testing.T) {
+	root := t.TempDir()
+	actions := map[string]ActionDeclaration{
+		"game/read": {
+			Path: "Actions/read", Runtime: CompositeActionRuntimeV1,
+			Execution: returnExecution(), RegistrableAs: []string{RegistrationMonitor},
+		},
+		"game/read-classifier": {
+			Path: "Actions/read-classifier", Runtime: ObservationRuntimeV1, Exposure: ActionExposureInternal,
+			Execution: returnExecution(), RegistrableAs: []string{},
+		},
+	}
+	writeRule(t, root, "Game.exe", "Public and internal Actions.", "# Game\n", actions, nil)
+	for _, name := range []string{"read", "read-classifier"} {
+		if err := os.MkdirAll(filepath.Join(root, "Game.exe", "Actions", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, _, err := store.ReadActions("Game.exe")
+	if err != nil || len(public) != 1 || public[0].ID != "game/read" {
+		t.Fatalf("public actions = %+v, err = %v", public, err)
+	}
+	all, _, err := store.ReadAllActions("Game.exe")
+	if err != nil || len(all) != 2 {
+		t.Fatalf("all actions = %+v, err = %v", all, err)
+	}
+	internal, err := store.ResolveAction("game/read-classifier")
+	if err != nil || internal.Exposure != ActionExposureInternal {
+		t.Fatalf("internal action = %+v, err = %v", internal, err)
+	}
+	if _, err := store.ResolvePublicAction("game/read-classifier"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("public internal resolution error = %v", err)
+	}
+	if scripts, _, err := store.ReadScripts("Game.exe"); err != nil || len(scripts) != 0 {
+		t.Fatalf("public scripts = %+v, err = %v", scripts, err)
+	}
+}
+
 func TestStoreProjectsObservationActionsToV1Scripts(t *testing.T) {
 	root := testRulesRoot(t)
 	actionRoot := filepath.Join(root, "CrimsonDesert.exe", "Actions", "inventory")
@@ -211,8 +253,15 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if flightStatus.Runtime != ObservationRuntimeV1 || !reflect.DeepEqual(flightStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
+	if flightStatus.Runtime != CompositeActionRuntimeV1 || flightStatus.Exposure != ActionExposurePublic || !reflect.DeepEqual(flightStatus.RegistrableAs, []string{RegistrationMonitor, RegistrationReaction}) {
 		t.Fatalf("flight-status action = %+v", flightStatus)
+	}
+	flightStatusClassifier, err := store.ResolveAction("elite-dangerous/flight-status-classifier")
+	if err != nil || flightStatusClassifier.Runtime != ObservationRuntimeV1 || flightStatusClassifier.Exposure != ActionExposureInternal || len(flightStatusClassifier.RegistrableAs) != 0 {
+		t.Fatalf("flight-status classifier = %+v, err = %v", flightStatusClassifier, err)
+	}
+	if _, err := store.ResolvePublicAction("elite-dangerous/flight-status-classifier"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("internal flight-status classifier public resolution error = %v", err)
 	}
 	shipStatus, err := store.ResolveAction("elite-dangerous/ship-status")
 	if err != nil {
@@ -266,6 +315,61 @@ func TestEliteRuleDeclaresResidentW480RuntimeAndFiniteActions(t *testing.T) {
 	}
 }
 
+func TestEliteHyperspaceStateAcceptsEveryFlightStatus(t *testing.T) {
+	root := filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions")
+	flight := readSchemaObject(t, filepath.Join(root, "flight-status", "output.schema.json"))
+	hyperspace := readSchemaObject(t, filepath.Join(root, "hyperspace-state", "output.schema.json"))
+	flightStates := nestedSchemaEnum(t, flight, "properties", "flightStatus", "properties", "state", "enum")
+	hyperspaceStates := nestedSchemaEnum(t, hyperspace, "properties", "hyperspaceState", "properties", "flightStatus", "enum")
+	accepted := make(map[string]struct{}, len(hyperspaceStates))
+	for _, state := range hyperspaceStates {
+		accepted[state] = struct{}{}
+	}
+	for _, state := range flightStates {
+		if _, ok := accepted[state]; !ok {
+			t.Errorf("hyperspace-state rejects flight-status state %q", state)
+		}
+	}
+}
+
+func readSchemaObject(t *testing.T, path string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+func nestedSchemaEnum(t *testing.T, schema map[string]any, path ...string) []string {
+	t.Helper()
+	var current any = schema
+	for _, key := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("schema path %v did not reach object at %q", path, key)
+		}
+		current = object[key]
+	}
+	values, ok := current.([]any)
+	if !ok {
+		t.Fatalf("schema path %v is not an enum", path)
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			t.Fatalf("schema enum path %v contains non-string %#v", path, value)
+		}
+		result = append(result, text)
+	}
+	return result
+}
+
 func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
 	tests := []struct{ name, body, want string }{
 		{"old schema", `{"schemaVersion":4,"description":"Valid.","runtimeProfiles":{},"actions":{},"registrations":{}}`, "schemaVersion"},
@@ -285,6 +389,9 @@ func TestStoreRejectsInvalidActionAndRegistrationContracts(t *testing.T) {
 		{"stream lifecycle", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","interruptible":true},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "lifecycle"},
 		{"stream interruptible", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"stream","lifecycle":"linear"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "interruptible"},
 		{"unknown registration type", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["timer"]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "unsupported registration type"},
+		{"unknown exposure", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","exposure":"private","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "exposure"},
+		{"internal registrable", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","exposure":"internal","execution":{"completion":"return"},"registrableAs":["monitor"]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`, "cannot declare registration"},
+		{"sequence internal action", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"windows-key-action-v1","exposure":"internal","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":["a"]},"registrations":{}}`, "must be public"},
 		{"unknown action", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"m":{"type":"monitor","action":"missing","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "unknown action"},
 		{"not declared", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":1,"emit":{"stream":"s","eventType":"e"}}}}}`, "not declared"},
 		{"zero interval", `{"schemaVersion":6,"description":"Valid.","runtimeProfiles":{},"actions":{"a":{"path":"Actions/a","runtime":"r","execution":{"completion":"return"},"registrableAs":["monitor"]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{"m":{"type":"monitor","action":"a","input":{},"monitor":{"intervalMs":0,"emit":{"stream":"s","eventType":"e"}}}}}`, "intervalMs"},

@@ -70,13 +70,10 @@ def observe_status():
     fail("Status.json observer failed after bounded retries: " + last_error)
 
 def observe_flight_status():
-    raw_attempt = action.try_call(id="elite-dangerous/flight-prompt-text", inputs={})
-    if not raw_attempt["ok"]:
-        return {"state": "UNKNOWN", "reason": "FLIGHT_PROMPT_FAILED: " + raw_attempt["error"]}
-    classified_attempt = action.try_call(id="elite-dangerous/flight-status", inputs=raw_attempt["output"])
+    classified_attempt = action.try_call(id="elite-dangerous/flight-status", inputs={})
     if not classified_attempt["ok"]:
         return {"state": "UNKNOWN", "reason": "FLIGHT_STATUS_FAILED: " + classified_attempt["error"]}
-    return {"state": classified_attempt["output"]["flightStatus"]["state"], "reason": raw_attempt["output"]["text"]}
+    return {"state": classified_attempt["output"]["flightStatus"]["state"], "reason": classified_attempt["output"]["source"]["text"]}
 
 def set_safe_failure_compensation():
     action.clear_on_failure()

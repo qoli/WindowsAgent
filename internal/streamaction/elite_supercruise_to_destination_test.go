@@ -62,7 +62,7 @@ func (c *supercruiseDestinationCaller) Call(_ context.Context, id string, inputs
 		}
 		state := c.flightStates[c.flightIndex]
 		c.flightIndex++
-		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}, "source": map[string]any{"text": "fixture"}})
 	case "elite-dangerous/ship-speed":
 		c.speedCalls++
 		return json.RawMessage(`{"speed":{"state":"STOPPED","displayValue":0,"rawCandidate":0}}`), nil

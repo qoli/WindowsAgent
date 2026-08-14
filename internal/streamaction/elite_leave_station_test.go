@@ -66,24 +66,19 @@ func (c *leaveStationCaller) Call(_ context.Context, id string, inputs map[strin
 			"repairAttempted": true, "autoLaunchSelected": true,
 		})
 	case "elite-dangerous/flight-prompt-text":
+		return nil, errors.New("workflow bypassed public flight-status Action")
+	case "elite-dangerous/flight-status":
 		c.flightPromptCalls++
 		c.cycle++
-		text := ""
-		confidence := 0.0
-		if c.isAutoLaunchCycle() {
-			text = "AUTO LAUNCH IN PROGRESS"
-			confidence = 0.99
-		} else if c.promptGarbageAfterLaunch && c.cycle >= 4 {
-			text = "V0AVVM"
-			confidence = 0.43
-		}
-		return json.Marshal(map[string]any{"text": text, "confidence": confidence})
-	case "elite-dangerous/flight-status":
 		state := "UNKNOWN"
+		text := ""
 		if c.isAutoLaunchCycle() {
 			state = "AUTO_LAUNCH"
+			text = "AUTO LAUNCH IN PROGRESS"
+		} else if c.promptGarbageAfterLaunch && c.cycle >= 4 {
+			text = "V0AVVM"
 		}
-		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}})
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}, "source": map[string]any{"text": text}})
 	case "elite-dangerous/ship-status":
 		c.shipStatusCalls++
 		state := "ON"

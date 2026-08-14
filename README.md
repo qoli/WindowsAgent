@@ -67,9 +67,9 @@ today:
   or `MOVING` (`>=10`). Only `MOVING` exposes its non-zero `displayValue`;
   covered or ambiguous values remain `UNKNOWN` without consulting journal,
   status-file, or throttle-command state
-- `elite-dangerous/flight-status` accepts the complete raw output of
-  `elite-dangerous/flight-prompt-text`, combines OCR confidence with finite
-  phrase similarity, and returns one reviewed flight state or `UNKNOWN`,
+- `elite-dangerous/flight-status` takes no inputs, captures fresh prompt OCR
+  through `elite-dangerous/flight-prompt-text`, applies its Rule-internal
+  classifier, and returns one reviewed flight state or `UNKNOWN`,
   including the explicit `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` Gate for
   `MOVE TO OBTAIN LINE OF SIGHT TO TARGET`
 - the Go launcher resolves any registered `windows-observation-v1` capability
@@ -139,9 +139,10 @@ The Action runtime and registration refactor is partially landed:
   finite `elite-dangerous/flight-prompt-text` Action. The Action captures one
   reviewed 400x40 reference-density region and returns raw OCR text, confidence,
   provenance, model identity, and timing;
-- its separate pure `elite-dangerous/flight-status` Action classifies that raw
-  output into a finite status only when both combined-confidence and
-  best-candidate-margin thresholds pass; unresolved content remains `UNKNOWN`;
+- its composite `elite-dangerous/flight-status` Action owns the complete fresh
+  OCR-to-semantic pipeline. Its Rule-internal pure classifier accepts a finite
+  status only when both combined-confidence and best-candidate-margin
+  thresholds pass; unresolved content remains `UNKNOWN`;
 - Elite Dangerous also declares `ocr/text-regions`, a resident PP-OCRv6 small
   detection-plus-recognition profile. The generic raw Action returns text
   quadrilaterals, recognition evidence, and bounded same-frame left context;

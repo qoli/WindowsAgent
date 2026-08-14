@@ -1,6 +1,5 @@
 def main(ctx):
-    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
-    flight = action.call(id="elite-dangerous/flight-status", inputs=raw)
+    flight = action.call(id="elite-dangerous/flight-status", inputs={})
     cockpit = action.call(id="elite-dangerous/cockpit-hud-presence", inputs={})
     flight_state = flight["flightStatus"]["state"]
     cockpit_state = cockpit["cockpitHud"]["state"]
@@ -14,7 +13,7 @@ def main(ctx):
         "hyperspaceState": {
             "state": state,
             "flightStatus": flight_state,
-            "promptText": raw["text"],
+            "promptText": flight["source"]["text"],
             "cockpitHud": cockpit["cockpitHud"],
             "evidenceCapturedAt": cockpit["profile"]["capturedAt"],
         },

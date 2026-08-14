@@ -43,6 +43,8 @@ const (
 	ResidencyRuleActive             = "while-rule-active"
 	RegistrationMonitor             = "monitor"
 	RegistrationReaction            = "reaction"
+	ActionExposurePublic            = "public"
+	ActionExposureInternal          = "internal"
 	CompletionReturn                = "return"
 	CompletionStream                = "stream"
 	LifecycleLinear                 = "linear"
@@ -127,6 +129,7 @@ type ActionDeclaration struct {
 	Path           string                      `json:"path"`
 	Runtime        string                      `json:"runtime"`
 	RuntimeProfile string                      `json:"runtimeProfile,omitempty"`
+	Exposure       string                      `json:"exposure,omitempty"`
 	Execution      *ActionExecutionDeclaration `json:"execution"`
 	RegistrableAs  []string                    `json:"registrableAs"`
 }
@@ -170,6 +173,7 @@ type Action struct {
 	Execution        ActionExecution `json:"execution"`
 	RegistrableAs    []string        `json:"registrableAs"`
 	SequenceEligible bool            `json:"sequenceEligible"`
+	Exposure         string          `json:"-"`
 	Root             string          `json:"-"`
 }
 
@@ -357,6 +361,7 @@ func (s *Store) ResolveAction(actionID string) (Action, error) {
 			Execution:        resolvedActionExecution(declaration.Execution),
 			RegistrableAs:    append([]string(nil), declaration.RegistrableAs...),
 			SequenceEligible: slicesContains(descriptor.EphemeralActionSequence.AllowedActions, actionID),
+			Exposure:         resolvedActionExposure(declaration.Exposure),
 			Root:             root,
 		}
 	}
@@ -364,6 +369,20 @@ func (s *Store) ResolveAction(actionID string) (Action, error) {
 		return Action{}, fs.ErrNotExist
 	}
 	return *matched, nil
+}
+
+// ResolvePublicAction resolves only Actions that form the remote Rule API.
+// Same-Rule composite and streaming child calls use ResolveAction so that a
+// Rule can keep implementation Actions out of catalogs and direct invocation.
+func (s *Store) ResolvePublicAction(actionID string) (Action, error) {
+	action, err := s.ResolveAction(actionID)
+	if err != nil {
+		return Action{}, err
+	}
+	if action.Exposure != ActionExposurePublic {
+		return Action{}, fs.ErrNotExist
+	}
+	return action, nil
 }
 
 func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
@@ -386,7 +405,7 @@ func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
 	}
 	capabilityIDs := make([]string, 0, len(descriptor.Actions))
 	for capabilityID, declaration := range descriptor.Actions {
-		if declaration.Runtime != ObservationRuntimeV1 {
+		if declaration.Runtime != ObservationRuntimeV1 || resolvedActionExposure(declaration.Exposure) != ActionExposurePublic {
 			continue
 		}
 		capabilityIDs = append(capabilityIDs, capabilityID)
@@ -412,6 +431,16 @@ func (s *Store) ReadScripts(id string) ([]Script, Resolution, error) {
 }
 
 func (s *Store) ReadActions(id string) ([]Action, Resolution, error) {
+	return s.readActions(id, true)
+}
+
+// ReadAllActions is for repository/runtime validation that must include
+// Rule-internal implementation Actions. It is not an HTTP catalog surface.
+func (s *Store) ReadAllActions(id string) ([]Action, Resolution, error) {
+	return s.readActions(id, false)
+}
+
+func (s *Store) readActions(id string, publicOnly bool) ([]Action, Resolution, error) {
 	if s == nil {
 		return nil, Resolution{}, errors.New("rule store is required")
 	}
@@ -430,7 +459,10 @@ func (s *Store) ReadActions(id string) ([]Action, Resolution, error) {
 		return nil, Resolution{}, err
 	}
 	actionIDs := make([]string, 0, len(descriptor.Actions))
-	for actionID := range descriptor.Actions {
+	for actionID, declaration := range descriptor.Actions {
+		if publicOnly && resolvedActionExposure(declaration.Exposure) != ActionExposurePublic {
+			continue
+		}
 		actionIDs = append(actionIDs, actionID)
 	}
 	sort.Strings(actionIDs)
@@ -660,6 +692,12 @@ func validateDescriptor(descriptor Descriptor) error {
 		if declaration.RegistrableAs == nil {
 			return fmt.Errorf("action %s registrableAs is required", id)
 		}
+		if declaration.Exposure != "" && declaration.Exposure != ActionExposurePublic && declaration.Exposure != ActionExposureInternal {
+			return fmt.Errorf("action %s exposure must equal %q or %q", id, ActionExposurePublic, ActionExposureInternal)
+		}
+		if resolvedActionExposure(declaration.Exposure) == ActionExposureInternal && len(declaration.RegistrableAs) != 0 {
+			return fmt.Errorf("internal action %s cannot declare registration eligibility", id)
+		}
 		if err := validateActionExecution(declaration.Execution); err != nil {
 			return fmt.Errorf("action %s execution: %w", id, err)
 		}
@@ -698,6 +736,9 @@ func validateDescriptor(descriptor Descriptor) error {
 		if !exists {
 			return fmt.Errorf("ephemeralActionSequence references unknown action %q", actionID)
 		}
+		if resolvedActionExposure(declaration.Exposure) != ActionExposurePublic {
+			return fmt.Errorf("ephemeralActionSequence action %q must be public", actionID)
+		}
 		if _, duplicate := sequenceSeen[actionID]; duplicate {
 			return fmt.Errorf("ephemeralActionSequence contains duplicate action %q", actionID)
 		}
@@ -718,6 +759,9 @@ func validateDescriptor(descriptor Descriptor) error {
 		if !exists {
 			return fmt.Errorf("registration %s references unknown action %q", id, registration.Action)
 		}
+		if resolvedActionExposure(action.Exposure) != ActionExposurePublic {
+			return fmt.Errorf("registration %s cannot reference internal action %q", id, registration.Action)
+		}
 		if err := validateRegistrationType(registration.Type); err != nil {
 			return fmt.Errorf("registration %s: %w", id, err)
 		}
@@ -729,6 +773,13 @@ func validateDescriptor(descriptor Descriptor) error {
 		}
 	}
 	return nil
+}
+
+func resolvedActionExposure(exposure string) string {
+	if exposure == "" {
+		return ActionExposurePublic
+	}
+	return exposure
 }
 
 func coreSequenceRuntime(runtime string) bool {

@@ -309,7 +309,7 @@ func (c *hyperspaceStateCaller) Call(_ context.Context, id string, _ map[string]
 	case "elite-dangerous/flight-prompt-text":
 		return json.RawMessage(`{"text":"PRESS TO ABORT"}`), nil
 	case "elite-dangerous/flight-status":
-		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": c.flightState}})
+		return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": c.flightState}, "source": map[string]any{"text": "PRESS TO ABORT"}})
 	case "elite-dangerous/cockpit-hud-presence":
 		return json.Marshal(map[string]any{"cockpitHud": map[string]any{"state": c.cockpitState, "orangePixelCount": 0, "chargeCyanPixelCount": 0, "hudPixelCount": 0, "minimumHudPixels": 150}, "profile": map[string]any{"capturedAt": "2026-08-10T00:00:00Z"}})
 	default:

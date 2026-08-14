@@ -769,7 +769,17 @@ func newTestServerWithExecutor(
 	executor scriptlaunch.Executor,
 ) (*Server, *artifact.Store) {
 	t.Helper()
-	server, store, _ := newTestServerAndRuleRootWithExecutor(t, capturer, timeout, executor)
+	server, store, ruleRoot := newTestServerAndRuleRootWithExecutor(t, capturer, timeout, executor)
+	if err := os.MkdirAll(filepath.Join(ruleRoot, "Actions", "status"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(ruleRoot, rules.RuleFilename),
+		[]byte(`{"schemaVersion":6,"description":"Read the live Rule before acting.","runtimeProfiles":{},"actions":{"game/status":{"path":"Actions/status","runtime":"windows-observation-v1","execution":{"completion":"return"},"registrableAs":[]}},"ephemeralActionSequence":{"allowedActions":[]},"registrations":{}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
 	return server, store
 }
 

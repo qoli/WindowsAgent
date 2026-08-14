@@ -117,10 +117,7 @@ def observe_obstruction():
     return action.call(id="elite-dangerous/hyperspace-target-occlusion", inputs={})["occlusion"]
 
 def observe_flight_status_state():
-    raw_attempt = action.try_call(id="elite-dangerous/flight-prompt-text", inputs={})
-    if not raw_attempt["ok"]:
-        return None
-    classified_attempt = action.try_call(id="elite-dangerous/flight-status", inputs=raw_attempt["output"])
+    classified_attempt = action.try_call(id="elite-dangerous/flight-status", inputs={})
     if not classified_attempt["ok"]:
         return None
     return classified_attempt["output"]["flightStatus"]["state"]

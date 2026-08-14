@@ -32,7 +32,7 @@ func TestBuildToolSchemaRequiresExplicitActionInputs(t *testing.T) {
 		t.Fatalf("schema = %+v", schema)
 	}
 	text := string(encoded)
-	for _, required := range []string{`"maxItems":20`, `"ruleId"`, `"Game.exe"`, `"game/align"`, `"required":["mode"]`} {
+	for _, required := range []string{`"maxItems":20`, `"ruleId"`, `"Game.exe"`, `"game/align"`, `"required":["mode"]`, `"type":"null"`, `Action default: \"ALIGN\".`} {
 		if !contains(text, required) {
 			t.Fatalf("tool schema missing %s: %s", required, text)
 		}
@@ -41,6 +41,37 @@ func TestBuildToolSchemaRequiresExplicitActionInputs(t *testing.T) {
 		if contains(text, forbidden) {
 			t.Fatalf("tool schema retained %s: %s", forbidden, text)
 		}
+	}
+}
+
+func TestCanonicalInputsRestoresOptionalOmissionWithoutChangingNullableNull(t *testing.T) {
+	schema := json.RawMessage(`{
+	  "type":"object",
+	  "required":["requiredValue","nullableValue"],
+	  "properties":{
+	    "requiredValue":{"type":"string"},
+	    "optionalDefault":{"type":"string","default":"AUTO"},
+	    "nullableValue":{"type":["string","null"]},
+	    "nested":{"type":"object","properties":{"optional":{"type":"boolean"}}}
+	  }
+	}`)
+	inputs := map[string]any{
+		"requiredValue": "ready", "optionalDefault": nil, "nullableValue": nil,
+		"nested": map[string]any{"optional": nil},
+	}
+	canonical, err := CanonicalInputs(schema, inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := canonical["optionalDefault"]; exists {
+		t.Fatalf("optional default was not restored to omission: %#v", canonical)
+	}
+	if value, exists := canonical["nullableValue"]; !exists || value != nil {
+		t.Fatalf("canonical nullable null was changed: %#v", canonical)
+	}
+	nested := canonical["nested"].(map[string]any)
+	if _, exists := nested["optional"]; exists {
+		t.Fatalf("nested optional null was not restored to omission: %#v", canonical)
 	}
 }
 

@@ -89,8 +89,8 @@ transition, presentation change, or at least eight pixels of pre/post-charge
 movement establishes charge ownership. The OCR-derived flight status covers
 the valid case where the pre-existing destination and the Escape Vector have
 identical Compass geometry; the Action still requires two consistent SOLID or
-HOLLOW samples before using any direction. The prompt pipeline is invoked as
-`flight-prompt-text` followed by `flight-status`, and is sampled both when the
+HOLLOW samples before using any direction. The zero-input `flight-status`
+Action owns fresh prompt OCR and classification, and is sampled both when the
 new charging Status first appears and after the bounded Compass window so a
 late HUD prompt is not missed. Missing
 samples are emitted explicitly instead of silently shrinking the voting

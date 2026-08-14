@@ -94,6 +94,7 @@
     "elite-dangerous/ship-status-classifier": {
       "path": "Actions/ship-status-classifier",
       "runtime": "windows-observation-v1",
+      "exposure": "internal",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
@@ -126,6 +127,7 @@
     "elite-dangerous/ship-speed-classifier": {
       "path": "Actions/ship-speed-classifier",
       "runtime": "windows-observation-v1",
+      "exposure": "internal",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
@@ -145,6 +147,7 @@
     "elite-dangerous/ship-heat-classifier": {
       "path": "Actions/ship-heat-classifier",
       "runtime": "windows-observation-v1",
+      "exposure": "internal",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
@@ -157,9 +160,16 @@
     },
     "elite-dangerous/flight-status": {
       "path": "Actions/flight-status",
-      "runtime": "windows-observation-v1",
+      "runtime": "windows-composite-action-v1",
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
+    },
+    "elite-dangerous/flight-status-classifier": {
+      "path": "Actions/flight-status-classifier",
+      "runtime": "windows-observation-v1",
+      "exposure": "internal",
+      "execution": {"completion": "return"},
+      "registrableAs": []
     },
     "elite-dangerous/cockpit-hud-presence": {
       "path": "Actions/cockpit-hud-presence",
@@ -200,6 +210,7 @@
     "elite-dangerous/request-docking-range-classifier": {
       "path": "Actions/request-docking-range-classifier",
       "runtime": "windows-observation-v1",
+      "exposure": "internal",
       "execution": {"completion": "return"},
       "registrableAs": []
     },
@@ -311,6 +322,7 @@
     "elite-dangerous/request-docking-availability-classifier": {
       "path": "Actions/request-docking-availability-classifier",
       "runtime": "windows-observation-v1",
+      "exposure": "internal",
       "execution": {"completion": "return"},
       "registrableAs": []
     },

@@ -40,11 +40,10 @@ def emit_update(phase, sample, target_name, flight_status="UNKNOWN", prompt_text
     )
 
 def observe_flight():
-    raw = action.call(id="elite-dangerous/flight-prompt-text", inputs={})
-    classified = action.call(id="elite-dangerous/flight-status", inputs=raw)
+    classified = action.call(id="elite-dangerous/flight-status", inputs={})
     return {
         "state": classified["flightStatus"]["state"],
-        "text": raw["text"],
+        "text": classified["source"]["text"],
     }
 
 def observe_compass_target():

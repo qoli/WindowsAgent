@@ -300,6 +300,14 @@ func (s *Server) handleScriptRun(w http.ResponseWriter, r *http.Request, request
 		writeError(w, requestID, http.StatusBadRequest, "invalid_script_request", err.Error())
 		return
 	}
+	if _, err := s.rules.ResolvePublicAction(invocation.Capability); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			writeError(w, requestID, http.StatusNotFound, "script_not_found", "Script Action not found")
+			return
+		}
+		s.writeMappedError(w, requestID, fmt.Errorf("resolve public Script Action %q: %w", invocation.Capability, err))
+		return
+	}
 	select {
 	case s.scriptGate <- struct{}{}:
 		defer func() { <-s.scriptGate }()
@@ -507,6 +515,8 @@ func (s *Server) handleActionEvents(w http.ResponseWriter, r *http.Request, requ
 
 func (s *Server) writeActionError(w http.ResponseWriter, requestID string, err error) {
 	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		writeError(w, requestID, http.StatusNotFound, "action_not_found", "Action not found")
 	case errors.Is(err, actionrun.ErrInvocationNotFound):
 		writeError(w, requestID, http.StatusNotFound, "action_invocation_not_found", "Action invocation not found")
 	case errors.Is(err, actionrun.ErrNotInterruptible):

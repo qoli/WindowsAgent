@@ -69,11 +69,7 @@ def failed_observation(attempt):
     return {"ok": False, "output": None, "error": attempt["error"], "errorCode": attempt["errorCode"]}
 
 def observe():
-    raw_attempt = action.try_call(id="elite-dangerous/flight-prompt-text", inputs={})
-    if not raw_attempt["ok"]:
-        return failed_observation(raw_attempt)
-    raw = raw_attempt["output"]
-    flight_attempt = action.try_call(id="elite-dangerous/flight-status", inputs=raw)
+    flight_attempt = action.try_call(id="elite-dangerous/flight-status", inputs={})
     if not flight_attempt["ok"]:
         return failed_observation(flight_attempt)
     ship_attempt = action.try_call(id="elite-dangerous/ship-status", inputs={})
@@ -88,7 +84,7 @@ def observe():
     return {"ok": True, "error": None, "errorCode": None, "output": {
         "observationScope": "FULL",
         "flightStatus": flight["flightStatus"]["state"],
-        "flightPromptText": raw["text"],
+        "flightPromptText": flight["source"]["text"],
         "massLock": ship["shipStatus"]["massLock"]["state"],
         "observedSpeedState": speed["observedSpeedState"],
         "observedSpeedDisplayValue": speed["observedSpeedDisplayValue"],

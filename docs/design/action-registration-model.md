@@ -35,9 +35,11 @@ registration forms:
 `registrations` object means the Action remains directly callable only.
 For example, the Elite Dangerous compass, flight-status, ship-status, and
 ship-speed Actions are eligible for both registration types while their empty
-registration catalog leaves them strictly on-demand. Flight-status is a pure
-postprocessor for the complete raw flight-prompt-text result; eligibility does
-not implicitly connect or schedule those two Actions. The ship-status Action's `UNKNOWN` results preserve
+registration catalog leaves them strictly on-demand. Flight-status is a
+zero-input composite that obtains fresh `flight-prompt-text` evidence and calls
+a Rule-internal pure classifier; registration eligibility therefore applies to
+the complete semantic observation rather than a classifier awaiting external
+OCR payload. The ship-status Action's `UNKNOWN` results preserve
 insufficient visual evidence rather than silently converting it to `OFF`; its
 three-row relative-geometry check reports Mass Lock, Landing Gear, and Cargo
 Scoop independently. Ship-speed likewise keeps ambiguous or covered OCR as
@@ -86,6 +88,9 @@ the Action ID remains executable capability identity.
 - every package lives below `Actions/`;
 - every Action explicitly declares `registrableAs`, including an empty list;
 - every Action explicitly declares one valid execution contract;
+- internal Actions have no registration eligibility and cannot appear in the
+  public Action catalog, v1 Script projection, registration catalog, or
+  Ephemeral Action Sequence allowlist;
 - a registration must reference an existing Action;
 - its type must appear in that Action's `registrableAs` declaration;
 - Monitor intervals are positive and emitted stream/event names are canonical;
