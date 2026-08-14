@@ -55,6 +55,17 @@ Replay additionally accepts the event journal's canonical `stream` selector.
 Live filtering remains a browser presentation feature so unmatched global
 records cannot create an invisible cursor gap.
 
+The Streaming Log UI starts on the `action.runs` tab and can switch to the
+`visual-log` tab. Both tabs project the same bounded in-memory event buffer;
+the browser filters by `event.stream` after receiving the one unfiltered live
+stream and the unfiltered durable replay. Selecting a tab therefore never
+opens a second live stream or resets the global durable cursor. The text filter
+is applied only to the selected tab. Pause freezes automatic rendering while
+the single live reader continues to retain at most 500 envelopes, and Resume
+renders the current tab. Clear discards that bounded buffer for both tabs but
+does not change the durable cursor, so the next live envelope resumes without a
+gap.
+
 Every browser event is an envelope containing the authoritative event and a
 decimal-string `cursor`. Replay cursors are also decimal strings. JavaScript
 therefore never has to round a `uint64` sequence through its Number type.
@@ -63,6 +74,11 @@ The OSD projection directly reuses `internal/actionosd.Model`, including strict
 Action Sequence provenance and terminal expiry. It does not infer activity from
 arbitrary domain payloads. Capture and recording indicators are read afresh
 from their existing session-local Windows signals for each OSD request.
+The Web OSD Mirror always renders Capture and Evidence as two independent
+full-width rows. Active rows use cyan and yellow dots respectively; inactive
+rows retain their positions with grey dots so Action and activity content does
+not shift. This is a browser-mirror layout contract and does not change the
+native Action OSD.
 
 ## Failure and reconnect behavior
 

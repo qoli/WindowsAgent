@@ -75,6 +75,63 @@ func TestServerServesEmbeddedUIAndRequiresAPIToken(t *testing.T) {
 	}
 }
 
+func TestEmbeddedUISeparatesTabsWithoutSplittingGlobalLiveStream(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui := string(data)
+	for _, marker := range []string{
+		`role="tablist"`,
+		`aria-selected="true" aria-controls="events" data-stream="action.runs"`,
+		`aria-selected="false" aria-controls="events" data-stream="visual-log"`,
+		`const state = { token: sessionStorage.getItem('windowsAgentWebToken') || '', cursor:'0', activeStream:streams.actionRuns`,
+		`x.event.stream===state.activeStream`,
+		`state.events.length>500`,
+		`/api/v1/events/stream?after=`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("embedded UI is missing streaming-log contract marker %q", marker)
+		}
+	}
+	if strings.Count(ui, "/api/v1/events/stream?after=") != 1 {
+		t.Fatal("embedded UI must maintain one unfiltered live stream")
+	}
+	if strings.Contains(ui, "state.cursor=maxCursor(state.cursor,data.cursor)") {
+		t.Fatal("OSD polling must not advance the global event cursor")
+	}
+}
+
+func TestEmbeddedUIKeepsOSDIndicatorsFixedAndGreyWhenInactive(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui := string(data)
+	for _, marker := range []string{
+		`.row { display:flex; align-items:center; gap:9px; margin-bottom:12px }`,
+		`.dot { width:10px; height:10px; border-radius:50%; background:#485566; flex:0 0 auto }`,
+		`.indicator { width:100% }`,
+		`const captureIndicator='<div class="row indicator"><span class="dot'+(data.captureActive?' capture':'')+'"></span><span>'+(data.captureActive?'Capture accepted':'Capture idle')+'</span></div>';`,
+		`const recordingIndicator='<div class="row indicator"><span class="dot'+(data.recordingActive?' recording':'')+'"></span><span>'+(data.recordingActive?'Evidence recording':'Evidence idle')+'</span></div>';`,
+		`$('osd').innerHTML=captureIndicator+recordingIndicator+'<div class="row">'+dot`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("embedded UI is missing fixed OSD indicator contract marker %q", marker)
+		}
+	}
+	if strings.Count(ui, `class="row indicator"`) != 2 {
+		t.Fatalf("OSD renderer must define exactly two indicator rows, got %d", strings.Count(ui, `class="row indicator"`))
+	}
+	if strings.Contains(ui, "if(data.captureActive) indicators.push") || strings.Contains(ui, "if(data.recordingActive) indicators.push") {
+		t.Fatal("OSD indicators must remain rendered when inactive")
+	}
+	if strings.Index(ui, "captureIndicator") > strings.Index(ui, "recordingIndicator") ||
+		strings.Index(ui, "recordingIndicator") > strings.Index(ui, "$('osd').innerHTML=captureIndicator+recordingIndicator") {
+		t.Fatal("OSD indicator rows must precede the Action row")
+	}
+}
+
 func TestServerProjectsActionOSDAndSessionIndicators(t *testing.T) {
 	projection := &Projection{}
 	start := time.Date(2026, 8, 14, 1, 2, 3, 0, time.UTC)
