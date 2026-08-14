@@ -2,12 +2,17 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "backSent", "listConfirmed", "panelClosed", "finalState"],
+  "required": ["schemaVersion", "backSent", "listConfirmed", "autoClosedAfterBack", "panelClosed", "finalState"],
   "properties": {
     "schemaVersion": {"const": 1},
     "backSent": {"const": true},
-    "listConfirmed": {"const": true},
+    "listConfirmed": {"type": "boolean"},
+    "autoClosedAfterBack": {"type": "boolean"},
     "panelClosed": {"const": true},
     "finalState": {"const": "ABSENT"}
-  }
+  },
+  "oneOf": [
+    {"properties": {"listConfirmed": {"const": true}, "autoClosedAfterBack": {"const": false}}},
+    {"properties": {"listConfirmed": {"const": false}, "autoClosedAfterBack": {"const": true}}}
+  ]
 }

@@ -339,6 +339,13 @@
       "execution": {"completion": "return"},
       "registrableAs": ["monitor", "reaction"]
     },
+    "elite-dangerous/navigation-tab-transition-state": {
+      "path": "Actions/navigation-tab-transition-state",
+      "runtime": "windows-observation-v1",
+      "exposure": "internal",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/station-service-focus": {
       "path": "Actions/station-service-focus",
       "runtime": "windows-observation-v1",

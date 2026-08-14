@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "title": "Observe transient Elite Dangerous Navigation-list highlight",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json"],
+  "permissions": {
+    "memory": null,
+    "file": null,
+    "screen": {"operations": ["readRegion"], "maxCalls": 1, "maxPixels": 16}
+  },
+  "limits": {"wallTimeMs": 3000, "maxSteps": 100000, "maxResultBytes": 2048, "maxLogBytes": 1024}
+}

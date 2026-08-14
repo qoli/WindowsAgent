@@ -329,7 +329,7 @@ def restore_forward_view(target_name, sample):
     # left-panel-tab-state. Treating that detail view as ABSENT is therefore a
     # false close. Always leave detail through its owning Action, which sends
     # BACK, closes the returned list, and independently verifies ABSENT.
-    restored = action.call(id="elite-dangerous/close-navigation-detail", inputs={})
+    restored = action.call(id="elite-dangerous/close-navigation-detail", inputs={"detailLabelConfirmed": True})
     if not restored["panelClosed"] or restored["finalState"] != "ABSENT":
         fail("Navigation detail did not restore the forward view after requesting Supercruise Assist")
     flight = observe_flight()
