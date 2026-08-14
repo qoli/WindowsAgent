@@ -60,8 +60,11 @@ inventories:
 - each Action package owns its `TASK.md`, schemas, manifest, and implementation;
 - `docs/script-development-contract.md` owns authoring and review rules for
   `windows-observation-v1` packages;
-- `.agents/skills/operate-windowsagent/SKILL.md` owns the operator workflow for
-  invoking a live WindowsAgent Rule;
+- `.agents/skills/develop-windowsagent-rule/SKILL.md` owns the workflow for
+  designing, invoking, troubleshooting, and validating Rule-owned Actions;
+- `.agents/skills/maintain-windowsagent-runtime/SKILL.md` owns the workflow for
+  generic runtime diagnosis, development, deployment, and acceptance without
+  taking ownership of Rule semantics;
 - `.agents/skills/use-visual-log/SKILL.md` owns the supervising-model workflow
   for operating the on-demand visual log and using it to locate evidence time
   ranges.

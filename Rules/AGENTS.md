@@ -308,9 +308,12 @@ this repository. It is not copied into an executable Rule plugin and is not
 served by `/v1/rules/{rule-id}/AGENTS.md`. It must never override or impersonate
 the live executable-specific document.
 
-Use `.agents/skills/operate-windowsagent/SKILL.md` as the operating workflow for
-discovering, invoking, observing, troubleshooting, and validating the live
-Rule. This file owns Action engineering; the skill owns live operation.
+Use `.agents/skills/develop-windowsagent-rule/SKILL.md` as the workflow for
+designing, discovering, invoking, troubleshooting, and validating Rule-owned
+Actions. This file remains the source-development contract; the skill applies
+it to Action engineering and live operation. Use
+`.agents/skills/maintain-windowsagent-runtime/SKILL.md` for generic runtime work;
+that workflow must not modify this Rule layer or remove its workarounds.
 
 ## Failure and Fallback Policy
 

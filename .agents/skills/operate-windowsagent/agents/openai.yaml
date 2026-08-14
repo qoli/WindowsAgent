@@ -1,4 +1,0 @@
-interface:
-  display_name: "Operate WindowsAgent"
-  short_description: "Design, invoke, and verify live WindowsAgent capabilities"
-  default_prompt: "Use $operate-windowsagent to inspect the live foreground Rule, identify whether the task exposes an Action gap, choose or create the smallest suitable Action, and validate the result from runtime and domain evidence."

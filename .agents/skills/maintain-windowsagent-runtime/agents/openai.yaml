@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain WindowsAgent Runtime"
+  short_description: "Maintain generic WindowsAgent runtime capabilities"
+  default_prompt: "Use $maintain-windowsagent-runtime to diagnose, change, deploy, and validate generic WindowsAgent runtime behavior without modifying game-owned Actions."
