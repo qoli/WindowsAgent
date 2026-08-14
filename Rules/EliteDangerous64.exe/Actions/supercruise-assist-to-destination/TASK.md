@@ -6,7 +6,10 @@ is separate from the retained manual `supercruise-to-destination` workflow.
 
 The caller must first complete `select-and-lock-destination`, visually confirm
 normal space, and confirm the ship's Supercruise Assist setting is `Auto
-Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop, then
+Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop through
+a four-sample bounded preflight window. Any observed `ON` fails immediately;
+two consecutive observations with all three `OFF` pass; unresolved `UNKNOWN`
+remains unknown and fails only after the window is exhausted. It then
 invokes `align-station-target` with the named destination. The child owns the
 rule that `NAV BEACON` is always `targetMotion=MOVING`; ordinary stations retain
 the requested `STATIC` profile. Before Supercruise
@@ -60,8 +63,22 @@ the workflow sends exactly one `RIGHT` from BACK and requires the complete
 mode-correct label in two consecutive observations. `ACTIVATE` or the shorter
 label permits one `SELECT`; `DEACTIVATE` proves Assist is already active and
 must not be selected because that would disable it. Missing or ambiguous text, focus, module, target
-lock, or panel state fails explicitly. After the panel closes, the Action may
-command 75% into the Supercruise blue zone. It gives the game three prompt
+lock, or panel state fails explicitly. The Navigation detail view does not
+expose the tab-header pixels used by `left-panel-tab-state`, so an `ABSENT` tab
+result is not accepted as proof that detail closed. The workflow must call
+`close-navigation-detail`, which sends BACK, closes the returned Navigation
+list, and independently reports `panelClosed=true` and `finalState=ABSENT`.
+Only that postcondition permits 75%; the detail-close compensation remains
+registered until it passes.
+
+After 75% is requested, six consecutive observations without any ACTIVE,
+alignment-required, or line-of-sight-required Gate are a bounded unsafe
+ownership gap. The Action immediately commands 0%, emits
+`ASSIST_OWNERSHIP_TIMEOUT` with the missing-sample count, and fails instead of
+continuing to move while repeatedly reporting `WAITING_FOR_ASSIST`. A single
+alignment or line-of-sight candidate pauses but does not reset this counter;
+only a fully debounced and accepted Gate resets it and enters its owning
+recovery path. It gives the game three prompt
 observations to react. If alignment remains required, it returns to 0%,
 performs Compass alignment followed by visible-target alignment, and verifies
 that the alignment prompt disappeared twice before restoring 75%; attitude

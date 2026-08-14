@@ -6,6 +6,7 @@ MAX_NAVIGATION = 8
 NAVIGATION_LOCK_WARMUP_RETRIES = 3
 SUPERCRUISE_ENTRY_LIMIT = 45
 ASSIST_START_LIMIT = 240
+ASSIST_START_NO_EVIDENCE_LIMIT = 6
 BLUE_ZONE_GRACE_SAMPLES = 3
 ASSIST_ALIGNMENT_CYCLE_LIMIT = 6
 ALIGNMENT_PROMPT_CLEAR_CONFIRMATIONS = 2
@@ -17,6 +18,8 @@ LINE_OF_SIGHT_REALIGN_CYCLE_LIMIT = 3
 MAX_LINE_OF_SIGHT_RECOVERIES = 3
 STOPPED_CONFIRMATIONS = 3
 MAX_WGC_CAPTURE_ERRORS = 5
+PREFLIGHT_STATUS_ATTEMPTS = 4
+PREFLIGHT_SAFE_CONFIRMATIONS = 2
 MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 MIN_TEXT_SIMILARITY = 0.72
@@ -310,17 +313,22 @@ def request_assist(target_name, sample, destination_mode):
     emit_update("REQUESTING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state="FOCUSED", last_command="SELECT", reason="ASSIST_ACTIVATION_REQUESTED")
     task.sleep(milliseconds=UI_SETTLE_MS)
 
-def close_panel(target_name, sample):
-    observation = observe_panel_stable()
-    state = observation["activeTab"]["state"]
-    if state != "ABSENT":
-        action.call(id="elite-dangerous/ui-control", inputs={"control": "FOCUS_LEFT_PANEL"})
-        emit_update("CLOSING_PANEL", sample, target_name, panel_tab=state, last_command="FOCUS_LEFT_PANEL", reason="RESTORING_FORWARD_VIEW")
-        task.sleep(milliseconds=UI_SETTLE_MS)
-        observation = observe_panel_stable()
-        state = observation["activeTab"]["state"]
-    if state != "ABSENT":
-        fail("left panel remained visible after requesting Supercruise Assist")
+def restore_forward_view(target_name, sample):
+    # The Navigation detail page does not expose the tab-header pixels used by
+    # left-panel-tab-state. Treating that detail view as ABSENT is therefore a
+    # false close. Always leave detail through its owning Action, which sends
+    # BACK, closes the returned list, and independently verifies ABSENT.
+    restored = action.call(id="elite-dangerous/close-navigation-detail", inputs={})
+    if not restored["panelClosed"] or restored["finalState"] != "ABSENT":
+        fail("Navigation detail did not restore the forward view after requesting Supercruise Assist")
+    emit_update(
+        "CLOSING_PANEL",
+        sample,
+        target_name,
+        panel_tab="ABSENT",
+        last_command="BACK+FOCUS_LEFT_PANEL",
+        reason="NAVIGATION_DETAIL_AND_PANEL_CLOSED_CONFIRMED",
+    )
 
 def observe_flight():
     classified = action.call(id="elite-dangerous/flight-status", inputs={})
@@ -534,13 +542,26 @@ def resolve_assist_line_of_sight_prompt(target_name, sample, recovery_count):
     fail("LINE_OF_SIGHT_PROMPT_PERSISTED_AFTER_REALIGNMENT: bounded bypass cycles exhausted")
 
 def preflight(target_name):
-    ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
-    mass_lock = ship["massLock"]["state"]
-    landing_gear = ship["landingGear"]["state"]
-    cargo_scoop = ship["cargoScoop"]["state"]
-    emit_update("PREFLIGHT", 0, target_name, mass_lock=mass_lock, landing_gear=landing_gear, cargo_scoop=cargo_scoop, reason="SHIP_STATUS_OBSERVED")
-    if mass_lock != "OFF" or landing_gear != "OFF" or cargo_scoop != "OFF":
-        fail("Supercruise Assist requires visual Mass Lock, Landing Gear, and Cargo Scoop all OFF")
+    safe_confirmations = 0
+    for attempt in range(PREFLIGHT_STATUS_ATTEMPTS):
+        ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
+        mass_lock = ship["massLock"]["state"]
+        landing_gear = ship["landingGear"]["state"]
+        cargo_scoop = ship["cargoScoop"]["state"]
+        if mass_lock == "ON" or landing_gear == "ON" or cargo_scoop == "ON":
+            emit_update("PREFLIGHT", attempt + 1, target_name, mass_lock=mass_lock, landing_gear=landing_gear, cargo_scoop=cargo_scoop, reason="SHIP_STATUS_UNSAFE")
+            fail("Supercruise Assist requires visual Mass Lock, Landing Gear, and Cargo Scoop all OFF")
+        if mass_lock == "OFF" and landing_gear == "OFF" and cargo_scoop == "OFF":
+            safe_confirmations += 1
+            emit_update("PREFLIGHT", attempt + 1, target_name, mass_lock=mass_lock, landing_gear=landing_gear, cargo_scoop=cargo_scoop, reason="SHIP_STATUS_SAFE_" + str(safe_confirmations) + "_OF_" + str(PREFLIGHT_SAFE_CONFIRMATIONS))
+            if safe_confirmations >= PREFLIGHT_SAFE_CONFIRMATIONS:
+                return
+        else:
+            safe_confirmations = 0
+            emit_update("PREFLIGHT", attempt + 1, target_name, mass_lock=mass_lock, landing_gear=landing_gear, cargo_scoop=cargo_scoop, reason="SHIP_STATUS_INCOMPLETE_ATTEMPT_" + str(attempt + 1) + "_OF_" + str(PREFLIGHT_STATUS_ATTEMPTS))
+        if attempt + 1 < PREFLIGHT_STATUS_ATTEMPTS:
+            task.sleep(milliseconds=POLL_MS)
+    fail("Supercruise Assist preflight ship status remained UNKNOWN within the bounded observation window")
 
 def main(ctx):
     target_name = ctx.inputs["targetName"]
@@ -635,7 +656,7 @@ def main(ctx):
         focus_and_open_target(target_name, sample)
         action.on_failure(id="elite-dangerous/close-navigation-detail", inputs={}, timeout_milliseconds=10000)
         request_assist(target_name, sample, destination_mode)
-        close_panel(target_name, sample)
+        restore_forward_view(target_name, sample)
         action.clear_on_failure()
         action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     else:
@@ -649,6 +670,7 @@ def main(ctx):
     line_of_sight_required_samples = 0
     line_of_sight_recovery_count = 0
     last_line_of_sight_control = None
+    no_ownership_evidence_samples = 0
     for _ in range(ASSIST_START_LIMIT):
         sample += 1
         flight = observe_flight()
@@ -659,6 +681,7 @@ def main(ctx):
         commanded_throttle = 75
         phase = "WAITING_FOR_ASSIST"
         if last_flight_status == "SUPERCRUISE_ASSIST_ACTIVE":
+            no_ownership_evidence_samples = 0
             assist_active_confirmations += 1
             alignment_required_samples = 0
             line_of_sight_required_samples = 0
@@ -669,6 +692,7 @@ def main(ctx):
             line_of_sight_required_samples += 1
             phase = "CONFIRMING_LINE_OF_SIGHT"
             if line_of_sight_required_samples >= LINE_OF_SIGHT_GATE_CONFIRMATIONS:
+                no_ownership_evidence_samples = 0
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
                 emit_update("CLEARING_LINE_OF_SIGHT", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, line_of_sight_required_confirmations=line_of_sight_required_samples, line_of_sight_recovery_count=line_of_sight_recovery_count, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_LINE_OF_SIGHT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
                 recovered = resolve_assist_line_of_sight_prompt(target_name, sample, line_of_sight_recovery_count)
@@ -692,6 +716,7 @@ def main(ctx):
             alignment_required_samples += 1
             line_of_sight_required_samples = 0
             if alignment_required_samples > BLUE_ZONE_GRACE_SAMPLES:
+                no_ownership_evidence_samples = 0
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
                 emit_update("CORRECTING_ASSIST_ALIGNMENT", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ASSIST_ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
                 alignment = resolve_assist_alignment_prompt(target_name, sample)
@@ -712,9 +737,24 @@ def main(ctx):
             assist_active_confirmations = 0
             alignment_required_samples = 0
             line_of_sight_required_samples = 0
+            no_ownership_evidence_samples += 1
+            if no_ownership_evidence_samples >= ASSIST_START_NO_EVIDENCE_LIMIT:
+                throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+                emit_update(
+                    "ASSIST_OWNERSHIP_TIMEOUT",
+                    sample,
+                    target_name,
+                    flight_status=last_flight_status,
+                    prompt_text=last_prompt_text,
+                    assist_missing_samples=no_ownership_evidence_samples,
+                    commanded_throttle=0,
+                    last_command="SET_THROTTLE_0",
+                    reason="NO_ASSIST_GATE_" + str(no_ownership_evidence_samples) + "_OF_" + str(ASSIST_START_NO_EVIDENCE_LIMIT) + ":" + throttle["control"],
+                )
+                fail("SUPERCRUISE ASSIST ownership produced no ACTIVE, alignment, or line-of-sight Gate within the bounded blue-zone window")
         else:
             fail("unexpected known flight status while awaiting Supercruise Assist activation: " + last_flight_status)
-        emit_update(phase, sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, target=target, assist_active_confirmations=assist_active_confirmations, line_of_sight_required_confirmations=line_of_sight_required_samples, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=commanded_throttle, last_command=command, reason="WAITING_FOR_ASSIST_GATES_THEN_BLUE_ZONE_OWNERSHIP")
+        emit_update(phase, sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, target=target, assist_active_confirmations=assist_active_confirmations, assist_missing_samples=no_ownership_evidence_samples, line_of_sight_required_confirmations=line_of_sight_required_samples, line_of_sight_recovery_count=line_of_sight_recovery_count, line_of_sight_control=last_line_of_sight_control, commanded_throttle=commanded_throttle, last_command=command, reason="WAITING_FOR_ASSIST_GATES_THEN_BLUE_ZONE_OWNERSHIP")
         if assist_active_confirmations >= ASSIST_ACTIVE_CONFIRMATIONS:
             break
         task.sleep(milliseconds=POLL_MS)

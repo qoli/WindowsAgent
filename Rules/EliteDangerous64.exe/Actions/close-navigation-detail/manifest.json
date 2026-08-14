@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Close an Elite Dangerous Navigation detail card and left panel",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

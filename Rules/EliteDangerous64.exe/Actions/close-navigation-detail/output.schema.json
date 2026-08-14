@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "backSent", "panelClosed", "finalState"],
+  "required": ["schemaVersion", "backSent", "listConfirmed", "panelClosed", "finalState"],
   "properties": {
     "schemaVersion": {"const": 1},
     "backSent": {"const": true},
-    "panelClosed": {"type": "boolean"},
-    "finalState": {"enum": ["ABSENT", "SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS", "UNKNOWN"]}
+    "listConfirmed": {"const": true},
+    "panelClosed": {"const": true},
+    "finalState": {"const": "ABSENT"}
   }
 }
