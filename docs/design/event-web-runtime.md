@@ -38,8 +38,11 @@ It holds two distinct regular-file credentials:
 
 The embedded UI is same-origin, has no external resources, and receives a
 restrictive Content Security Policy. It keeps the Web token in browser
-`sessionStorage`, never a query parameter. The unauthenticated surface is only
-the embedded page and `/healthz`; neither returns event contents or identifiers.
+`sessionStorage`, never a query parameter. Missing or rejected credentials are
+handled by a non-blocking in-page password form; the UI never opens a native
+`prompt`, `alert`, or `confirm` dialog that could block its main thread or CDP
+control. The unauthenticated surface is only the embedded page and `/healthz`;
+neither returns event contents or identifiers.
 
 ## HTTP interface
 
@@ -58,13 +61,20 @@ records cannot create an invisible cursor gap.
 The Streaming Log UI starts on the `action.runs` tab and can switch to the
 `visual-log` tab. Both tabs project the same bounded in-memory event buffer;
 the browser filters by `event.stream` after receiving the one unfiltered live
-stream and the unfiltered durable replay. Selecting a tab therefore never
+stream and an unfiltered durable tail replay. On initial load, the browser uses
+the replay response's authoritative `lastSequence` to fetch at most the latest
+100 envelopes before following from that cursor; it never replays the entire
+journal merely to display a recent window. Selecting a tab therefore never
 opens a second live stream or resets the global durable cursor. The text filter
-is applied only to the selected tab. Pause freezes automatic rendering while
-the single live reader continues to retain at most 500 envelopes, and Resume
-renders the current tab. Clear discards that bounded buffer for both tabs but
-does not change the durable cursor, so the next live envelope resumes without a
-gap.
+is applied only to the selected tab.
+
+Live ingestion retains at most 500 envelopes and coalesces DOM replacement to
+at most once per 100 milliseconds instead of rebuilding the event list for
+every envelope. A large network chunk also yields to the browser event loop at
+least every 100 parsed envelopes. Pause freezes automatic rendering while the
+single live reader continues to update the bounded buffer, and Resume renders
+the current tab. Clear discards that buffer for both tabs but does not change
+the durable cursor, so the next live envelope resumes without a gap.
 
 Every browser event is an envelope containing the authoritative event and a
 decimal-string `cursor`. Replay cursors are also decimal strings. JavaScript

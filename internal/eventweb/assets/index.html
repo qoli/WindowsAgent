@@ -38,11 +38,23 @@
     .event-type { color:#7cd4fd }.event-stream { color:#b9a2ff }
     pre { white-space:pre-wrap; overflow-wrap:anywhere; color:#9cadbd; margin:7px 0 0 }
     #status { font-size:12px; color:#90a4b8 }
+    .token-panel { display:flex; justify-content:flex-end; margin:-4px 0 14px }
+    .token-panel[hidden] { display:none }
+    .token-panel form { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px; background:#0c1219; border:1px solid #223041; border-radius:10px }
+    .token-panel label { flex:1 1 100%; color:#8da2b7; font-size:12px }
+    .token-panel input { min-width:280px }
     @media(max-width:760px){ body{padding:10px}.grid{grid-template-columns:1fr}#events{height:56vh} }
   </style>
 </head>
 <body>
   <header><h1>WindowsAgent Live</h1><div><span id="status">disconnected</span> <button id="token">Token</button></div></header>
+  <div id="token-panel" class="token-panel" hidden>
+    <form id="token-form">
+      <label for="web-token">WindowsAgent Web bearer token</label>
+      <input id="web-token" type="password" autocomplete="off" required>
+      <button type="submit">Connect</button><button id="token-cancel" type="button">Cancel</button>
+    </form>
+  </div>
   <main class="grid">
     <section class="panel"><div class="title">OSD Mirror</div><div class="osd" id="osd"></div></section>
     <section class="panel">
@@ -64,16 +76,20 @@
   const streams = { actionRuns:'action.runs', visualLog:'visual-log' };
   const streamLabels = { 'action.runs':'Action runs', 'visual-log':'Visual log' };
   const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
-  const state = { token: sessionStorage.getItem('windowsAgentWebToken') || '', cursor:'0', activeStream:streams.actionRuns, paused:false, events:[], controller:null };
+  const initialReplayLimit=100, eventBufferLimit=500, visibleEventLimit=250, renderDelayMs=100, parseYieldEvery=100;
+  const state = { token: sessionStorage.getItem('windowsAgentWebToken') || '', cursor:'0', activeStream:streams.actionRuns, paused:false, events:[], controller:null, renderTimer:null };
   const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const auth = () => ({Authorization:'Bearer '+state.token});
-  function requestToken(){ const value=prompt('WindowsAgent Web bearer token',state.token); if(value!==null){state.token=value.trim();sessionStorage.setItem('windowsAgentWebToken',state.token);restart();} }
+  function showTokenPanel(status='token required'){$('token-panel').hidden=false;$('status').textContent=status;$('web-token').focus();}
+  function hideTokenPanel(){$('token-panel').hidden=true;$('web-token').value='';}
+  function rejectToken(){if(state.controller)state.controller.abort();state.token='';sessionStorage.removeItem('windowsAgentWebToken');showTokenPanel('unauthorized');}
+  function submitToken(event){event.preventDefault();const value=$('web-token').value.trim();if(!value){showTokenPanel('token required');return;}state.token=value;sessionStorage.setItem('windowsAgentWebToken',state.token);hideTokenPanel();restart();}
   function shortAction(id){ const parts=String(id||'').split('/'); return parts[parts.length-1]||'No active Action'; }
   async function pollOSD(){
     if(!state.token) return;
     try{
       const response=await fetch('/api/v1/osd',{headers:auth(),cache:'no-store'});
-      if(response.status===401){$('status').textContent='unauthorized';return;}
+      if(response.status===401){rejectToken();return;}
       if(!response.ok) throw new Error('HTTP '+response.status);
       const data=await response.json(); renderOSD(data); $('status').textContent=data.streamConnected?'live · '+data.cursor:'degraded · '+data.cursor;
     }catch(error){$('status').textContent='offline · '+error.message;}
@@ -87,9 +103,13 @@
     $('osd').innerHTML=captureIndicator+recordingIndicator+'<div class="row">'+dot+'<div class="action">'+escapeHTML(shortAction(a.actionId))+'</div></div>'+(a.visible?activities:'<div class="muted">Waiting for Action activity</div>');
   }
   function maxCursor(a,b){ try{return BigInt(a)>=BigInt(b)?String(a):String(b)}catch{return String(b||a||'0')} }
-  function addEnvelope(envelope){ state.cursor=maxCursor(state.cursor,envelope.cursor); state.events.push(envelope); if(state.events.length>500)state.events.shift(); if(!state.paused)renderEvents(); }
+  function scheduleEventsRender(){
+    if(state.paused||state.renderTimer!==null)return;
+    state.renderTimer=setTimeout(()=>{state.renderTimer=null;if(!state.paused)renderEvents();},renderDelayMs);
+  }
+  function addEnvelope(envelope){ state.cursor=maxCursor(state.cursor,envelope.cursor); state.events.push(envelope); if(state.events.length>eventBufferLimit)state.events.shift(); scheduleEventsRender(); }
   function renderEvents(){
-    const query=$('filter').value.toLowerCase(); const rows=state.events.filter(x=>x.event.stream===state.activeStream).filter(x=>JSON.stringify(x.event).toLowerCase().includes(query)).slice(-250).reverse();
+    const query=$('filter').value.toLowerCase(); const rows=state.events.filter(x=>x.event.stream===state.activeStream).filter(x=>JSON.stringify(x.event).toLowerCase().includes(query)).slice(-visibleEventLimit).reverse();
     $('events').innerHTML=rows.map(x=>{const e=x.event;return '<article class="event"><div class="event-head"><span>#'+escapeHTML(x.cursor)+'</span><span class="event-stream">'+escapeHTML(e.stream)+'</span><span class="event-type">'+escapeHTML(e.type)+'</span></div><pre>'+escapeHTML(JSON.stringify(e.payload,null,2))+'</pre></article>'}).join('');
   }
   function selectStream(stream, focus){
@@ -107,22 +127,26 @@
     selectStream(tabs[next].dataset.stream,true);
   }
   async function loadRecent(){
-    const start=BigInt(state.cursor)>100n?String(BigInt(state.cursor)-100n):'0'; const response=await fetch('/api/v1/events?after='+start+'&limit=100',{headers:auth(),cache:'no-store'}); if(!response.ok)throw new Error('replay HTTP '+response.status); const data=await response.json(); state.events=[];(data.events||[]).forEach(addEnvelope);state.cursor=maxCursor(state.cursor,data.nextCursor);
+    const probeResponse=await fetch('/api/v1/events?after=0&limit=1',{headers:auth(),cache:'no-store'});if(probeResponse.status===401){rejectToken();throw new Error('unauthorized');}if(!probeResponse.ok)throw new Error('replay probe HTTP '+probeResponse.status);
+    const probe=await probeResponse.json();const lastSequence=BigInt(probe.lastSequence);const tailStart=lastSequence>BigInt(initialReplayLimit)?String(lastSequence-BigInt(initialReplayLimit)):'0';
+    const response=await fetch('/api/v1/events?after='+tailStart+'&limit='+initialReplayLimit,{headers:auth(),cache:'no-store'});if(response.status===401){rejectToken();throw new Error('unauthorized');}if(!response.ok)throw new Error('replay HTTP '+response.status);
+    const data=await response.json();state.events=[];(data.events||[]).forEach(addEnvelope);state.cursor=String(data.nextCursor);
   }
   async function follow(){
     while(state.token){
       state.controller=new AbortController();
       try{
         const response=await fetch('/api/v1/events/stream?after='+encodeURIComponent(state.cursor),{headers:auth(),cache:'no-store',signal:state.controller.signal});
+        if(response.status===401){rejectToken();return;}
         if(!response.ok)throw new Error('stream HTTP '+response.status);
-        const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
-        while(true){const part=await reader.read();if(part.done)throw new Error('stream ended');buffer+=decoder.decode(part.value,{stream:true});let index;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);if(line)addEnvelope(JSON.parse(line));}}
+        const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',processedSinceYield=0;
+        while(true){const part=await reader.read();if(part.done)throw new Error('stream ended');buffer+=decoder.decode(part.value,{stream:true});let index;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);if(line){addEnvelope(JSON.parse(line));processedSinceYield++;if(processedSinceYield>=parseYieldEvery){processedSinceYield=0;await new Promise(resolve=>setTimeout(resolve,0));}}}}
       }catch(error){if(error.name==='AbortError')return;$('status').textContent='reconnecting · '+state.cursor;await new Promise(resolve=>setTimeout(resolve,1000));}
     }
   }
-  async function restart(){ if(state.controller)state.controller.abort(); if(!state.token){requestToken();return;} try{await pollOSD();await loadRecent();follow();}catch(error){$('status').textContent=error.message;} }
+  async function restart(){ if(state.controller)state.controller.abort(); if(!state.token){showTokenPanel();return;} try{await pollOSD();if(!state.token)return;await loadRecent();if(!state.token)return;follow();}catch(error){$('status').textContent=error.message;} }
   tabs.forEach(tab=>{tab.onclick=()=>selectStream(tab.dataset.stream,false);tab.onkeydown=event=>{if(event.key==='ArrowRight'){event.preventDefault();moveTab(1);}else if(event.key==='ArrowLeft'){event.preventDefault();moveTab(-1);}else if(event.key==='Home'){event.preventDefault();selectStream(tabs[0].dataset.stream,true);}else if(event.key==='End'){event.preventDefault();selectStream(tabs[tabs.length-1].dataset.stream,true);}};});
-  $('token').onclick=requestToken;$('filter').oninput=renderEvents;$('pause').onclick=()=>{state.paused=!state.paused;$('pause').textContent=state.paused?'Resume':'Pause';$('pause').setAttribute('aria-pressed',String(state.paused));if(!state.paused)renderEvents();};$('clear').onclick=()=>{state.events=[];renderEvents();};
+  $('token').onclick=()=>showTokenPanel('enter bearer token');$('token-form').onsubmit=submitToken;$('token-cancel').onclick=hideTokenPanel;$('filter').oninput=renderEvents;$('pause').onclick=()=>{state.paused=!state.paused;$('pause').textContent=state.paused?'Resume':'Pause';$('pause').setAttribute('aria-pressed',String(state.paused));if(!state.paused)renderEvents();};$('clear').onclick=()=>{state.events=[];renderEvents();};
   setInterval(pollOSD,500); restart();
 })();
 </script>

@@ -87,7 +87,7 @@ func TestEmbeddedUISeparatesTabsWithoutSplittingGlobalLiveStream(t *testing.T) {
 		`aria-selected="false" aria-controls="events" data-stream="visual-log"`,
 		`const state = { token: sessionStorage.getItem('windowsAgentWebToken') || '', cursor:'0', activeStream:streams.actionRuns`,
 		`x.event.stream===state.activeStream`,
-		`state.events.length>500`,
+		`state.events.length>eventBufferLimit`,
 		`/api/v1/events/stream?after=`,
 	} {
 		if !strings.Contains(ui, marker) {
@@ -99,6 +99,61 @@ func TestEmbeddedUISeparatesTabsWithoutSplittingGlobalLiveStream(t *testing.T) {
 	}
 	if strings.Contains(ui, "state.cursor=maxCursor(state.cursor,data.cursor)") {
 		t.Fatal("OSD polling must not advance the global event cursor")
+	}
+}
+
+func TestEmbeddedUIBootstrapsRecentTailAndBatchesRendering(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui := string(data)
+	for _, marker := range []string{
+		`const initialReplayLimit=100, eventBufferLimit=500, visibleEventLimit=250, renderDelayMs=100, parseYieldEvery=100;`,
+		`/api/v1/events?after=0&limit=1`,
+		`const lastSequence=BigInt(probe.lastSequence)`,
+		`const tailStart=lastSequence>BigInt(initialReplayLimit)?String(lastSequence-BigInt(initialReplayLimit)):'0'`,
+		`/api/v1/events?after='+tailStart+'&limit='+initialReplayLimit`,
+		`state.cursor=String(data.nextCursor)`,
+		`state.renderTimer=setTimeout(`,
+		`processedSinceYield>=parseYieldEvery`,
+		`await new Promise(resolve=>setTimeout(resolve,0))`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("embedded UI is missing bounded streaming marker %q", marker)
+		}
+	}
+	addStart := strings.Index(ui, "function addEnvelope(")
+	addEnd := strings.Index(ui, "function renderEvents(")
+	if addStart < 0 || addEnd <= addStart {
+		t.Fatal("embedded UI addEnvelope function is unavailable")
+	}
+	addEnvelope := ui[addStart:addEnd]
+	if !strings.Contains(addEnvelope, "scheduleEventsRender()") || strings.Contains(addEnvelope, "renderEvents()") {
+		t.Fatal("addEnvelope must schedule one bounded render instead of rebuilding the DOM per envelope")
+	}
+}
+
+func TestEmbeddedUIUsesNonBlockingTokenPanel(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ui := string(data)
+	for _, marker := range []string{
+		`<div id="token-panel" class="token-panel" hidden>`,
+		`<form id="token-form">`,
+		`<input id="web-token" type="password" autocomplete="off" required>`,
+		`function showTokenPanel(status='token required')`,
+		`sessionStorage.removeItem('windowsAgentWebToken')`,
+		`$('token-form').onsubmit=submitToken`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("embedded UI is missing non-blocking token marker %q", marker)
+		}
+	}
+	if strings.Contains(ui, "prompt(") || strings.Contains(ui, "alert(") || strings.Contains(ui, "confirm(") {
+		t.Fatal("embedded UI must not use blocking browser dialogs")
 	}
 }
 
