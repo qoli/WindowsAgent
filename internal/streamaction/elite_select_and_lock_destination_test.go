@@ -387,7 +387,7 @@ func TestEliteSelectAndLockDestinationAcceptsStrongTargetFillDespiteAdjacentCont
 	}
 }
 
-func TestEliteSelectAndLockDestinationIgnoresBrightSingleCharacterPanelControl(t *testing.T) {
+func TestEliteSelectAndLockDestinationIgnoresBrightRepeatedXPanelControl(t *testing.T) {
 	withControl := func(targetSamples, focusedSamples int) json.RawMessage {
 		base := navigationRowsWithFocusRatios("OBAMA REACH", 520, targetSamples, "< NAV BEACON >", 480, focusedSamples)
 		var decoded map[string]any
@@ -403,7 +403,7 @@ func TestEliteSelectAndLockDestinationIgnoresBrightSingleCharacterPanelControl(t
 		}
 		regions := decoded["regions"].([]any)
 		regions = append(regions, map[string]any{
-			"detectionConfidence": 0.92, "recognitionConfidence": 0.98, "text": "X",
+			"detectionConfidence": 0.92, "recognitionConfidence": 0.98, "text": "XX",
 			"referencePoints": []any{
 				map[string]any{"x": 450, "y": 390}, map[string]any{"x": 470, "y": 390},
 				map[string]any{"x": 470, "y": 410}, map[string]any{"x": 450, "y": 410},

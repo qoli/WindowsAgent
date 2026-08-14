@@ -46,6 +46,14 @@ def digits(text):
             result += text[index]
     return result
 
+def is_filter_clear_control(normalized):
+    if len(normalized) == 0:
+        return False
+    for index in range(len(normalized)):
+        if normalized[index] != "X":
+            return False
+    return True
+
 def edit_distance(left, right):
     previous = []
     for index in range(len(right) + 1):
@@ -133,10 +141,10 @@ def inspect_target(raw, target_name):
         if normalized == expected:
             exact.append(candidate)
         ratio = focus_fill_ratio(region)
-        # Single-character OCR regions in this ROI are panel controls such as
-        # the filter-clear X, not Navigation destination rows. Their icon
+        # OCR may return the filter-clear X icon as X, XX, or another repeated
+        # run of X glyphs. It is not a Navigation destination row, and its icon
         # background can be brighter than the actual focused row.
-        if ratio != None and len(normalized) >= 2:
+        if ratio != None and len(normalized) >= 2 and not is_filter_clear_control(normalized):
             focus_candidate = {"text": region["text"], "normalized": normalized, "centerY": box["centerY"], "fillRatio": ratio}
             if focus_best == None or ratio > focus_best["fillRatio"]:
                 if focus_best != None and focus_best["fillRatio"] > focus_runner_up:

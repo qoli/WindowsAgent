@@ -55,6 +55,7 @@ When the exact requested row is itself the strongest sample and reaches 0.60,
 that stronger direct evidence is sufficient even if OCR context padding makes
 an adjacent row's runner-up ratio too close for the weaker 0.40 path. Events
 report the leader, runner-up, and margin so context spill remains observable.
-Single-character OCR regions are excluded from focus leadership because the
-Action input requires a multi-character destination and the Navigation ROI's
-filter controls, especially `X`, can otherwise outscore the selected row.
+OCR regions consisting only of one or more `X` glyphs are excluded from focus
+leadership because the Navigation filter-clear icon can be recognized as `X`
+or `XX` and otherwise outscore the selected row. Legitimate destination names
+that merely contain `X` remain eligible.
