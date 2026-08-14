@@ -240,6 +240,39 @@ includes the Visual Log model endpoint.
 rejected unless `--allow-dirty` is explicitly supplied. Failed remote staging
 is retained for diagnosis.
 
+### Deploy the complete Rules tree from macOS
+
+`scripts/deploy-windows-rules.py` is the single macOS interface for publishing
+the repository-owned `Rules/` tree without rebuilding or restarting the Agent.
+It explicitly excludes known platform metadata such as AppleDouble and records
+every exclusion, rejects symlinks, runs the canonical Action checker, creates a
+per-file byte-length and SHA-256 manifest, and uploads one ZIP over SSH. The
+Windows executor verifies the staged inventory and runs the same checker before
+it discovers the live `--rules-dir` from the owned capture Scheduled Task.
+
+Publication replaces the complete Rules root as one transaction. The previous
+tree is restored if installed hash or live catalog validation fails. A
+successful deployment retains the previous tree in its transaction directory
+as a recoverable backup and writes matching local and remote JSON receipts.
+Installed Rule directories absent from the source cause an explicit failure;
+removing them requires `--prune-unknown`.
+
+```bash
+python3 scripts/deploy-windows-rules.py --host <ssh-host>
+```
+
+`WINDOWS_AGENT_SSH_HOST` may supply the host instead. A dirty worktree is
+rejected unless `--allow-dirty` is explicitly supplied. On failure the remote
+staging directory and any transactional failed tree are retained for
+diagnosis. Success proves local validation, transport integrity, staged and
+installed tree hashes, Agent health, and request-time Actions, registrations,
+runtimes, Action Sequence tool, and `AGENTS.md` catalogs for every Rule. It does
+not invoke an Action or claim a game-domain result.
+
+Use `--validate-only` to exercise packaging, transfer, staged Windows hashes,
+the Windows checker, installed task discovery, process identity, and Agent
+health without publishing or changing the installed Rules tree.
+
 ### Offline Action dependency check
 
 `windows-action-check` is an independent development and release tool. The

@@ -34,6 +34,8 @@ jobs:
           --configuration Release
       - name: Check ScreenParser build tools
         run: python3 -m py_compile tools/screenparser-model/export_onnx.py tools/screenparser-model/convert_fp16.py tools/screenparser-runtime/publish.py
+      - name: Test Rule deployment packager
+        run: python3 -m unittest scripts/tests/test_deploy_windows_rules.py
 
   windows-cross-build:
     runs-on: ubuntu-latest
