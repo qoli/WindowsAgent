@@ -71,6 +71,23 @@ list, and independently reports `panelClosed=true` and `finalState=ABSENT`.
 Only that postcondition permits 75%; the detail-close compensation remains
 registered until it passes.
 
+Immediately before opening Navigation, the Action takes one current
+`flight-status` snapshot. Detail-card text overlaps the central prompt ROI, so
+every `FOCUSING_ASSIST`, `LOCATING_ASSIST`, and `REQUESTING_ASSIST` event carries
+that value with `flightStatusSource=PRE_NAVIGATION_SNAPSHOT` instead of
+misclassifying detail prose as a current flight prompt. After the panel-close
+postcondition, `CLOSING_PANEL` immediately resumes a fresh observation marked
+`CURRENT_FRAME`. Domain insufficiency remains explicit `UNKNOWN`; the Action
+never reports `null` or disguises the snapshot as current. The detail-close
+failure compensation is bounded to 5 seconds.
+
+If that restored current frame already reports
+`SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED`, it is retained as the first LOS
+Gate confirmation while throttle remains 0%. A second fresh observation must
+confirm the Gate before the clear-LOS child starts. The Action must not request
+75% between those two observations; if the second frame rejects the candidate,
+only then may it request the blue-zone throttle.
+
 After 75% is requested, six consecutive observations without any ACTIVE,
 alignment-required, or line-of-sight-required Gate are a bounded unsafe
 ownership gap. The Action immediately commands 0%, emits

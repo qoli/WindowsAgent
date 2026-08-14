@@ -56,11 +56,14 @@ func loadEliteCloseNavigationDetailPackage(t *testing.T) *Package {
 }
 
 func TestEliteCloseNavigationDetailRequiresListBeforeClosingPanel(t *testing.T) {
-	caller := &closeNavigationDetailCaller{states: []string{"ABSENT", "UNKNOWN", "ABSENT", "ABSENT", "ABSENT", "ABSENT"}}
+	caller := &closeNavigationDetailCaller{states: []string{
+		"ABSENT", "UNKNOWN", "ABSENT", "ABSENT", "ABSENT", "ABSENT",
+		"UNKNOWN", "ABSENT", "ABSENT", "UNKNOWN", "ABSENT", "ABSENT",
+	}}
 	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteCloseNavigationDetailPackage(t), map[string]any{}, caller, &fixtureReporter{},
 	)
-	if err == nil || !contains(err.Error(), "BACK did not produce two confirmed NAVIGATION") {
+	if err == nil || !contains(err.Error(), "BACK did not produce a confirmed NAVIGATION list transition") {
 		t.Fatalf("error=%v", err)
 	}
 	if !equalStrings(caller.controls, []string{"BACK"}) || caller.closePanelCalls != 0 {
@@ -68,8 +71,29 @@ func TestEliteCloseNavigationDetailRequiresListBeforeClosingPanel(t *testing.T) 
 	}
 }
 
+func TestEliteCloseNavigationDetailAcceptsObservedListThenAutomaticClose(t *testing.T) {
+	caller := &closeNavigationDetailCaller{
+		states:        []string{"UNKNOWN", "NAVIGATION"},
+		closePanelOut: json.RawMessage(`{"schemaVersion":1,"closed":true,"commandSent":false,"initialState":"ABSENT","finalState":"ABSENT"}`),
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteCloseNavigationDetailPackage(t), map[string]any{}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalStrings(caller.controls, []string{"BACK"}) || caller.closePanelCalls != 1 {
+		t.Fatalf("controls=%v closePanelCalls=%d", caller.controls, caller.closePanelCalls)
+	}
+	if !contains(string(output), `"listConfirmed":true`) ||
+		!contains(string(output), `"panelClosed":true`) ||
+		!contains(string(output), `"finalState":"ABSENT"`) {
+		t.Fatalf("output=%s", output)
+	}
+}
+
 func TestEliteCloseNavigationDetailConfirmsListThenForwardView(t *testing.T) {
-	caller := &closeNavigationDetailCaller{states: []string{"NAVIGATION", "UNKNOWN", "NAVIGATION", "NAVIGATION"}}
+	caller := &closeNavigationDetailCaller{states: []string{"NAVIGATION"}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteCloseNavigationDetailPackage(t), map[string]any{}, caller, &fixtureReporter{},
 	)

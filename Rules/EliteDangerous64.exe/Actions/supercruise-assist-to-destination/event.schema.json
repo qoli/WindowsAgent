@@ -8,7 +8,7 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "targetName", "panelTab", "assistButtonState", "flightStatus", "flightPromptText", "massLock", "landingGear", "cargoScoop", "targetDetected", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "assistActiveConfirmations", "assistMissingSamples", "lineOfSightRequiredConfirmations", "lineOfSightRecoveryCount", "lineOfSightControl", "stoppedConfirmations", "commandedThrottle", "lastCommand", "reason"],
+      "required": ["phase", "sample", "targetName", "panelTab", "assistButtonState", "flightStatus", "flightStatusSource", "flightPromptText", "massLock", "landingGear", "cargoScoop", "targetDetected", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "assistActiveConfirmations", "assistMissingSamples", "lineOfSightRequiredConfirmations", "lineOfSightRecoveryCount", "lineOfSightControl", "stoppedConfirmations", "commandedThrottle", "lastCommand", "reason"],
       "properties": {
         "phase": {"enum": ["PREFLIGHT", "OPENING_NAVIGATION", "LOCATING_TARGET", "OPENING_DETAIL", "LOCATING_ASSIST", "FOCUSING_ASSIST", "REQUESTING_ASSIST", "CLOSING_PANEL", "ALIGNING", "CHARGING", "ALIGNING_FOR_ENTRY", "CORRECTING_ASSIST_ALIGNMENT", "VERIFYING_ASSIST_ALIGNMENT", "ENTERED", "WAITING_FOR_ASSIST", "ASSIST_OWNERSHIP_TIMEOUT", "ASSIST_ACTIVE", "CONFIRMING_LINE_OF_SIGHT", "CLEARING_LINE_OF_SIGHT", "REALIGNING_AFTER_LINE_OF_SIGHT", "VERIFYING_LINE_OF_SIGHT_CLEAR", "REACQUIRING_ASSIST", "GAME_CONTROLLED_APPROACH", "VERIFYING_STOP", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 5000},
@@ -16,6 +16,7 @@
         "panelTab": {"type": ["string", "null"], "enum": ["ABSENT", "SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS", "UNKNOWN", null]},
         "assistButtonState": {"type": ["string", "null"], "enum": ["AVAILABLE", "FOCUSED", "ACTIVE", "UNKNOWN", null]},
         "flightStatus": {"enum": ["SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "FSD_CHARGING", "FSD_THROTTLE_UP_REQUIRED", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_DOCK", "UNKNOWN"]},
+        "flightStatusSource": {"type": ["string", "null"], "enum": ["PRE_NAVIGATION_SNAPSHOT", "CURRENT_FRAME", null]},
         "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
         "massLock": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},
         "landingGear": {"type": ["string", "null"], "enum": ["ON", "OFF", "UNKNOWN", null]},

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +19,13 @@ type supercruiseAssistDestinationCaller struct {
 	navigationIndex        int
 	assistRegions          []json.RawMessage
 	assistIndex            int
+	uiSnapshotStates       []string
+	uiSnapshotIndex        int
+	uiSnapshotPending      bool
+	uiSnapshotTaken        bool
+	postPanelStates        []string
+	postPanelIndex         int
+	postPanelPending       bool
 	flightStates           []string
 	flightIndex            int
 	speedStates            []string
@@ -109,6 +118,7 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 		return json.RawMessage(`{"completed":true}`), nil
 	case "elite-dangerous/close-navigation-detail":
 		c.closeNavigationCalls++
+		c.postPanelPending = true
 		if c.closeNavigationOutput != nil {
 			return c.closeNavigationOutput, nil
 		}
@@ -119,6 +129,10 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 			return nil, errors.New("throttle percent is not an integer")
 		}
 		c.throttles = append(c.throttles, int(percent))
+		if percent == 0 && !c.uiSnapshotTaken && (c.supercruiseKeys > 0 || c.supercruiseHUDIndex >= 2) {
+			c.uiSnapshotPending = true
+			c.uiSnapshotTaken = true
+		}
 		c.recordFlightInput("THROTTLE")
 		return json.Marshal(map[string]any{"control": map[int64]string{0: "SetSpeedZero", 100: "SetSpeed100"}[percent]})
 	case "elite-dangerous/align-station-target":
@@ -155,6 +169,18 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 	case "elite-dangerous/flight-prompt-text":
 		return json.RawMessage(`{"text":"fixture"}`), nil
 	case "elite-dangerous/flight-status":
+		if c.uiSnapshotPending && c.uiSnapshotIndex < len(c.uiSnapshotStates) {
+			state := c.uiSnapshotStates[c.uiSnapshotIndex]
+			c.uiSnapshotIndex++
+			c.uiSnapshotPending = false
+			return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}, "source": map[string]any{"text": "ALIGN WITH TARGET DESTINATION"}})
+		}
+		if c.postPanelPending && c.postPanelIndex < len(c.postPanelStates) {
+			state := c.postPanelStates[c.postPanelIndex]
+			c.postPanelIndex++
+			c.postPanelPending = false
+			return json.Marshal(map[string]any{"flightStatus": map[string]any{"state": state}, "source": map[string]any{"text": "ALIGN WITH TARGET DESTINATION"}})
+		}
 		if c.flightIndex >= len(c.flightStates) {
 			return nil, errors.New("unexpected flight-status observation")
 		}
@@ -254,6 +280,22 @@ func loadEliteSupercruiseAssistToDestinationPackage(t *testing.T) *Package {
 	return pkg
 }
 
+func TestEliteSupercruiseAssistNavigationDetailFailureCompensationUsesFiveSecondBudget(t *testing.T) {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "supercruise-assist-to-destination"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join(root, "main.star"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := `action.on_failure(id="elite-dangerous/close-navigation-detail", inputs={}, timeout_milliseconds=5000)`
+	if strings.Count(string(source), registration) != 1 || strings.Contains(string(source), "timeout_milliseconds=15000") {
+		t.Fatalf("close-navigation-detail failure budget drifted: source=%s", source)
+	}
+}
+
 func successfulSupercruiseAssistCaller() *supercruiseAssistDestinationCaller {
 	return &supercruiseAssistDestinationCaller{
 		panelStates: []string{"ABSENT", "ABSENT", "NAVIGATION", "NAVIGATION", "NAVIGATION", "NAVIGATION", "ABSENT", "ABSENT"},
@@ -263,6 +305,8 @@ func successfulSupercruiseAssistCaller() *supercruiseAssistDestinationCaller {
 		assistRegions: []json.RawMessage{
 			textRegionRaw("ACTIVATE SUPERCRUISE ASSIST", 720, true), textRegionRaw("ACTIVATE SUPERCRUISE ASSIST", 720, true),
 		},
+		uiSnapshotStates: []string{"FSD_ALIGNMENT_REQUIRED"},
+		postPanelStates:  []string{"FSD_ALIGNMENT_REQUIRED"},
 		flightStates: []string{
 			"FSD_CHARGING", "SUPERCRUISE", "SUPERCRUISE", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
 			"UNKNOWN", "UNKNOWN", "UNKNOWN",
@@ -356,6 +400,16 @@ func TestEliteSupercruiseAssistToDestinationHandsFlightToGameComputer(t *testing
 	}
 	if !contains(joined, `"phase":"ASSIST_ACTIVE"`) || !contains(joined, `"phase":"COMPLETED"`) {
 		t.Fatalf("events=%s", joined)
+	}
+	if !contains(joined, `"phase":"LOCATING_ASSIST"`) ||
+		!contains(joined, `"flightStatus":"FSD_ALIGNMENT_REQUIRED"`) ||
+		!contains(joined, `"flightStatusSource":"PRE_NAVIGATION_SNAPSHOT"`) ||
+		!contains(joined, `"flightPromptText":"ALIGN WITH TARGET DESTINATION"`) {
+		t.Fatalf("Assist UI events did not retain fresh flight context: events=%s", joined)
+	}
+	if !contains(joined, `"phase":"CLOSING_PANEL"`) ||
+		!contains(joined, `"flightStatusSource":"CURRENT_FRAME"`) {
+		t.Fatalf("panel-close event did not resume current-frame flight context: events=%s", joined)
 	}
 }
 
@@ -711,6 +765,72 @@ func TestEliteSupercruiseAssistClearsLineOfSightThenReacquiresGameOwnership(t *t
 		!contains(joined, `"phase":"REALIGNING_AFTER_LINE_OF_SIGHT"`) ||
 		!contains(joined, `"phase":"REACQUIRING_ASSIST"`) {
 		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteSupercruiseAssistDoesNotRequestBlueZoneWhenRestoredFrameRequiresLineOfSight(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.postPanelStates = []string{"SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED"}
+	caller.flightStates = []string{
+		"FSD_CHARGING", "SUPERCRUISE",
+		"SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED",
+		"UNKNOWN", "UNKNOWN",
+		"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, reporter,
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.lineOfSightCalls != 1 {
+		t.Fatalf("line-of-sight calls=%d", caller.lineOfSightCalls)
+	}
+	wantThrottles := []int{0, 100, 0, 0, 75}
+	if len(caller.throttles) != len(wantThrottles) {
+		t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+	}
+	for index := range wantThrottles {
+		if caller.throttles[index] != wantThrottles[index] {
+			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+		}
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if !contains(joined, `"phase":"CLOSING_PANEL"`) ||
+		!contains(joined, `"flightStatusSource":"CURRENT_FRAME"`) ||
+		!contains(joined, `"lineOfSightRequiredConfirmations":1`) ||
+		!contains(joined, `"phase":"CLEARING_LINE_OF_SIGHT"`) {
+		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteSupercruiseAssistRestoredLineOfSightCandidateStillRequiresSecondFrame(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.postPanelStates = []string{"SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED"}
+	caller.flightStates = []string{
+		"FSD_CHARGING", "SUPERCRUISE",
+		"UNKNOWN", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE",
+		"UNKNOWN", "UNKNOWN", "UNKNOWN",
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.lineOfSightCalls != 0 {
+		t.Fatalf("single restored LOS frame entered recovery: calls=%d", caller.lineOfSightCalls)
+	}
+	wantThrottles := []int{0, 100, 0, 75}
+	if len(caller.throttles) != len(wantThrottles) {
+		t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+	}
+	for index := range wantThrottles {
+		if caller.throttles[index] != wantThrottles[index] {
+			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
+		}
 	}
 }
 

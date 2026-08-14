@@ -29,7 +29,7 @@ LIST_MIN_Y = 320.0
 LIST_MAX_Y = 760.0
 LIST_MAX_X = 920.0
 
-def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=None, flight_status="UNKNOWN", prompt_text=None, mass_lock=None, landing_gear=None, cargo_scoop=None, target=None, assist_active_confirmations=0, assist_missing_samples=0, line_of_sight_required_confirmations=0, line_of_sight_recovery_count=0, line_of_sight_control=None, stopped_confirmations=0, commanded_throttle=None, last_command=None, reason=None):
+def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=None, flight_status="UNKNOWN", flight_status_source=None, prompt_text=None, mass_lock=None, landing_gear=None, cargo_scoop=None, target=None, assist_active_confirmations=0, assist_missing_samples=0, line_of_sight_required_confirmations=0, line_of_sight_recovery_count=0, line_of_sight_control=None, stopped_confirmations=0, commanded_throttle=None, last_command=None, reason=None):
     stream.emit(
         type="action.supercruise-assist-to-destination.update",
         payload={
@@ -39,6 +39,7 @@ def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=
             "panelTab": panel_tab,
             "assistButtonState": assist_button_state,
             "flightStatus": flight_status,
+            "flightStatusSource": flight_status_source,
             "flightPromptText": prompt_text,
             "massLock": mass_lock,
             "landingGear": landing_gear,
@@ -282,13 +283,23 @@ def inspect_assist_button(raw, destination_mode):
         reason = "ORBIT_ASSIST_CONTEXT_LABEL_CONFIRMED" if destination_mode == "ORBIT_HANDOFF" else "DROP_ASSIST_CONTEXT_LABEL_CONFIRMED"
     return {"state": best["state"], "text": best["region"]["text"], "focusFillRatio": ratio, "reason": reason}
 
-def observe_assist_button_stable(target_name, sample, destination_mode):
+def observe_assist_button_stable(target_name, sample, destination_mode, flight_context):
     previous = None
     for attempt in range(STABLE_ATTEMPTS):
         raw = action.call(id="elite-dangerous/lock-destination-text-regions", inputs={})
         observation = inspect_assist_button(raw, destination_mode)
         key = observation["state"] + ":" + str(observation["text"])
-        emit_update("LOCATING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state=observation["state"], reason=observation["reason"])
+        emit_update(
+            "LOCATING_ASSIST",
+            sample,
+            target_name,
+            panel_tab="NAVIGATION",
+            assist_button_state=observation["state"],
+            flight_status=flight_context["state"],
+            flight_status_source="PRE_NAVIGATION_SNAPSHOT",
+            prompt_text=flight_context["text"],
+            reason=observation["reason"],
+        )
         if observation["state"] != "UNKNOWN" and key == previous:
             return observation
         previous = None if observation["state"] == "UNKNOWN" else key
@@ -296,21 +307,21 @@ def observe_assist_button_stable(target_name, sample, destination_mode):
             task.sleep(milliseconds=POLL_MS)
     fail("Supercruise Assist button did not produce two consecutive known observations; the module may be absent or the detail layout is unsupported")
 
-def request_assist(target_name, sample, destination_mode):
+def request_assist(target_name, sample, destination_mode, flight_context):
     # Detail action labels are contextual: with BACK focused the first action's
     # SUPERCRUISE ASSIST text is not rendered at all. Move focus exactly once,
     # then identify and validate the now-visible label before SELECT.
     action.call(id="elite-dangerous/ui-control", inputs={"control": "RIGHT"})
-    emit_update("FOCUSING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state=None, last_command="RIGHT", reason="FOCUS_FIRST_DETAIL_ACTION_TO_REVEAL_LABEL")
+    emit_update("FOCUSING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state=None, flight_status=flight_context["state"], flight_status_source="PRE_NAVIGATION_SNAPSHOT", prompt_text=flight_context["text"], last_command="RIGHT", reason="FOCUS_FIRST_DETAIL_ACTION_TO_REVEAL_LABEL")
     task.sleep(milliseconds=UI_SETTLE_MS)
-    observation = observe_assist_button_stable(target_name, sample, destination_mode)
+    observation = observe_assist_button_stable(target_name, sample, destination_mode, flight_context)
     if observation["state"] == "ACTIVE":
-        emit_update("REQUESTING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state="ACTIVE", reason="ASSIST_ALREADY_ACTIVE_NO_SELECT")
+        emit_update("REQUESTING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state="ACTIVE", flight_status=flight_context["state"], flight_status_source="PRE_NAVIGATION_SNAPSHOT", prompt_text=flight_context["text"], reason="ASSIST_ALREADY_ACTIVE_NO_SELECT")
         return
     if observation["state"] != "FOCUSED":
         fail("RIGHT did not produce a focused Supercruise Assist button")
     action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
-    emit_update("REQUESTING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state="FOCUSED", last_command="SELECT", reason="ASSIST_ACTIVATION_REQUESTED")
+    emit_update("REQUESTING_ASSIST", sample, target_name, panel_tab="NAVIGATION", assist_button_state="FOCUSED", flight_status=flight_context["state"], flight_status_source="PRE_NAVIGATION_SNAPSHOT", prompt_text=flight_context["text"], last_command="SELECT", reason="ASSIST_ACTIVATION_REQUESTED")
     task.sleep(milliseconds=UI_SETTLE_MS)
 
 def restore_forward_view(target_name, sample):
@@ -321,14 +332,24 @@ def restore_forward_view(target_name, sample):
     restored = action.call(id="elite-dangerous/close-navigation-detail", inputs={})
     if not restored["panelClosed"] or restored["finalState"] != "ABSENT":
         fail("Navigation detail did not restore the forward view after requesting Supercruise Assist")
+    flight = observe_flight()
+    line_of_sight_confirmations = 0
+    if flight["state"] == "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED":
+        line_of_sight_confirmations = 1
     emit_update(
         "CLOSING_PANEL",
         sample,
         target_name,
         panel_tab="ABSENT",
+        flight_status=flight["state"],
+        flight_status_source="CURRENT_FRAME",
+        prompt_text=flight["text"],
+        line_of_sight_required_confirmations=line_of_sight_confirmations,
+        commanded_throttle=0,
         last_command="BACK+FOCUS_LEFT_PANEL",
         reason="NAVIGATION_DETAIL_AND_PANEL_CLOSED_CONFIRMED",
     )
+    return flight
 
 def observe_flight():
     classified = action.call(id="elite-dangerous/flight-status", inputs={})
@@ -652,25 +673,33 @@ def main(ctx):
     emit_update("ENTERED", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
     if not assist_requested_confirmed:
         action.on_failure(id="elite-dangerous/close-left-panel", inputs={}, timeout_milliseconds=10000)
+        ui_flight_context = observe_flight()
         open_navigation(target_name, sample)
         focus_and_open_target(target_name, sample)
-        action.on_failure(id="elite-dangerous/close-navigation-detail", inputs={}, timeout_milliseconds=10000)
-        request_assist(target_name, sample, destination_mode)
-        restore_forward_view(target_name, sample)
+        action.on_failure(id="elite-dangerous/close-navigation-detail", inputs={}, timeout_milliseconds=5000)
+        request_assist(target_name, sample, destination_mode, ui_flight_context)
+        restored_flight = restore_forward_view(target_name, sample)
+        last_flight_status = restored_flight["state"]
+        last_prompt_text = restored_flight["text"]
         action.clear_on_failure()
         action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     else:
         emit_update("WAITING_FOR_ASSIST", sample, target_name, commanded_throttle=0, reason="ASSIST_REQUEST_CONFIRMED_AT_RESUME")
 
-    throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
-    emit_update("WAITING_FOR_ASSIST", sample, target_name, commanded_throttle=75, last_command="SET_THROTTLE_75", reason="SUPERCRUISE_ASSIST_BLUE_ZONE_REQUESTED:" + throttle["control"])
-
     assist_active_confirmations = 0
     alignment_required_samples = 0
-    line_of_sight_required_samples = 0
+    line_of_sight_required_samples = 1 if last_flight_status == "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED" else 0
     line_of_sight_recovery_count = 0
     last_line_of_sight_control = None
     no_ownership_evidence_samples = 0
+    waiting_at_zero_for_restored_gate = line_of_sight_required_samples == 1
+    blue_zone_requested = False
+    if not waiting_at_zero_for_restored_gate:
+        throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+        blue_zone_requested = True
+        emit_update("WAITING_FOR_ASSIST", sample, target_name, commanded_throttle=75, last_command="SET_THROTTLE_75", reason="SUPERCRUISE_ASSIST_BLUE_ZONE_REQUESTED:" + throttle["control"])
+    else:
+        task.sleep(milliseconds=POLL_MS)
     for _ in range(ASSIST_START_LIMIT):
         sample += 1
         flight = observe_flight()
@@ -678,8 +707,14 @@ def main(ctx):
         last_prompt_text = flight["text"]
         target = None
         command = None
-        commanded_throttle = 75
+        commanded_throttle = 75 if blue_zone_requested else 0
         phase = "WAITING_FOR_ASSIST"
+        if waiting_at_zero_for_restored_gate and last_flight_status != "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED":
+            throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+            blue_zone_requested = True
+            commanded_throttle = 75
+            command = "SET_THROTTLE_75"
+            waiting_at_zero_for_restored_gate = False
         if last_flight_status == "SUPERCRUISE_ASSIST_ACTIVE":
             no_ownership_evidence_samples = 0
             assist_active_confirmations += 1
@@ -704,6 +739,8 @@ def main(ctx):
                 last_line_of_sight_control = recovered["control"]
                 if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
                     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+                    blue_zone_requested = True
+                    waiting_at_zero_for_restored_gate = False
                     command = "CLEAR_LINE_OF_SIGHT+REALIGN+SET_THROTTLE_75"
                     commanded_throttle = 75
                 else:
@@ -726,6 +763,8 @@ def main(ctx):
                 assist_active_confirmations = alignment["assistActiveConfirmations"]
                 if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
                     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+                    blue_zone_requested = True
+                    waiting_at_zero_for_restored_gate = False
                     command = "ALIGN_TARGETS:" + str(alignment["cycleCount"]) + "+SET_THROTTLE_75"
                     commanded_throttle = 75
                 else:
