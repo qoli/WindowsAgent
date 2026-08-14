@@ -30,12 +30,13 @@
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["region", "physicalRegion", "capturedAt", "selectedPlane", "selectionReason", "planes"],
+      "required": ["region", "physicalRegion", "capturedAt", "selectedPlane", "requestedPolicy", "selectionReason", "planes"],
       "properties": {
         "region": {"type": "object"},
         "physicalRegion": {"type": "object"},
         "capturedAt": {"type": "string"},
         "selectedPlane": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
+        "requestedPolicy": {"enum": ["ADAPTIVE_ORANGE", "OCCLUSION_AWARE"]},
         "selectionReason": {"type": "string"},
         "planes": {
           "type": "array",

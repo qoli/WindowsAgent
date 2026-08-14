@@ -25,7 +25,7 @@
         "reticleCapturedAt": {"type": ["string", "null"]}
       },
       "oneOf": [
-        {"properties": {"state": {"const": "READY"}, "control": {"type": "string"}, "targetPresentation": {"const": "DASHED"}, "reticleEvidencePlane": {"const": "HSV_ORANGE"}, "initialProjectionPixels": {"type": "number", "minimum": 48}}},
+        {"properties": {"state": {"const": "READY"}, "control": {"type": "string"}, "targetPresentation": {"const": "DASHED"}, "reticleEvidencePlane": {"enum": ["STRICT_RGB", "HSV_ORANGE"]}, "initialProjectionPixels": {"type": "number", "minimum": 48}}},
         {"properties": {"state": {"const": "UNKNOWN"}, "control": {"const": null}, "initialProjectionPixels": {"const": null}}}
       ]
     }

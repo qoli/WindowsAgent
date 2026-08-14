@@ -255,7 +255,11 @@ def main(ctx):
 
         observed = action.call(
             id="elite-dangerous/supercruise-target-position",
-            inputs={"targetName": target_name},
+            inputs={
+                "targetName": target_name,
+                "scanProfile": "LOS_DIRECTION",
+                "reticleEvidencePolicy": "OCCLUSION_AWARE",
+            },
         )["target"]
         if observed["state"] != "DETECTED":
             fail("LINE_OF_SIGHT_TARGET_LOST_AFTER_TURN: " + observed["reason"])

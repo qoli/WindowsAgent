@@ -58,17 +58,21 @@ def initial_projection(control, offset_x, offset_y):
 def main(ctx):
     observed = action.call(
         id="elite-dangerous/supercruise-target-position",
-        inputs={"targetName": ctx.inputs["targetName"]},
+        inputs={
+            "targetName": ctx.inputs["targetName"],
+            "scanProfile": "LOS_DIRECTION",
+            "reticleEvidencePolicy": "OCCLUSION_AWARE",
+        },
     )
     target = observed["target"]
     if target["state"] != "DETECTED":
-        return unknown(target, "TARGET_FOCUS_FRAME_NOT_DETECTED")
+        return unknown(target, target["reason"])
     if not target["identityConfirmed"]:
         return unknown(target, "CURRENT_TARGET_IDENTITY_NOT_CONFIRMED")
     if target["presentation"] != "DASHED":
         return unknown(target, "DASHED_OCCLUDED_FOCUS_FRAME_REQUIRED")
-    if target["reticleEvidencePlane"] != "HSV_ORANGE":
-        return unknown(target, "HSV_ORANGE_FOCUS_FRAME_REQUIRED")
+    if target["reticleEvidencePlane"] != "HSV_ORANGE" and target["reticleEvidencePlane"] != "STRICT_RGB":
+        return unknown(target, "LOS_DIRECTION_EVIDENCE_PLANE_REQUIRED")
     if target["shapeConfidencePermille"] < MIN_SHAPE_CONFIDENCE_PERMILLE:
         return unknown(target, "FOCUS_FRAME_SHAPE_CONFIDENCE_LOW")
     if target["focusFrameConfidencePermille"] < MIN_FOCUS_FRAME_CONFIDENCE_PERMILLE:
@@ -87,7 +91,7 @@ def main(ctx):
         "direction": {
             "state": "READY",
             "control": control,
-            "reason": "DASHED_HSV_ORANGE_FOCUS_FRAME_OUTWARD_DIRECTION_CONFIRMED",
+            "reason": "DASHED_CURRENT_FRAME_FOCUS_FRAME_OUTWARD_DIRECTION_CONFIRMED:" + target["reticleEvidencePlane"],
             "targetPresentation": target["presentation"],
             "targetOffsetX": target["offsetX"],
             "targetOffsetY": target["offsetY"],

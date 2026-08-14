@@ -2,12 +2,22 @@
 
 This finite composite Action uses PP-OCR first to propose bounded spatial
 candidates, then fuses a local CV focus-frame measurement with current HUD
-layout and identity evidence. It uses one tall central, two lower, symmetric
-upper-left and upper-right bands, and symmetric middle-left and middle-right
-gap bands. Every normally
-legible OCR proposal receives a fresh 140×140 local enhancement and 3/4-annulus
-measurement before target-name semantics may select it. OCR never authorizes a
-control coordinate or decides which shape is viable by itself.
+layout and identity evidence. The default `FULL` profile uses one tall central,
+two lower, symmetric upper-left and upper-right bands, and symmetric middle-left
+and middle-right gap bands. OCR name matching and spatial de-duplication happen
+before local CV; only text-compatible candidates receive a fresh 140×140 local
+enhancement and 3/4-annulus measurement. If no text-compatible candidate exists,
+the Action returns `TARGET_TEXT_NOT_FOUND` without spending local CV work on
+unrelated HUD text. OCR never authorizes a control coordinate or decides which
+shape is viable by itself.
+
+The explicit `LOS_DIRECTION` profile is available only to the separately
+confirmed `MOVE TO OBTAIN LINE OF SIGHT TO TARGET` workflow. It scans the lower
+band, then lower-wide band, followed by the normal independent lower-left
+identity observation. It does not silently expand to the other five bands.
+This bounded ordering prevents a residual closing target from changing scale
+for the duration of seven sequential OCR calls. The caller also declares the
+reticle evidence policy passed unchanged to every local CV candidate.
 The central band covers reference `y=80..400`: live Supercruise evidence placed
 an already Compass-aligned planetary marker around `y=185`, above the retired
 `y=240..400` strip. Its 800 by 320 shape retains the same 256k reference-pixel

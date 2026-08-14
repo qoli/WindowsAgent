@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 1,
+  "version": 2,
   "title": "Clear an Elite Dangerous Supercruise Assist line-of-sight obstruction",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

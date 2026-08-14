@@ -269,7 +269,7 @@ def public_plane(plane, roi_x, roi_y):
         "presentation": plane["presentation"],
     }
 
-def unknown(reason, planes, sample, roi_x, roi_y):
+def unknown(reason, planes, sample, roi_x, roi_y, evidence_policy):
     public_planes = []
     for plane in planes:
         public_planes.append(public_plane(plane, roi_x, roi_y))
@@ -286,6 +286,7 @@ def unknown(reason, planes, sample, roi_x, roi_y):
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],
             "capturedAt": sample["frame"]["capturedAt"], "selectedPlane": None,
+            "requestedPolicy": evidence_policy,
             "selectionReason": reason, "planes": public_planes,
         },
     }
@@ -293,6 +294,7 @@ def unknown(reason, planes, sample, roi_x, roi_y):
 def main(ctx):
     hint_x = ctx.inputs["hintX"]
     hint_y = ctx.inputs["hintY"]
+    evidence_policy = ctx.inputs.get("evidencePolicy", "ADAPTIVE_ORANGE")
     roi_x = hint_x - ROI_HALF
     roi_y = hint_y - ROI_HALF
     sample = observer.screen.read_region(x=roi_x, y=roi_y, w=ROI_SIZE, h=ROI_SIZE, sampling="reference")
@@ -329,16 +331,23 @@ def main(ctx):
         evaluate_plane("ORANGE_OPPONENT", points_at_or_above(opponent_scores, opponent_threshold), opponent_threshold),
         evaluate_plane("HSV_ORANGE", points_at_or_above(hsv_scores, hsv_threshold), hsv_threshold),
     ]
-    viable = []
+    adaptive_viable = []
+    strict_viable = None
     for plane in planes:
-        # The old absolute RGB gate remains visible diagnostic evidence only.
-        # The offline four-background ablation showed it loses dim targets and
-        # produces false high-contrast fragments; it cannot authorize control.
-        if plane["state"] == "VIABLE" and plane["name"] != "STRICT_RGB":
-            selection_score = plane["shapeConfidencePermille"] * 1000 + min(999, plane["quality"])
-            viable.append([selection_score, plane])
+        if plane["state"] != "VIABLE":
+            continue
+        selection_score = plane["shapeConfidencePermille"] * 1000 + min(999, plane["quality"])
+        if plane["name"] == "STRICT_RGB":
+            strict_viable = [selection_score, plane]
+        else:
+            adaptive_viable.append([selection_score, plane])
+    viable = adaptive_viable
+    selection_reason = "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY"
+    if len(viable) == 0 and evidence_policy == "OCCLUSION_AWARE" and strict_viable != None:
+        viable = [strict_viable]
+        selection_reason = "OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION"
     if len(viable) == 0:
-        return unknown("NO_EVIDENCE_PLANE_CONFIRMED_RETICLE", planes, sample, roi_x, roi_y)
+        return unknown("NO_EVIDENCE_PLANE_CONFIRMED_RETICLE", planes, sample, roi_x, roi_y, evidence_policy)
     selected = viable[0]
     runner_up = None
     for candidate in viable[1:]:
@@ -354,7 +363,7 @@ def main(ctx):
         dy = selected_plane["y"] - other["y"]
         bin_difference = abs(selected_plane["occupiedAngularBins"] - other["occupiedAngularBins"])
         if dx * dx + dy * dy >= PLANE_DISAGREEMENT_DISTANCE_SQUARED and bin_difference <= PLANE_DISAGREEMENT_BIN_MARGIN:
-            return unknown("EVIDENCE_PLANES_DISAGREE_ON_CENTER", planes, sample, roi_x, roi_y)
+            return unknown("EVIDENCE_PLANES_DISAGREE_ON_CENTER", planes, sample, roi_x, roi_y, evidence_policy)
 
     reference_x = roi_x + selected_plane["x"]
     reference_y = roi_y + selected_plane["y"]
@@ -369,7 +378,7 @@ def main(ctx):
             "state": "DETECTED", "referenceX": reference_x, "referenceY": reference_y,
             "offsetX": offset_x, "offsetY": offset_y,
             "centerDistancePixels": math.hypot(offset_x, offset_y),
-            "reason": "ADAPTIVE_ORANGE_RETICLE_CONFIRMED:" + selected_plane["name"] + ":" + selected_plane["presentation"],
+            "reason": "CURRENT_FRAME_RETICLE_CONFIRMED:" + selected_plane["name"] + ":" + selected_plane["presentation"],
             "bestScore": selected_plane["ringScore"], "secondScore": selected_plane["secondRingScore"],
             "presentation": selected_plane["presentation"],
             "occupiedAngularBins": selected_plane["occupiedAngularBins"],
@@ -380,7 +389,7 @@ def main(ctx):
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],
             "capturedAt": sample["frame"]["capturedAt"], "selectedPlane": selected_plane["name"],
-            "selectionReason": "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY",
+            "requestedPolicy": evidence_policy, "selectionReason": selection_reason,
             "planes": public_planes,
         },
     }

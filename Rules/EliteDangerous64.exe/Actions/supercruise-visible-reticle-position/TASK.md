@@ -6,13 +6,21 @@ hint is a bounded search origin, not a returned target position.
 
 The Action derives three declared evidence planes from the same current RGB
 region: the legacy strict RGB gate, a normalized orange-opponent plane, and an
-HSV orange-hue plane. The strict RGB result is diagnostic only: the reviewed
-four-background ablation showed that it loses dim rings and creates false
-high-contrast fragments, so it cannot authorize control. The latter two planes
-use their own 99.5-percentile-derived threshold with an absolute floor. This is
+HSV orange-hue plane. The latter two planes use their own
+99.5-percentile-derived threshold with an absolute floor. This is
 one primary adaptive classifier, not a provider or capture fallback: every
 plane is evaluated on the same pixels, all thresholds and scores are returned,
 and the selected adaptive plane is explicit.
+
+The default `ADAPTIVE_ORANGE` policy keeps strict RGB diagnostic-only. The
+explicit `OCCLUSION_AWARE` policy is reserved for a separately confirmed
+`MOVE TO OBTAIN LINE OF SIGHT TO TARGET` workflow. It still prefers either
+adaptive plane. Only when both adaptive planes reject the same current ROI may
+a viable strict-RGB three-quarter annulus be selected. The returned selection
+reason is
+`OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION`; no provider,
+capture, ROI, or prior-frame evidence changes silently. Exact current identity
+and layout remain parent Gates before this local shape can authorize control.
 
 Each plane evaluates a fixed grid of candidate centres. Its score rewards
 pixels in the reviewed 34–58-pixel annulus, penalizes pixels in the adjacent

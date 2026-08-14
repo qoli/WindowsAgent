@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": 5,
+  "version": 6,
   "title": "Locate the orange Supercruise selected-target reticle",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

@@ -9,7 +9,11 @@ The workflow first requires two classified
 `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` samples. It then commands 0%
 minimum Supercruise throttle and registers critical 0% failure compensation.
 `supercruise-line-of-sight-direction` must return one fresh `READY` direction
-from the named target's dashed HSV-orange three-quarter focus frame. `UNKNOWN`
+from the named target's dashed three-quarter focus frame. It explicitly uses
+the bounded `LOS_DIRECTION` OCR profile and `OCCLUSION_AWARE` reticle policy for
+both initial direction acquisition and every post-pulse target measurement.
+Adaptive orange remains preferred; a same-current-ROI strict-RGB ring may be
+used only under that declared policy after adaptive rejection. `UNKNOWN`
 is terminal; there is no fixed pitch/yaw fallback.
 
 The Action keeps that initial direction fixed. It issues bounded 800 ms

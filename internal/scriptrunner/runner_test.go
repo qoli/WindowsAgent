@@ -1993,6 +1993,49 @@ func TestEliteSupercruiseVisibleReticleUsesAdaptivePlaneForDimDashedRingOnMagent
 	}
 }
 
+func TestEliteSupercruiseVisibleReticleOcclusionAwareSelectsStrictRGBOnlyAfterAdaptiveRejection(t *testing.T) {
+	pixels := reticleFixturePixels(78, 78, true, 0xC8376E, func(_, _ int) uint32 {
+		return 0x080A12
+	})
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name       string
+		inputs     map[string]any
+		wantState  string
+		wantPolicy string
+	}{
+		{name: "default adaptive policy remains fail closed", inputs: map[string]any{"hintX": 960, "hintY": 540}, wantState: "UNKNOWN", wantPolicy: "ADAPTIVE_ORANGE"},
+		{name: "explicit occlusion policy selects strict plane", inputs: map[string]any{"hintX": 960, "hintY": 540, "evidencePolicy": "OCCLUSION_AWARE"}, wantState: "DETECTED", wantPolicy: "OCCLUSION_AWARE"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner, err := New(&compassBroker{pixels: pixels})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := runner.Run(context.Background(), pkg, test.inputs)
+			if err != nil {
+				t.Fatalf("run package: %v", err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			target := result["target"].(map[string]any)
+			evidence := result["evidence"].(map[string]any)
+			if target["state"] != test.wantState || evidence["requestedPolicy"] != test.wantPolicy {
+				t.Fatalf("target=%#v evidence=%#v", target, evidence)
+			}
+			if test.wantState == "DETECTED" && (target["evidencePlane"] != "STRICT_RGB" ||
+				evidence["selectionReason"] != "OCCLUSION_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION") {
+				t.Fatalf("target=%#v evidence=%#v", target, evidence)
+			}
+		})
+	}
+}
+
 func TestEliteSupercruiseVisibleReticleKeepsSolidTopologyWithoutClosingGap(t *testing.T) {
 	pixels := reticleFixturePixels(74, 66, false, 0xF58A18, func(x, y int) uint32 {
 		value := uint32((x*7 + y*11) % 24)

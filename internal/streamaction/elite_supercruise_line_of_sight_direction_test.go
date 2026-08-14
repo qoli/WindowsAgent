@@ -9,13 +9,15 @@ import (
 )
 
 type supercruiseLineOfSightDirectionCaller struct {
-	target map[string]any
+	target     map[string]any
+	lastInputs map[string]any
 }
 
-func (c *supercruiseLineOfSightDirectionCaller) Call(_ context.Context, id string, _ map[string]any) (json.RawMessage, error) {
+func (c *supercruiseLineOfSightDirectionCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	if id != "elite-dangerous/supercruise-target-position" {
 		return nil, errors.New("unexpected line-of-sight direction child Action: " + id)
 	}
+	c.lastInputs = inputs
 	return json.Marshal(map[string]any{"target": c.target})
 }
 
@@ -92,6 +94,55 @@ func TestEliteSupercruiseLineOfSightDirectionRejectsNearCentreFrameWithoutDefaul
 	}
 }
 
+func TestEliteSupercruiseLineOfSightDirectionUsesBoundedOcclusionAwareAcquisition(t *testing.T) {
+	target := lineOfSightDirectionTarget(-16, -64, "DASHED", "STRICT_RGB")
+	target["centerDistancePixels"] = 65.97
+	caller := &supercruiseLineOfSightDirectionCaller{target: target}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(),
+		loadEliteSupercruiseLineOfSightDirectionPackage(t),
+		map[string]any{"targetName": "OBAMA REACH"},
+		caller,
+		&fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"READY"`) ||
+		!contains(string(output), `"control":"PITCH_UP"`) ||
+		!contains(string(output), `"reticleEvidencePlane":"STRICT_RGB"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.lastInputs["scanProfile"] != "LOS_DIRECTION" ||
+		caller.lastInputs["reticleEvidencePolicy"] != "OCCLUSION_AWARE" {
+		t.Fatalf("target-position inputs = %#v", caller.lastInputs)
+	}
+}
+
+func TestEliteSupercruiseLineOfSightDirectionPreservesAcquisitionReason(t *testing.T) {
+	target := lineOfSightDirectionTarget(0, 0, "DASHED", "HSV_ORANGE")
+	target["state"] = "UNKNOWN"
+	target["reason"] = "NO_SHAPE_FIRST_FOCUS_FRAME_CANDIDATE"
+	target["presentation"] = nil
+	target["offsetX"] = nil
+	target["offsetY"] = nil
+	target["centerDistancePixels"] = nil
+	target["reticleEvidencePlane"] = nil
+	target["shapeConfidencePermille"] = nil
+	target["focusFrameConfidencePermille"] = nil
+	target["reticleCapturedAt"] = nil
+	target["identityConfirmed"] = false
+	caller := &supercruiseLineOfSightDirectionCaller{target: target}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(),
+		loadEliteSupercruiseLineOfSightDirectionPackage(t),
+		map[string]any{"targetName": "OBAMA REACH"},
+		caller,
+		&fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"UNKNOWN"`) ||
+		!contains(string(output), `"reason":"NO_SHAPE_FIRST_FOCUS_FRAME_CANDIDATE"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+}
+
 func TestEliteSupercruiseLineOfSightDirectionRejectsUnconfirmedCurrentIdentity(t *testing.T) {
 	target := lineOfSightDirectionTarget(140, 0, "DASHED", "HSV_ORANGE")
 	target["identityConfirmed"] = false
@@ -116,7 +167,7 @@ func TestEliteSupercruiseLineOfSightDirectionRejectsNonHSVAndSolidEvidence(t *te
 		plane        string
 		wantReason   string
 	}{
-		{name: "non HSV plane", presentation: "DASHED", plane: "ORANGE_OPPONENT", wantReason: "HSV_ORANGE_FOCUS_FRAME_REQUIRED"},
+		{name: "unapproved plane", presentation: "DASHED", plane: "ORANGE_OPPONENT", wantReason: "LOS_DIRECTION_EVIDENCE_PLANE_REQUIRED"},
 		{name: "solid frame", presentation: "SOLID", plane: "HSV_ORANGE", wantReason: "DASHED_OCCLUDED_FOCUS_FRAME_REQUIRED"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -3,5 +3,9 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["targetName"],
-  "properties": {"targetName": {"type": "string", "minLength": 2, "maxLength": 96}}
+  "properties": {
+    "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
+    "scanProfile": {"enum": ["FULL", "LOS_DIRECTION"]},
+    "reticleEvidencePolicy": {"enum": ["ADAPTIVE_ORANGE", "OCCLUSION_AWARE"]}
+  }
 }

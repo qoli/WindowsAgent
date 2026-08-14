@@ -12,9 +12,11 @@ type supercruiseTargetPositionCaller struct {
 	regions         map[string]json.RawMessage
 	reticleShapeFor func(map[string]any) int
 	reticleHints    []map[string]any
+	childCalls      []string
 }
 
 func (c *supercruiseTargetPositionCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
+	c.childCalls = append(c.childCalls, id)
 	if id == "elite-dangerous/supercruise-visible-reticle-position" {
 		c.reticleHints = append(c.reticleHints, inputs)
 		x := inputs["hintX"]
@@ -138,7 +140,7 @@ func TestEliteSupercruiseTargetPositionFindsIdentityCorroboratedMiddleRightSyste
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "AASGANANU"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"OCCLUDED_SINGLE_WORD_POSITION_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"OCCLUDED_SINGLE_WORD_POSITION_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) ||
 		!contains(string(output), `"referenceX":1385`) || !contains(string(output), `"referenceY":432`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
@@ -157,7 +159,7 @@ func TestEliteSupercruiseTargetPositionFindsIdentityCorroboratedOmittedNumericPr
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "47 Arietis"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"OCCLUDED_SHORT_NUMERIC_PREFIX_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"OCCLUDED_SHORT_NUMERIC_PREFIX_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) ||
 		!contains(string(output), `"referenceX":1400`) || !contains(string(output), `"referenceY":362`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
@@ -223,7 +225,7 @@ func TestEliteSupercruiseTargetPositionAcceptsPillarOccludedStationName(t *testi
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Shaw Station"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"OCCLUDED_SAME_LINE_PROPER_NAME_ENDPOINTS_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) {
+		!contains(string(output), `"reason":"OCCLUDED_SAME_LINE_PROPER_NAME_ENDPOINTS_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
@@ -255,7 +257,7 @@ func TestEliteSupercruiseTargetPositionAcceptsIdentityCorroboratedPillarFragment
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Shaw Station"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"OCCLUDED_POSITION_FRAGMENT_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) {
+		!contains(string(output), `"reason":"OCCLUDED_POSITION_FRAGMENT_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
@@ -289,7 +291,7 @@ func TestEliteSupercruiseTargetPositionCombinesPillarSplitSameLineWords(t *testi
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Shaw Station"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"PILLAR_SPLIT_SAME_LINE_WORDS_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"PILLAR_SPLIT_SAME_LINE_WORDS_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) ||
 		!contains(string(output), `"referenceX":1250`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
@@ -307,7 +309,7 @@ func TestEliteSupercruiseTargetPositionCombinesPillarSplitProperNamePrefix(t *te
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Shaw Station"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"EXACT_SELECTED_IDENTITY_AND_PROPER_NAME_PREFIX_SEARCH_HINT_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) {
+		!contains(string(output), `"reason":"EXACT_SELECTED_IDENTITY_AND_PROPER_NAME_PREFIX_SEARCH_HINT_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
@@ -342,7 +344,7 @@ func TestEliteSupercruiseTargetPositionAcceptsIdentityCorroboratedFusedPillarLab
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Shaw Station"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"PILLAR_FUSED_POSITION_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) {
+		!contains(string(output), `"reason":"PILLAR_FUSED_POSITION_AND_EXACT_SELECTED_IDENTITY_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
@@ -377,7 +379,7 @@ func TestEliteSupercruiseTargetPositionSelectsForwardDuplicate(t *testing.T) {
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"HIGHEST_SHAPE_LAYOUT_TEXT_CONFIDENCE_SELECTED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"HIGHEST_SHAPE_LAYOUT_TEXT_CONFIDENCE_SELECTED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) ||
 		!contains(string(output), `"centerDistancePixels":50`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
@@ -409,7 +411,7 @@ func TestEliteSupercruiseTargetPositionDeduplicatesOverlappingBandBoundary(t *te
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "LTT 11244 A 2"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"TARGET_LABEL_TO_MARKER_OFFSET_APPLIED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) {
+		!contains(string(output), `"reason":"TARGET_LABEL_TO_MARKER_OFFSET_APPLIED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 }
@@ -444,7 +446,7 @@ func TestEliteSupercruiseTargetPositionRejectsTextWhenShapeConfidenceIsLow(t *te
 	}
 }
 
-func TestEliteSupercruiseTargetPositionShapeScoresAllSpatialProposalsBeforeTextSelection(t *testing.T) {
+func TestEliteSupercruiseTargetPositionShapeScoresOnlyTextCompatibleProposals(t *testing.T) {
 	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
 		targetPositionMultipleRegions(
 			targetPositionRegion("UNRELATED HUD TEXT", 600, 300),
@@ -459,8 +461,45 @@ func TestEliteSupercruiseTargetPositionShapeScoresAllSpatialProposalsBeforeTextS
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if len(caller.reticleHints) != 2 {
-		t.Fatalf("shape stage evaluated %d proposals, want both OCR spatial proposals", len(caller.reticleHints))
+	if len(caller.reticleHints) != 1 {
+		t.Fatalf("shape stage evaluated %d proposals, want only the target-compatible OCR proposal", len(caller.reticleHints))
+	}
+	if caller.reticleHints[0]["hintX"] != int64(1000) {
+		t.Fatalf("reticle hint = %#v, want target-compatible label hint", caller.reticleHints[0])
+	}
+}
+
+func TestEliteSupercruiseTargetPositionUsesBoundedLineOfSightScanProfile(t *testing.T) {
+	caller := &supercruiseTargetPositionCaller{regions: supercruiseTargetPositionBands(
+		targetPositionRegions("UNRELATED CENTRAL TEXT", 600, 300),
+		targetPositionRegions("OBAMA REACH", 990, 520),
+		targetPositionRegions("", 0, 0),
+	)}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(),
+		loadEliteSupercruiseTargetPositionPackage(t),
+		map[string]any{
+			"targetName":             "OBAMA REACH",
+			"scanProfile":            "LOS_DIRECTION",
+			"reticleEvidencePolicy": "OCCLUSION_AWARE",
+		},
+		caller,
+		&fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"state":"DETECTED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	for _, id := range caller.childCalls {
+		if id == "elite-dangerous/supercruise-target-text-regions" ||
+			id == "elite-dangerous/supercruise-target-text-regions-upper-left" ||
+			id == "elite-dangerous/supercruise-target-text-regions-upper-right" ||
+			id == "elite-dangerous/supercruise-target-text-regions-middle-left" ||
+			id == "elite-dangerous/supercruise-target-text-regions-middle-right" {
+			t.Fatalf("LOS profile invoked excluded OCR band %q", id)
+		}
+	}
+	if len(caller.reticleHints) != 1 || caller.reticleHints[0]["evidencePolicy"] != "OCCLUSION_AWARE" {
+		t.Fatalf("reticle inputs = %#v", caller.reticleHints)
 	}
 }
 
@@ -477,7 +516,7 @@ func TestEliteSupercruiseTargetPositionCombinesOccludedTwoLineStationName(t *tes
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "CREON'S STANDING"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"OCCLUDED_TWO_LINE_WORD_PREFIXES_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"OCCLUDED_TWO_LINE_WORD_PREFIXES_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) ||
 		!contains(string(output), `"referenceX":1277`) ||
 		!contains(string(output), `"referenceY":682`) {
 		t.Fatalf("output=%s error=%v", output, err)
@@ -497,7 +536,7 @@ func TestEliteSupercruiseTargetPositionCombinesStackedMultiwordSystemName(t *tes
 		context.Background(), loadEliteSupercruiseTargetPositionPackage(t), map[string]any{"targetName": "Tascheter Sector TE-Q a5-1"}, caller, &fixtureReporter{},
 	)
 	if err != nil || !contains(string(output), `"state":"DETECTED"`) ||
-		!contains(string(output), `"reason":"STACKED_FULL_TARGET_NAME_CONFIRMED:ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED"`) ||
+		!contains(string(output), `"reason":"STACKED_FULL_TARGET_NAME_CONFIRMED:CURRENT_FRAME_RETICLE_CONFIRMED:HSV_ORANGE:SOLID"`) ||
 		!contains(string(output), `"referenceX":1103`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}

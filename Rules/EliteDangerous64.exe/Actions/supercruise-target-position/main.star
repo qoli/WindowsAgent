@@ -284,7 +284,7 @@ def square_root(value):
         guess = (guess + value / guess) / 2.0
     return guess
 
-def locate_reticle(region):
+def locate_reticle(region, evidence_policy):
     box = bounds(region["referencePoints"])
     hint_x = int(box["left"] - LABEL_TO_MARKER_X)
     hint_y = int(box["centerY"] - LABEL_TO_MARKER_Y)
@@ -296,7 +296,11 @@ def locate_reticle(region):
         hint_y = 70
     elif hint_y > 1010:
         hint_y = 1010
-    return action.call(id="elite-dangerous/supercruise-visible-reticle-position", inputs={"hintX": hint_x, "hintY": hint_y})
+    return action.call(id="elite-dangerous/supercruise-visible-reticle-position", inputs={
+        "hintX": hint_x,
+        "hintY": hint_y,
+        "evidencePolicy": evidence_policy,
+    })
 
 def clamp_permille(value):
     if value < 0:
@@ -368,17 +372,29 @@ def timing_output(bands, identity_band):
 
 def main(ctx):
     target_name = ctx.inputs["targetName"]
+    scan_profile = ctx.inputs.get("scanProfile", "FULL")
+    reticle_evidence_policy = ctx.inputs.get("reticleEvidencePolicy", "ADAPTIVE_ORANGE")
     expected = normalize(target_name)
     expected_words = normalized_words(target_name)
-    bands = [
-        action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={}),
-        action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
-        action.call(id="elite-dangerous/supercruise-target-text-regions-lower-wide", inputs={}),
-        action.call(id="elite-dangerous/supercruise-target-text-regions-upper-left", inputs={}),
-        action.call(id="elite-dangerous/supercruise-target-text-regions-upper-right", inputs={}),
-        action.call(id="elite-dangerous/supercruise-target-text-regions-middle-left", inputs={}),
-        action.call(id="elite-dangerous/supercruise-target-text-regions-middle-right", inputs={}),
-    ]
+    if scan_profile == "LOS_DIRECTION":
+        # The confirmed LOS prompt places the selected target around the
+        # central/lower forward HUD. Keep this explicit profile bounded so the
+        # target cannot grow out of the local CV geometry while seven unrelated
+        # OCR bands are processed serially.
+        bands = [
+            action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-lower-wide", inputs={}),
+        ]
+    else:
+        bands = [
+            action.call(id="elite-dangerous/supercruise-target-text-regions", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-lower", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-lower-wide", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-upper-left", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-upper-right", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-middle-left", inputs={}),
+            action.call(id="elite-dangerous/supercruise-target-text-regions-middle-right", inputs={}),
+        ]
     identity_band = action.call(id="elite-dangerous/request-docking-distance-regions", inputs={})
     identity_confirmed = False
     for identity_region in identity_band["regions"]:
@@ -386,7 +402,6 @@ def main(ctx):
             identity_confirmed = True
             break
     matches = []
-    proposals = []
     raw_texts = []
     for raw in bands:
         eligible_regions = []
@@ -398,10 +413,6 @@ def main(ctx):
             if region["detectionConfidence"] < MIN_DETECTION_CONFIDENCE or region["recognitionConfidence"] < MIN_RECOGNITION_CONFIDENCE:
                 continue
             eligible_regions.append(region)
-            # OCR supplies a spatial proposal, not a semantic Gate. Every
-            # normally legible forward-HUD box receives shape analysis before
-            # target-name and layout evidence are allowed to select it.
-            append_deduplicated(proposals, region)
             exact_or_one_edit = one_edit_or_exact(normalize(region["text"]), expected)
             occluded_same_line = same_line_occluded_two_words(region["text"], expected_words)
             identity_fragment = same_line_identity_corroborated_fragment(region["text"], expected_words, identity_confirmed)
@@ -481,7 +492,6 @@ def main(ctx):
                     continue
                 if one_edit_or_exact(normalize(first["text"] + " " + second["text"]), expected):
                     combined = stacked_full_name_candidate(first, second)
-                    proposals.append(combined)
                     append_deduplicated(matches, combined)
         if len(expected_words) == 2:
             for first in eligible_regions:
@@ -500,7 +510,6 @@ def main(ctx):
                     if abs(second_box["left"] - first_box["left"]) > MULTILINE_LEFT_TOLERANCE_PIXELS or center_gap < MULTILINE_MIN_CENTER_GAP_PIXELS or center_gap > MULTILINE_MAX_CENTER_GAP_PIXELS:
                         continue
                     combined = multiline_candidate(first, second)
-                    proposals.append(combined)
                     append_deduplicated(matches, combined)
             split_regions = corroborated_split_regions if identity_confirmed else eligible_regions
             for first in split_regions:
@@ -517,15 +526,7 @@ def main(ctx):
                     if horizontal_gap < -SAME_LINE_MAX_HORIZONTAL_OVERLAP_PIXELS or horizontal_gap > SAME_LINE_MAX_HORIZONTAL_GAP_PIXELS or abs(second_box["centerY"] - first_box["centerY"]) > SAME_LINE_CENTER_TOLERANCE_PIXELS:
                         continue
                     combined = same_line_split_candidate(first, second)
-                    proposals.append(combined)
                     append_deduplicated(matches, combined)
-    shaped_proposals = []
-    last_reticle_capture = None
-    for proposal in proposals:
-        reticle_output = locate_reticle(proposal)
-        last_reticle_capture = reticle_output["evidence"]["capturedAt"]
-        if reticle_output["target"]["state"] == "DETECTED":
-            shaped_proposals.append({"region": proposal, "reticleOutput": reticle_output})
     if len(matches) == 0:
         return {
             "schemaVersion": 1,
@@ -533,12 +534,13 @@ def main(ctx):
             "timing": timing_output(bands, identity_band),
         }
     candidates = []
+    last_reticle_capture = None
     for match in matches:
-        for shaped in shaped_proposals:
-            if same_box(match, shaped["region"]):
-                candidate = focus_frame_candidate(match, shaped["reticleOutput"], identity_confirmed)
-                if candidate != None:
-                    append_focus_candidate(candidates, candidate)
+        reticle_output = locate_reticle(match, reticle_evidence_policy)
+        last_reticle_capture = reticle_output["evidence"]["capturedAt"]
+        candidate = focus_frame_candidate(match, reticle_output, identity_confirmed)
+        if candidate != None:
+            append_focus_candidate(candidates, candidate)
     if len(candidates) == 0:
         return {
             "schemaVersion": 1,
@@ -578,7 +580,7 @@ def main(ctx):
             "offsetX": offset_x,
             "offsetY": offset_y,
             "centerDistancePixels": square_root(offset_x * offset_x + offset_y * offset_y),
-            "reason": reason + ":ORANGE_RETICLE_ANNULUS_CENTER_CONFIRMED",
+            "reason": reason + ":CURRENT_FRAME_RETICLE_CONFIRMED:" + reticle["evidencePlane"] + ":" + reticle["presentation"],
             "presentation": reticle["presentation"],
             "occupiedAngularBins": reticle["occupiedAngularBins"],
             "angularRuns": reticle["angularRuns"],
