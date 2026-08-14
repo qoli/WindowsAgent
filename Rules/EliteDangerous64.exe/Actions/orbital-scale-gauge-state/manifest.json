@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "title": "Observe the Elite Dangerous orbital scale gauge",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json"],
+  "permissions": {"screen": {"operations": ["readRegion"], "maxCalls": 1, "maxPixels": 65170}},
+  "limits": {"wallTimeMs": 8000, "maxSteps": 12000000, "maxResultBytes": 16384, "maxLogBytes": 4096}
+}

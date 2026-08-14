@@ -49,6 +49,10 @@ type supercruiseAssistDestinationCaller struct {
 	lineOfSightCalls       int
 	closeNavigationCalls   int
 	closeNavigationOutput  json.RawMessage
+	orbitalScaleDetected   bool
+	orbitalScaleDetectAt   int
+	orbitalScaleCalls      int
+	humanTakeoverCalls     int
 }
 
 func focusedPixels(focused bool) []any {
@@ -85,6 +89,15 @@ func (c *supercruiseAssistDestinationCaller) recordFlightInput(input string) {
 
 func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
 	switch id {
+	case "elite-dangerous/orbital-scale-gauge-state":
+		c.orbitalScaleCalls++
+		if c.orbitalScaleDetected && (c.orbitalScaleDetectAt == 0 || c.orbitalScaleCalls >= c.orbitalScaleDetectAt) {
+			return json.RawMessage(`{"schemaVersion":1,"gauge":{"state":"DETECTED","confidence":0.91,"threshold":0.75,"reason":"ORBITAL_HEADING_SCALE_GEOMETRY_CONFIRMED"},"evidence":{}}`), nil
+		}
+		return json.RawMessage(`{"schemaVersion":1,"gauge":{"state":"ABSENT","confidence":0.12,"threshold":0.75,"reason":"ORBITAL_HEADING_SCALE_GEOMETRY_NOT_CONFIRMED"},"evidence":{}}`), nil
+	case "elite-dangerous/pause-at-exit-for-human-takeover":
+		c.humanTakeoverCalls++
+		return json.RawMessage(`{"schemaVersion":1,"task":"PAUSE_AT_EXIT_FOR_HUMAN_TAKEOVER","completed":true,"pauseMenuConfirmed":true,"exitFocused":true,"selectSent":false,"openAttempts":1,"finalObservation":{"state":"EXIT_FOCUSED"}}`), nil
 	case "elite-dangerous/ship-status":
 		if c.shipStatusIndex < len(c.shipStatuses) {
 			value := c.shipStatuses[c.shipStatusIndex]
@@ -779,7 +792,7 @@ func TestEliteSupercruiseAssistRejectsOrbitButtonWithoutSelectingIt(t *testing.T
 	}
 }
 
-func TestEliteSupercruiseAssistHandsOrbitFlightToGameWithoutClaimingArrival(t *testing.T) {
+func TestEliteSupercruiseAssistOrbitModeWaitsForNearOrbitThenHandsToHuman(t *testing.T) {
 	caller := successfulSupercruiseAssistCaller()
 	caller.assistRegions = []json.RawMessage{
 		textRegionRaw("SUPERCRUISE ASSIST AND ORBIT", 720, true),
@@ -789,23 +802,21 @@ func TestEliteSupercruiseAssistHandsOrbitFlightToGameWithoutClaimingArrival(t *t
 		textRegionRaw("<LTT 11244 A 2>", 400, true),
 		textRegionRaw("<LTT 11244 A 2>", 400, true),
 	}
-	caller.flightStates = []string{"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE"}
+	caller.flightStates = []string{"SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_ACTIVE"}
+	caller.speedStates = []string{"MOVING"}
+	caller.orbitalScaleDetected = true
+	caller.orbitalScaleDetectAt = 8
 	caller.supercruiseHUDStates = []string{"ACTIVE", "ACTIVE"}
 	inputs := map[string]any{
 		"targetName": "LTT 11244 A 2", "targetLocked": true,
 		"normalSpaceConfirmed": false, "supercruiseConfirmed": true,
 		"autoThrottleConfirmed": true, "destinationMode": "ORBIT_HANDOFF",
 	}
-	output, err := (Runner{Sleep: immediateSleep}).Run(
+	_, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), inputs, caller, &fixtureReporter{},
 	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !contains(string(output), `"destinationMode":"ORBIT_HANDOFF"`) ||
-		!contains(string(output), `"finalPhase":"ASSIST_HANDOFF"`) ||
-		!contains(string(output), `"finalSpeed":null`) {
-		t.Fatalf("output=%s", output)
+	if err == nil || !contains(err.Error(), "NEAR_ORBIT_SAFETY_TRIGGERED") {
+		t.Fatalf("error=%v", err)
 	}
 	selects := 0
 	for _, control := range caller.controls {
@@ -815,6 +826,9 @@ func TestEliteSupercruiseAssistHandsOrbitFlightToGameWithoutClaimingArrival(t *t
 	}
 	if selects != 2 {
 		t.Fatalf("ORBIT workflow did not open the target and select Assist: controls=%v", caller.controls)
+	}
+	if caller.humanTakeoverCalls != 1 {
+		t.Fatalf("human takeover calls=%d", caller.humanTakeoverCalls)
 	}
 }
 
@@ -1027,5 +1041,32 @@ func TestEliteSupercruiseAssistRestoresThrottleAtChargedHandoff(t *testing.T) {
 		if caller.throttles[index] != wantThrottles[index] {
 			t.Fatalf("throttles=%v want=%v", caller.throttles, wantThrottles)
 		}
+	}
+}
+
+func TestEliteSupercruiseAssistNearOrbitStopsBeforeHumanTakeover(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.orbitalScaleDetected = true
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, reporter,
+	)
+	if err == nil || !contains(err.Error(), "NEAR_ORBIT_SAFETY_TRIGGERED") {
+		t.Fatalf("error=%v", err)
+	}
+	if caller.humanTakeoverCalls != 1 {
+		t.Fatalf("human takeover calls=%d", caller.humanTakeoverCalls)
+	}
+	if len(caller.throttles) < 2 || caller.throttles[0] != 0 || caller.throttles[1] != 0 {
+		t.Fatalf("zero-throttle ordering missing: %v", caller.throttles)
+	}
+	if caller.alignmentCalls != 0 || caller.visibleAlignmentCalls != 0 || caller.supercruiseKeys != 0 {
+		t.Fatalf("flight continued after near-orbit Gate: compass=%d visible=%d fsd=%d", caller.alignmentCalls, caller.visibleAlignmentCalls, caller.supercruiseKeys)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	zeroIndex := strings.Index(joined, `"phase":"NEAR_ORBIT_SAFETY_TRIGGERED"`)
+	handoffIndex := strings.Index(joined, `"phase":"HUMAN_TAKEOVER"`)
+	if zeroIndex < 0 || handoffIndex <= zeroIndex || !contains(joined, `"humanTakeoverReady":true`) {
+		t.Fatalf("events=%s", joined)
 	}
 }

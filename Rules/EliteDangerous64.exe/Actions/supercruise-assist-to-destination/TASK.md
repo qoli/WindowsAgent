@@ -116,7 +116,7 @@ before the game computer owns flight.
 
 After ownership begins, the Action normally sends no throttle, attitude, UI,
 or FSD input. It only watches `flight-status` and `ship-speed`. The sole
-declared exception is two consecutive
+ordinary recovery exception is two consecutive
 `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` samples. That Gate means the game
 computer cannot continue because the selected destination is physically
 occluded; it is not ordinary Assist disappearance and must not accumulate
@@ -138,6 +138,20 @@ recovery count and truthfully sets `agentFlightInputAfterAssistActive=true`
 when this explicit recovery path issued flight input. No child completion
 substitutes for the original OCR Gate.
 
+The independent `orbital-scale-gauge-state` observation is a higher-priority
+safety Gate throughout preflight, entry, Assist acquisition, correction,
+line-of-sight handoff, and game-controlled approach. It applies the reviewed
+orange heading-scale geometry in the current frame and retains its evidence
+score. One `DETECTED` frame is sufficient to command 0% immediately; no later
+75% or 100% command is permitted. The parent then invokes
+`pause-at-exit-for-human-takeover`, which opens the pause menu, clamps focus to
+`EXIT`, and requires two fresh visual confirmations of that exact handoff
+screen. It deliberately does not select EXIT. Once the handoff is confirmed,
+the parent emits `HUMAN_TAKEOVER` and fails with the stable
+`NEAR_ORBIT_SAFETY_TRIGGERED` prefix because the requested autonomous flight
+goal was aborted. A capture, schema, OCR, or menu-observation failure remains
+terminal and does not become an absent scale or a successful handoff.
+
 Up to five transient
 failures from the same persistent WGC region-capture provider may be skipped
 while the game owns flight; the sixth consecutive failure, or any different
@@ -150,9 +164,9 @@ drop and stop. Thirty missing Assist samples without that stop fail as
 `ASSIST_INTERRUPTED`; no manual-flight fallback is attempted. Failure or
 cancellation still invokes the registered 0% throttle compensation.
 
-`destinationMode=DROP` accepts only `SUPERCRUISE ASSIST` and retains the
-automatic drop-and-stop completion contract. `destinationMode=ORBIT_HANDOFF`
-accepts only `SUPERCRUISE ASSIST AND ORBIT` and completes at the explicit
-`ASSIST_HANDOFF` boundary after two visual ownership confirmations. It does
-not claim that the body has been reached or that the ship left Supercruise;
-those are separate distance/arrival and drop Actions.
+`destinationMode=DROP` accepts only `SUPERCRUISE ASSIST`; mode selection does
+not bypass the orbital-scale safety Gate. `destinationMode=ORBIT_HANDOFF`
+accepts only `SUPERCRUISE ASSIST AND ORBIT`, but ownership confirmation is no
+longer a terminal success: the Action remains responsible until either its
+ordinary observed stop completes or the orbital-scale Gate produces the
+explicit paused human-takeover terminal.

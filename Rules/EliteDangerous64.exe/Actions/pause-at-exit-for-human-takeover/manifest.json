@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 31,
-  "title": "Elite Dangerous Supercruise Assist to destination",
+  "version": 1,
+  "title": "Pause Elite Dangerous with EXIT focused for human takeover",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {"maxSteps": 7000000, "maxOutputBytes": 16384, "maxEventBytes": 16384, "maxSleepMs": 1000}
+  "limits": {"maxSteps": 1000000, "maxOutputBytes": 16384, "maxEventBytes": 4096, "maxSleepMs": 1000}
 }

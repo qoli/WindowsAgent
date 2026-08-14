@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "gauge", "evidence"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "gauge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "confidence", "threshold", "reason"],
+      "properties": {
+        "state": {"enum": ["DETECTED", "ABSENT"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "threshold": {"const": 0.75},
+        "reason": {"enum": ["ORBITAL_HEADING_SCALE_GEOMETRY_CONFIRMED", "ORBITAL_HEADING_SCALE_GEOMETRY_NOT_CONFIRMED"]}
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["capturedAt", "referenceRegion", "algorithm", "orangePixelCount", "tickCount", "spacingMatchCount", "collinearMatchCount", "averageSpacingPixels", "averageMinorTickHeightPixels", "maximumTickHeightPixels", "majorTickNearCenter", "upperOrangePixelCount", "leftAnchorPixelCount", "rightAnchorPixelCount"],
+      "properties": {
+        "capturedAt": {"type": "string", "minLength": 1},
+        "referenceRegion": {"type": "object"},
+        "algorithm": {"const": "HSV_ORANGE_VERTICAL_SCALE_GEOMETRY_V1"},
+        "orangePixelCount": {"type": "integer", "minimum": 0},
+        "tickCount": {"type": "integer", "minimum": 0},
+        "spacingMatchCount": {"type": "integer", "minimum": 0},
+        "collinearMatchCount": {"type": "integer", "minimum": 0},
+        "averageSpacingPixels": {"type": ["number", "null"], "minimum": 0},
+        "averageMinorTickHeightPixels": {"type": ["number", "null"], "minimum": 0},
+        "maximumTickHeightPixels": {"type": "integer", "minimum": 0},
+        "majorTickNearCenter": {"type": "boolean"},
+        "upperOrangePixelCount": {"type": "integer", "minimum": 0},
+        "leftAnchorPixelCount": {"type": "integer", "minimum": 0},
+        "rightAnchorPixelCount": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

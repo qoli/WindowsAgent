@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.pause-at-exit-for-human-takeover.update"},
+    "payload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["phase", "attempt", "menuState", "exitFocusFillRatio", "lastCommand", "reason"],
+      "properties": {
+        "phase": {"enum": ["OBSERVING", "OPENING_PAUSE_MENU", "FOCUSING_EXIT", "VERIFYING_EXIT_FOCUS"]},
+        "attempt": {"type": "integer", "minimum": 0, "maximum": 3},
+        "menuState": {"enum": ["EXIT_FOCUSED", "PAUSE_MENU", "ABSENT", "UNKNOWN"]},
+        "exitFocusFillRatio": {"type": "number", "minimum": 0, "maximum": 1},
+        "lastCommand": {"type": ["string", "null"], "enum": ["BACK", "DOWN_X8", null]},
+        "reason": {"enum": ["PAUSE_MENU_EXIT_FOCUS_CONFIRMED", "PAUSE_MENU_VISIBLE_EXIT_NOT_FOCUSED", "PAUSE_MENU_LABELS_ABSENT", "PAUSE_MENU_LABELS_INCOMPLETE"]}
+      }
+    }
+  }
+}

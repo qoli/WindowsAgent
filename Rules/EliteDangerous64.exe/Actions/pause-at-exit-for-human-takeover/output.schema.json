@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "pauseMenuConfirmed", "exitFocused", "selectSent", "openAttempts", "finalObservation"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "PAUSE_AT_EXIT_FOR_HUMAN_TAKEOVER"},
+    "completed": {"const": true},
+    "pauseMenuConfirmed": {"const": true},
+    "exitFocused": {"const": true},
+    "selectSent": {"const": false},
+    "openAttempts": {"type": "integer", "minimum": 0, "maximum": 3},
+    "finalObservation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "reason", "exitFocusFillRatio", "rawTexts"],
+      "properties": {
+        "state": {"const": "EXIT_FOCUSED"},
+        "reason": {"const": "PAUSE_MENU_EXIT_FOCUS_CONFIRMED"},
+        "exitFocusFillRatio": {"type": "number", "minimum": 0.55, "maximum": 1},
+        "rawTexts": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
+      }
+    }
+  }
+}

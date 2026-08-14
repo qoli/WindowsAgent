@@ -29,7 +29,7 @@ LIST_MIN_Y = 320.0
 LIST_MAX_Y = 760.0
 LIST_MAX_X = 920.0
 
-def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=None, flight_status="UNKNOWN", flight_status_source=None, prompt_text=None, mass_lock=None, landing_gear=None, cargo_scoop=None, target=None, assist_active_confirmations=0, assist_missing_samples=0, line_of_sight_required_confirmations=0, line_of_sight_recovery_count=0, line_of_sight_control=None, stopped_confirmations=0, commanded_throttle=None, last_command=None, reason=None):
+def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=None, flight_status="UNKNOWN", flight_status_source=None, prompt_text=None, mass_lock=None, landing_gear=None, cargo_scoop=None, target=None, assist_active_confirmations=0, assist_missing_samples=0, line_of_sight_required_confirmations=0, line_of_sight_recovery_count=0, line_of_sight_control=None, stopped_confirmations=0, commanded_throttle=None, last_command=None, orbital_scale_state=None, orbital_scale_confidence=None, human_takeover_ready=False, reason=None):
     stream.emit(
         type="action.supercruise-assist-to-destination.update",
         payload={
@@ -57,6 +57,9 @@ def emit_update(phase, sample, target_name, panel_tab=None, assist_button_state=
             "stoppedConfirmations": stopped_confirmations,
             "commandedThrottle": commanded_throttle,
             "lastCommand": last_command,
+            "orbitalScaleState": orbital_scale_state,
+            "orbitalScaleConfidence": orbital_scale_confidence,
+            "humanTakeoverReady": human_takeover_ready,
             "reason": reason,
         },
     )
@@ -355,6 +358,17 @@ def observe_flight():
     classified = action.call(id="elite-dangerous/flight-status", inputs={})
     return {"state": classified["flightStatus"]["state"], "text": classified["source"]["text"]}
 
+def guard_near_orbit(target_name, sample, phase):
+    observation = action.call(id="elite-dangerous/orbital-scale-gauge-state", inputs={})
+    gauge = observation["gauge"]
+    if gauge["state"] != "DETECTED":
+        return gauge
+    throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    emit_update("NEAR_ORBIT_SAFETY_TRIGGERED", sample, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], reason="ORBITAL_SCALE_DETECTED_DURING_" + phase + ":" + throttle["control"])
+    handoff = action.call(id="elite-dangerous/pause-at-exit-for-human-takeover", inputs={})
+    emit_update("HUMAN_TAKEOVER", sample, target_name, commanded_throttle=0, last_command="PAUSE_MENU_EXIT_FOCUSED", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], human_takeover_ready=handoff["pauseMenuConfirmed"] and handoff["exitFocused"] and not handoff["selectSent"], reason="NEAR_ORBIT_ABORT_PAUSED_AT_EXIT_FOR_HUMAN_TAKEOVER")
+    fail("NEAR_ORBIT_SAFETY_TRIGGERED: orbital scale detected; throttle is 0% and the pause menu is waiting at EXIT for human takeover")
+
 def observe_supercruise_hud_stable():
     confirmations = 0
     last = None
@@ -412,8 +426,11 @@ def align_visible_destination(target_name):
     return visible_result["sampleCount"]
 
 def align_destination_pair(target_name, control_profile, phase, reason_prefix):
+    guard_near_orbit(target_name, 0, phase + "_BEFORE_COMPASS")
     compass_samples = align_compass(target_name, control_profile)
+    guard_near_orbit(target_name, compass_samples, phase + "_BEFORE_VISIBLE")
     visible_samples = align_visible_destination(target_name)
+    guard_near_orbit(target_name, compass_samples + visible_samples, phase + "_AFTER_VISIBLE")
     emit_update(
         phase,
         compass_samples + visible_samples,
@@ -443,6 +460,7 @@ def resolve_assist_alignment_prompt(target_name, sample):
         last_flight = None
         for _ in range(STABLE_ATTEMPTS):
             sample += 1
+            guard_near_orbit(target_name, sample, "VERIFYING_ASSIST_ALIGNMENT")
             last_flight = observe_flight()
             state = last_flight["state"]
             if state == "FSD_ALIGNMENT_REQUIRED":
@@ -508,6 +526,8 @@ def resolve_assist_line_of_sight_prompt(target_name, sample, recovery_count):
             reason="LINE_OF_SIGHT_CHILD_COMPLETED_CYCLE_" + str(cycle),
         )
 
+        guard_near_orbit(target_name, sample, "POST_LINE_OF_SIGHT_SEPARATION")
+
         emit_update(
             "REALIGNING_COMPASS_AFTER_SEPARATION",
             sample,
@@ -554,6 +574,7 @@ def resolve_assist_line_of_sight_prompt(target_name, sample, recovery_count):
         clear_confirmations = 0
         for _ in range(STABLE_ATTEMPTS):
             sample += 1
+            guard_near_orbit(target_name, sample, "VERIFYING_LINE_OF_SIGHT_CLEAR")
             flight = observe_flight()
             state = flight["state"]
             if state == "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED":
@@ -650,6 +671,7 @@ def main(ctx):
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("PREFLIGHT", 0, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
     action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
+    guard_near_orbit(target_name, 0, "PREFLIGHT")
     stream.activity(message="Aligning destination before Supercruise Assist entry", level="info")
     initial_alignment_profile = "SUPERCRUISE_ASSIST" if supercruise_confirmed else "NORMAL_SPACE"
     initial_alignment = align_destination_pair(target_name, initial_alignment_profile, "ALIGNING_FOR_ENTRY", "INITIAL_ALIGNMENT_PAIR_COMPLETED")
@@ -669,6 +691,7 @@ def main(ctx):
         hud_confirmations = 0
         for _ in range(SUPERCRUISE_ENTRY_LIMIT):
             sample += 1
+            guard_near_orbit(target_name, sample, "SUPERCRUISE_ENTRY")
             flight = observe_flight()
             last_flight_status = flight["state"]
             last_prompt_text = flight["text"]
@@ -718,6 +741,7 @@ def main(ctx):
     # itself attempt to start FSD and race a later explicit toggle.
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("ENTERED", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
+    guard_near_orbit(target_name, sample, "ENTERED")
     if not assist_requested_confirmed:
         action.on_failure(id="elite-dangerous/close-left-panel", inputs={}, timeout_milliseconds=10000)
         ui_flight_context = observe_flight()
@@ -749,6 +773,7 @@ def main(ctx):
         task.sleep(milliseconds=POLL_MS)
     for _ in range(ASSIST_START_LIMIT):
         sample += 1
+        guard_near_orbit(target_name, sample, "WAITING_FOR_ASSIST")
         flight = observe_flight()
         last_flight_status = flight["state"]
         last_prompt_text = flight["text"]
@@ -847,26 +872,6 @@ def main(ctx):
     if assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS:
         fail("SUPERCRUISE ASSIST ACTIVE was not confirmed twice; Auto Throttle or Assist activation may not be active")
 
-    if destination_mode == "ORBIT_HANDOFF":
-        action.clear_on_failure()
-        stream.activity(message="Supercruise Assist and Orbit owns flight controls", level="info")
-        emit_update("ASSIST_ACTIVE", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, assist_active_confirmations=assist_active_confirmations, commanded_throttle=None, reason="ORBIT_ASSIST_HANDOFF_CONFIRMED")
-        return {
-            "schemaVersion": 1,
-            "task": "SUPERCRUISE_ASSIST_TO_DESTINATION",
-            "completed": True,
-            "finalPhase": "ASSIST_HANDOFF",
-            "targetName": target_name,
-            "destinationMode": destination_mode,
-            "assistActiveConfirmations": assist_active_confirmations,
-            "assistMissingSamples": 0,
-            "lineOfSightRecoveryCount": line_of_sight_recovery_count,
-            "stoppedConfirmations": 0,
-            "agentFlightInputAfterAssistActive": False,
-            "finalSpeed": None,
-            "sampleCount": sample,
-        }
-
     stream.activity(message="Supercruise Assist owns flight controls", level="info")
     assist_missing_samples = 0
     stopped_confirmations = 0
@@ -878,6 +883,7 @@ def main(ctx):
     agent_flight_input_after_assist_active = False
     for _ in range(ASSIST_ACTIVE_LIMIT):
         sample += 1
+        guard_near_orbit(target_name, sample, "GAME_CONTROLLED_APPROACH")
         flight = observe_flight()
         speed_attempt = action.try_call(id="elite-dangerous/ship-speed", inputs={})
         if not speed_attempt["ok"]:

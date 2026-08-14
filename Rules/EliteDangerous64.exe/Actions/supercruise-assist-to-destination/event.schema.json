@@ -8,9 +8,9 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "sample", "targetName", "panelTab", "assistButtonState", "flightStatus", "flightStatusSource", "flightPromptText", "massLock", "landingGear", "cargoScoop", "targetDetected", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "assistActiveConfirmations", "assistMissingSamples", "lineOfSightRequiredConfirmations", "lineOfSightRecoveryCount", "lineOfSightControl", "stoppedConfirmations", "commandedThrottle", "lastCommand", "reason"],
+      "required": ["phase", "sample", "targetName", "panelTab", "assistButtonState", "flightStatus", "flightStatusSource", "flightPromptText", "massLock", "landingGear", "cargoScoop", "targetDetected", "targetPresentation", "targetOffsetX", "targetOffsetY", "targetCenterDistancePixels", "assistActiveConfirmations", "assistMissingSamples", "lineOfSightRequiredConfirmations", "lineOfSightRecoveryCount", "lineOfSightControl", "stoppedConfirmations", "commandedThrottle", "lastCommand", "orbitalScaleState", "orbitalScaleConfidence", "humanTakeoverReady", "reason"],
       "properties": {
-        "phase": {"enum": ["PREFLIGHT", "OPENING_NAVIGATION", "LOCATING_TARGET", "OPENING_DETAIL", "LOCATING_ASSIST", "FOCUSING_ASSIST", "REQUESTING_ASSIST", "CLOSING_PANEL", "ALIGNING", "CHARGING", "ALIGNING_FOR_ENTRY", "CORRECTING_ASSIST_ALIGNMENT", "VERIFYING_ASSIST_ALIGNMENT", "ENTERED", "WAITING_FOR_ASSIST", "ASSIST_OWNERSHIP_TIMEOUT", "ASSIST_ACTIVE", "CONFIRMING_LINE_OF_SIGHT", "CLEARING_LINE_OF_SIGHT", "REALIGNING_COMPASS_AFTER_SEPARATION", "COMPASS_HANDOFF_CONFIRMED", "REALIGNING_VISIBLE_TARGET_AFTER_SEPARATION", "REALIGNING_AFTER_LINE_OF_SIGHT", "VERIFYING_LINE_OF_SIGHT_CLEAR", "REACQUIRING_ASSIST", "GAME_CONTROLLED_APPROACH", "VERIFYING_STOP", "COMPLETED"]},
+        "phase": {"enum": ["PREFLIGHT", "OPENING_NAVIGATION", "LOCATING_TARGET", "OPENING_DETAIL", "LOCATING_ASSIST", "FOCUSING_ASSIST", "REQUESTING_ASSIST", "CLOSING_PANEL", "ALIGNING", "CHARGING", "ALIGNING_FOR_ENTRY", "CORRECTING_ASSIST_ALIGNMENT", "VERIFYING_ASSIST_ALIGNMENT", "ENTERED", "WAITING_FOR_ASSIST", "ASSIST_OWNERSHIP_TIMEOUT", "ASSIST_ACTIVE", "CONFIRMING_LINE_OF_SIGHT", "CLEARING_LINE_OF_SIGHT", "REALIGNING_COMPASS_AFTER_SEPARATION", "COMPASS_HANDOFF_CONFIRMED", "REALIGNING_VISIBLE_TARGET_AFTER_SEPARATION", "REALIGNING_AFTER_LINE_OF_SIGHT", "VERIFYING_LINE_OF_SIGHT_CLEAR", "REACQUIRING_ASSIST", "GAME_CONTROLLED_APPROACH", "VERIFYING_STOP", "NEAR_ORBIT_SAFETY_TRIGGERED", "HUMAN_TAKEOVER", "COMPLETED"]},
         "sample": {"type": "integer", "minimum": 0, "maximum": 5000},
         "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
         "panelTab": {"type": ["string", "null"], "enum": ["ABSENT", "SYSTEM", "NAVIGATION", "TRANSACTIONS", "CONTACTS", "UNKNOWN", null]},
@@ -34,6 +34,9 @@
         "stoppedConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},
         "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 75, 100, null]},
         "lastCommand": {"type": ["string", "null"], "maxLength": 64},
+        "orbitalScaleState": {"type": ["string", "null"], "enum": ["DETECTED", "ABSENT", null]},
+        "orbitalScaleConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "humanTakeoverReady": {"type": "boolean"},
         "reason": {"type": ["string", "null"], "maxLength": 192}
       }
     }
