@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ type fakeWorkerClient struct {
 	closeCalls  int
 	fullErr     error
 	regionErr   error
+	regionHook  func()
 }
 
 type fakeCaptureNotifier struct {
@@ -52,6 +54,9 @@ func (c *fakeWorkerClient) Capture(context.Context, time.Time, capture.Request) 
 
 func (c *fakeWorkerClient) CaptureRegion(context.Context, time.Time, capture.RegionRequest) (capture.RegionResult, error) {
 	c.regionCalls++
+	if c.regionHook != nil {
+		c.regionHook()
+	}
 	if c.regionErr != nil {
 		return capture.RegionResult{}, c.regionErr
 	}
@@ -104,8 +109,8 @@ func TestCapturerReusesOneHealthyWorkerGeneration(t *testing.T) {
 	}
 }
 
-func TestCapturerDoesNotReplayDomainFailureAndStartsNextGenerationLater(t *testing.T) {
-	first := &fakeWorkerClient{pid: 41, fullErr: capture.Failure("capture_readback_failed", "D3D11 Map failed", errors.New("worker exited"))}
+func TestCapturerDoesNotReplayNonTransientFailureAndStartsNextGenerationLater(t *testing.T) {
+	first := &fakeWorkerClient{pid: 41, fullErr: capture.Failure("unsupported_color_space", "unsupported primary-monitor color space", errors.New("fixture"))}
 	second := &fakeWorkerClient{pid: 42}
 	clients := []workerClient{first, second}
 	var mu sync.Mutex
@@ -123,7 +128,7 @@ func TestCapturerDoesNotReplayDomainFailureAndStartsNextGenerationLater(t *testi
 	}
 	_, err = capturer.Capture(context.Background(), capture.Request{})
 	var failure *capture.Error
-	if !errors.As(err, &failure) || failure.Code != "capture_readback_failed" {
+	if !errors.As(err, &failure) || failure.Code != "unsupported_color_space" {
 		t.Fatalf("error=%v", err)
 	}
 	if starts != 1 || first.fullCalls != 1 || first.closeCalls != 1 || second.fullCalls != 0 {
@@ -160,8 +165,84 @@ func TestCapturerRetriesRegionTransportEOFAcrossWorkerGenerations(t *testing.T) 
 	}
 }
 
-func TestCapturerDoesNotRetryNonTransportRegionFailure(t *testing.T) {
-	client := &fakeWorkerClient{pid: 41, regionErr: capture.Failure("capture_readback_failed", "D3D11 Map failed", errors.New("HRESULT"))}
+func TestCapturerRetriesTransientRegionFailureAcrossWorkerGenerations(t *testing.T) {
+	first := &fakeWorkerClient{pid: 41, regionErr: capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", errors.New("HRESULT 0x80070057"))}
+	second := &fakeWorkerClient{pid: 42}
+	clients := []workerClient{first, second}
+	starts := 0
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			client := clients[starts]
+			starts++
+			return client, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := capturer.CaptureRegion(context.Background(), capture.RegionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if starts != 2 || first.regionCalls != 1 || first.closeCalls != 1 || second.regionCalls != 1 || result.ImageWidth != 10 {
+		t.Fatalf("starts=%d first=%d/%d second=%d result=%+v", starts, first.regionCalls, first.closeCalls, second.regionCalls, result)
+	}
+}
+
+func TestCapturerDoesNotRetryFullCaptureProviderFailure(t *testing.T) {
+	client := &fakeWorkerClient{pid: 41, fullErr: capture.Failure("capture_readback_failed", "D3D11 Map failed", errors.New("HRESULT"))}
+	starts := 0
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			starts++
+			return client, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = capturer.Capture(context.Background(), capture.Request{})
+	if err == nil {
+		t.Fatal("expected full-capture provider failure")
+	}
+	if starts != 1 || client.fullCalls != 1 || client.closeCalls != 1 {
+		t.Fatalf("starts=%d calls=%d closes=%d", starts, client.fullCalls, client.closeCalls)
+	}
+}
+
+func TestCapturerExhaustsOneFreshGenerationRegionRecovery(t *testing.T) {
+	clients := make([]workerClient, 2)
+	for index := range clients {
+		clients[index] = &fakeWorkerClient{
+			pid:       41 + index,
+			regionErr: capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", fmt.Errorf("HRESULT attempt %d", index+1)),
+		}
+	}
+	starts := 0
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			client := clients[starts]
+			starts++
+			return client, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = capturer.CaptureRegion(context.Background(), capture.RegionRequest{})
+	if err == nil || !strings.Contains(err.Error(), "HRESULT attempt 2") {
+		t.Fatalf("error=%v", err)
+	}
+	if starts != 2 {
+		t.Fatalf("starts=%d", starts)
+	}
+	for index, client := range clients {
+		fixture := client.(*fakeWorkerClient)
+		if fixture.regionCalls != 1 || fixture.closeCalls != 1 {
+			t.Fatalf("client %d calls=%d closes=%d", index, fixture.regionCalls, fixture.closeCalls)
+		}
+	}
+}
+
+func TestCapturerDoesNotRetryNonTransientRegionFailure(t *testing.T) {
+	client := &fakeWorkerClient{pid: 41, regionErr: capture.Failure("screen_pixel_limit_exceeded", "region exceeds pixel limit", errors.New("fixture"))}
 	starts := 0
 	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
 		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
@@ -176,7 +257,32 @@ func TestCapturerDoesNotRetryNonTransportRegionFailure(t *testing.T) {
 		t.Fatal("expected region failure")
 	}
 	if starts != 1 || client.regionCalls != 1 || client.closeCalls != 1 {
-		t.Fatalf("non-transport failure was retried: starts=%d calls=%d closes=%d", starts, client.regionCalls, client.closeCalls)
+		t.Fatalf("non-transient failure was retried: starts=%d calls=%d closes=%d", starts, client.regionCalls, client.closeCalls)
+	}
+}
+
+func TestCapturerDoesNotStartRegionRecoveryAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &fakeWorkerClient{
+		pid:        41,
+		regionErr:  capture.Failure("capture_readback_failed", "failed to create the region unordered-access view", errors.New("HRESULT 0x80070057")),
+		regionHook: cancel,
+	}
+	starts := 0
+	capturer, err := newWithStarter(context.Background(), workerFixture(t), time.Second, false, &fakeCaptureNotifier{}, slog.New(slog.NewTextHandler(io.Discard, nil)),
+		func(context.Context, string, bool, *slog.Logger) (workerClient, error) {
+			starts++
+			return client, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = capturer.CaptureRegion(ctx, capture.RegionRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v", err)
+	}
+	if starts != 1 || client.regionCalls != 1 || client.closeCalls != 1 {
+		t.Fatalf("starts=%d calls=%d closes=%d", starts, client.regionCalls, client.closeCalls)
 	}
 }
 

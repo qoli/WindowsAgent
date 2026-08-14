@@ -37,8 +37,10 @@ The screenshot capability is available today:
 - strict JSON errors with no GDI or hidden provider fallback; one
   crash-isolated worker generation keeps its WGC session, D3D11
   device/context, frame pool, and region shader resident across requests
-- a failed WGC provider call is never replayed inside the worker adapter; that
-  generation is retired and only a later request may start a fresh generation
+- a transient region readback failure retires that worker generation and gets
+  one fresh-generation retry using the same backend and request; transport EOF
+  retains its five-attempt bound, while full-capture provider failures and
+  exhausted or non-transient failures remain explicit
 - optional hidden startup through an interactive-user Scheduled Task
 
 The generic Starlark launcher and finite Script capabilities are available

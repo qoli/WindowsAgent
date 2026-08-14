@@ -37,12 +37,18 @@ fails initialization explicitly. There is no bordered-capture fallback.
 
 ## Failure contract
 
-There is no capture-provider or in-process fallback. A protocol failure,
-deadline, worker exit, native access violation, or WGC/D3D11 capture error
-fails the current call and retires that generation. The Agent never replays the
-failed request because its input or foreground postcondition may no longer be
-current. A later independent request may create a new generation explicitly
-visible through generation and process identifiers in lifecycle logs.
+There is no capture-provider or in-process fallback. A protocol EOF or region
+`capture_readback_failed` retires that generation. Because a region capture is
+an idempotent observation, one unchanged request may run once on a fresh
+generation after a readback failure. Transport EOF retains its separate
+five-attempt bound. Each attempt acquires a new frame and revalidates
+capture-time foreground identity; no pixels or metadata from a failed attempt
+are returned. Recovery, exhaustion, generation, and process identifiers remain
+visible in runtime logs. Caller cancellation and the original absolute
+deadline bound the complete retry set. Full-capture provider failures,
+non-transient failures, and an exhausted region recovery retain the exact final
+cause and remain terminal. There is no capture backend, provider, algorithm,
+or cached-frame fallback.
 
 Worker stderr is bounded and forwarded into the Agent's runtime diagnostics.
 The installer and complete binary deployment path configure process-scoped
@@ -79,13 +85,13 @@ session and record:
    version, worker generation, and PID;
 2. repeated alternating OCR-sized and heat-sized region captures through the
    real Action path, plus full capture, without Agent restart;
-3. one deliberately terminated worker where the in-flight request fails once,
-   the Agent remains healthy, and the next independent request starts exactly
-   one new generation;
+3. one deliberately failed transient in-flight capture where the current
+   generation is retired and the unchanged idempotent request succeeds on
+   exactly one fresh generation, plus an exhausted case that remains terminal;
 4. current foreground identity and domain postconditions independently from
    transport and process health;
-5. absence of fallback, request replay, stale-frame substitution, orphaned
-   workers, and unbounded crash artifacts;
+5. absence of fallback, changed-request replay, stale-frame substitution,
+   orphaned workers, and unbounded crash artifacts;
 6. Windows reports borderless access allowed and `IsBorderRequired=false`, no
    yellow capture border remains, and the capture pulse appears without being
    included in captured output or stealing focus.

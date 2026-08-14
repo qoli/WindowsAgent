@@ -30,8 +30,10 @@ type workerStarter func(context.Context, string, bool, *slog.Logger) (workerClie
 
 // Capturer is the Agent-side adapter for crash-isolated persistent WGC worker
 // generations. An idempotent capture request may be replayed on a fresh
-// generation only after an explicit worker transport EOF. Capture/provider
-// failures remain terminal and are never changed or retried here.
+// generation after an explicit worker transport EOF. A region readback may
+// additionally receive one fresh-generation recovery because it is an
+// idempotent observation. The provider and capture request never change, and
+// exhausted or non-transient failures remain explicit.
 type Capturer struct {
 	mu           sync.Mutex
 	executable   string
@@ -123,15 +125,28 @@ func (c *Capturer) Capture(ctx context.Context, request capture.Request) (captur
 		}
 		result, err := client.Capture(ctx, deadline, request)
 		if err == nil {
+			if attempt > 1 {
+				c.logger.InfoContext(ctx, "wgc_worker_capture_retry_recovered",
+					"capture_kind", "full", "attempts", attempt, "retry_count", attempt-1)
+			}
 			return result, nil
 		}
 		c.retireLocked("capture_failed", err)
-		if attempt == maxTransportAttempts || !retryableTransportFailure(err) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return capture.Result{}, ctxErr
+		}
+		retryable := retryableTransportFailure(err)
+		if attempt == maxTransportAttempts || !retryable {
+			if retryable {
+				c.logger.ErrorContext(ctx, "wgc_worker_capture_retry_exhausted",
+					"capture_kind", "full", "attempts", attempt, "retry_count", attempt-1, "error", err)
+			}
 			return capture.Result{}, fmt.Errorf("persistent WGC worker capture: %w", err)
 		}
-		c.logger.WarnContext(ctx, "wgc_worker_transport_retry",
+		c.logger.WarnContext(ctx, "wgc_worker_capture_retry_scheduled",
 			"capture_kind", "full",
-			"attempt", attempt,
+			"failed_attempt", attempt,
+			"next_attempt", attempt+1,
 			"max_attempts", maxTransportAttempts,
 			"error", err,
 		)
@@ -147,6 +162,7 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.notifyCapture("region")
+	regionReadbackRecoveries := 0
 	for attempt := 1; attempt <= maxTransportAttempts; attempt++ {
 		client, err := c.clientLocked(ctx)
 		if err != nil {
@@ -154,15 +170,32 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 		}
 		result, err := client.CaptureRegion(ctx, deadline, request)
 		if err == nil {
+			if attempt > 1 {
+				c.logger.InfoContext(ctx, "wgc_worker_capture_retry_recovered",
+					"capture_kind", "region", "attempts", attempt, "retry_count", attempt-1)
+			}
 			return result, nil
 		}
 		c.retireLocked("region_failed", err)
-		if attempt == maxTransportAttempts || !retryableTransportFailure(err) {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return capture.RegionResult{}, ctxErr
+		}
+		retryable := retryableTransportFailure(err)
+		if !retryable && regionReadbackRecoveries == 0 && retryableRegionReadbackFailure(err) {
+			regionReadbackRecoveries++
+			retryable = true
+		}
+		if attempt == maxTransportAttempts || !retryable {
+			if retryable {
+				c.logger.ErrorContext(ctx, "wgc_worker_capture_retry_exhausted",
+					"capture_kind", "region", "attempts", attempt, "retry_count", attempt-1, "error", err)
+			}
 			return capture.RegionResult{}, fmt.Errorf("persistent WGC worker region capture: %w", err)
 		}
-		c.logger.WarnContext(ctx, "wgc_worker_transport_retry",
+		c.logger.WarnContext(ctx, "wgc_worker_capture_retry_scheduled",
 			"capture_kind", "region",
-			"attempt", attempt,
+			"failed_attempt", attempt,
+			"next_attempt", attempt+1,
 			"max_attempts", maxTransportAttempts,
 			"error", err,
 		)
@@ -172,6 +205,14 @@ func (c *Capturer) CaptureRegion(ctx context.Context, request capture.RegionRequ
 
 func retryableTransportFailure(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func retryableRegionReadbackFailure(err error) bool {
+	var failure *capture.Error
+	if !errors.As(err, &failure) {
+		return false
+	}
+	return failure.Code == "capture_readback_failed"
 }
 
 func (c *Capturer) notifyCapture(kind string) {
