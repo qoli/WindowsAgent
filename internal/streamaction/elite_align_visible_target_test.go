@@ -15,6 +15,7 @@ type alignVisibleTargetCaller struct {
 	posErrors       []error
 	controls        []string
 	positionActions []string
+	positionInputs  []map[string]any
 	heatIndex       int
 	posIndex        int
 }
@@ -30,6 +31,7 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		return value, nil
 	case "elite-dangerous/escape-vector-visible-position", "elite-dangerous/supercruise-target-position", "elite-dangerous/supercruise-visible-reticle-position":
 		c.positionActions = append(c.positionActions, id)
+		c.positionInputs = append(c.positionInputs, inputs)
 		if len(c.posErrors) > 0 {
 			err := c.posErrors[0]
 			c.posErrors = c.posErrors[1:]
@@ -79,6 +81,12 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 	for index := range want {
 		if caller.positionActions[index] != want[index] {
 			t.Fatalf("position Actions=%v want=%v", caller.positionActions, want)
+		}
+		if caller.positionActions[index] == "elite-dangerous/supercruise-target-position" && caller.positionInputs[index]["reticleEvidencePolicy"] != "HUD_OVERLAY_AWARE" {
+			t.Fatalf("identity inputs=%v", caller.positionInputs[index])
+		}
+		if caller.positionActions[index] == "elite-dangerous/supercruise-visible-reticle-position" && caller.positionInputs[index]["evidencePolicy"] != "HUD_OVERLAY_AWARE" {
+			t.Fatalf("tracking inputs=%v", caller.positionInputs[index])
 		}
 	}
 	events := joinEventPhases(reporter.payloads)

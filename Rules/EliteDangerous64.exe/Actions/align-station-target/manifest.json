@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 75,
+  "version": 77,
   "title": "Elite Dangerous align selected Station target",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

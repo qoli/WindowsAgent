@@ -22,6 +22,14 @@ planes on one current 140x140 RGB region and reports the chosen plane, quality,
 topology, and capture time in the alignment stream. Completion still requires
 the tracked marker to remain within 12 reference pixels of the 1920x1080 screen
 centre for three consecutive destination samples.
+Destination identity acquisition and local tracking explicitly request the
+`HUD_OVERLAY_AWARE` evidence policy. Adaptive orange remains primary; only
+when both adaptive planes reject a current frame may a valid strict-RGB
+three-quarter ring be selected. Live Obama Reach evidence showed the selected
+body and orbit overlay filling every adaptive angular bin while strict RGB
+still isolated the SOLID focus ring at `0.830` shape confidence. The selected
+plane and policy remain current-frame provenance and neither can rescue missing
+target identity or invalid label-to-ring layout.
 
 This is deliberately separate from `align-station-target`. Compass alignment
 handles rear-hemisphere and large-angle navigation; visible-target alignment

@@ -228,11 +228,11 @@ def main(ctx):
             observation_mode = "RETICLE_TRACKING"
             attempt = action.try_call(
                 id="elite-dangerous/supercruise-visible-reticle-position",
-                inputs={"hintX": int(tracked_target["referenceX"]), "hintY": int(tracked_target["referenceY"])},
+                inputs={"hintX": int(tracked_target["referenceX"]), "hintY": int(tracked_target["referenceY"]), "evidencePolicy": "HUD_OVERLAY_AWARE"},
             )
         else:
             observation_mode = "IDENTITY_ACQUISITION"
-            attempt = action.try_call(id="elite-dangerous/supercruise-target-position", inputs={"targetName": target_name})
+            attempt = action.try_call(id="elite-dangerous/supercruise-target-position", inputs={"targetName": target_name, "reticleEvidencePolicy": "HUD_OVERLAY_AWARE"})
         if not attempt["ok"]:
             text = attempt["error"]
             bounded = text if len(text) <= 512 else text[:512]

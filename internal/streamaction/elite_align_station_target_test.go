@@ -631,14 +631,14 @@ func TestEliteAlignStationTargetNavBeaconOverridesStaticMotionAndReportsIt(t *te
 	for _, payload := range reporter.payloads {
 		text := string(payload)
 		if contains(text, `"reason":"NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE"`) {
-			if contains(text, `"commandHoldMs":40`) {
-				pulseHolds = append(pulseHolds, "40")
-			} else if contains(text, `"commandHoldMs":80`) {
+			if contains(text, `"commandHoldMs":80`) {
 				pulseHolds = append(pulseHolds, "80")
+			} else if contains(text, `"commandHoldMs":240`) {
+				pulseHolds = append(pulseHolds, "240")
 			}
 		}
 	}
-	if strings.Join(pulseHolds, ",") != "40,40,80" || !contains(string(output), `"sampleCount":8`) || !contains(string(output), `"commandCount":3`) || !contains(string(output), `"stableConfirmations":3`) {
+	if strings.Join(pulseHolds, ",") != "80,80,240" || !contains(string(output), `"sampleCount":8`) || !contains(string(output), `"commandCount":3`) || !contains(string(output), `"stableConfirmations":3`) {
 		t.Fatalf("NAV BEACON must reject the 5.657px hysteresis handoff and use one moving-profile correction: output=%s payloads=%v", output, reporter.payloads)
 	}
 	foundOverride := false

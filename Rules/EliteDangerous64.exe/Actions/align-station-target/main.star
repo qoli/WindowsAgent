@@ -1,5 +1,6 @@
 SAMPLE_CADENCE_MS = 1000
 SUPERCRUISE_STATIC_TRACK_CADENCE_MS = 650
+NAV_BEACON_VISIBLE_HANDOFF_CADENCE_MS = 500
 MAX_SLEEP_STEP_MS = 250
 MAX_COMMANDS = 120
 MAX_SAMPLES = 240
@@ -43,8 +44,8 @@ HYPERSPACE_CHARGE_ULTRA_FINE_DISTANCE_PIXELS = 20
 SUPERCRUISE_HYPERSPACE_CHARGE_FINE_HOLD_MS = 300
 SUPERCRUISE_STATIC_ALIGN_ULTRA_FINE_HOLD_MS = 40
 NAV_BEACON_VISIBLE_HANDOFF_FINE_DISTANCE_PIXELS = 8
-NAV_BEACON_VISIBLE_HANDOFF_FINE_HOLD_MS = 40
-NAV_BEACON_VISIBLE_HANDOFF_RECOVERY_HOLD_MS = 80
+NAV_BEACON_VISIBLE_HANDOFF_FINE_HOLD_MS = 80
+NAV_BEACON_VISIBLE_HANDOFF_RECOVERY_HOLD_MS = 240
 CENTER_ENTRY_BRAKE_MS = 100
 SUPERCRUISE_CENTER_ENTRY_BRAKE_MS = 300
 SUPERCRUISE_SUSTAINED_RELEASE_BRAKE_MS = 160
@@ -388,6 +389,12 @@ def main(ctx):
         fine_hold = SUPERCRUISE_TRACK_FINE_HOLD_MS if mode == "TRACK" else SUPERCRUISE_FINE_HOLD_MS
     sample_limit = tracking_samples if mode == "TRACK" else MAX_SAMPLES
     sample_cadence_ms = SUPERCRUISE_STATIC_TRACK_CADENCE_MS if target_motion == "STATIC" and supercruise_profile else SAMPLE_CADENCE_MS
+    if alignment_purpose == "VISIBLE_HANDOFF" and target_name == "NAV BEACON":
+        # A moving contact can cross the strict four-pixel Gate between 1 Hz
+        # samples. Keep every control decision fresh, but observe at 2 Hz so
+        # the passive settle Gate does not spend most of the command budget
+        # chasing detector quantization and target drift.
+        sample_cadence_ms = NAV_BEACON_VISIBLE_HANDOFF_CADENCE_MS
 
     stream.activity(message="Compass control profile " + control_profile + " selected from " + control_profile_source + " for " + alignment_purpose, level="info")
     if nav_beacon_motion_override:
@@ -977,10 +984,13 @@ def main(ctx):
                     target["centerDistancePixels"] <= NAV_BEACON_VISIBLE_HANDOFF_FINE_DISTANCE_PIXELS and
                     pulse != None
                 ):
-                    # The moving Nav Beacon occupies a 3.6-5px quantized band
-                    # around the strict four-pixel Gate. Cap near-center input
-                    # well below the generic moving-target 120/240ms law so a
-                    # correction cannot repeatedly sweep across the Gate.
+                    # The moving Nav Beacon can remain in a 5-8px quantized
+                    # band while 40/80ms pulses are fully absorbed by target
+                    # drift. Keep the first correction bounded at 80ms, then
+                    # use the generic 240ms recovery strength only after two
+                    # measured no-progress samples. Fresh Compass observations
+                    # still gate every later command and the four-pixel handoff
+                    # remains unchanged.
                     pulse = [pulse[0], NAV_BEACON_VISIBLE_HANDOFF_RECOVERY_HOLD_MS if no_movement_count >= 2 else NAV_BEACON_VISIBLE_HANDOFF_FINE_HOLD_MS]
                     pulse_reason = "NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE"
                 if (

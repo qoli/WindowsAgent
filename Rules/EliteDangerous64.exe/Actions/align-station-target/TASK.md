@@ -305,12 +305,17 @@ control evidence. `VISIBLE_HANDOFF` retains its
 strict four-reference-pixel Compass Gate for this moving contact and applies no
 verification hysteresis: all three passive settle contacts must remain within four pixels.
 The STATIC-only 300 ms inner pulse is also disabled. Inside eight pixels,
-NAV BEACON uses a 40 ms micro-pulse and may escalate only to 80 ms after two
+NAV BEACON uses an 80 ms micro-pulse and escalates to 240 ms only after two
 measured no-progress samples; streaming events mark this as
-`NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE`. This prevents the generic moving-target
-120/240 ms law from repeatedly sweeping across the observed 3.6-5px quantized
-band. Target motion does not authorize an early handoff to
-`align-visible-target`.
+`NAV_BEACON_VISIBLE_HANDOFF_MICRO_PULSE`. Live Evidence showed repeated 80 ms
+corrections could remain at `(-7,+3)` to `(-6,+3)` until the command limit, so
+the recovery pulse must exceed the moving target's own drift. Fresh Compass
+observations and the strict four-pixel Gate still prevent an early handoff to
+`align-visible-target`. This moving-target handoff samples at 500 ms rather
+than the generic 1000 ms cadence. The faster cadence does not authorize an
+open-loop burst: every 80/240 ms pulse still requires a fresh Compass result,
+and completion still requires three consecutive passive observations inside
+the unchanged four-pixel Gate.
 
 TRACK requires its first detected marker to be SOLID. An initial HOLLOW marker
 fails before sending attitude input because the invocation has no prior control
