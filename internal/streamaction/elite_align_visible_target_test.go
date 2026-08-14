@@ -132,6 +132,30 @@ func TestEliteAlignVisibleTargetKeepsContinuousReticleTrackThroughPillarOcclusio
 	}
 }
 
+func TestEliteAlignVisibleTargetAllowsMoreThanEightyConvergingMicroPulses(t *testing.T) {
+	caller := &alignVisibleTargetCaller{}
+	for index := 0; index < 100; index++ {
+		caller.heats = append(caller.heats, visibleHeat("KNOWN", 24))
+	}
+	caller.positions = append(caller.positions, visiblePosition(80, -400, 407.9))
+	for index := 0; index < 140; index++ {
+		caller.positions = append(caller.positions, visiblePosition(80, -400+float64(index), 400))
+	}
+	for index := 0; index < 10; index++ {
+		caller.positions = append(caller.positions, visiblePosition(8, 6, 10))
+	}
+
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "OBAMA REACH", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, &fixtureReporter{})
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) <= 120 || len(caller.controls) > 160 {
+		t.Fatalf("controls=%d want >120 and <=160", len(caller.controls))
+	}
+}
+
 func TestEliteAlignVisibleTargetTrackingLossReacquiresIdentityWithoutSteering(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},

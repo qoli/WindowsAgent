@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 23,
+  "version": 25,
   "title": "Elite Dangerous precisely align a visible HUD target",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

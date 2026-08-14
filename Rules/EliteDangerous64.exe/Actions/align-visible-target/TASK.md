@@ -65,7 +65,17 @@ its 750 ms cadence and three confirmations. Destination pulses are capped at
 120 ms while local tracking is active. Live Evidence measured a 300 ms Pitch
 pulse moving the reticle 50–53 reference pixels, outside the local tracker's
 28-pixel candidate span; 120 ms retains a conservative closed-loop margin. The
-profile retains the proven 80 ms pulse inside 20 pixels. Live v9 evidence needed eleven 80 ms pulses to
+bounded command budget is 160 pulses within 192 total samples. The sample
+budget includes the required periodic identity revalidation, heat checkpoints,
+and final passive centre confirmations instead of terminating a
+still-converging controller at the former 120-sample boundary. Live
+normal-space Obama Reach evidence
+showed a correctly identified SOLID focus frame continuously converging from
+about 405 to 69 reference pixels while exhausting the former 80-pulse budget;
+the larger bound preserves the reviewed micro-pulse gain and all current-frame,
+heat, cancellation, and failure-compensation Gates instead of increasing pulse
+amplitude. The profile retains the proven 80 ms pulse inside 20 pixels. Live v9
+evidence needed eleven 80 ms pulses to
 traverse roughly 36 to 13 pixels; the split raises only that inefficient
 mid-fine band while preserving the near-centre gain.
 Near-centre destination Yaw uses 120 ms while Pitch remains at 80 ms. Live

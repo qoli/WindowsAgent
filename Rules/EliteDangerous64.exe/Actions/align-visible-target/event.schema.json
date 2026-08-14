@@ -12,8 +12,8 @@
       "properties": {
         "phase": {"enum": ["STOPPING", "OBSERVING", "ALIGNING", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR", "SAFETY_GATE"]},
         "targetName": {"type": "string", "maxLength": 96},
-        "sample": {"type": "integer", "minimum": 0, "maximum": 120},
-        "commandCount": {"type": "integer", "minimum": 0, "maximum": 80},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 192},
+        "commandCount": {"type": "integer", "minimum": 0, "maximum": 160},
         "targetState": {"type": ["string", "null"], "enum": ["DETECTED", "UNKNOWN", null]},
         "observationMode": {"type": ["string", "null"], "enum": ["IDENTITY_ACQUISITION", "RETICLE_TRACKING", "ESCAPE_VECTOR_POSITION", null]},
         "offsetX": {"type": ["number", "null"]},

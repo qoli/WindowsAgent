@@ -411,6 +411,19 @@ def align_visible_destination(target_name):
     )
     return visible_result["sampleCount"]
 
+def align_destination_pair(target_name, control_profile, phase, reason_prefix):
+    compass_samples = align_compass(target_name, control_profile)
+    visible_samples = align_visible_destination(target_name)
+    emit_update(
+        phase,
+        compass_samples + visible_samples,
+        target_name,
+        commanded_throttle=0,
+        last_command="ALIGN_STATION_TARGET+ALIGN_VISIBLE_TARGET",
+        reason=reason_prefix + ":" + str(compass_samples) + "+" + str(visible_samples),
+    )
+    return {"compassSamples": compass_samples, "visibleSamples": visible_samples}
+
 def resolve_assist_alignment_prompt(target_name, sample):
     for cycle_index in range(ASSIST_ALIGNMENT_CYCLE_LIMIT):
         cycle = cycle_index + 1
@@ -636,11 +649,12 @@ def main(ctx):
     preflight(target_name)
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("PREFLIGHT", 0, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", reason=throttle["control"])
+    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     stream.activity(message="Aligning destination before Supercruise Assist entry", level="info")
     initial_alignment_profile = "SUPERCRUISE_ASSIST" if supercruise_confirmed else "NORMAL_SPACE"
-    sample = align_compass(target_name, initial_alignment_profile)
+    initial_alignment = align_destination_pair(target_name, initial_alignment_profile, "ALIGNING_FOR_ENTRY", "INITIAL_ALIGNMENT_PAIR_COMPLETED")
+    sample = initial_alignment["compassSamples"] + initial_alignment["visibleSamples"]
 
-    action.on_failure(id="elite-dangerous/set-throttle", inputs={"percent": 0}, critical=True, timeout_milliseconds=2000)
     charging_seen = supercruise_confirmed
     entered = supercruise_confirmed
     last_flight_status = "UNKNOWN"
@@ -672,9 +686,9 @@ def main(ctx):
                 charging_seen = True
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
                 emit_update("ALIGNING_FOR_ENTRY", sample, target_name, flight_status=last_flight_status, prompt_text=last_prompt_text, commanded_throttle=0, last_command="SET_THROTTLE_0", reason="ALIGNMENT_REQUIRES_MINIMUM_THROTTLE:" + throttle["control"])
-                alignment_sample_count = align_compass(target_name, "NORMAL_SPACE")
+                entry_alignment = align_destination_pair(target_name, "NORMAL_SPACE", "ALIGNING_FOR_ENTRY", "CHARGING_ALIGNMENT_PAIR_COMPLETED")
                 throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
-                command = "ALIGN_TARGETS:" + str(alignment_sample_count) + "+SET_THROTTLE_100"
+                command = "ALIGN_STATION_TARGET+ALIGN_VISIBLE_TARGET:" + str(entry_alignment["compassSamples"]) + "+" + str(entry_alignment["visibleSamples"]) + "+SET_THROTTLE_100"
                 phase = "ALIGNING_FOR_ENTRY"
             elif last_flight_status == "SUPERCRUISE":
                 if not charging_seen:

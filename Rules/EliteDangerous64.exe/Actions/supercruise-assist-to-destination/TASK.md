@@ -9,18 +9,25 @@ normal space, and confirm the ship's Supercruise Assist setting is `Auto
 Throttle`. The Action checks Mass Lock, Landing Gear, and Cargo Scoop through
 a four-sample bounded preflight window. Any observed `ON` fails immediately;
 two consecutive observations with all three `OFF` pass; unresolved `UNKNOWN`
-remains unknown and fails only after the window is exhausted. It then
-invokes `align-station-target` with the named destination. The child owns the
+remains unknown and fails only after the window is exhausted. It then invokes
+`align-station-target` followed by `align-visible-target` with the named
+destination. The Compass child owns the
 rule that `NAV BEACON` is always `targetMotion=MOVING`; ordinary stations retain
 the requested `STATIC` profile. Before Supercruise
 entry it uses the strict `NORMAL_SPACE` Compass profile with the
 `HYPERSPACE_CHARGE` purpose, which requires the tighter normal-space pre-FSD
-Gate. After a confirmed Supercruise entry it uses `SUPERCRUISE_ASSIST` with
+Gate; the visible child then requires the current destination focus frame to
+complete its `DESTINATION`/`STRICT` screen-centre Gate. Both children must
+complete at 0% throttle before Supercruise input or acceleration is permitted.
+If charging later reports `FSD_ALIGNMENT_REQUIRED`, the Action returns to 0%,
+repeats the same Compass-to-visible pair, and restores 100% only after both
+children complete. A Compass handoff alone never authorizes charging recovery.
+After a confirmed Supercruise entry it uses `SUPERCRUISE_ASSIST` with
 the explicit `VISIBLE_HANDOFF` purpose. The Compass child owns rear/coarse
 entry into the appropriate front SOLID domain; `align-visible-target` owns any
-following precise screen-centre Gate. The Compass child remains the
-coarse and initial alignment feedback source and must complete while throttle
-is 0% before acceleration is permitted. `ALIGN WITH TARGET DESTINATION` is a
+following precise screen-centre Gate. A resumed invocation already in
+Supercruise uses the same pair with the `SUPERCRUISE_ASSIST` profile before it
+continues to the Assist UI. `ALIGN WITH TARGET DESTINATION` is a
 generic current-frame target-alignment prompt even though `flight-status`
 retains the historical `FSD_ALIGNMENT_REQUIRED` state name. It is not scoped
 to the FSD charging phase. After Assist selection, that prompt starts a bounded
@@ -51,6 +58,9 @@ as completed entry or issue a blind second FSD toggle. The entry window permits
 countdown after the previous 30-observation bound. Exhausting the larger bound
 still fails explicitly and invokes the registered 0% throttle compensation;
 elapsed samples never substitute for two fresh persistent-HUD observations.
+Each initial or charging-recovery pair emits a durable
+`ALIGN_STATION_TARGET+ALIGN_VISIBLE_TARGET` summary with both child sample
+counts; neither child terminal result is hidden as completion of the pair.
 
 Only after Supercruise entry does the Action command 0% minimum Supercruise
 throttle and reopen NAVIGATION. This avoids racing the version-dependent UI
