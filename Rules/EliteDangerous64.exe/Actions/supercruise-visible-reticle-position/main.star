@@ -7,32 +7,29 @@ ROI_HALF = 70
 CANDIDATE_SPAN = 28
 CANDIDATE_STEP = 4
 REFINEMENT_RADIUS = 4
-INNER_RADIUS_SQUARED = 34 * 34
-OUTER_RADIUS_SQUARED = 58 * 58
-SEARCH_INNER_RADIUS_SQUARED = 40 * 40
-SEARCH_OUTER_RADIUS_SQUARED = 52 * 52
+SEARCH_INNER_RADIUS = 40
+SEARCH_OUTER_RADIUS = 52
+SEARCH_INNER_RADIUS_SQUARED = SEARCH_INNER_RADIUS * SEARCH_INNER_RADIUS
+SEARCH_OUTER_RADIUS_SQUARED = SEARCH_OUTER_RADIUS * SEARCH_OUTER_RADIUS
 INNER_NOISE_MIN_RADIUS_SQUARED = 28 * 28
 INNER_NOISE_MAX_RADIUS_SQUARED = 38 * 38
 OUTER_NOISE_MIN_RADIUS_SQUARED = 54 * 54
 OUTER_NOISE_MAX_RADIUS_SQUARED = 64 * 64
-MIN_RING_SCORE = 18
-MIN_DASHED_OCCUPIED_ANGULAR_BINS = 18
-MIN_SOLID_OCCUPIED_ANGULAR_BINS = 40
+RIDGE_SIGNAL_HALF_WIDTH = 1
+RIDGE_BACKGROUND_INNER_OFFSET = 5
+RIDGE_BACKGROUND_OUTER_OFFSET = 5
+MIN_STRUCTURAL_OCCUPIED_BINS = 36
+MAX_RADIUS_MAD = 2.0
+MIN_ORIENTATION_COHERENCE_PERMILLE = 590
 AMBIGUOUS_QUALITY_MARGIN = 10
 DISTINCT_CENTER_DISTANCE_SQUARED = 20 * 20
 PLANE_DISAGREEMENT_DISTANCE_SQUARED = 20 * 20
 PLANE_DISAGREEMENT_BIN_MARGIN = 2
-ANGULAR_BINS = 72
-MIN_DASHED_ANGULAR_RUNS = 5
-# The selected-target focus frame is intentionally open on the label side. The
-# eighteen bins centred on +X are the reviewed one-quarter label sector; the
-# remaining fifty-four bins are the structural three-quarter arc.
-LABEL_SECTOR_START = 27
-LABEL_SECTOR_END = 44
 STRUCTURAL_ARC_BINS = 54
-LABEL_SECTOR_BINS = 18
+MIN_DASHED_STRUCTURAL_RUNS = 4
 MIN_OTSU_NONZERO_PIXELS = 24
-MAX_EVIDENCE_PLANE_PIXELS = 10000
+MIN_ALPHA_INVARIANT_ORANGE_SCORE = 80
+MAX_EVIDENCE_PLANE_PIXELS = 6000
 MAX_CANDIDATE_SCORE_POINTS = 1200
 
 def channels(pixel):
@@ -61,8 +58,10 @@ def hsv_orange_score(red, green, blue):
     if affinity <= 0:
         return 0
     saturation = float(delta) / float(maximum)
-    value_weight = math.sqrt(float(maximum) / 255.0)
-    return int(255.0 * affinity * saturation * value_weight)
+    # Hue affinity and saturation are invariant under uniform alpha/value
+    # scaling. Value is deliberately excluded: the selected-target reticle may
+    # be dimmed by the HUD compositor without changing its orange identity.
+    return int(255.0 * affinity * saturation)
 
 def otsu_threshold(histogram):
     # Zero is not orange evidence. Including the black/background population in
@@ -139,36 +138,146 @@ def candidate_score(points, point_weight, candidate_x, candidate_y):
         elif (radius_squared >= INNER_NOISE_MIN_RADIUS_SQUARED and radius_squared <= INNER_NOISE_MAX_RADIUS_SQUARED) or (radius_squared >= OUTER_NOISE_MIN_RADIUS_SQUARED and radius_squared <= OUTER_NOISE_MAX_RADIUS_SQUARED):
             clutter_score += point_weight
     hint_distance = abs(candidate_x - ROI_HALF) + abs(candidate_y - ROI_HALF)
-    quality = ring_score * 5 - clutter_score * 7 - hint_distance
-    return [quality, ring_score, clutter_score]
+    return [ring_score * 5 - clutter_score * 7 - hint_distance, ring_score, clutter_score]
 
-def topology(points, center_x, center_y):
-    angular_bins = []
-    for _ in range(ANGULAR_BINS):
-        angular_bins.append(False)
-    for point in points:
-        dx = point[0] - center_x
-        dy = point[1] - center_y
-        radius_squared = dx * dx + dy * dy
-        if radius_squared < INNER_RADIUS_SQUARED or radius_squared > OUTER_RADIUS_SQUARED:
+def score_at(scores, x, y):
+    sample_x = int(x + 0.5)
+    sample_y = int(y + 0.5)
+    if sample_x < 1 or sample_x >= ROI_SIZE - 1 or sample_y < 1 or sample_y >= ROI_SIZE - 1:
+        return 0
+    return scores[sample_y * ROI_SIZE + sample_x]
+
+def radial_orientation_coherence(scores, center_x, center_y, cosine, sine, radius):
+    x = float(center_x) + cosine * float(radius)
+    y = float(center_y) + sine * float(radius)
+    gradient_x = float(score_at(scores, x + 1.0, y) - score_at(scores, x - 1.0, y))
+    gradient_y = float(score_at(scores, x, y + 1.0) - score_at(scores, x, y - 1.0))
+    magnitude = math.hypot(gradient_x, gradient_y)
+    if magnitude <= 0.0:
+        return 0
+    return int(abs(gradient_x * cosine + gradient_y * sine) * 1000.0 / magnitude)
+
+def median(values):
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return float(ordered[middle])
+    return float(ordered[middle - 1] + ordered[middle]) / 2.0
+
+def structural_directions():
+    directions = []
+    for structural_bin in range(STRUCTURAL_ARC_BINS):
+        angle = math.pi / 4.0 + (float(structural_bin) + 0.5) * (3.0 * math.pi / 2.0) / float(STRUCTURAL_ARC_BINS)
+        directions.append([math.cos(angle), math.sin(angle)])
+    return directions
+
+def polar_center_fit_quality(scores, threshold, candidate_x, candidate_y, directions):
+    radii = []
+    # Centre refinement uses every third structural direction. Final acceptance
+    # below always recomputes all 54 bins, so this bounded fit cannot establish
+    # coverage, topology, radius, or orientation success by itself.
+    for direction_index in range(0, len(directions), 6):
+        cosine = directions[direction_index][0]
+        sine = directions[direction_index][1]
+        best = None
+        for radius in range(SEARCH_INNER_RADIUS, SEARCH_OUTER_RADIUS + 1, 2):
+            signal = score_at(scores, float(candidate_x) + cosine * float(radius), float(candidate_y) + sine * float(radius))
+            inner_background = score_at(scores, float(candidate_x) + cosine * float(radius - RIDGE_BACKGROUND_INNER_OFFSET), float(candidate_y) + sine * float(radius - RIDGE_BACKGROUND_INNER_OFFSET))
+            outer_background = score_at(scores, float(candidate_x) + cosine * float(radius + RIDGE_BACKGROUND_OUTER_OFFSET), float(candidate_y) + sine * float(radius + RIDGE_BACKGROUND_OUTER_OFFSET))
+            contrast = signal - (inner_background + outer_background) // 2
+            if best == None or contrast > best[0]:
+                best = [contrast, signal, radius]
+        if best[0] > 0 and best[1] >= threshold:
+            radii.append(best[2])
+    radius_mad = 99.0
+    if len(radii) > 0:
+        radius_median = median(radii)
+        deviations = []
+        for radius in radii:
+            deviations.append(abs(float(radius) - radius_median))
+        radius_mad = median(deviations)
+    hint_distance = abs(candidate_x - ROI_HALF) + abs(candidate_y - ROI_HALF)
+    if len(radii) >= 6:
+        return 1000000 - int(radius_mad * 10000.0) + len(radii) * 100 - hint_distance
+    return len(radii) * 10000 - int(radius_mad * 1000.0) - hint_distance
+
+def polar_candidate(scores, alpha_scores, threshold, candidate_x, candidate_y, directions):
+    occupied_bins = []
+    radii = []
+    coherences = []
+    ridge_score = 0
+    clutter_score = 0
+    alpha_score = 0
+    # A true 270-degree arc: 54 five-degree bins from +45 through +315
+    # degrees. The omitted right-facing quarter is the target-label opening.
+    for direction in directions:
+        cosine = direction[0]
+        sine = direction[1]
+        best = None
+        for radius in range(SEARCH_INNER_RADIUS, SEARCH_OUTER_RADIUS + 1):
+            signal = 0
+            peak = 0
+            for offset in range(-RIDGE_SIGNAL_HALF_WIDTH, RIDGE_SIGNAL_HALF_WIDTH + 1):
+                sample_score = score_at(scores, float(candidate_x) + cosine * float(radius + offset), float(candidate_y) + sine * float(radius + offset))
+                signal += sample_score
+                peak = max(peak, sample_score)
+            signal = signal // (RIDGE_SIGNAL_HALF_WIDTH * 2 + 1)
+            inner_background = score_at(scores, float(candidate_x) + cosine * float(radius - RIDGE_BACKGROUND_INNER_OFFSET), float(candidate_y) + sine * float(radius - RIDGE_BACKGROUND_INNER_OFFSET))
+            outer_background = score_at(scores, float(candidate_x) + cosine * float(radius + RIDGE_BACKGROUND_OUTER_OFFSET), float(candidate_y) + sine * float(radius + RIDGE_BACKGROUND_OUTER_OFFSET))
+            local_background = (inner_background + outer_background) // 2
+            contrast = signal - local_background
+            if best == None or contrast > best[0]:
+                best = [contrast, signal, local_background, radius, peak]
+        occupied = best[0] > 0 and best[4] >= threshold
+        occupied_bins.append(occupied)
+        if not occupied:
             continue
-        angle = math.atan2(dy, dx) + math.pi
-        angular_bin = int(angle * float(ANGULAR_BINS) / (2.0 * math.pi)) % ANGULAR_BINS
-        angular_bins[angular_bin] = True
-    occupied = 0
-    transitions = 0
-    structural_occupied = 0
-    label_sector_occupied = 0
-    for index in range(ANGULAR_BINS):
-        if angular_bins[index]:
-            occupied += 1
-            if index >= LABEL_SECTOR_START and index <= LABEL_SECTOR_END:
-                label_sector_occupied += 1
-            else:
-                structural_occupied += 1
-        if angular_bins[index] != angular_bins[(index - 1) % ANGULAR_BINS]:
-            transitions += 1
-    return [occupied, transitions, transitions // 2, structural_occupied, label_sector_occupied]
+        radii.append(best[3])
+        ridge_score += best[0]
+        clutter_score += best[2]
+        alpha_score += score_at(alpha_scores, float(candidate_x) + cosine * float(best[3]), float(candidate_y) + sine * float(best[3]))
+        inner_coherence = radial_orientation_coherence(scores, candidate_x, candidate_y, cosine, sine, best[3] - 2)
+        outer_coherence = radial_orientation_coherence(scores, candidate_x, candidate_y, cosine, sine, best[3] + 2)
+        coherences.append(max(inner_coherence, outer_coherence))
+
+    runs = 0
+    in_run = False
+    for occupied in occupied_bins:
+        if occupied and not in_run:
+            runs += 1
+        in_run = occupied
+    coverage = len(radii)
+    coverage_permille = coverage * 1000 // STRUCTURAL_ARC_BINS
+    radius_mad = 99.0
+    radius_consistency = 0
+    orientation_coherence = 0
+    mean_alpha_score = 0
+    if coverage > 0:
+        radius_median = median(radii)
+        deviations = []
+        for radius in radii:
+            deviations.append(abs(float(radius) - radius_median))
+        radius_mad = median(deviations)
+        radius_consistency = clamp_permille(1000 - int(radius_mad * 250.0))
+        coherence_sum = 0
+        for coherence in coherences:
+            coherence_sum += coherence
+        orientation_coherence = coherence_sum // len(coherences)
+        mean_alpha_score = alpha_score // coverage
+    preliminary_confidence = (coverage_permille * 50 + radius_consistency * 25 + orientation_coherence * 20) // 95
+    hint_distance = abs(candidate_x - ROI_HALF) + abs(candidate_y - ROI_HALF)
+    return {
+        "x": candidate_x, "y": candidate_y,
+        "quality": preliminary_confidence * 100 - hint_distance,
+        "ringScore": ridge_score, "clutterScore": clutter_score,
+        "structuralArcOccupiedBins": coverage,
+        "structuralCoveragePermille": coverage_permille,
+        "radiusMAD": radius_mad,
+        "radiusConsistencyPermille": radius_consistency,
+        "orientationCoherence": orientation_coherence,
+        "alphaInvariantOrangeScore": mean_alpha_score,
+        "angularRuns": runs,
+    }
 
 def clamp_permille(value):
     if value < 0:
@@ -177,19 +286,7 @@ def clamp_permille(value):
         return 1000
     return value
 
-def shape_confidence(best, second_quality, shape):
-    structural_coverage = clamp_permille(shape[3] * 1000 // STRUCTURAL_ARC_BINS)
-    label_gap_clarity = clamp_permille((LABEL_SECTOR_BINS - shape[4]) * 1000 // LABEL_SECTOR_BINS)
-    radial_contrast = clamp_permille(best["ringScore"] * 1000 // (best["ringScore"] + best["clutterScore"] + 1))
-    centre_margin = best["quality"] if second_quality <= 0 else best["quality"] - second_quality
-    centre_uniqueness = clamp_permille(centre_margin * 25)
-    # Structural arc dominates. A bright label may occupy some of the open
-    # sector, so gap clarity is corroborative and cannot veto an otherwise
-    # strong three-quarter arc by itself.
-    confidence = (structural_coverage * 55 + radial_contrast * 20 + centre_uniqueness * 15 + label_gap_clarity * 10) // 100
-    return [confidence, structural_coverage, label_gap_clarity, radial_contrast, centre_uniqueness]
-
-def evaluate_plane(name, points, threshold_evidence):
+def evaluate_plane(name, scores, alpha_scores, threshold_evidence, directions):
     threshold = threshold_evidence["threshold"]
     base = {
         "name": name, "state": "REJECTED", "reason": "RING_SCORE_LOW",
@@ -198,7 +295,7 @@ def evaluate_plane(name, points, threshold_evidence):
         "nonzeroCount": threshold_evidence["nonzeroCount"],
         "nonzeroRatioPermille": threshold_evidence["nonzeroRatioPermille"],
         "thresholdDegenerate": threshold_evidence["degenerate"],
-        "pixelCount": len(points), "x": ROI_HALF, "y": ROI_HALF,
+        "pixelCount": 0, "x": ROI_HALF, "y": ROI_HALF,
         "quality": 0, "ringScore": 0, "secondQuality": 0, "secondRingScore": 0,
         "clutterScore": 0, "centerMargin": 0,
         "occupiedAngularBins": 0, "angularTransitions": 0,
@@ -206,19 +303,19 @@ def evaluate_plane(name, points, threshold_evidence):
         "labelSectorOccupiedBins": 0, "structuralCoveragePermille": 0,
         "labelGapClarityPermille": 0, "radialContrastPermille": 0,
         "centerUniquenessPermille": 0, "shapeConfidencePermille": 0,
+        "alphaInvariantOrangeScore": 0, "structuralCoverage": 0.0,
+        "radiusMAD": 99.0, "orientationCoherence": 0.0,
+        "arcConfidencePermille": 0,
         "presentation": None,
     }
     if threshold_evidence["degenerate"]:
         base["reason"] = "HISTOGRAM_DEGENERATE"
         return base
+    points = points_at_or_above(scores, threshold)
+    base["pixelCount"] = len(points)
     if len(points) > MAX_EVIDENCE_PLANE_PIXELS:
         base["reason"] = "PIXEL_DENSITY_HIGH"
         return base
-    # Candidate fitting is the only quadratic part of this observation. Dense
-    # adaptive planes can contain thousands of pixels, so score candidates with
-    # one deterministic evenly spaced representation and scale its counts back
-    # to the full plane. Topology and public evidence still use every accepted
-    # current-frame pixel below.
     score_points = points
     point_weight = 1
     if len(points) > MAX_CANDIDATE_SCORE_POINTS:
@@ -231,13 +328,7 @@ def evaluate_plane(name, points, threshold_evidence):
     for candidate_y in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
         for candidate_x in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
             score = candidate_score(score_points, point_weight, candidate_x, candidate_y)
-            candidate = {
-                "x": candidate_x,
-                "y": candidate_y,
-                "quality": score[0],
-                "ringScore": score[1],
-                "clutterScore": score[2],
-            }
+            candidate = {"x": candidate_x, "y": candidate_y, "quality": score[0], "ringScore": score[1], "clutterScore": score[2]}
             candidates.append(candidate)
             if coarse_best == None or candidate["quality"] > coarse_best["quality"]:
                 coarse_best = candidate
@@ -248,16 +339,18 @@ def evaluate_plane(name, points, threshold_evidence):
     for candidate_y in range(coarse_best["y"] - REFINEMENT_RADIUS, coarse_best["y"] + REFINEMENT_RADIUS + 1):
         for candidate_x in range(coarse_best["x"] - REFINEMENT_RADIUS, coarse_best["x"] + REFINEMENT_RADIUS + 1):
             score = candidate_score(score_points, point_weight, candidate_x, candidate_y)
-            candidate = {
-                "x": candidate_x,
-                "y": candidate_y,
-                "quality": score[0],
-                "ringScore": score[1],
-                "clutterScore": score[2],
-            }
+            candidate = {"x": candidate_x, "y": candidate_y, "quality": score[0], "ringScore": score[1], "clutterScore": score[2]}
             candidates.append(candidate)
             if best == None or candidate["quality"] > best["quality"]:
                 best = candidate
+    polar_fit_best = None
+    for candidate_y in range(best["y"] - REFINEMENT_RADIUS, best["y"] + REFINEMENT_RADIUS + 1):
+        for candidate_x in range(best["x"] - REFINEMENT_RADIUS, best["x"] + REFINEMENT_RADIUS + 1):
+            fit_quality = polar_center_fit_quality(scores, threshold, candidate_x, candidate_y, directions)
+            if polar_fit_best == None or fit_quality > polar_fit_best[0]:
+                polar_fit_best = [fit_quality, candidate_x, candidate_y]
+    best["x"] = polar_fit_best[1]
+    best["y"] = polar_fit_best[2]
     second_quality = 0
     second_ring_score = 0
     for candidate in candidates:
@@ -275,34 +368,39 @@ def evaluate_plane(name, points, threshold_evidence):
     result["secondRingScore"] = second_ring_score
     result["clutterScore"] = best["clutterScore"]
     result["centerMargin"] = best["quality"] - max(0, second_quality)
-    if best["ringScore"] < MIN_RING_SCORE:
-        return result
-    if best["quality"] <= 0:
-        result["reason"] = "RADIAL_CONTRAST_NOT_CONFIRMED"
-        return result
     if second_quality > 0 and best["quality"] - second_quality <= AMBIGUOUS_QUALITY_MARGIN:
         result["reason"] = "DISTINCT_CENTER_AMBIGUOUS"
         return result
-    shape = topology(points, best["x"], best["y"])
-    result["occupiedAngularBins"] = shape[0]
-    result["angularTransitions"] = shape[1]
-    result["angularRuns"] = shape[2]
-    result["structuralArcOccupiedBins"] = shape[3]
-    result["labelSectorOccupiedBins"] = shape[4]
-    if shape[1] < 2:
-        result["reason"] = "RETICLE_GAP_NOT_CONFIRMED"
+    polar = polar_candidate(scores, alpha_scores, threshold, best["x"], best["y"], directions)
+    result["occupiedAngularBins"] = polar["structuralArcOccupiedBins"]
+    result["angularTransitions"] = polar["angularRuns"] * 2
+    result["angularRuns"] = polar["angularRuns"]
+    result["structuralArcOccupiedBins"] = polar["structuralArcOccupiedBins"]
+    result["structuralCoverage"] = float(polar["structuralArcOccupiedBins"]) / float(STRUCTURAL_ARC_BINS)
+    result["structuralCoveragePermille"] = polar["structuralCoveragePermille"]
+    result["labelSectorOccupiedBins"] = 0
+    result["labelGapClarityPermille"] = 1000
+    result["radiusMAD"] = polar["radiusMAD"]
+    result["orientationCoherence"] = float(polar["orientationCoherence"]) / 1000.0
+    result["alphaInvariantOrangeScore"] = polar["alphaInvariantOrangeScore"]
+    if polar["structuralArcOccupiedBins"] < MIN_STRUCTURAL_OCCUPIED_BINS:
+        result["reason"] = "STRUCTURAL_COVERAGE_LOW"
         return result
-    result["presentation"] = "DASHED" if shape[2] >= MIN_DASHED_ANGULAR_RUNS else "SOLID"
-    minimum_occupied = MIN_DASHED_OCCUPIED_ANGULAR_BINS if result["presentation"] == "DASHED" else MIN_SOLID_OCCUPIED_ANGULAR_BINS
-    if shape[0] < minimum_occupied:
-        result["reason"] = result["presentation"] + "_ANGULAR_COVERAGE_LOW"
+    result["presentation"] = "DASHED" if polar["angularRuns"] >= MIN_DASHED_STRUCTURAL_RUNS else "SOLID"
+    if polar["radiusMAD"] > MAX_RADIUS_MAD:
+        result["reason"] = "RADIUS_MAD_HIGH"
         return result
-    confidence = shape_confidence(best, second_quality, shape)
-    result["shapeConfidencePermille"] = confidence[0]
-    result["structuralCoveragePermille"] = confidence[1]
-    result["labelGapClarityPermille"] = confidence[2]
-    result["radialContrastPermille"] = confidence[3]
-    result["centerUniquenessPermille"] = confidence[4]
+    if polar["orientationCoherence"] < MIN_ORIENTATION_COHERENCE_PERMILLE:
+        result["reason"] = "ORIENTATION_COHERENCE_LOW"
+        return result
+    centre_margin = best["quality"] if second_quality <= 0 else best["quality"] - second_quality
+    centre_uniqueness = clamp_permille(centre_margin * 1000 // max(1, abs(best["quality"])))
+    radial_contrast = clamp_permille(best["ringScore"] * 1000 // (best["ringScore"] + best["clutterScore"] + 1))
+    confidence = (polar["structuralCoveragePermille"] * 50 + polar["radiusConsistencyPermille"] * 25 + polar["orientationCoherence"] * 20 + centre_uniqueness * 5) // 100
+    result["arcConfidencePermille"] = confidence
+    result["shapeConfidencePermille"] = confidence
+    result["radialContrastPermille"] = radial_contrast
+    result["centerUniquenessPermille"] = centre_uniqueness
     result["state"] = "VIABLE"
     result["reason"] = "THREE_QUARTER_FOCUS_FRAME_CONFIRMED"
     return result
@@ -335,6 +433,11 @@ def public_plane(plane, roi_x, roi_y):
         "radialContrastPermille": plane["radialContrastPermille"],
         "centerUniquenessPermille": plane["centerUniquenessPermille"],
         "shapeConfidencePermille": plane["shapeConfidencePermille"],
+        "alphaInvariantOrangeScore": plane["alphaInvariantOrangeScore"],
+        "structuralCoverage": plane["structuralCoverage"],
+        "radiusMAD": plane["radiusMAD"],
+        "orientationCoherence": plane["orientationCoherence"],
+        "arcConfidencePermille": plane["arcConfidencePermille"],
         "presentation": plane["presentation"],
     }
 
@@ -350,7 +453,9 @@ def unknown(reason, planes, sample, roi_x, roi_y, evidence_policy):
             "reason": reason, "bestScore": 0, "secondScore": 0,
             "presentation": None, "occupiedAngularBins": 0,
             "angularRuns": 0, "evidencePlane": None, "evidenceQuality": None,
-            "shapeConfidencePermille": None,
+            "shapeConfidencePermille": None, "alphaInvariantOrangeScore": None,
+            "structuralCoverage": None, "radiusMAD": None,
+            "orientationCoherence": None, "arcConfidencePermille": None,
         },
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],
@@ -371,7 +476,8 @@ def main(ctx):
     if sample["sampling"] != "reference" or sample["coordinateSpace"]["width"] != REFERENCE_WIDTH or sample["coordinateSpace"]["height"] != REFERENCE_HEIGHT or image["encoding"] != "rgb24-packed" or len(image["pixels"]) != ROI_SIZE * ROI_SIZE:
         return job.fail(code="SUPERCRUISE_RETICLE_EVIDENCE_INVALID", message="local reticle screen evidence is incomplete")
 
-    strict_points = []
+    strict_scores = []
+    strict_count = 0
     opponent_scores = []
     hsv_scores = []
     opponent_histogram = []
@@ -385,7 +491,10 @@ def main(ctx):
         green = color[1]
         blue = color[2]
         if strict_rgb_orange(red, green, blue):
-            strict_points.append([index % ROI_SIZE, index // ROI_SIZE])
+            strict_scores.append(255)
+            strict_count += 1
+        else:
+            strict_scores.append(0)
         opponent = opponent_score(red, green, blue)
         hsv = hsv_orange_score(red, green, blue)
         opponent_scores.append(opponent)
@@ -394,17 +503,26 @@ def main(ctx):
         hsv_histogram[hsv] += 1
 
     opponent_threshold = otsu_threshold(opponent_histogram)
-    hsv_threshold = otsu_threshold(hsv_histogram)
+    alpha_nonzero_count = 0
+    for score in range(1, 256):
+        alpha_nonzero_count += hsv_histogram[score]
+    hsv_threshold = {
+        "method": "FIXED_ALPHA_INVARIANT", "threshold": MIN_ALPHA_INVARIANT_ORANGE_SCORE,
+        "nonzeroCount": alpha_nonzero_count,
+        "nonzeroRatioPermille": alpha_nonzero_count * 1000 // (ROI_SIZE * ROI_SIZE),
+        "degenerate": alpha_nonzero_count < MIN_OTSU_NONZERO_PIXELS,
+    }
     strict_threshold = {
         "method": "FIXED_STRICT_RGB", "threshold": 1,
-        "nonzeroCount": len(strict_points),
-        "nonzeroRatioPermille": len(strict_points) * 1000 // (ROI_SIZE * ROI_SIZE),
+        "nonzeroCount": strict_count,
+        "nonzeroRatioPermille": strict_count * 1000 // (ROI_SIZE * ROI_SIZE),
         "degenerate": False,
     }
+    directions = structural_directions()
     planes = [
-        evaluate_plane("STRICT_RGB", strict_points, strict_threshold),
-        evaluate_plane("ORANGE_OPPONENT", points_at_or_above(opponent_scores, opponent_threshold["threshold"]), opponent_threshold),
-        evaluate_plane("HSV_ORANGE", points_at_or_above(hsv_scores, hsv_threshold["threshold"]), hsv_threshold),
+        evaluate_plane("STRICT_RGB", strict_scores, hsv_scores, strict_threshold, directions),
+        evaluate_plane("ORANGE_OPPONENT", opponent_scores, hsv_scores, opponent_threshold, directions),
+        evaluate_plane("HSV_ORANGE", hsv_scores, hsv_scores, hsv_threshold, directions),
     ]
     adaptive_viable = []
     strict_viable = None
@@ -460,6 +578,11 @@ def main(ctx):
             "angularRuns": selected_plane["angularRuns"],
             "evidencePlane": selected_plane["name"], "evidenceQuality": selected[0],
             "shapeConfidencePermille": selected_plane["shapeConfidencePermille"],
+            "alphaInvariantOrangeScore": selected_plane["alphaInvariantOrangeScore"],
+            "structuralCoverage": selected_plane["structuralCoverage"],
+            "radiusMAD": selected_plane["radiusMAD"],
+            "orientationCoherence": selected_plane["orientationCoherence"],
+            "arcConfidencePermille": selected_plane["arcConfidencePermille"],
         },
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],

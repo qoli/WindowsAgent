@@ -244,8 +244,12 @@ func reticleFixturePixels(centerX, centerY int, dashed bool, ring uint32, backgr
 				continue
 			}
 			if dashed {
-				segment := int(math.Floor((angle + math.Pi) * 18 / (2 * math.Pi)))
-				if segment%2 != 0 {
+				// The in-game hyperspace frame is a mostly continuous 270-degree
+				// structure with several narrow breaks, not alternating half-on,
+				// half-off sectors. Four breaks inside the structural arc preserve
+				// dashed topology while retaining at least 36 of its 54 bins.
+				if math.Abs(angle+2*math.Pi/3) < .07 || math.Abs(angle+math.Pi/3) < .07 ||
+					math.Abs(angle-math.Pi/3) < .07 || math.Abs(angle-2*math.Pi/3) < .07 {
 					continue
 				}
 			}
@@ -2065,15 +2069,23 @@ func TestEliteSupercruiseVisibleReticleUsesAdaptivePlaneForDimDashedRingOnMagent
 	if target["state"] != "DETECTED" || target["presentation"] != "DASHED" ||
 		target["evidencePlane"] == "STRICT_RGB" || math.Abs(target["referenceX"].(float64)-968) > 4 ||
 		math.Abs(target["referenceY"].(float64)-548) > 4 || target["shapeConfidencePermille"].(float64) < 650 {
-		t.Fatalf("target = %#v", target)
+		t.Fatalf("target = %#v output=%s", target, output)
 	}
 	evidence := result["evidence"].(map[string]any)
 	if len(evidence["planes"].([]any)) != 3 || evidence["selectionReason"] != "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY" {
 		t.Fatalf("evidence = %#v", evidence)
 	}
-	selectedPlane := evidence["planes"].([]any)[2].(map[string]any)
-	if selectedPlane["thresholdMethod"] != "OTSU" || selectedPlane["thresholdDegenerate"] != false ||
-		selectedPlane["nonzeroCount"].(float64) == 0 || selectedPlane["centerMargin"].(float64) <= 0 {
+	var selectedPlane map[string]any
+	for _, rawPlane := range evidence["planes"].([]any) {
+		plane := rawPlane.(map[string]any)
+		if plane["name"] == evidence["selectedPlane"] {
+			selectedPlane = plane
+		}
+	}
+	if selectedPlane == nil || selectedPlane["thresholdMethod"] != "FIXED_ALPHA_INVARIANT" || selectedPlane["thresholdDegenerate"] != false ||
+		selectedPlane["nonzeroCount"].(float64) == 0 || selectedPlane["centerMargin"].(float64) <= 0 ||
+		selectedPlane["structuralCoverage"].(float64) < 36.0/54.0 || selectedPlane["radiusMAD"].(float64) > 2 ||
+		selectedPlane["orientationCoherence"].(float64) < .59 || selectedPlane["arcConfidencePermille"].(float64) == 0 {
 		t.Fatalf("selected plane = %#v", selectedPlane)
 	}
 }
@@ -2113,9 +2125,84 @@ func TestEliteSupercruiseVisibleReticleKeepsDashedRingAcrossOnePixelHintPhases(t
 			target := result["target"].(map[string]any)
 			if target["state"] != "DETECTED" || target["presentation"] != "DASHED" ||
 				math.Abs(target["referenceX"].(float64)-968) > 4 || math.Abs(target["referenceY"].(float64)-548) > 4 {
-				t.Fatalf("axis=%d delta=%d target=%#v", axis, delta, target)
+				t.Fatalf("axis=%d delta=%d target=%#v output=%s", axis, delta, target, output)
+			}
+			if target["structuralCoverage"].(float64) < 36.0/54.0 || target["radiusMAD"].(float64) > 2 ||
+				target["orientationCoherence"].(float64) < .59 || target["arcConfidencePermille"].(float64) == 0 {
+				t.Fatalf("axis=%d delta=%d diagnostics=%#v", axis, delta, target)
 			}
 		}
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleAlphaInvariantScoreIgnoresValueScaling(t *testing.T) {
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scores []float64
+	for _, ring := range []uint32{0xD88424, 0x6C4212} {
+		pixels := reticleFixturePixels(72, 75, true, ring, func(_, _ int) uint32 { return 0x080A12 })
+		runner, err := New(&compassBroker{pixels: pixels})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540})
+		if err != nil {
+			t.Fatalf("ring=%#x: %v", ring, err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(output, &result); err != nil {
+			t.Fatal(err)
+		}
+		target := result["target"].(map[string]any)
+		if target["state"] != "DETECTED" || target["evidencePlane"] != "HSV_ORANGE" {
+			t.Fatalf("ring=%#x target=%#v", ring, target)
+		}
+		scores = append(scores, target["alphaInvariantOrangeScore"].(float64))
+	}
+	if math.Abs(scores[0]-scores[1]) > 3 {
+		t.Fatalf("alpha-invariant scores changed with value scaling: %v", scores)
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleRejectsPartialOrangeArcBelowStructuralGate(t *testing.T) {
+	pixels := make([]any, 140*140)
+	for index := range pixels {
+		pixels[index] = uint32(0x080A12)
+	}
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 140; x++ {
+			distance := math.Hypot(float64(x-70), float64(y-70))
+			angle := math.Atan2(float64(y-70), float64(x-70))
+			if distance >= 44 && distance <= 48 && angle >= math.Pi/3 && angle <= 2*math.Pi/3 {
+				pixels[y*140+x] = uint32(0xD88424)
+			}
+		}
+	}
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&compassBroker{pixels: pixels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["target"].(map[string]any)["state"] != "UNKNOWN" {
+		t.Fatalf("partial arc must remain UNKNOWN: %s", output)
+	}
+	planes := result["evidence"].(map[string]any)["planes"].([]any)
+	alphaPlane := planes[2].(map[string]any)
+	if alphaPlane["reason"] != "STRUCTURAL_COVERAGE_LOW" || alphaPlane["structuralCoverage"].(float64) >= 36.0/54.0 {
+		t.Fatalf("alpha plane=%#v", alphaPlane)
 	}
 }
 
