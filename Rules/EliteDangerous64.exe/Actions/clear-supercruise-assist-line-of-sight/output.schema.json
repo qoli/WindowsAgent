@@ -2,18 +2,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "task", "completed", "targetName", "control", "turnPulses", "sphereExitConfirmed", "separationDurationMs", "separationSamples", "finalFlightStatus", "sampleCount"],
+  "required": ["schemaVersion", "task", "completed", "targetName", "control", "directionConfirmations", "turnPulses", "fixedTurnDurationMs", "fixedOutwardTurnCompleted", "separationDurationMs", "separationSamples", "finalFlightStatus", "sampleCount"],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 3},
     "task": {"const": "CLEAR_SUPERCRUISE_ASSIST_LINE_OF_SIGHT"},
     "completed": {"const": true},
     "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
     "control": {"enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT"]},
-    "turnPulses": {"type": "integer", "minimum": 1, "maximum": 40},
-    "sphereExitConfirmed": {"const": true},
+    "directionConfirmations": {"const": 2},
+    "turnPulses": {"const": 8},
+    "fixedTurnDurationMs": {"const": 6400},
+    "fixedOutwardTurnCompleted": {"const": true},
     "separationDurationMs": {"const": 30000},
     "separationSamples": {"const": 60},
     "finalFlightStatus": {"enum": ["SUPERCRUISE", "SUPERCRUISE_ASSIST_ACTIVE", "FSD_ALIGNMENT_REQUIRED", "SAFE_DISENGAGE_READY"]},
-    "sampleCount": {"type": "integer", "minimum": 67, "maximum": 116}
+    "sampleCount": {"type": "integer", "minimum": 74, "maximum": 84}
   }
 }
