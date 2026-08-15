@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": 5,
-  "title": "Exit Elite Dangerous flight to the main menu for human takeover",
+  "version": 6,
+  "title": "Replay the Elite Dangerous safe-exit key structure for human takeover",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",

@@ -262,17 +262,24 @@ substitute. Successful injection is not menu evidence; the caller must verify
 the pause menu from a fresh frame. Missing or unbound `Pause` fails explicitly;
 there is no BACK or literal-key fallback.
 
-`elite-dangerous/pause-at-exit-for-human-takeover` is a safe-exit workflow, not
-a paused-flight handoff. It confirms the first-level `EXIT` focus twice before
-one `SELECT`, then independently confirms the second-level `EXIT TO MAIN MENU`
-card is focused and `QUIT TO DESKTOP` is not focused twice before the final
-`SELECT`; dual-focus evidence fails closed. A restarted Action may resume from
-that exact second-level two-frame Gate without toggling Pause or replaying the
-first select. `QUIT TO DESKTOP`, missing labels, black/loading frames, and menu
-disappearance never authorize success.
-The terminal postcondition is two fresh exact-anchor observations of the
-non-flight main menu headed by `CONTINUE`; only then may a parent report human
-takeover readiness.
+`elite-dangerous/pause-at-exit-for-human-takeover` is a fixed safe-exit key
+replay, not a paused-flight handoff or a menu observer. From the caller-owned
+near-orbit branch after 0% throttle, it sends binding-resolved `PAUSE`, five
+`DOWN` controls, and two `SELECT` controls with fixed timing. It performs no
+OCR, CV, focus classification, or main-menu verification and cannot resume
+from an intermediate menu. Its terminal output proves only that all eight
+inputs were injected in order; it never claims that the game accepted the
+transition or reached a particular screen.
+
+An orbital-scale detection first commands 0% and authorizes one bounded
+automatic sphere-separation attempt using the same
+`fixed-supercruise-sphere-separation` core as LOS recovery. Only two fresh
+post-separation `orbital-scale-gauge-state=ABSENT` samples permit the caller to
+continue. During game-controlled approach this includes Compass plus
+visible-target realignment and restoration of 75% for Assist reacquisition;
+earlier Gates resume their ordinary 0%-throttle path. A failed child or
+persistent scale proceeds to the fixed safe-exit key replay; the sphere
+maneuver is never repeated as an unbounded alternative.
 
 `elite-dangerous/text-entry-key` is the finite single-key text primitive for a
 model-confirmed active game field. It accepts one allowlisted ASCII letter,

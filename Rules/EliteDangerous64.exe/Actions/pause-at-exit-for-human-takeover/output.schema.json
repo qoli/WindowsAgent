@@ -1,29 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object", "additionalProperties": false,
-  "required": ["schemaVersion", "task", "completed", "pauseMenuConfirmed", "exitFocused", "firstExitSelectSent", "exitDestinationMenuConfirmed", "exitToMainMenuFocused", "exitToMainMenuSelectSent", "mainMenuConfirmed", "openAttempts", "postExitSamples", "finalObservation"],
+  "required": ["schemaVersion", "task", "completed", "keyReplayCompleted", "pauseSent", "downCount", "firstSelectSent", "secondSelectSent", "sequenceLength", "visualPostconditionClaimed"],
   "properties": {
-    "schemaVersion": {"const": 2},
+    "schemaVersion": {"const": 3},
     "task": {"const": "PAUSE_AT_EXIT_FOR_HUMAN_TAKEOVER"},
     "completed": {"const": true},
-    "pauseMenuConfirmed": {"const": true},
-    "exitFocused": {"const": true},
-    "firstExitSelectSent": {"const": true},
-    "exitDestinationMenuConfirmed": {"const": true},
-    "exitToMainMenuFocused": {"const": true},
-    "exitToMainMenuSelectSent": {"const": true},
-    "mainMenuConfirmed": {"const": true},
-    "openAttempts": {"type": "integer", "minimum": 0, "maximum": 1},
-    "postExitSamples": {"type": "integer", "minimum": 2, "maximum": 120},
-    "finalObservation": {
-      "type": "object", "additionalProperties": false,
-      "required": ["state", "reason", "focusFillRatio", "rawTexts"],
-      "properties": {
-        "state": {"const": "MAIN_MENU"},
-        "reason": {"const": "MAIN_MENU_EXACT_ANCHORS_CONFIRMED"},
-        "focusFillRatio": {"type": "number", "minimum": 0, "maximum": 1},
-        "rawTexts": {"type": "array", "items": {"type": "string"}, "maxItems": 64}
-      }
-    }
+    "keyReplayCompleted": {"const": true},
+    "pauseSent": {"const": true},
+    "downCount": {"const": 5},
+    "firstSelectSent": {"const": true},
+    "secondSelectSent": {"const": true},
+    "sequenceLength": {"const": 8},
+    "visualPostconditionClaimed": {"const": false}
   }
 }

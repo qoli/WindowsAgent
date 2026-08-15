@@ -15,12 +15,26 @@ required adaptive plane. The classifier never retries a threshold, changes
 provider, captures another frame, repairs a rejected plane, or substitutes a
 previous result.
 
-Centre localization remains a bounded same-frame coarse-to-fine annulus fit:
-a four-pixel grid followed by one-pixel refinement and a bounded polar centre
-refinement. Candidate fitting may use at most 1200 evenly spaced accepted
-pixels. Dense planes above 6000 accepted pixels reject explicitly. These steps
-only choose the centre at which the structural classifier runs; none can
-establish a reticle by itself.
+Centre localization remains bounded and same-frame. A four-pixel annulus grid
+and fixed one-pixel refinement supply only a seed. From that seed the Action
+collects at most one high-confidence ridge point from each of the same 54
+structural directions, performs one algebraic circle fit, applies one fixed
+median/MAD residual trim, and refits exactly once. At least 36 inliers are
+required. Candidate fitting may use at most 1200 evenly spaced accepted pixels,
+and dense planes above 6000 accepted pixels reject explicitly. The fit exposes
+its point/inlier counts, residual p95, and centre covariance XX/XY/YY/trace;
+covariance trace above 4 square pixels rejects as `CENTER_COVARIANCE_HIGH`.
+These steps only choose the centre at which the unchanged structural classifier
+runs; none can establish a reticle by itself.
+
+The same fixed coarse grid supplies at most six separated runner-up seeds. Each
+uses the identical bounded circle fit. A runner-up at least six pixels from the
+selected centre rejects as `MULTIMODAL_CENTER_AMBIGUOUS` only when its inlier
+support is within two points and its residual p95 is within 1.5 pixels of the
+selected fit. Events are not involved because this is a finite observation;
+the output planes expose runner-up centre, support, residual, distance, and
+`centerModeCount`. Missing or degenerate fit evidence remains explicit
+`UNKNOWN`, never a previous-frame centre.
 
 At the selected centre, every plane runs the same polar thin-ridge classifier.
 It searches radii 40–52 pixels. For each radius it subtracts local inner and
@@ -43,7 +57,8 @@ The output also exposes `alphaInvariantOrangeScore`, `structuralCoverage`,
 `radiusMAD`, and `orientationCoherence`; legacy topology and confidence fields
 remain as compatible diagnostics. Shape confidence, rather than global image
 contrast or OCR confidence, selects between viable same-frame adaptive planes.
-A distinct near-tied centre rejects the plane. If two viable adaptive planes
+A distinct near-tied centre or comparable robust circle mode rejects the plane.
+If two viable adaptive planes
 point to distinct centres with near-equal coverage, the Action returns
 `UNKNOWN` rather than silently selecting one.
 

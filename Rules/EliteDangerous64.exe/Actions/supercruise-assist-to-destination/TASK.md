@@ -155,17 +155,31 @@ The independent `orbital-scale-gauge-state` observation is a higher-priority
 safety Gate throughout preflight, entry, Assist acquisition, correction,
 line-of-sight handoff, and game-controlled approach. It applies the reviewed
 orange heading-scale geometry in the current frame and retains its evidence
-score. One `DETECTED` frame is sufficient to command 0% immediately; no later
-75% or 100% command is permitted. The parent then invokes
-`pause-at-exit-for-human-takeover`, which opens the pause menu, confirms and
-selects `EXIT`, independently confirms the second-level `EXIT TO MAIN MENU`
-card before selecting it, and finally requires two fresh exact-anchor
-observations of the non-flight main menu. Missing menus and loading frames do
-not count as success. Once the safe exit is confirmed, the parent emits
-`HUMAN_TAKEOVER` and fails with the stable
+score. One `DETECTED` frame is sufficient to command 0% immediately.
+
+At every near-orbit Gate, the parent makes one bounded automatic avoidance
+attempt before asking for human takeover. It calls the same internal
+`fixed-supercruise-sphere-separation` core used by LOS recovery: two fresh
+matching sphere directions, a fixed 8 x 800 ms outward turn, 30 seconds of
+mechanical separation, and final 0%. Child failure does not become recovery;
+it proceeds to safe-exit replay. Child success must then be followed by two
+fresh `orbital-scale-gauge-state=ABSENT` samples. During game-controlled
+approach, a cleared Gate is followed by the ordinary Compass and visible-target
+realignment, restoration of 75%, and renewed Assist ownership. That recovery
+counts as an agent flight input after Assist ownership and increments the
+shared bounded recovery count. At earlier Gates, the caller resumes its normal
+0%-throttle alignment or entry path after the two clear samples. If the scale
+persists, the Action does not repeat the maneuver.
+
+After an unsuccessful or persistent-scale avoidance, the parent invokes
+`pause-at-exit-for-human-takeover`, which replays the reviewed fixed
+`PAUSE`, `DOWN` x5, `SELECT`, `SELECT` key structure without OCR or CV. The
+child terminal proves only that all eight binding-resolved inputs were sent;
+it deliberately does not claim a resulting menu state. Once the safe-exit key
+replay is complete, the parent emits `HUMAN_TAKEOVER` and fails with the stable
 `NEAR_ORBIT_SAFETY_TRIGGERED` prefix because the requested autonomous flight
-goal was aborted. A capture, schema, OCR, or menu-observation failure remains
-terminal and does not become an absent scale or a successful handoff.
+goal was aborted. An input, schema, or Action failure remains terminal and does
+not become a successful handoff.
 
 Up to five transient
 failures from the same persistent WGC region-capture provider may be skipped

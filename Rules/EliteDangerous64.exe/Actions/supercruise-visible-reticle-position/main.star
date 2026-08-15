@@ -31,6 +31,15 @@ MIN_OTSU_NONZERO_PIXELS = 24
 MIN_ALPHA_INVARIANT_ORANGE_SCORE = 80
 MAX_EVIDENCE_PLANE_PIXELS = 6000
 MAX_CANDIDATE_SCORE_POINTS = 1200
+MIN_CIRCLE_FIT_POINTS = 36
+CIRCLE_FIT_OUTLIER_FLOOR_PIXELS = 1.5
+CIRCLE_FIT_OUTLIER_MAD_MULTIPLIER = 3.0
+MAX_CENTER_COVARIANCE_TRACE = 4.0
+RUNNER_UP_SEED_DISTANCE_SQUARED = 8 * 8
+RUNNER_UP_MODE_DISTANCE_SQUARED = 6 * 6
+RUNNER_UP_SUPPORT_MARGIN = 2
+RUNNER_UP_RESIDUAL_MARGIN_PIXELS = 1.5
+MAX_RUNNER_UP_SEEDS = 6
 
 def channels(pixel):
     return [pixel // 65536, (pixel // 256) % 256, pixel % 256]
@@ -171,35 +180,143 @@ def structural_directions():
         directions.append([math.cos(angle), math.sin(angle)])
     return directions
 
-def polar_center_fit_quality(scores, threshold, candidate_x, candidate_y, directions):
-    radii = []
-    # Centre refinement uses every third structural direction. Final acceptance
-    # below always recomputes all 54 bins, so this bounded fit cannot establish
-    # coverage, topology, radius, or orientation success by itself.
-    for direction_index in range(0, len(directions), 6):
-        cosine = directions[direction_index][0]
-        sine = directions[direction_index][1]
+def high_confidence_arc_points(scores, threshold, candidate_x, candidate_y, directions):
+    points = []
+    for direction in directions:
+        cosine = direction[0]
+        sine = direction[1]
         best = None
-        for radius in range(SEARCH_INNER_RADIUS, SEARCH_OUTER_RADIUS + 1, 2):
-            signal = score_at(scores, float(candidate_x) + cosine * float(radius), float(candidate_y) + sine * float(radius))
+        for radius in range(SEARCH_INNER_RADIUS, SEARCH_OUTER_RADIUS + 1):
+            signal = 0
+            peak = 0
+            for offset in range(-RIDGE_SIGNAL_HALF_WIDTH, RIDGE_SIGNAL_HALF_WIDTH + 1):
+                sample_score = score_at(scores, float(candidate_x) + cosine * float(radius + offset), float(candidate_y) + sine * float(radius + offset))
+                signal += sample_score
+                peak = max(peak, sample_score)
+            signal = signal // (RIDGE_SIGNAL_HALF_WIDTH * 2 + 1)
             inner_background = score_at(scores, float(candidate_x) + cosine * float(radius - RIDGE_BACKGROUND_INNER_OFFSET), float(candidate_y) + sine * float(radius - RIDGE_BACKGROUND_INNER_OFFSET))
             outer_background = score_at(scores, float(candidate_x) + cosine * float(radius + RIDGE_BACKGROUND_OUTER_OFFSET), float(candidate_y) + sine * float(radius + RIDGE_BACKGROUND_OUTER_OFFSET))
             contrast = signal - (inner_background + outer_background) // 2
             if best == None or contrast > best[0]:
-                best = [contrast, signal, radius]
+                best = [contrast, peak, radius]
         if best[0] > 0 and best[1] >= threshold:
-            radii.append(best[2])
-    radius_mad = 99.0
-    if len(radii) > 0:
-        radius_median = median(radii)
-        deviations = []
-        for radius in radii:
-            deviations.append(abs(float(radius) - radius_median))
-        radius_mad = median(deviations)
-    hint_distance = abs(candidate_x - ROI_HALF) + abs(candidate_y - ROI_HALF)
-    if len(radii) >= 6:
-        return 1000000 - int(radius_mad * 10000.0) + len(radii) * 100 - hint_distance
-    return len(radii) * 10000 - int(radius_mad * 1000.0) - hint_distance
+            points.append([
+                float(candidate_x) + cosine * float(best[2]),
+                float(candidate_y) + sine * float(best[2]),
+            ])
+    return points
+
+def algebraic_circle_fit(points):
+    if len(points) < 3:
+        return None
+    mean_x = 0.0
+    mean_y = 0.0
+    for point in points:
+        mean_x += point[0]
+        mean_y += point[1]
+    mean_x = mean_x / float(len(points))
+    mean_y = mean_y / float(len(points))
+    sum_xx = 0.0
+    sum_xy = 0.0
+    sum_yy = 0.0
+    sum_xq = 0.0
+    sum_yq = 0.0
+    for point in points:
+        x = point[0] - mean_x
+        y = point[1] - mean_y
+        q = x * x + y * y
+        sum_xx += x * x
+        sum_xy += x * y
+        sum_yy += y * y
+        sum_xq += x * q
+        sum_yq += y * q
+    determinant = sum_xx * sum_yy - sum_xy * sum_xy
+    if determinant <= 0.000001:
+        return None
+    slope_x = (sum_xq * sum_yy - sum_yq * sum_xy) / determinant
+    slope_y = (sum_yq * sum_xx - sum_xq * sum_xy) / determinant
+    center_x = mean_x + slope_x / 2.0
+    center_y = mean_y + slope_y / 2.0
+    radii = []
+    for point in points:
+        radii.append(math.hypot(point[0] - center_x, point[1] - center_y))
+    return {"centerX": center_x, "centerY": center_y, "radius": median(radii)}
+
+def circle_fit_residuals(points, fit):
+    residuals = []
+    for point in points:
+        residuals.append(abs(math.hypot(point[0] - fit["centerX"], point[1] - fit["centerY"]) - fit["radius"]))
+    return residuals
+
+def percentile95(values):
+    if len(values) == 0:
+        return 99.0
+    ordered = sorted(values)
+    index = (len(ordered) * 95 + 99) // 100 - 1
+    return float(ordered[index])
+
+def robust_circle_fit(scores, threshold, candidate_x, candidate_y, directions):
+    points = high_confidence_arc_points(scores, threshold, candidate_x, candidate_y, directions)
+    rejected = {
+        "valid": False, "pointCount": len(points), "inlierCount": 0,
+        "centerX": float(candidate_x), "centerY": float(candidate_y),
+        "radius": 0.0, "residualP95": 99.0,
+        "covarianceXX": 99.0, "covarianceXY": 0.0, "covarianceYY": 99.0,
+        "covarianceTrace": 198.0,
+    }
+    if len(points) < MIN_CIRCLE_FIT_POINTS:
+        return rejected
+    initial = algebraic_circle_fit(points)
+    if initial == None:
+        return rejected
+    initial_residuals = circle_fit_residuals(points, initial)
+    residual_median = median(initial_residuals)
+    deviations = []
+    for residual in initial_residuals:
+        deviations.append(abs(residual - residual_median))
+    residual_mad = median(deviations)
+    inlier_limit = max(CIRCLE_FIT_OUTLIER_FLOOR_PIXELS, residual_median + CIRCLE_FIT_OUTLIER_MAD_MULTIPLIER * residual_mad)
+    inliers = []
+    for index in range(len(points)):
+        if initial_residuals[index] <= inlier_limit:
+            inliers.append(points[index])
+    if len(inliers) < MIN_CIRCLE_FIT_POINTS:
+        return rejected
+    fit = algebraic_circle_fit(inliers)
+    if fit == None:
+        return rejected
+    residuals = circle_fit_residuals(inliers, fit)
+    sum_jxx = 0.0
+    sum_jxy = 0.0
+    sum_jyy = 0.0
+    residual_squared_sum = 0.0
+    for index in range(len(inliers)):
+        dx = inliers[index][0] - fit["centerX"]
+        dy = inliers[index][1] - fit["centerY"]
+        distance = math.hypot(dx, dy)
+        if distance <= 0.0:
+            continue
+        unit_x = dx / distance
+        unit_y = dy / distance
+        sum_jxx += unit_x * unit_x
+        sum_jxy += unit_x * unit_y
+        sum_jyy += unit_y * unit_y
+        residual_squared_sum += residuals[index] * residuals[index]
+    determinant = sum_jxx * sum_jyy - sum_jxy * sum_jxy
+    if determinant <= 0.000001:
+        return rejected
+    residual_variance = residual_squared_sum / float(max(1, len(inliers) - 3))
+    covariance_xx = residual_variance * sum_jyy / determinant
+    covariance_xy = -residual_variance * sum_jxy / determinant
+    covariance_yy = residual_variance * sum_jxx / determinant
+    return {
+        "valid": True, "pointCount": len(points), "inlierCount": len(inliers),
+        "centerX": fit["centerX"], "centerY": fit["centerY"],
+        "radius": fit["radius"], "residualP95": percentile95(residuals),
+        "covarianceXX": covariance_xx, "covarianceXY": covariance_xy,
+        "covarianceYY": covariance_yy,
+        "covarianceTrace": covariance_xx + covariance_yy,
+    }
 
 def polar_candidate(scores, alpha_scores, threshold, candidate_x, candidate_y, directions):
     occupied_bins = []
@@ -306,6 +423,13 @@ def evaluate_plane(name, scores, alpha_scores, threshold_evidence, directions):
         "alphaInvariantOrangeScore": 0, "structuralCoverage": 0.0,
         "radiusMAD": 99.0, "orientationCoherence": 0.0,
         "arcConfidencePermille": 0,
+        "circleFitPointCount": 0, "circleFitInlierCount": 0,
+        "circleFitResidualP95": None,
+        "centerCovarianceXX": None, "centerCovarianceXY": None,
+        "centerCovarianceYY": None, "centerCovarianceTrace": None,
+        "runnerUpReferenceX": None, "runnerUpReferenceY": None,
+        "runnerUpSupport": 0, "runnerUpResidualP95": None,
+        "runnerUpCenterDistancePixels": None, "centerModeCount": 0,
         "presentation": None,
     }
     if threshold_evidence["degenerate"]:
@@ -324,12 +448,14 @@ def evaluate_plane(name, scores, alpha_scores, threshold_evidence, directions):
         for index in range(0, len(points), point_weight):
             score_points.append(points[index])
     candidates = []
+    coarse_candidates = []
     coarse_best = None
     for candidate_y in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
         for candidate_x in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
             score = candidate_score(score_points, point_weight, candidate_x, candidate_y)
             candidate = {"x": candidate_x, "y": candidate_y, "quality": score[0], "ringScore": score[1], "clutterScore": score[2]}
             candidates.append(candidate)
+            coarse_candidates.append(candidate)
             if coarse_best == None or candidate["quality"] > coarse_best["quality"]:
                 coarse_best = candidate
     # The four-pixel grid bounds global search cost. A fixed one-pixel local
@@ -343,14 +469,77 @@ def evaluate_plane(name, scores, alpha_scores, threshold_evidence, directions):
             candidates.append(candidate)
             if best == None or candidate["quality"] > best["quality"]:
                 best = candidate
-    polar_fit_best = None
-    for candidate_y in range(best["y"] - REFINEMENT_RADIUS, best["y"] + REFINEMENT_RADIUS + 1):
-        for candidate_x in range(best["x"] - REFINEMENT_RADIUS, best["x"] + REFINEMENT_RADIUS + 1):
-            fit_quality = polar_center_fit_quality(scores, threshold, candidate_x, candidate_y, directions)
-            if polar_fit_best == None or fit_quality > polar_fit_best[0]:
-                polar_fit_best = [fit_quality, candidate_x, candidate_y]
-    best["x"] = polar_fit_best[1]
-    best["y"] = polar_fit_best[2]
+    fit = robust_circle_fit(scores, threshold, best["x"], best["y"], directions)
+    result = base
+    result["circleFitPointCount"] = fit["pointCount"]
+    result["circleFitInlierCount"] = fit["inlierCount"]
+    if not fit["valid"]:
+        if fit["pointCount"] < MIN_STRUCTURAL_OCCUPIED_BINS:
+            result["occupiedAngularBins"] = fit["pointCount"]
+            result["structuralArcOccupiedBins"] = fit["pointCount"]
+            result["structuralCoverage"] = float(fit["pointCount"]) / float(STRUCTURAL_ARC_BINS)
+            result["structuralCoveragePermille"] = fit["pointCount"] * 1000 // STRUCTURAL_ARC_BINS
+            result["reason"] = "STRUCTURAL_COVERAGE_LOW"
+        else:
+            result["reason"] = "ROBUST_CIRCLE_FIT_INSUFFICIENT"
+        return result
+    best["x"] = int(fit["centerX"] + 0.5)
+    best["y"] = int(fit["centerY"] + 0.5)
+    result["circleFitResidualP95"] = fit["residualP95"]
+    result["centerCovarianceXX"] = fit["covarianceXX"]
+    result["centerCovarianceXY"] = fit["covarianceXY"]
+    result["centerCovarianceYY"] = fit["covarianceYY"]
+    result["centerCovarianceTrace"] = fit["covarianceTrace"]
+    result["centerModeCount"] = 1
+    if fit["covarianceTrace"] > MAX_CENTER_COVARIANCE_TRACE:
+        result["reason"] = "CENTER_COVARIANCE_HIGH"
+        return result
+
+    selected_runner_seeds = [coarse_best]
+    runner_fit = None
+    runner_fit_score = None
+    for _ in range(MAX_RUNNER_UP_SEEDS):
+        runner_seed = None
+        for candidate in coarse_candidates:
+            separated = True
+            for selected_seed in selected_runner_seeds:
+                seed_dx = candidate["x"] - selected_seed["x"]
+                seed_dy = candidate["y"] - selected_seed["y"]
+                if seed_dx * seed_dx + seed_dy * seed_dy < RUNNER_UP_SEED_DISTANCE_SQUARED:
+                    separated = False
+            if separated and (runner_seed == None or candidate["quality"] > runner_seed["quality"]):
+                runner_seed = candidate
+        if runner_seed == None:
+            continue
+        selected_runner_seeds.append(runner_seed)
+        candidate_fit = robust_circle_fit(scores, threshold, runner_seed["x"], runner_seed["y"], directions)
+        if not candidate_fit["valid"]:
+            continue
+        runner_x = int(candidate_fit["centerX"] + 0.5)
+        runner_y = int(candidate_fit["centerY"] + 0.5)
+        runner_dx = runner_x - best["x"]
+        runner_dy = runner_y - best["y"]
+        if runner_dx * runner_dx + runner_dy * runner_dy < RUNNER_UP_MODE_DISTANCE_SQUARED:
+            continue
+        candidate_fit_score = candidate_fit["inlierCount"] * 1000 - int(candidate_fit["residualP95"] * 100.0)
+        if runner_fit == None or candidate_fit_score > runner_fit_score:
+            runner_fit = candidate_fit
+            runner_fit_score = candidate_fit_score
+    if runner_fit != None:
+        runner_x = int(runner_fit["centerX"] + 0.5)
+        runner_y = int(runner_fit["centerY"] + 0.5)
+        runner_dx = runner_x - best["x"]
+        runner_dy = runner_y - best["y"]
+        runner_distance = math.hypot(runner_dx, runner_dy)
+        result["runnerUpReferenceX"] = runner_x
+        result["runnerUpReferenceY"] = runner_y
+        result["runnerUpSupport"] = runner_fit["inlierCount"]
+        result["runnerUpResidualP95"] = runner_fit["residualP95"]
+        result["runnerUpCenterDistancePixels"] = runner_distance
+        if runner_fit["inlierCount"] >= fit["inlierCount"] - RUNNER_UP_SUPPORT_MARGIN and runner_fit["residualP95"] <= fit["residualP95"] + RUNNER_UP_RESIDUAL_MARGIN_PIXELS:
+            result["centerModeCount"] = 2
+            result["reason"] = "MULTIMODAL_CENTER_AMBIGUOUS"
+            return result
     second_quality = 0
     second_ring_score = 0
     for candidate in candidates:
@@ -359,7 +548,6 @@ def evaluate_plane(name, scores, alpha_scores, threshold_evidence, directions):
         if dx * dx + dy * dy >= DISTINCT_CENTER_DISTANCE_SQUARED and candidate["quality"] > second_quality:
             second_quality = candidate["quality"]
             second_ring_score = candidate["ringScore"]
-    result = base
     result["x"] = best["x"]
     result["y"] = best["y"]
     result["quality"] = best["quality"]
@@ -438,6 +626,19 @@ def public_plane(plane, roi_x, roi_y):
         "radiusMAD": plane["radiusMAD"],
         "orientationCoherence": plane["orientationCoherence"],
         "arcConfidencePermille": plane["arcConfidencePermille"],
+        "circleFitPointCount": plane["circleFitPointCount"],
+        "circleFitInlierCount": plane["circleFitInlierCount"],
+        "circleFitResidualP95": plane["circleFitResidualP95"],
+        "centerCovarianceXX": plane["centerCovarianceXX"],
+        "centerCovarianceXY": plane["centerCovarianceXY"],
+        "centerCovarianceYY": plane["centerCovarianceYY"],
+        "centerCovarianceTrace": plane["centerCovarianceTrace"],
+        "runnerUpReferenceX": None if plane["runnerUpReferenceX"] == None else roi_x + plane["runnerUpReferenceX"],
+        "runnerUpReferenceY": None if plane["runnerUpReferenceY"] == None else roi_y + plane["runnerUpReferenceY"],
+        "runnerUpSupport": plane["runnerUpSupport"],
+        "runnerUpResidualP95": plane["runnerUpResidualP95"],
+        "runnerUpCenterDistancePixels": plane["runnerUpCenterDistancePixels"],
+        "centerModeCount": plane["centerModeCount"],
         "presentation": plane["presentation"],
     }
 
@@ -456,6 +657,13 @@ def unknown(reason, planes, sample, roi_x, roi_y, evidence_policy):
             "shapeConfidencePermille": None, "alphaInvariantOrangeScore": None,
             "structuralCoverage": None, "radiusMAD": None,
             "orientationCoherence": None, "arcConfidencePermille": None,
+            "circleFitPointCount": None, "circleFitInlierCount": None,
+            "circleFitResidualP95": None,
+            "centerCovarianceXX": None, "centerCovarianceXY": None,
+            "centerCovarianceYY": None, "centerCovarianceTrace": None,
+            "runnerUpReferenceX": None, "runnerUpReferenceY": None,
+            "runnerUpSupport": None, "runnerUpResidualP95": None,
+            "runnerUpCenterDistancePixels": None, "centerModeCount": None,
         },
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],
@@ -583,6 +791,19 @@ def main(ctx):
             "radiusMAD": selected_plane["radiusMAD"],
             "orientationCoherence": selected_plane["orientationCoherence"],
             "arcConfidencePermille": selected_plane["arcConfidencePermille"],
+            "circleFitPointCount": selected_plane["circleFitPointCount"],
+            "circleFitInlierCount": selected_plane["circleFitInlierCount"],
+            "circleFitResidualP95": selected_plane["circleFitResidualP95"],
+            "centerCovarianceXX": selected_plane["centerCovarianceXX"],
+            "centerCovarianceXY": selected_plane["centerCovarianceXY"],
+            "centerCovarianceYY": selected_plane["centerCovarianceYY"],
+            "centerCovarianceTrace": selected_plane["centerCovarianceTrace"],
+            "runnerUpReferenceX": None if selected_plane["runnerUpReferenceX"] == None else roi_x + selected_plane["runnerUpReferenceX"],
+            "runnerUpReferenceY": None if selected_plane["runnerUpReferenceY"] == None else roi_y + selected_plane["runnerUpReferenceY"],
+            "runnerUpSupport": selected_plane["runnerUpSupport"],
+            "runnerUpResidualP95": selected_plane["runnerUpResidualP95"],
+            "runnerUpCenterDistancePixels": selected_plane["runnerUpCenterDistancePixels"],
+            "centerModeCount": selected_plane["centerModeCount"],
         },
         "evidence": {
             "region": sample["region"], "physicalRegion": sample["physicalRegion"],

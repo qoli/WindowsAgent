@@ -6,14 +6,12 @@
     "type": {"const": "action.pause-at-exit-for-human-takeover.update"},
     "payload": {
       "type": "object", "additionalProperties": false,
-      "required": ["phase", "attempt", "menuState", "focusFillRatio", "lastCommand", "reason"],
+      "required": ["phase", "step", "lastCommand", "reason"],
       "properties": {
-        "phase": {"enum": ["OBSERVING", "OPENING_PAUSE_MENU", "FOCUSING_EXIT", "VERIFYING_EXIT_FOCUS", "SELECTING_EXIT", "VERIFYING_EXIT_DESTINATION", "SELECTING_EXIT_TO_MAIN_MENU", "VERIFYING_MAIN_MENU"]},
-        "attempt": {"type": "integer", "minimum": 0, "maximum": 120},
-        "menuState": {"enum": ["EXIT_FOCUSED", "PAUSE_MENU", "EXIT_TO_MAIN_MENU_FOCUSED", "EXIT_DESTINATION_MENU", "MAIN_MENU", "ABSENT", "UNKNOWN"]},
-        "focusFillRatio": {"type": "number", "minimum": 0, "maximum": 1},
-        "lastCommand": {"type": ["string", "null"], "enum": ["PAUSE", "DOWN", "SELECT", null]},
-        "reason": {"enum": ["PAUSE_MENU_EXIT_FOCUS_CONFIRMED", "PAUSE_MENU_VISIBLE_EXIT_NOT_FOCUSED", "PRIMARY_MENU_LABELS_ABSENT", "PRIMARY_MENU_LABELS_INCOMPLETE", "EXIT_DESTINATION_MAIN_MENU_FOCUS_CONFIRMED", "EXIT_DESTINATION_FOCUS_AMBIGUOUS", "EXIT_DESTINATION_MENU_VISIBLE_MAIN_NOT_FOCUSED", "EXIT_DESTINATION_LABELS_ABSENT", "EXIT_DESTINATION_LABELS_INCOMPLETE", "MAIN_MENU_EXACT_ANCHORS_CONFIRMED"]}
+        "phase": {"enum": ["REPLAYING_PAUSE", "REPLAYING_EXIT_NAVIGATION", "REPLAYING_FIRST_SELECT", "REPLAYING_SECOND_SELECT"]},
+        "step": {"type": "integer", "minimum": 1, "maximum": 8},
+        "lastCommand": {"enum": ["PAUSE", "DOWN", "SELECT"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 96}
       }
     }
   }

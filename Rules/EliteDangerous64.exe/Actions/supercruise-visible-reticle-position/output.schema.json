@@ -8,7 +8,7 @@
     "target": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "bestScore", "secondScore", "presentation", "occupiedAngularBins", "angularRuns", "evidencePlane", "evidenceQuality", "shapeConfidencePermille", "alphaInvariantOrangeScore", "structuralCoverage", "radiusMAD", "orientationCoherence", "arcConfidencePermille"],
+      "required": ["state", "referenceX", "referenceY", "offsetX", "offsetY", "centerDistancePixels", "reason", "bestScore", "secondScore", "presentation", "occupiedAngularBins", "angularRuns", "evidencePlane", "evidenceQuality", "shapeConfidencePermille", "alphaInvariantOrangeScore", "structuralCoverage", "radiusMAD", "orientationCoherence", "arcConfidencePermille", "circleFitPointCount", "circleFitInlierCount", "circleFitResidualP95", "centerCovarianceXX", "centerCovarianceXY", "centerCovarianceYY", "centerCovarianceTrace", "runnerUpReferenceX", "runnerUpReferenceY", "runnerUpSupport", "runnerUpResidualP95", "runnerUpCenterDistancePixels", "centerModeCount"],
       "properties": {
         "state": {"enum": ["DETECTED", "UNKNOWN"]},
         "referenceX": {"type": ["number", "null"]},
@@ -29,7 +29,20 @@
         "structuralCoverage": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "radiusMAD": {"type": ["number", "null"], "minimum": 0},
         "orientationCoherence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
-        "arcConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000}
+        "arcConfidencePermille": {"type": ["integer", "null"], "minimum": 0, "maximum": 1000},
+        "circleFitPointCount": {"type": ["integer", "null"], "minimum": 0, "maximum": 54},
+        "circleFitInlierCount": {"type": ["integer", "null"], "minimum": 0, "maximum": 54},
+        "circleFitResidualP95": {"type": ["number", "null"], "minimum": 0},
+        "centerCovarianceXX": {"type": ["number", "null"], "minimum": 0},
+        "centerCovarianceXY": {"type": ["number", "null"]},
+        "centerCovarianceYY": {"type": ["number", "null"], "minimum": 0},
+        "centerCovarianceTrace": {"type": ["number", "null"], "minimum": 0},
+        "runnerUpReferenceX": {"type": ["number", "null"]},
+        "runnerUpReferenceY": {"type": ["number", "null"]},
+        "runnerUpSupport": {"type": ["integer", "null"], "minimum": 0, "maximum": 54},
+        "runnerUpResidualP95": {"type": ["number", "null"], "minimum": 0},
+        "runnerUpCenterDistancePixels": {"type": ["number", "null"], "minimum": 0},
+        "centerModeCount": {"type": ["integer", "null"], "minimum": 0, "maximum": 2}
       }
     },
     "evidence": {
@@ -50,7 +63,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "state", "reason", "thresholdMethod", "threshold", "nonzeroCount", "nonzeroRatioPermille", "thresholdDegenerate", "pixelCount", "referenceX", "referenceY", "quality", "ringScore", "secondQuality", "clutterScore", "centerMargin", "occupiedAngularBins", "angularTransitions", "angularRuns", "structuralArcOccupiedBins", "labelSectorOccupiedBins", "structuralCoveragePermille", "labelGapClarityPermille", "radialContrastPermille", "centerUniquenessPermille", "shapeConfidencePermille", "alphaInvariantOrangeScore", "structuralCoverage", "radiusMAD", "orientationCoherence", "arcConfidencePermille", "presentation"],
+            "required": ["name", "state", "reason", "thresholdMethod", "threshold", "nonzeroCount", "nonzeroRatioPermille", "thresholdDegenerate", "pixelCount", "referenceX", "referenceY", "quality", "ringScore", "secondQuality", "clutterScore", "centerMargin", "occupiedAngularBins", "angularTransitions", "angularRuns", "structuralArcOccupiedBins", "labelSectorOccupiedBins", "structuralCoveragePermille", "labelGapClarityPermille", "radialContrastPermille", "centerUniquenessPermille", "shapeConfidencePermille", "alphaInvariantOrangeScore", "structuralCoverage", "radiusMAD", "orientationCoherence", "arcConfidencePermille", "circleFitPointCount", "circleFitInlierCount", "circleFitResidualP95", "centerCovarianceXX", "centerCovarianceXY", "centerCovarianceYY", "centerCovarianceTrace", "runnerUpReferenceX", "runnerUpReferenceY", "runnerUpSupport", "runnerUpResidualP95", "runnerUpCenterDistancePixels", "centerModeCount", "presentation"],
             "properties": {
               "name": {"enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE"]},
               "state": {"enum": ["VIABLE", "REJECTED"]},
@@ -83,6 +96,19 @@
               "radiusMAD": {"type": "number", "minimum": 0},
               "orientationCoherence": {"type": "number", "minimum": 0, "maximum": 1},
               "arcConfidencePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+              "circleFitPointCount": {"type": "integer", "minimum": 0, "maximum": 54},
+              "circleFitInlierCount": {"type": "integer", "minimum": 0, "maximum": 54},
+              "circleFitResidualP95": {"type": ["number", "null"], "minimum": 0},
+              "centerCovarianceXX": {"type": ["number", "null"], "minimum": 0},
+              "centerCovarianceXY": {"type": ["number", "null"]},
+              "centerCovarianceYY": {"type": ["number", "null"], "minimum": 0},
+              "centerCovarianceTrace": {"type": ["number", "null"], "minimum": 0},
+              "runnerUpReferenceX": {"type": ["number", "null"]},
+              "runnerUpReferenceY": {"type": ["number", "null"]},
+              "runnerUpSupport": {"type": "integer", "minimum": 0, "maximum": 54},
+              "runnerUpResidualP95": {"type": ["number", "null"], "minimum": 0},
+              "runnerUpCenterDistancePixels": {"type": ["number", "null"], "minimum": 0},
+              "centerModeCount": {"type": "integer", "minimum": 0, "maximum": 2},
               "presentation": {"enum": ["SOLID", "DASHED", null]}
             }
           }

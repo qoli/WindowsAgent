@@ -16,6 +16,8 @@ ASSIST_MISSING_LIMIT = 30
 LINE_OF_SIGHT_GATE_CONFIRMATIONS = 2
 LINE_OF_SIGHT_REALIGN_CYCLE_LIMIT = 3
 MAX_LINE_OF_SIGHT_RECOVERIES = 3
+NEAR_ORBIT_CLEAR_CONFIRMATIONS = 2
+NEAR_ORBIT_CLEAR_ATTEMPTS = 4
 STOPPED_CONFIRMATIONS = 3
 MAX_WGC_CAPTURE_ERRORS = 5
 PREFLIGHT_STATUS_ATTEMPTS = 4
@@ -358,19 +360,67 @@ def observe_flight():
     classified = action.call(id="elite-dangerous/flight-status", inputs={})
     return {"state": classified["flightStatus"]["state"], "text": classified["source"]["text"]}
 
+def handoff_after_near_orbit(target_name, sample, gauge, reason):
+    handoff = action.call(id="elite-dangerous/pause-at-exit-for-human-takeover", inputs={})
+    ready = handoff["keyReplayCompleted"] and handoff["pauseSent"] and handoff["downCount"] == 5 and handoff["firstSelectSent"] and handoff["secondSelectSent"] and handoff["sequenceLength"] == 8 and not handoff["visualPostconditionClaimed"]
+    if not ready:
+        fail("NEAR_ORBIT_SAFE_EXIT_KEY_REPLAY_INCOMPLETE: throttle is 0% but the fixed safe-exit key sequence was incomplete")
+    emit_update("HUMAN_TAKEOVER", sample, target_name, commanded_throttle=0, last_command="SAFE_EXIT_KEY_REPLAY", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], human_takeover_ready=ready, reason=reason + ":SAFE_EXIT_KEYS_REPLAYED_FOR_HUMAN_TAKEOVER")
+    fail("NEAR_ORBIT_SAFETY_TRIGGERED: orbital scale remained detected after the bounded automatic sphere-separation attempt; throttle is 0% and the fixed safe-exit key sequence was replayed for human takeover; resulting menu state is not asserted")
+
+def attempt_near_orbit_separation(target_name, sample, gauge, phase):
+    attempt = action.try_call(id="elite-dangerous/fixed-supercruise-sphere-separation", inputs={})
+    if not attempt["ok"]:
+        emit_update("NEAR_ORBIT_AVOIDANCE_FAILED", sample, target_name, commanded_throttle=0, last_command="FIXED_SPHERE_SEPARATION", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], reason="NEAR_ORBIT_FIXED_SPHERE_SEPARATION_FAILED:" + str(attempt["errorCode"]))
+        return {"cleared": False, "sample": sample, "control": None, "gauge": gauge, "reason": "NEAR_ORBIT_FIXED_SPHERE_SEPARATION_FAILED_DURING_" + phase}
+
+    separation = attempt["output"]
+    sample += separation["sampleCount"]
+    control = separation["control"]
+    emit_update("NEAR_ORBIT_AVOIDANCE", sample, target_name, commanded_throttle=0, last_command="FIXED_SPHERE_SEPARATION", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], line_of_sight_control=control, reason="NEAR_ORBIT_FIXED_SPHERE_SEPARATION_COMPLETED:6400+30000MS")
+
+    confirmations = 0
+    last_gauge = gauge
+    for attempt_index in range(NEAR_ORBIT_CLEAR_ATTEMPTS):
+        sample += 1
+        last_gauge = action.call(id="elite-dangerous/orbital-scale-gauge-state", inputs={})["gauge"]
+        if last_gauge["state"] == "ABSENT":
+            confirmations += 1
+        else:
+            confirmations = 0
+        emit_update("VERIFYING_NEAR_ORBIT_CLEAR", sample, target_name, commanded_throttle=0, last_command=None, orbital_scale_state=last_gauge["state"], orbital_scale_confidence=last_gauge["confidence"], line_of_sight_control=control, reason="POST_SEPARATION_ORBITAL_SCALE_ABSENT_" + str(confirmations) + "_OF_" + str(NEAR_ORBIT_CLEAR_CONFIRMATIONS))
+        if confirmations >= NEAR_ORBIT_CLEAR_CONFIRMATIONS:
+            emit_update("NEAR_ORBIT_AVOIDANCE_COMPLETED", sample, target_name, commanded_throttle=0, last_command="FIXED_SPHERE_SEPARATION", orbital_scale_state=last_gauge["state"], orbital_scale_confidence=last_gauge["confidence"], line_of_sight_control=control, reason="POST_SEPARATION_ORBITAL_SCALE_CLEARED_DURING_" + phase)
+            return {"cleared": True, "sample": sample, "control": control, "gauge": last_gauge, "reason": "POST_SEPARATION_ORBITAL_SCALE_CLEARED_DURING_" + phase}
+        if attempt_index + 1 < NEAR_ORBIT_CLEAR_ATTEMPTS:
+            task.sleep(milliseconds=POLL_MS)
+
+    return {"cleared": False, "sample": sample, "control": control, "gauge": last_gauge, "reason": "NEAR_ORBIT_SCALE_PERSISTED_AFTER_FIXED_SPHERE_SEPARATION_DURING_" + phase}
+
 def guard_near_orbit(target_name, sample, phase):
-    observation = action.call(id="elite-dangerous/orbital-scale-gauge-state", inputs={})
-    gauge = observation["gauge"]
+    gauge = action.call(id="elite-dangerous/orbital-scale-gauge-state", inputs={})["gauge"]
     if gauge["state"] != "DETECTED":
         return gauge
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("NEAR_ORBIT_SAFETY_TRIGGERED", sample, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], reason="ORBITAL_SCALE_DETECTED_DURING_" + phase + ":" + throttle["control"])
-    handoff = action.call(id="elite-dangerous/pause-at-exit-for-human-takeover", inputs={})
-    ready = handoff["pauseMenuConfirmed"] and handoff["exitFocused"] and handoff["firstExitSelectSent"] and handoff["exitDestinationMenuConfirmed"] and handoff["exitToMainMenuFocused"] and handoff["exitToMainMenuSelectSent"] and handoff["mainMenuConfirmed"]
-    if not ready:
-        fail("NEAR_ORBIT_SAFE_EXIT_POSTCONDITION_NOT_CONFIRMED: throttle is 0% but the main-menu handoff contract was incomplete")
-    emit_update("HUMAN_TAKEOVER", sample, target_name, commanded_throttle=0, last_command="EXIT_TO_MAIN_MENU", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], human_takeover_ready=ready, reason="NEAR_ORBIT_ABORT_EXITED_TO_MAIN_MENU_FOR_HUMAN_TAKEOVER")
-    fail("NEAR_ORBIT_SAFETY_TRIGGERED: orbital scale detected; throttle is 0% and flight exited to the main menu for human takeover")
+    recovered = attempt_near_orbit_separation(target_name, sample, gauge, phase)
+    if recovered["cleared"]:
+        return recovered["gauge"]
+    handoff_after_near_orbit(target_name, recovered["sample"], recovered["gauge"], recovered["reason"])
+
+def recover_near_orbit_or_handoff(target_name, sample):
+    gauge = action.call(id="elite-dangerous/orbital-scale-gauge-state", inputs={})["gauge"]
+    if gauge["state"] != "DETECTED":
+        return {"recovered": False, "sample": sample, "control": None}
+    throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
+    emit_update("NEAR_ORBIT_SAFETY_TRIGGERED", sample, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], reason="ORBITAL_SCALE_DETECTED_DURING_GAME_CONTROLLED_APPROACH:" + throttle["control"])
+    recovered = attempt_near_orbit_separation(target_name, sample, gauge, "GAME_CONTROLLED_APPROACH")
+    if not recovered["cleared"]:
+        handoff_after_near_orbit(target_name, recovered["sample"], recovered["gauge"], recovered["reason"])
+    alignment = resolve_assist_alignment_prompt(target_name, recovered["sample"])
+    restored = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 75})
+    emit_update("REACQUIRING_ASSIST", alignment["sample"], target_name, flight_status=alignment["flight"]["state"], prompt_text=alignment["flight"]["text"], assist_active_confirmations=alignment["assistActiveConfirmations"], commanded_throttle=75, last_command="SET_THROTTLE_75", orbital_scale_state=recovered["gauge"]["state"], orbital_scale_confidence=recovered["gauge"]["confidence"], line_of_sight_control=recovered["control"], reason="NEAR_ORBIT_AVOIDANCE_ALIGNMENT_CLEAR_RESTORING_BLUE_ZONE:" + restored["control"])
+    return {"recovered": True, "sample": alignment["sample"], "control": recovered["control"], "flight": alignment["flight"], "assistActiveConfirmations": alignment["assistActiveConfirmations"]}
 
 def observe_supercruise_hud_stable():
     confirmations = 0
@@ -889,7 +939,18 @@ def main(ctx):
     agent_flight_input_after_assist_active = False
     for _ in range(ASSIST_ACTIVE_LIMIT):
         sample += 1
-        guard_near_orbit(target_name, sample, "GAME_CONTROLLED_APPROACH")
+        near_orbit = recover_near_orbit_or_handoff(target_name, sample)
+        if near_orbit["recovered"]:
+            sample = near_orbit["sample"]
+            line_of_sight_recovery_count += 1
+            last_line_of_sight_control = near_orbit["control"]
+            assist_active_confirmations = near_orbit["assistActiveConfirmations"]
+            line_of_sight_required_samples = 0
+            assist_missing_samples = 0
+            stopped_confirmations = 0
+            assist_reacquire_samples = 0
+            reacquiring_assist = assist_active_confirmations < ASSIST_ACTIVE_CONFIRMATIONS
+            agent_flight_input_after_assist_active = True
         flight = observe_flight()
         speed_attempt = action.try_call(id="elite-dangerous/ship-speed", inputs={})
         if not speed_attempt["ok"]:

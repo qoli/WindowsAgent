@@ -9,6 +9,7 @@ import (
 	"math"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -232,6 +233,11 @@ func reticleFixturePixels(centerX, centerY int, dashed bool, ring uint32, backgr
 			pixels[y*140+x] = background(x, y)
 		}
 	}
+	paintReticleFixture(pixels, centerX, centerY, dashed, ring)
+	return pixels
+}
+
+func paintReticleFixture(pixels []any, centerX, centerY int, dashed bool, ring uint32) {
 	for y := 0; y < 140; y++ {
 		for x := 0; x < 140; x++ {
 			distance := math.Hypot(float64(x-centerX), float64(y-centerY))
@@ -263,7 +269,6 @@ func reticleFixturePixels(centerX, centerY int, dashed bool, ring uint32, backgr
 			pixels[y*140+x] = pixel
 		}
 	}
-	return pixels
 }
 
 func hyperspaceTargetOcclusionPackageRoot(t *testing.T) string {
@@ -2132,6 +2137,113 @@ func TestEliteSupercruiseVisibleReticleKeepsDashedRingAcrossOnePixelHintPhases(t
 				t.Fatalf("axis=%d delta=%d diagnostics=%#v", axis, delta, target)
 			}
 		}
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleRobustCircleFitBoundsCenterP95AndSpread(t *testing.T) {
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deltas := [][2]int{
+		{-8, -8}, {-8, 0}, {-8, 8}, {-4, 5}, {0, -8}, {0, 0}, {0, 8}, {3, -5}, {5, 4}, {8, -8}, {8, 0}, {8, 8},
+	}
+	errorsPixels := make([]float64, 0, len(deltas))
+	centersX := make([]float64, 0, len(deltas))
+	centersY := make([]float64, 0, len(deltas))
+	for index, delta := range deltas {
+		background := func(x, y int) uint32 {
+			value := uint32((x*5 + y*9 + index*3) % 18)
+			return (value << 16) | (value << 8) | value
+		}
+		if index%3 == 1 {
+			background = func(x, y int) uint32 {
+				if x >= 108 {
+					return 0xD02AAE
+				}
+				value := uint32((x*3 + y*7) % 16)
+				return (value << 16) | (value << 8) | value
+			}
+		}
+		pixels := reticleFixturePixels(78-delta[0], 78-delta[1], true, 0x8A5A18, background)
+		runner, err := New(&compassBroker{pixels: pixels})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, err := runner.Run(context.Background(), pkg, map[string]any{
+			"hintX": 960 + delta[0], "hintY": 540 + delta[1], "evidencePolicy": "HUD_OVERLAY_AWARE",
+		})
+		if err != nil {
+			t.Fatalf("delta=%v: %v", delta, err)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(output, &result); err != nil {
+			t.Fatal(err)
+		}
+		target := result["target"].(map[string]any)
+		if target["state"] != "DETECTED" || target["centerModeCount"].(float64) != 1 ||
+			target["circleFitPointCount"].(float64) < 36 || target["circleFitInlierCount"].(float64) < 36 ||
+			target["circleFitResidualP95"].(float64) > 4 || target["centerCovarianceTrace"].(float64) > 4 {
+			t.Fatalf("delta=%v target=%#v output=%s", delta, target, output)
+		}
+		x := target["referenceX"].(float64)
+		y := target["referenceY"].(float64)
+		centersX = append(centersX, x)
+		centersY = append(centersY, y)
+		errorsPixels = append(errorsPixels, math.Hypot(x-968, y-548))
+	}
+	sort.Float64s(errorsPixels)
+	p95 := errorsPixels[(len(errorsPixels)*95+99)/100-1]
+	sort.Float64s(centersX)
+	sort.Float64s(centersY)
+	spread := math.Hypot(centersX[len(centersX)-1]-centersX[0], centersY[len(centersY)-1]-centersY[0])
+	t.Logf("robust circle center p95=%.3fpx spread=%.3fpx across %d jitter fixtures", p95, spread, len(deltas))
+	if p95 > 4 || spread > 4 {
+		t.Fatalf("center stability p95=%.3f spread=%.3f errors=%v x=%v y=%v", p95, spread, errorsPixels, centersX, centersY)
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleRejectsComparableDistinctCircleModes(t *testing.T) {
+	pixels := make([]any, 140*140)
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 140; x++ {
+			pixels[y*140+x] = uint32(0x080A12)
+		}
+	}
+	paintReticleFixture(pixels, 54, 70, true, 0xD88424)
+	paintReticleFixture(pixels, 86, 70, true, 0xD88424)
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&compassBroker{pixels: pixels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540, "evidencePolicy": "HUD_OVERLAY_AWARE"})
+	if err != nil {
+		t.Fatalf("run package: %v", err)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["target"].(map[string]any)["state"] != "UNKNOWN" {
+		t.Fatalf("two comparable circle modes must remain UNKNOWN: %s", output)
+	}
+	foundAmbiguous := false
+	for _, rawPlane := range result["evidence"].(map[string]any)["planes"].([]any) {
+		plane := rawPlane.(map[string]any)
+		if plane["reason"] == "MULTIMODAL_CENTER_AMBIGUOUS" {
+			foundAmbiguous = true
+			if plane["centerModeCount"].(float64) != 2 || plane["runnerUpSupport"].(float64) < 36 ||
+				plane["runnerUpCenterDistancePixels"].(float64) < 6 {
+				t.Fatalf("ambiguous plane diagnostics=%#v", plane)
+			}
+		}
+	}
+	if !foundAmbiguous {
+		t.Fatalf("missing explicit multimodal rejection: %s", output)
 	}
 }
 
