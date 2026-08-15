@@ -135,14 +135,25 @@ def choose_command(target, position_source):
 def trackable_hint(target):
     return target["referenceX"] >= MIN_TRACKING_HINT and target["referenceX"] <= MAX_TRACKING_HINT_X and target["referenceY"] >= MIN_TRACKING_HINT and target["referenceY"] <= MAX_TRACKING_HINT_Y
 
+def normalize_prompt_text(text):
+    normalized = ""
+    upper = text.upper()
+    for index in range(len(upper)):
+        character = upper[index]
+        if character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
+            normalized += character
+    return normalized
+
 def observe_blue_zone_gate(target_name, sample, command_count, stable, gate):
     if not gate["enabled"]:
         return False
     flight = action.call(id="elite-dangerous/flight-status", inputs={})
     state = flight["flightStatus"]["state"]
     prompt_text = flight["source"]["text"]
+    gate["lastState"] = state
     gate["lastPromptText"] = prompt_text
-    if state == "FSD_THROTTLE_UP_REQUIRED":
+    exact_prompt = normalize_prompt_text(prompt_text) == "MOVETHROTTLETOBLUEZONE"
+    if state == "FSD_THROTTLE_UP_REQUIRED" or exact_prompt:
         gate["confirmations"] += 1
         reason = "BLUE_ZONE_ALIGNMENT_GATE_" + str(gate["confirmations"]) + "_OF_2"
     else:
@@ -170,7 +181,7 @@ def blue_zone_completion(target_name, sample, command_count, final_target, gate)
         target=final_target,
         stable=0,
         reason="BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED",
-        flight_status="FSD_THROTTLE_UP_REQUIRED",
+        flight_status=gate["lastState"],
         flight_prompt_text=gate["lastPromptText"],
         blue_zone_confirmations=gate["confirmations"],
     )
@@ -250,7 +261,7 @@ def main(ctx):
     # must still be DETECTED before any attitude command is sent.
     tracked_target = {"referenceX": SCREEN_CENTER_X, "referenceY": SCREEN_CENTER_Y} if center_hint_confirmed else None
     tracked_samples_since_identity = 0
-    blue_zone_gate = {"enabled": blue_zone_gate_enabled, "confirmations": 0, "lastPromptText": None}
+    blue_zone_gate = {"enabled": blue_zone_gate_enabled, "confirmations": 0, "lastState": None, "lastPromptText": None}
     if observe_blue_zone_gate(target_name, 0, command_count, stable, blue_zone_gate):
         return blue_zone_completion(target_name, 0, command_count, final_target, blue_zone_gate)
     if position_source == "DESTINATION":

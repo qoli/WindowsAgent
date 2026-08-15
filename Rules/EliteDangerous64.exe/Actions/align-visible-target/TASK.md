@@ -29,11 +29,13 @@ the alignment loop every three destination samples (about 2.25 seconds at the
 declared cadence). The first sample is taken when alignment starts. If the
 strict heat checkpoint remains UNKNOWN for all eight same-provider retries,
 the Action takes the next game-status sample before failing that heat Gate.
-Two uninterrupted fresh `FSD_THROTTLE_UP_REQUIRED` observations, whose visible
-meaning is `MOVE THROTTLE TO BLUE ZONE`, are independent positive game evidence
-that the selected destination is aligned and may complete this Action. Any
-other state, including UNKNOWN, resets the confirmation count. One observation
-never completes, no cached prompt is accepted, and no game-status observation
+Two uninterrupted fresh observations must either classify as
+`FSD_THROTTLE_UP_REQUIRED` or carry source text whose normalized value is
+exactly `MOVETHROTTLETOBLUEZONE`. This is independent positive game evidence
+that the selected destination is aligned and may complete this Action. An
+UNKNOWN classifier is accepted only with that exact same-frame source text;
+any other state/text pair resets the confirmation count. One observation never
+completes, no fuzzy or cached prompt is accepted, and no game-status observation
 authorizes an attitude or throttle command. Callers that do not explicitly
 enable this Gate retain the CV-only contract.
 

@@ -108,8 +108,8 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 func TestEliteAlignVisibleTargetCompletesFromConcurrentBlueZoneGateDuringUnknownHeat(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		flightStatuses: []json.RawMessage{
-			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
-			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("UNKNOWN", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("UNKNOWN", "MOVE THROTTLE TO BLUE ZONE"),
 		},
 	}
 	for index := 0; index < 8; index++ {
@@ -134,7 +134,7 @@ func TestEliteAlignVisibleTargetCompletesFromConcurrentBlueZoneGateDuringUnknown
 func TestEliteAlignVisibleTargetDoesNotCompleteFromInterruptedBlueZoneGate(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		flightStatuses: []json.RawMessage{
-			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("UNKNOWN", "MOVE THROTTLE TO BLUE ZONE"),
 			visibleFlightStatus("UNKNOWN", ""),
 		},
 	}
@@ -156,8 +156,8 @@ func TestEliteAlignVisibleTargetPollsBlueZoneWhileCVKeepsAligning(t *testing.T) 
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		flightStatuses: []json.RawMessage{
-			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
-			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("UNKNOWN", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("UNKNOWN", "MOVE THROTTLE TO BLUE ZONE"),
 		},
 		positions: []json.RawMessage{
 			visiblePositionWithPresentation(35, -40, 53.2, "DASHED"),
