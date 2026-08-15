@@ -33,6 +33,7 @@ STRUCTURAL_ARC_BINS = 54
 LABEL_SECTOR_BINS = 18
 MIN_OTSU_NONZERO_PIXELS = 24
 MAX_EVIDENCE_PLANE_PIXELS = 10000
+MAX_CANDIDATE_SCORE_POINTS = 1200
 
 def channels(pixel):
     return [pixel // 65536, (pixel // 256) % 256, pixel % 256]
@@ -126,7 +127,7 @@ def points_at_or_above(scores, threshold):
             points.append([index % ROI_SIZE, index // ROI_SIZE])
     return points
 
-def candidate_score(points, candidate_x, candidate_y):
+def candidate_score(points, point_weight, candidate_x, candidate_y):
     ring_score = 0
     clutter_score = 0
     for point in points:
@@ -134,9 +135,9 @@ def candidate_score(points, candidate_x, candidate_y):
         dy = point[1] - candidate_y
         radius_squared = dx * dx + dy * dy
         if radius_squared >= SEARCH_INNER_RADIUS_SQUARED and radius_squared <= SEARCH_OUTER_RADIUS_SQUARED:
-            ring_score += 1
+            ring_score += point_weight
         elif (radius_squared >= INNER_NOISE_MIN_RADIUS_SQUARED and radius_squared <= INNER_NOISE_MAX_RADIUS_SQUARED) or (radius_squared >= OUTER_NOISE_MIN_RADIUS_SQUARED and radius_squared <= OUTER_NOISE_MAX_RADIUS_SQUARED):
-            clutter_score += 1
+            clutter_score += point_weight
     hint_distance = abs(candidate_x - ROI_HALF) + abs(candidate_y - ROI_HALF)
     quality = ring_score * 5 - clutter_score * 7 - hint_distance
     return [quality, ring_score, clutter_score]
@@ -213,11 +214,23 @@ def evaluate_plane(name, points, threshold_evidence):
     if len(points) > MAX_EVIDENCE_PLANE_PIXELS:
         base["reason"] = "PIXEL_DENSITY_HIGH"
         return base
+    # Candidate fitting is the only quadratic part of this observation. Dense
+    # adaptive planes can contain thousands of pixels, so score candidates with
+    # one deterministic evenly spaced representation and scale its counts back
+    # to the full plane. Topology and public evidence still use every accepted
+    # current-frame pixel below.
+    score_points = points
+    point_weight = 1
+    if len(points) > MAX_CANDIDATE_SCORE_POINTS:
+        point_weight = (len(points) + MAX_CANDIDATE_SCORE_POINTS - 1) // MAX_CANDIDATE_SCORE_POINTS
+        score_points = []
+        for index in range(0, len(points), point_weight):
+            score_points.append(points[index])
     candidates = []
     coarse_best = None
     for candidate_y in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
         for candidate_x in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
-            score = candidate_score(points, candidate_x, candidate_y)
+            score = candidate_score(score_points, point_weight, candidate_x, candidate_y)
             candidate = {
                 "x": candidate_x,
                 "y": candidate_y,
@@ -234,7 +247,7 @@ def evaluate_plane(name, points, threshold_evidence):
     best = None
     for candidate_y in range(coarse_best["y"] - REFINEMENT_RADIUS, coarse_best["y"] + REFINEMENT_RADIUS + 1):
         for candidate_x in range(coarse_best["x"] - REFINEMENT_RADIUS, coarse_best["x"] + REFINEMENT_RADIUS + 1):
-            score = candidate_score(points, candidate_x, candidate_y)
+            score = candidate_score(score_points, point_weight, candidate_x, candidate_y)
             candidate = {
                 "x": candidate_x,
                 "y": candidate_y,

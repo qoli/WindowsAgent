@@ -2216,6 +2216,36 @@ func TestEliteSupercruiseVisibleReticleRejectsFilledWarmField(t *testing.T) {
 	}
 }
 
+func TestEliteSupercruiseVisibleReticleBoundsDenseCandidateScoringWithinStepBudget(t *testing.T) {
+	pixels := make([]any, 140*140)
+	for index := range pixels {
+		if index < 8000 {
+			if index%2 == 0 {
+				pixels[index] = uint32(0xD08020)
+			} else {
+				pixels[index] = uint32(0xA85C18)
+			}
+		} else {
+			pixels[index] = uint32(0x080A12)
+		}
+	}
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(&compassBroker{pixels: pixels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": 960, "hintY": 540, "evidencePolicy": "HUD_OVERLAY_AWARE"})
+	if err != nil {
+		t.Fatalf("dense current-frame plane exceeded its declared runtime budget: %v", err)
+	}
+	if !strings.Contains(string(output), `"state":"UNKNOWN"`) {
+		t.Fatalf("dense non-reticle field must remain fail closed: %s", output)
+	}
+}
+
 func TestEliteHyperspaceTargetOcclusionReportsCoverageAndEscapeDirection(t *testing.T) {
 	pkg, err := scriptpackage.Load(hyperspaceTargetOcclusionPackageRoot(t), "elite-dangerous/hyperspace-target-occlusion")
 	if err != nil {

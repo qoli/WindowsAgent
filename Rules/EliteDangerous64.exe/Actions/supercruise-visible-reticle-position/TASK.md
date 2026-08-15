@@ -31,9 +31,13 @@ controller; strict RGB still cannot rescue missing identity, invalid layout,
 or an invalid three-quarter shape. Its selection reason is
 `HUD_OVERLAY_AWARE_STRICT_RGB_SELECTED_AFTER_ADAPTIVE_REJECTION`.
 
-Each plane evaluates every retained foreground pixel. It first evaluates the
-fixed four-pixel grid of candidate centres, then evaluates one fixed one-pixel
-local grid within four pixels of that coarse winner. This same-frame refinement
+Each plane retains every foreground pixel for thresholding, topology, and
+published evidence. Candidate scoring uses at most 1200 deterministic evenly
+spaced retained pixels and scales ring/clutter counts by that sampling stride;
+this bounds dense Dash frames without changing source, frame, threshold, or
+fail-closed plane selection. It first evaluates the fixed four-pixel grid of
+candidate centres, then evaluates one fixed one-pixel local grid within four
+pixels of that coarse winner. This same-frame refinement
 removes the measured pixel-phase flicker of thin `DASHED` three-quarter rings;
 it does not change the hint window, source, provider, or evidence plane. Its score rewards
 pixels in the reviewed 34–58-pixel annulus, penalizes pixels in the adjacent
@@ -71,6 +75,7 @@ track the already-identified reticle by feeding each current result back as the
 next hint. A tracking miss authorizes no steering and must transition visibly
 back to identity acquisition.
 
-The ROI, candidate grid, evidence-plane order, and 64M Starlark step budget are
-fixed. Exceeding the declared budget or receiving incomplete screen evidence
-is a terminal infrastructure failure, not domain `UNKNOWN`.
+The ROI, candidate grid, 1200-point candidate-scoring bound, evidence-plane
+order, and 64M Starlark step budget are fixed. Exceeding the declared budget or
+receiving incomplete screen evidence is a terminal infrastructure failure, not
+domain `UNKNOWN`.
