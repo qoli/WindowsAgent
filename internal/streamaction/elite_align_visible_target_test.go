@@ -324,14 +324,14 @@ func TestEliteAlignVisibleTargetBiasesAssistTrackingROIWithoutBiasingControlTarg
 	}
 	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
 		caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 430 ||
-		caller.positionInputs[2]["hintX"].(int64) != 930 || caller.positionInputs[2]["hintY"].(int64) != 429 {
+		caller.positionInputs[2]["hintX"].(int64) != 933 || caller.positionInputs[2]["hintY"].(int64) != 437 {
 		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
 	}
 	if len(caller.controls) == 0 || caller.controls[0] != "PITCH_UP" {
 		t.Fatalf("control must use true offset (3,-91), controls=%v", caller.controls)
 	}
 	events := joinEventPhases(reporter.payloads)
-	if !contains(events, `"trackingHintX":930`) || !contains(events, `"trackingHintY":429`) ||
+	if !contains(events, `"trackingHintX":933`) || !contains(events, `"trackingHintY":437`) ||
 		!contains(events, `"offsetX":3`) || !contains(events, `"offsetY":-91`) ||
 		!contains(events, `"command":"PITCH_UP"`) {
 		t.Fatalf("events=%s", events)

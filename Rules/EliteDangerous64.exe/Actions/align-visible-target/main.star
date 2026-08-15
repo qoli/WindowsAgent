@@ -39,8 +39,8 @@ MAX_TRACKING_HINT_Y = 1010
 SCREEN_CENTER_X = 960
 SCREEN_CENTER_Y = 540
 RELOCALIZATION_VALIDATION_MAX_DELTA_SQUARED = 12.0 * 12.0
-SUPERCRUISE_ASSIST_TRACKING_BIAS_X = -33
-SUPERCRUISE_ASSIST_TRACKING_BIAS_Y = -20
+SUPERCRUISE_ASSIST_TRACKING_BIAS_X = -30
+SUPERCRUISE_ASSIST_TRACKING_BIAS_Y = -12
 
 def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0, relocalization_state="INACTIVE", relocalization_attempt=0, confirmed_hint_profile="NONE", relocalization_hint_x=None, relocalization_hint_y=None, tracking_hint_x=None, tracking_hint_y=None):
     presentation = None

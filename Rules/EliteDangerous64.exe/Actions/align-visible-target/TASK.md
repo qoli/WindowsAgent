@@ -64,8 +64,9 @@ algorithm at the caller-selected profile hint. Non-confirmed callers must use
 
 After any detector result establishes a true reticle centre, the
 `SUPERCRUISE_ASSIST` profile routes the next `LOCAL_140` crop with a fixed
-`(-33,-20)` hint bias. Live A/B evidence showed exact-centre hint `(963,449)`
-rejecting a dense Assist crop while `(930,430)` detected the same ring. The
+`(-30,-12)` hint bias. Live A/B evidence showed exact-centre hint `(963,449)`
+rejecting a dense Assist crop, and later post-pulse hint `(927,446)` rejecting
+while the motion-adjusted `(930,454)` detected the same ring. The
 bias applies only to the crop origin: the stored target, the 12-pixel
 relocalization consistency Gate, centre completion, and `choose_command` all
 continue to use the detector's unbiased true centre and offsets.
