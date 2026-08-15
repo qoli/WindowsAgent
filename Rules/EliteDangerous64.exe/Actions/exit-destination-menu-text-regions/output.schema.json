@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "regions", "evidence", "models", "timing"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "regions": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["detectionConfidence", "text", "recognitionConfidence", "leftContext"],
+        "properties": {
+          "detectionConfidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "text": {"type": "string", "maxLength": 256},
+          "recognitionConfidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "leftContext": {
+            "type": "object", "required": ["pixels"],
+            "properties": {"pixels": {"type": "array", "maxItems": 65536, "items": {"type": "integer", "minimum": 0, "maximum": 16777215}}}
+          }
+        }
+      }
+    },
+    "evidence": {"type": "object"},
+    "models": {"type": "object"},
+    "timing": {"type": "object"}
+  }
+}

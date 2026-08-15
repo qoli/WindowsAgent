@@ -144,10 +144,12 @@ line-of-sight handoff, and game-controlled approach. It applies the reviewed
 orange heading-scale geometry in the current frame and retains its evidence
 score. One `DETECTED` frame is sufficient to command 0% immediately; no later
 75% or 100% command is permitted. The parent then invokes
-`pause-at-exit-for-human-takeover`, which opens the pause menu, clamps focus to
-`EXIT`, and requires two fresh visual confirmations of that exact handoff
-screen. It deliberately does not select EXIT. Once the handoff is confirmed,
-the parent emits `HUMAN_TAKEOVER` and fails with the stable
+`pause-at-exit-for-human-takeover`, which opens the pause menu, confirms and
+selects `EXIT`, independently confirms the second-level `EXIT TO MAIN MENU`
+card before selecting it, and finally requires two fresh exact-anchor
+observations of the non-flight main menu. Missing menus and loading frames do
+not count as success. Once the safe exit is confirmed, the parent emits
+`HUMAN_TAKEOVER` and fails with the stable
 `NEAR_ORBIT_SAFETY_TRIGGERED` prefix because the requested autonomous flight
 goal was aborted. A capture, schema, OCR, or menu-observation failure remains
 terminal and does not become an absent scale or a successful handoff.

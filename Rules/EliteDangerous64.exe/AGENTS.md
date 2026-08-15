@@ -255,6 +255,25 @@ game-neutral Windows scan-code input driver; never assume Space or any other
 fixed physical key. Successful output includes the binding source, backend,
 scan code, extended-key flag, and configured hold time.
 
+The `PAUSE` selection of `elite-dangerous/ui-control` resolves Frontier's
+dedicated `Pause` control. It is distinct from binding-resolved `UI_Back`,
+which owns in-panel back navigation and must not be used as a pause-menu
+substitute. Successful injection is not menu evidence; the caller must verify
+the pause menu from a fresh frame. Missing or unbound `Pause` fails explicitly;
+there is no BACK or literal-key fallback.
+
+`elite-dangerous/pause-at-exit-for-human-takeover` is a safe-exit workflow, not
+a paused-flight handoff. It confirms the first-level `EXIT` focus twice before
+one `SELECT`, then independently confirms the second-level `EXIT TO MAIN MENU`
+card is focused and `QUIT TO DESKTOP` is not focused twice before the final
+`SELECT`; dual-focus evidence fails closed. A restarted Action may resume from
+that exact second-level two-frame Gate without toggling Pause or replaying the
+first select. `QUIT TO DESKTOP`, missing labels, black/loading frames, and menu
+disappearance never authorize success.
+The terminal postcondition is two fresh exact-anchor observations of the
+non-flight main menu headed by `CONTINUE`; only then may a parent report human
+takeover readiness.
+
 `elite-dangerous/text-entry-key` is the finite single-key text primitive for a
 model-confirmed active game field. It accepts one allowlisted ASCII letter,
 digit, Space, Backspace, or Enter and uses the same foreground-revalidated

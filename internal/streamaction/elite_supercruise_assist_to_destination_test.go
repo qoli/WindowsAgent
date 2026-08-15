@@ -53,6 +53,7 @@ type supercruiseAssistDestinationCaller struct {
 	orbitalScaleDetectAt   int
 	orbitalScaleCalls      int
 	humanTakeoverCalls     int
+	humanTakeoverOutput    json.RawMessage
 }
 
 func focusedPixels(focused bool) []any {
@@ -92,12 +93,15 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 	case "elite-dangerous/orbital-scale-gauge-state":
 		c.orbitalScaleCalls++
 		if c.orbitalScaleDetected && (c.orbitalScaleDetectAt == 0 || c.orbitalScaleCalls >= c.orbitalScaleDetectAt) {
-			return json.RawMessage(`{"schemaVersion":1,"gauge":{"state":"DETECTED","confidence":0.91,"threshold":0.75,"reason":"ORBITAL_HEADING_SCALE_GEOMETRY_CONFIRMED"},"evidence":{}}`), nil
+			return json.RawMessage(`{"schemaVersion":2,"gauge":{"state":"DETECTED","confidence":0.91,"threshold":0.75,"reason":"ORBITAL_VERTICAL_SCALE_GEOMETRY_CONFIRMED"},"evidence":{}}`), nil
 		}
-		return json.RawMessage(`{"schemaVersion":1,"gauge":{"state":"ABSENT","confidence":0.12,"threshold":0.75,"reason":"ORBITAL_HEADING_SCALE_GEOMETRY_NOT_CONFIRMED"},"evidence":{}}`), nil
+		return json.RawMessage(`{"schemaVersion":2,"gauge":{"state":"ABSENT","confidence":0.12,"threshold":0.75,"reason":"ORBITAL_VERTICAL_SCALE_GEOMETRY_NOT_CONFIRMED"},"evidence":{}}`), nil
 	case "elite-dangerous/pause-at-exit-for-human-takeover":
 		c.humanTakeoverCalls++
-		return json.RawMessage(`{"schemaVersion":1,"task":"PAUSE_AT_EXIT_FOR_HUMAN_TAKEOVER","completed":true,"pauseMenuConfirmed":true,"exitFocused":true,"selectSent":false,"openAttempts":1,"finalObservation":{"state":"EXIT_FOCUSED"}}`), nil
+		if c.humanTakeoverOutput != nil {
+			return c.humanTakeoverOutput, nil
+		}
+		return json.RawMessage(`{"schemaVersion":2,"task":"PAUSE_AT_EXIT_FOR_HUMAN_TAKEOVER","completed":true,"pauseMenuConfirmed":true,"exitFocused":true,"firstExitSelectSent":true,"exitDestinationMenuConfirmed":true,"exitToMainMenuFocused":true,"exitToMainMenuSelectSent":true,"mainMenuConfirmed":true,"openAttempts":1,"postExitSamples":7,"finalObservation":{"state":"MAIN_MENU","reason":"MAIN_MENU_EXACT_ANCHORS_CONFIRMED","focusFillRatio":0,"rawTexts":["CONTINUE","SOCIAL","OPTIONS"]}}`), nil
 	case "elite-dangerous/ship-status":
 		if c.shipStatusIndex < len(c.shipStatuses) {
 			value := c.shipStatuses[c.shipStatusIndex]
@@ -1068,5 +1072,22 @@ func TestEliteSupercruiseAssistNearOrbitStopsBeforeHumanTakeover(t *testing.T) {
 	handoffIndex := strings.Index(joined, `"phase":"HUMAN_TAKEOVER"`)
 	if zeroIndex < 0 || handoffIndex <= zeroIndex || !contains(joined, `"humanTakeoverReady":true`) {
 		t.Fatalf("events=%s", joined)
+	}
+}
+
+func TestEliteSupercruiseAssistNearOrbitRejectsIncompleteHumanTakeoverPostcondition(t *testing.T) {
+	caller := successfulSupercruiseAssistCaller()
+	caller.orbitalScaleDetected = true
+	caller.humanTakeoverOutput = json.RawMessage(`{"schemaVersion":2,"task":"PAUSE_AT_EXIT_FOR_HUMAN_TAKEOVER","completed":true,"pauseMenuConfirmed":true,"exitFocused":true,"firstExitSelectSent":true,"exitDestinationMenuConfirmed":true,"exitToMainMenuFocused":true,"exitToMainMenuSelectSent":true,"mainMenuConfirmed":false,"openAttempts":1,"postExitSamples":7,"finalObservation":{"state":"MAIN_MENU","reason":"MAIN_MENU_EXACT_ANCHORS_CONFIRMED","focusFillRatio":0,"rawTexts":["CONTINUE","SOCIAL","OPTIONS"]}}`)
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteSupercruiseAssistToDestinationPackage(t), supercruiseAssistInputs(), caller, reporter,
+	)
+	if err == nil || !contains(err.Error(), "NEAR_ORBIT_SAFE_EXIT_POSTCONDITION_NOT_CONFIRMED") {
+		t.Fatalf("error=%v", err)
+	}
+	joined := joinEventPhases(reporter.payloads)
+	if contains(joined, `"phase":"HUMAN_TAKEOVER"`) || contains(joined, `"humanTakeoverReady":true`) {
+		t.Fatalf("incomplete postcondition emitted successful handoff: %s", joined)
 	}
 }

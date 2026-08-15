@@ -527,6 +527,35 @@ func TestEliteUIControlResolvesDedicatedPanelCycleControls(t *testing.T) {
 	}
 }
 
+func TestEliteUIControlResolvesPauseBindingWithoutHardcodedKey(t *testing.T) {
+	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ui-control"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := Load(packageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindingsRoot := writeBindings(t, "ControlPadKeyboard", `<Root PresetName="ControlPadKeyboard">
+  <Pause><Primary Device="Keyboard" Key="Key_P"/><Secondary Device="{NoDevice}" Key=""/></Pause>
+</Root>`)
+	driver := &recordingDriver{}
+	controller, err := NewController(bindingsRoot, driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := controller.Run(context.Background(), pkg, map[string]any{"control": "PAUSE"}, "EliteDangerous64.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_P" ||
+		!strings.Contains(string(output), `"selection":"PAUSE"`) ||
+		!strings.Contains(string(output), `"control":"Pause"`) ||
+		!strings.Contains(string(output), `"bindingSource":"frontier-active-preset-v1"`) {
+		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
 func TestEliteShipAttitudeControlResolvesFrontierArrowAndDynamicHold(t *testing.T) {
 	packageRoot, err := filepath.Abs(filepath.Join("..", "..", "Rules", "EliteDangerous64.exe", "Actions", "ship-attitude-control"))
 	if err != nil {

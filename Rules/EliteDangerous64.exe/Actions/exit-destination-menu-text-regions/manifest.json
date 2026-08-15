@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "title": "Detect Elite Dangerous exit destination menu text regions",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "referenceRegion": {"x": 600, "y": 500, "w": 700, "h": 180},
+  "sampling": "reference",
+  "maxPixels": 126000,
+  "leftContextWidth": 48,
+  "verticalPadding": 8
+}

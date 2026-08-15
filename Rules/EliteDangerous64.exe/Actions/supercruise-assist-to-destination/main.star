@@ -366,8 +366,11 @@ def guard_near_orbit(target_name, sample, phase):
     throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     emit_update("NEAR_ORBIT_SAFETY_TRIGGERED", sample, target_name, commanded_throttle=0, last_command="SET_THROTTLE_0", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], reason="ORBITAL_SCALE_DETECTED_DURING_" + phase + ":" + throttle["control"])
     handoff = action.call(id="elite-dangerous/pause-at-exit-for-human-takeover", inputs={})
-    emit_update("HUMAN_TAKEOVER", sample, target_name, commanded_throttle=0, last_command="PAUSE_MENU_EXIT_FOCUSED", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], human_takeover_ready=handoff["pauseMenuConfirmed"] and handoff["exitFocused"] and not handoff["selectSent"], reason="NEAR_ORBIT_ABORT_PAUSED_AT_EXIT_FOR_HUMAN_TAKEOVER")
-    fail("NEAR_ORBIT_SAFETY_TRIGGERED: orbital scale detected; throttle is 0% and the pause menu is waiting at EXIT for human takeover")
+    ready = handoff["pauseMenuConfirmed"] and handoff["exitFocused"] and handoff["firstExitSelectSent"] and handoff["exitDestinationMenuConfirmed"] and handoff["exitToMainMenuFocused"] and handoff["exitToMainMenuSelectSent"] and handoff["mainMenuConfirmed"]
+    if not ready:
+        fail("NEAR_ORBIT_SAFE_EXIT_POSTCONDITION_NOT_CONFIRMED: throttle is 0% but the main-menu handoff contract was incomplete")
+    emit_update("HUMAN_TAKEOVER", sample, target_name, commanded_throttle=0, last_command="EXIT_TO_MAIN_MENU", orbital_scale_state=gauge["state"], orbital_scale_confidence=gauge["confidence"], human_takeover_ready=ready, reason="NEAR_ORBIT_ABORT_EXITED_TO_MAIN_MENU_FOR_HUMAN_TAKEOVER")
+    fail("NEAR_ORBIT_SAFETY_TRIGGERED: orbital scale detected; throttle is 0% and flight exited to the main menu for human takeover")
 
 def observe_supercruise_hud_stable():
     confirmations = 0

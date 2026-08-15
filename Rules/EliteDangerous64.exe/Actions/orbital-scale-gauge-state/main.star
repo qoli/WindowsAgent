@@ -1,13 +1,13 @@
-ROI_X = 640
-ROI_Y = 235
-WIDTH = 490
-HEIGHT = 133
-SCAN_TOP = 98
-SCAN_BOTTOM = 132
-MIN_TICK_HEIGHT = 6
-MIN_TICKS = 6
-MIN_SPACING = 24
-MAX_SPACING = 37
+ROI_X = 1120
+ROI_Y = 390
+WIDTH = 145
+HEIGHT = 330
+MIN_SPINE_PIXELS = 120
+MIN_SPINE_SPAN = 200
+MIN_TICK_WIDTH = 14
+MIN_TICK_PIXELS = 8
+MIN_TICKS = 3
+MIN_TICK_SPREAD = 120
 CONFIDENCE_THRESHOLD = 0.75
 
 def orange(red, green, blue):
@@ -30,97 +30,88 @@ def main(ctx):
     if len(pixels) != WIDTH * HEIGHT:
         return job.fail(code="ORBITAL_SCALE_EVIDENCE_INVALID", message="orbital scale ROI pixel count is incomplete")
 
+    mask = []
     orange_count = 0
-    upper_count = 0
-    left_anchor_count = 0
-    right_anchor_count = 0
-    column_runs = []
+    for pixel in pixels:
+        red, green, blue = channels(pixel)
+        matched = orange(red, green, blue)
+        mask.append(matched)
+        if matched:
+            orange_count += 1
+
+    spine_x = 0
+    spine_pixels = 0
+    spine_top = None
+    spine_bottom = None
     for x in range(WIDTH):
+        count = 0
+        first = None
+        last = None
+        for y in range(HEIGHT):
+            if not mask[y * WIDTH + x]:
+                continue
+            count += 1
+            if first == None:
+                first = y
+            last = y
+        if count > spine_pixels:
+            spine_x = x
+            spine_pixels = count
+            spine_top = first
+            spine_bottom = last
+
+    spine_span = spine_bottom - spine_top + 1 if spine_top != None else 0
+    scan_left = max(0, spine_x - 5)
+    scan_right = min(WIDTH - 1, spine_x + 45)
+    tick_rows = []
+    for y in range(HEIGHT):
         first = None
         last = None
         count = 0
-        for y in range(HEIGHT):
-            red, green, blue = channels(pixels[y * WIDTH + x])
-            if not orange(red, green, blue):
+        for x in range(scan_left, scan_right + 1):
+            if not mask[y * WIDTH + x]:
                 continue
-            orange_count += 1
-            if y >= 55 and y < SCAN_TOP:
-                upper_count += 1
-                if x < WIDTH // 2 - 35:
-                    left_anchor_count += 1
-                elif x > WIDTH // 2 + 35:
-                    right_anchor_count += 1
-            if y >= SCAN_TOP and y <= SCAN_BOTTOM:
-                count += 1
-                if first == None:
-                    first = y
-                last = y
-        if first != None and count >= 4 and last - first + 1 >= MIN_TICK_HEIGHT:
-            column_runs.append({"x": x, "top": first, "bottom": last, "height": last - first + 1})
+            count += 1
+            if first == None:
+                first = x
+            last = x
+        if first != None and count >= MIN_TICK_PIXELS and last - first + 1 >= MIN_TICK_WIDTH:
+            tick_rows.append(y)
 
-    components = []
+    # HDR bloom and anti-aliasing can split one horizontal mark by a few rows.
+    # Merge rows separated by at most three blank rows, then retain only the
+    # compact marks. The coordinate readout below the scale is deliberately
+    # rejected because it forms a much taller component.
+    tick_components = []
     current = None
-    for run in column_runs:
-        if current == None or run["x"] > current["right"] + 1:
+    for y in tick_rows:
+        if current == None or y > current["bottom"] + 4:
             if current != None:
-                components.append(current)
-            current = {"left": run["x"], "right": run["x"], "top": run["top"], "bottom": run["bottom"]}
+                tick_components.append(current)
+            current = {"top": y, "bottom": y}
         else:
-            current["right"] = run["x"]
-            current["top"] = min(current["top"], run["top"])
-            current["bottom"] = max(current["bottom"], run["bottom"])
+            current["bottom"] = y
     if current != None:
-        components.append(current)
+        tick_components.append(current)
 
     ticks = []
-    for component in components:
-        width = component["right"] - component["left"] + 1
+    for component in tick_components:
         height = component["bottom"] - component["top"] + 1
-        # HDR bloom widens the reviewed 2-4px glyph core to as much as 14
-        # reference pixels. Width remains bounded so number strokes do not
-        # become scale ticks.
-        if width <= 18 and height >= MIN_TICK_HEIGHT and component["bottom"] >= 116:
-            ticks.append({"center": (component["left"] + component["right"]) // 2, "top": component["top"], "bottom": component["bottom"], "height": height})
+        if height <= 16:
+            ticks.append((component["top"] + component["bottom"]) // 2)
 
-    spacing_matches = 0
-    collinear_matches = 0
-    spacing_sum = 0
-    for index in range(1, len(ticks)):
-        gap = ticks[index]["center"] - ticks[index - 1]["center"]
-        if gap >= MIN_SPACING and gap <= MAX_SPACING:
-            spacing_matches += 1
-            spacing_sum += gap
-            if abs(ticks[index]["bottom"] - ticks[index - 1]["bottom"]) <= 3:
-                collinear_matches += 1
-
-    minor_height_sum = 0
-    minor_height_count = 0
-    maximum_height = 0
-    major_near_center = False
-    for tick in ticks:
-        maximum_height = max(maximum_height, tick["height"])
-        if tick["height"] <= 22:
-            minor_height_sum += tick["height"]
-            minor_height_count += 1
-    average_minor_height = float(minor_height_sum) / float(minor_height_count) if minor_height_count > 0 else 0.0
-    for tick in ticks:
-        if abs(tick["center"] - WIDTH // 2) <= 55 and average_minor_height > 0 and float(tick["height"]) >= average_minor_height * 1.55:
-            major_near_center = True
-
+    tick_spread = ticks[-1] - ticks[0] if len(ticks) > 1 else 0
+    spine_pixel_score = min(1.0, float(spine_pixels) / 180.0)
+    spine_span_score = min(1.0, float(spine_span) / 220.0)
     tick_score = min(1.0, float(len(ticks)) / float(MIN_TICKS))
-    spacing_score = min(1.0, float(spacing_matches) / 5.0)
-    collinear_score = min(1.0, float(collinear_matches) / 4.0)
-    geometry_score = tick_score * 0.36 + spacing_score * 0.34 + collinear_score * 0.18 + (0.12 if major_near_center else 0.0)
-    anchor_score = min(1.0, float(upper_count) / 180.0) * 0.7
-    if left_anchor_count >= 20 or right_anchor_count >= 20:
-        anchor_score += 0.3
-    density_score = min(1.0, float(orange_count) / 800.0)
-    confidence = geometry_score * 0.62 + anchor_score * 0.30 + density_score * 0.08
+    spread_score = min(1.0, float(tick_spread) / float(MIN_TICK_SPREAD))
+    confidence = spine_pixel_score * 0.45 + spine_span_score * 0.25 + tick_score * 0.25 + spread_score * 0.05
 
-    state = "DETECTED" if confidence >= CONFIDENCE_THRESHOLD else "ABSENT"
-    reason = "ORBITAL_HEADING_SCALE_GEOMETRY_CONFIRMED" if state == "DETECTED" else "ORBITAL_HEADING_SCALE_GEOMETRY_NOT_CONFIRMED"
+    geometry_confirmed = spine_pixels >= MIN_SPINE_PIXELS and spine_span >= MIN_SPINE_SPAN and len(ticks) >= MIN_TICKS and tick_spread >= MIN_TICK_SPREAD
+    state = "DETECTED" if geometry_confirmed and confidence >= CONFIDENCE_THRESHOLD else "ABSENT"
+    reason = "ORBITAL_VERTICAL_SCALE_GEOMETRY_CONFIRMED" if state == "DETECTED" else "ORBITAL_VERTICAL_SCALE_GEOMETRY_NOT_CONFIRMED"
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "gauge": {
             "state": state,
             "confidence": math.round(confidence * 10000.0) / 10000.0,
@@ -130,17 +121,12 @@ def main(ctx):
         "evidence": {
             "capturedAt": sample["frame"]["capturedAt"],
             "referenceRegion": {"x": ROI_X, "y": ROI_Y, "w": WIDTH, "h": HEIGHT},
-            "algorithm": "HSV_ORANGE_VERTICAL_SCALE_GEOMETRY_V1",
+            "algorithm": "HSV_ORANGE_ORBITAL_VERTICAL_SCALE_GEOMETRY_V2",
             "orangePixelCount": orange_count,
+            "spineX": ROI_X + spine_x,
+            "spinePixelCount": spine_pixels,
+            "spineSpanPixels": spine_span,
             "tickCount": len(ticks),
-            "spacingMatchCount": spacing_matches,
-            "collinearMatchCount": collinear_matches,
-            "averageSpacingPixels": math.round(float(spacing_sum) / float(spacing_matches) * 100.0) / 100.0 if spacing_matches > 0 else None,
-            "averageMinorTickHeightPixels": math.round(average_minor_height * 100.0) / 100.0 if minor_height_count > 0 else None,
-            "maximumTickHeightPixels": maximum_height,
-            "majorTickNearCenter": major_near_center,
-            "upperOrangePixelCount": upper_count,
-            "leftAnchorPixelCount": left_anchor_count,
-            "rightAnchorPixelCount": right_anchor_count,
+            "tickSpreadPixels": tick_spread,
         },
     }

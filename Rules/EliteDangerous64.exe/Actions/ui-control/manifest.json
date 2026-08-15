@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 5,
+  "version": 6,
   "title": "Elite Dangerous bounded UI control",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
@@ -19,7 +19,8 @@
     "LEFT": {"control": "UI_Left"},
     "RIGHT": {"control": "UI_Right"},
     "SELECT": {"control": "UI_Select"},
-    "BACK": {"control": "UI_Back"}
+    "BACK": {"control": "UI_Back"},
+    "PAUSE": {"control": "Pause"}
   },
   "files": ["TASK.md", "input.schema.json", "output.schema.json"]
 }

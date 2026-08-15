@@ -28,6 +28,14 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/exit-destination-menu-text-regions": {
+      "path": "Actions/exit-destination-menu-text-regions",
+      "runtime": "ppocr-text-regions-v1",
+      "runtimeProfile": "ocr/text-regions",
+      "exposure": "internal",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
     "elite-dangerous/pause-at-exit-for-human-takeover": {
       "path": "Actions/pause-at-exit-for-human-takeover",
       "runtime": "windows-streaming-action-v1",

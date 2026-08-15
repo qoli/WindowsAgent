@@ -1,8 +1,8 @@
 # Elite Dangerous bounded UI control
 
 This finite Action lets a supervising model arrange an Elite Dangerous menu
-slowly through one logical `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, or `BACK`
-operation per invocation. It is intended for screenshot-observe / one-key-act
+slowly through one logical `UP`, `DOWN`, `LEFT`, `RIGHT`, `SELECT`, `BACK`, or
+`PAUSE` operation per invocation. It is intended for screenshot-observe / one-key-act
 interaction such as selecting `AUTO LAUNCH`; it does not decide which key to
 press or perform an autonomous navigation sequence.
 
@@ -19,6 +19,9 @@ of an already plotted route; callers must verify the resulting
 `CycleNextPanel` and `CyclePreviousPanel` controls. They are the only logical
 controls in this Action that may change the active Target-panel tab; do not use
 `LEFT` or `RIGHT` as substitutes.
+`PAUSE` resolves Frontier's dedicated `Pause` control. It is not interchangeable
+with `BACK`, which resolves `UI_Back` for in-panel navigation. A missing or
+unbound `Pause` control fails explicitly; there is no literal-key fallback.
 The panel remembers its last tab, and its transition is animated. A supervising
 model must wait for the UI to settle before interpreting a subsequent capture;
 the Action itself does not claim that the requested panel or focus transition
