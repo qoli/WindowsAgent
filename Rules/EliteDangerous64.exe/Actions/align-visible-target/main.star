@@ -39,7 +39,7 @@ MAX_TRACKING_HINT_Y = 1010
 SCREEN_CENTER_X = 960
 SCREEN_CENTER_Y = 540
 CONFIRMED_HINT_ALTERNATE_X = 800
-CONFIRMED_HINT_ALTERNATE_Y = 300
+CONFIRMED_HINT_ALTERNATE_Y = 345
 RELOCALIZATION_VALIDATION_MAX_DELTA_SQUARED = 12.0 * 12.0
 
 def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0, relocalization_state="INACTIVE", relocalization_attempt=0):
@@ -393,9 +393,10 @@ def main(ctx):
                     emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
                     fail("relocalized reticle candidate was not confirmed by the next current-frame local track")
                 elif center_hint_confirmed and not fresh_local_track_seen and relocalization_attempt == 0:
-                    # A/B evidence showed the already identity-bound marker at
-                    # (802,298) while the centre hint (960,540) returned
-                    # UNKNOWN. Try the one reviewed alternate LOCAL_140 hint.
+                    # Post-Compass A/B evidence showed the already
+                    # identity-bound marker at (807,345) while the centre hint
+                    # (960,540) returned UNKNOWN. Try the one reviewed
+                    # alternate LOCAL_140 hint.
                     # This observation cannot authorize input; even DETECTED
                     # must be confirmed by a later fresh local track.
                     relocalization_state = "TRIGGERED"

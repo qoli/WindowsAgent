@@ -237,8 +237,8 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			unknownVisiblePosition(),
-			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
-			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
+			visiblePositionWithPresentation(-153, -195, 247.9, "DASHED"),
+			visiblePositionWithPresentation(-153, -195, 247.9, "DASHED"),
 			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
 			visiblePositionWithPresentation(8, -5, 9.4, "DASHED"),
 			visiblePositionWithPresentation(7, -4, 8.1, "DASHED"),
@@ -257,8 +257,8 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 		}
 	}
 	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
-		caller.positionInputs[1]["hintX"].(int64) != 800 || caller.positionInputs[1]["hintY"].(int64) != 300 ||
-		caller.positionInputs[2]["hintX"].(int64) != 802 || caller.positionInputs[2]["hintY"].(int64) != 298 {
+		caller.positionInputs[1]["hintX"].(int64) != 800 || caller.positionInputs[1]["hintY"].(int64) != 345 ||
+		caller.positionInputs[2]["hintX"].(int64) != 807 || caller.positionInputs[2]["hintY"].(int64) != 345 {
 		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
 	}
 	events := joinEventPhases(reporter.payloads)

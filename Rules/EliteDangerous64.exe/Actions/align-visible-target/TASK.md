@@ -54,8 +54,9 @@ exists only for the initial confirmed centre hint: if current `LOCAL_140`
 tracking at `(960,540)` returns `UNKNOWN`, the Action makes exactly one further
 call to the same `supercruise-visible-reticle-position` classifier, same
 `HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring algorithm at
-the reviewed alternate hint `(800,300)`. Live A/B evidence found the reticle at
-`(802,298)` from that alternate hint while the centre hint was `UNKNOWN`.
+the reviewed alternate hint `(800,345)`. Post-Compass live A/B evidence found
+the reticle at `(807,345)` from that alternate hint while both `(960,540)` and
+the pre-Compass `(800,300)` hint were `UNKNOWN`.
 
 The alternate observation never establishes identity and never authorizes an
 attitude, throttle, Blue-zone, heat, or FSD decision. A detected alternate
