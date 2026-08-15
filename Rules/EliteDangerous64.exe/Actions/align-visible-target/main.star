@@ -36,8 +36,6 @@ DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES = 32
 MIN_TRACKING_HINT = 70
 MAX_TRACKING_HINT_X = 1850
 MAX_TRACKING_HINT_Y = 1010
-SCREEN_CENTER_X = 960
-SCREEN_CENTER_Y = 540
 RELOCALIZATION_VALIDATION_MAX_DELTA_SQUARED = 12.0 * 12.0
 SUPERCRUISE_ASSIST_TRACKING_BIAS_X = -30
 SUPERCRUISE_ASSIST_TRACKING_BIAS_Y = -12
@@ -288,18 +286,19 @@ def main(ctx):
     final_target = None
     # An owning workflow may provide this Gate only after it has independently
     # confirmed the exact selected target and completed its identity-bound
-    # Compass alignment. Seed the current screen centre as a local CV hint; the
-    # hint itself never authorizes steering, and the first fresh reticle result
-    # must still be DETECTED before any attitude command is sent.
-    tracked_target = {"referenceX": SCREEN_CENTER_X, "referenceY": SCREEN_CENTER_Y} if center_hint_confirmed else None
+    # Compass alignment. Explicit confirmed-hint profiles begin at their
+    # reviewed caller-owned ROI as a candidate-only observation. No
+    # screen-centre probe precedes it.
+    tracked_target = None
     tracked_target_has_detected_center = False
     tracked_samples_since_identity = 0
-    fresh_local_track_seen = False
-    relocalization_state = "INACTIVE"
+    relocalization_state = "TRIGGERED" if center_hint_confirmed else "INACTIVE"
     relocalization_attempt = 0
     relocalization_candidate = None
     alternate_hint = alternate_hint_for_profile(confirmed_hint_profile) if center_hint_confirmed else None
     blue_zone_gate = {"enabled": blue_zone_gate_enabled, "confirmations": 0, "lastState": None, "lastPromptText": None}
+    if center_hint_confirmed:
+        emit_update("OBSERVING", target_name, 0, command_count, stable=0, reason="PROFILE_HINT_RELOCALIZATION_TRIGGERED", observation_mode="RETICLE_RELOCALIZATION", relocalization_state=relocalization_state, relocalization_attempt=0, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=alternate_hint[0], relocalization_hint_y=alternate_hint[1], tracking_hint_x=alternate_hint[0], tracking_hint_y=alternate_hint[1])
     if observe_blue_zone_gate(target_name, 0, command_count, stable, blue_zone_gate):
         return blue_zone_completion(target_name, 0, command_count, final_target, blue_zone_gate)
     if position_source == "DESTINATION":
@@ -405,8 +404,8 @@ def main(ctx):
             candidate_tracking_hint = tracking_hint_for_target(target, confirmed_hint_profile, True) if target["state"] == "DETECTED" else None
             if target["state"] != "DETECTED" or not trackable_hint_coordinates(candidate_tracking_hint):
                 relocalization_state = "MISS"
-                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_RELOCALIZATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
-                fail("alternate local reticle hint did not produce an unambiguous current-frame position: " + target["reason"])
+                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="PROFILE_HINT_RELOCALIZATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
+                fail("profile reticle hint did not produce an unambiguous current-frame position: " + target["reason"])
             tracked_target = target
             tracked_target_has_detected_center = True
             relocalization_candidate = target
@@ -416,7 +415,7 @@ def main(ctx):
             stable = 0
             entered_center_gate = False
             boundary_jitter_samples = 0
-            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_CANDIDATE_AWAITING_FRESH_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
+            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="PROFILE_HINT_CANDIDATE_AWAITING_FRESH_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
             wait_for_cadence(started_ms, position_source)
             continue
         if target["state"] != "DETECTED":
@@ -429,17 +428,6 @@ def main(ctx):
                     relocalization_state = "MISS"
                     emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                     fail("relocalized reticle candidate was not confirmed by the next current-frame local track")
-                elif center_hint_confirmed and not fresh_local_track_seen and relocalization_attempt == 0:
-                    # Post-Compass A/B evidence showed the already
-                    # identity-bound marker at (807,345) while the centre hint
-                    # (960,540) returned UNKNOWN. Try the one reviewed
-                    # alternate LOCAL_140 hint.
-                    # This observation cannot authorize input; even DETECTED
-                    # must be confirmed by a later fresh local track.
-                    relocalization_state = "TRIGGERED"
-                    tracked_samples_since_identity = 0
-                    unknown_count = 0
-                    unknown_reason = "CENTER_HINT_UNKNOWN_TRIGGER_ALTERNATE_LOCAL_HINT"
                 elif center_hint_confirmed:
                     # The caller has already bound identity and the previous
                     # current-frame local result supplied this hint. Preserve
@@ -472,7 +460,6 @@ def main(ctx):
                     fail("relocalized reticle candidate contradicted the next current-frame local track")
                 relocalization_state = "VALIDATED"
                 emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="RELOCALIZED_CANDIDATE_VALIDATED_BY_FRESH_LOCAL_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
-            fresh_local_track_seen = True
         if position_source == "DESTINATION":
             tracked_target = target
             tracked_target_has_detected_center = True

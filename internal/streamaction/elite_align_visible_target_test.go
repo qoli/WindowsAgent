@@ -170,7 +170,7 @@ func TestEliteAlignVisibleTargetPollsBlueZoneWhileCVKeepsAligning(t *testing.T) 
 	if err != nil || !contains(string(output), `"completionEvidence":"BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if len(caller.controls) != 2 || caller.flightIndex != 2 || caller.posIndex != 2 {
+	if len(caller.controls) != 1 || caller.flightIndex != 2 || caller.posIndex != 2 {
 		t.Fatalf("controls=%v flight=%d positions=%d", caller.controls, caller.flightIndex, caller.posIndex)
 	}
 }
@@ -200,13 +200,14 @@ func TestEliteAlignVisibleTargetAcceptsIdentityBoundDashedReticle(t *testing.T) 
 	}
 }
 
-func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *testing.T) {
+func TestEliteAlignVisibleTargetStartsConfirmedAssistAtProfileHint(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
 			visiblePositionWithPresentation(8, -5, 9.4, "DASHED"),
 			visiblePositionWithPresentation(7, -4, 8.1, "DASHED"),
+			visiblePositionWithPresentation(6, -3, 6.7, "DASHED"),
 		},
 	}
 	reporter := &fixtureReporter{}
@@ -216,7 +217,7 @@ func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *
 	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"presentation":"DASHED"`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if len(caller.positionActions) != 3 {
+	if len(caller.positionActions) != 4 {
 		t.Fatalf("position Actions=%v", caller.positionActions)
 	}
 	for index, actionID := range caller.positionActions {
@@ -224,11 +225,16 @@ func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *
 			t.Fatalf("confirmed centre called %s at %d; actions=%v", actionID, index, caller.positionActions)
 		}
 	}
-	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 {
-		t.Fatalf("first centre hint inputs=%v", caller.positionInputs[0])
+	if caller.positionInputs[0]["hintX"].(int64) != 930 || caller.positionInputs[0]["hintY"].(int64) != 450 ||
+		caller.positionInputs[1]["hintX"].(int64) != 939 || caller.positionInputs[1]["hintY"].(int64) != 522 {
+		t.Fatalf("profile candidate and validation inputs=%v", caller.positionInputs[:2])
 	}
-	if contains(joinEventPhases(reporter.payloads), `"observationMode":"IDENTITY_ACQUISITION"`) {
-		t.Fatalf("confirmed centre unexpectedly repeated identity acquisition: %s", joinEventPhases(reporter.payloads))
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `PROFILE_HINT_RELOCALIZATION_TRIGGERED`) ||
+		!contains(events, `"relocalizationState":"CANDIDATE_FOUND"`) ||
+		!contains(events, `"relocalizationState":"VALIDATED"`) ||
+		contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) {
+		t.Fatalf("events=%s", events)
 	}
 }
 
@@ -266,7 +272,6 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
-			unknownVisiblePosition(),
 			visiblePositionWithPresentation(-153, -195, 247.9, "DASHED"),
 			visiblePositionWithPresentation(-153, -195, 247.9, "DASHED"),
 			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
@@ -286,13 +291,12 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 			t.Fatalf("confirmed hint used a different classifier %s at %d; actions=%v", actionID, index, caller.positionActions)
 		}
 	}
-	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
-		caller.positionInputs[1]["hintX"].(int64) != 800 || caller.positionInputs[1]["hintY"].(int64) != 345 ||
-		caller.positionInputs[2]["hintX"].(int64) != 807 || caller.positionInputs[2]["hintY"].(int64) != 345 {
-		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
+	if caller.positionInputs[0]["hintX"].(int64) != 800 || caller.positionInputs[0]["hintY"].(int64) != 345 ||
+		caller.positionInputs[1]["hintX"].(int64) != 807 || caller.positionInputs[1]["hintY"].(int64) != 345 {
+		t.Fatalf("position inputs=%v", caller.positionInputs[:2])
 	}
 	events := joinEventPhases(reporter.payloads)
-	if !contains(events, `CENTER_HINT_UNKNOWN_TRIGGER_ALTERNATE_LOCAL_HINT`) ||
+	if !contains(events, `PROFILE_HINT_RELOCALIZATION_TRIGGERED`) ||
 		!contains(events, `"observationMode":"RETICLE_RELOCALIZATION"`) ||
 		!contains(events, `"confirmedHintProfile":"HYPERSPACE_CHARGE"`) ||
 		!contains(events, `"relocalizationHintX":800`) || !contains(events, `"relocalizationHintY":345`) ||
@@ -307,7 +311,6 @@ func TestEliteAlignVisibleTargetBiasesAssistTrackingROIWithoutBiasingControlTarg
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
-			unknownVisiblePosition(),
 			visiblePositionWithPresentation(3, -91, 91.0, "DASHED"), // true centre 963,449
 			visiblePositionWithPresentation(3, -91, 91.0, "DASHED"), // fresh local validation
 			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
@@ -322,10 +325,9 @@ func TestEliteAlignVisibleTargetBiasesAssistTrackingROIWithoutBiasingControlTarg
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
-	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
-		caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 450 ||
-		caller.positionInputs[2]["hintX"].(int64) != 933 || caller.positionInputs[2]["hintY"].(int64) != 437 {
-		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
+	if caller.positionInputs[0]["hintX"].(int64) != 930 || caller.positionInputs[0]["hintY"].(int64) != 450 ||
+		caller.positionInputs[1]["hintX"].(int64) != 933 || caller.positionInputs[1]["hintY"].(int64) != 437 {
+		t.Fatalf("position inputs=%v", caller.positionInputs[:2])
 	}
 	if len(caller.controls) == 0 || caller.controls[0] != "PITCH_UP" {
 		t.Fatalf("control must use true offset (3,-91), controls=%v", caller.controls)
@@ -341,20 +343,20 @@ func TestEliteAlignVisibleTargetBiasesAssistTrackingROIWithoutBiasingControlTarg
 func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats:     []json.RawMessage{visibleHeat("KNOWN", 23)},
-		positions: []json.RawMessage{unknownVisiblePosition(), unknownVisiblePosition()},
+		positions: []json.RawMessage{unknownVisiblePosition()},
 	}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
 		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
-	if err == nil || !contains(err.Error(), "alternate local reticle hint did not produce an unambiguous current-frame position") {
+	if err == nil || !contains(err.Error(), "profile reticle hint did not produce an unambiguous current-frame position") {
 		t.Fatalf("error=%v", err)
 	}
-	if len(caller.controls) != 0 || len(caller.positionActions) != 2 {
+	if len(caller.controls) != 0 || len(caller.positionActions) != 1 {
 		t.Fatalf("positions=%v controls=%v", caller.positionActions, caller.controls)
 	}
 	events := joinEventPhases(reporter.payloads)
-	if caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 450 ||
+	if caller.positionInputs[0]["hintX"].(int64) != 930 || caller.positionInputs[0]["hintY"].(int64) != 450 ||
 		!contains(events, `"relocalizationState":"MISS"`) || !contains(events, `"relocalizationAttempt":1`) ||
 		!contains(events, `"confirmedHintProfile":"SUPERCRUISE_ASSIST"`) ||
 		!contains(events, `"relocalizationHintX":930`) || !contains(events, `"relocalizationHintY":450`) {
@@ -366,7 +368,6 @@ func TestEliteAlignVisibleTargetFailsWhenFreshLocalTrackContradictsRelocationCan
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
-			unknownVisiblePosition(),
 			visiblePositionWithPresentation(2, -92, 92.0, "DASHED"),
 			visiblePositionWithPresentation(20, -70, 72.8, "DASHED"),
 		},
@@ -381,6 +382,10 @@ func TestEliteAlignVisibleTargetFailsWhenFreshLocalTrackContradictsRelocationCan
 	if len(caller.controls) != 0 {
 		t.Fatalf("contradicted candidate authorized controls=%v", caller.controls)
 	}
+	if caller.positionInputs[0]["hintX"].(int64) != 930 || caller.positionInputs[0]["hintY"].(int64) != 450 ||
+		caller.positionInputs[1]["hintX"].(int64) != 932 || caller.positionInputs[1]["hintY"].(int64) != 436 {
+		t.Fatalf("position inputs=%v", caller.positionInputs)
+	}
 	events := joinEventPhases(reporter.payloads)
 	if !contains(events, `"relocalizationState":"CONTRADICTED"`) || !contains(events, `RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_CONTRADICTED`) {
 		t.Fatalf("events=%s", events)
@@ -391,7 +396,6 @@ func TestEliteAlignVisibleTargetFailsWhenFreshLocalValidationIsUnknown(t *testin
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
-			unknownVisiblePosition(),
 			visiblePositionWithPresentation(2, -92, 92.0, "DASHED"),
 			unknownVisiblePosition(),
 		},
@@ -405,6 +409,10 @@ func TestEliteAlignVisibleTargetFailsWhenFreshLocalValidationIsUnknown(t *testin
 	}
 	if len(caller.controls) != 0 {
 		t.Fatalf("UNKNOWN local validation authorized controls=%v", caller.controls)
+	}
+	if caller.positionInputs[0]["hintX"].(int64) != 930 || caller.positionInputs[0]["hintY"].(int64) != 450 ||
+		caller.positionInputs[1]["hintX"].(int64) != 932 || caller.positionInputs[1]["hintY"].(int64) != 436 {
+		t.Fatalf("position inputs=%v", caller.positionInputs)
 	}
 	events := joinEventPhases(reporter.payloads)
 	if !contains(events, `"relocalizationState":"MISS"`) || !contains(events, `RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_UNKNOWN`) {

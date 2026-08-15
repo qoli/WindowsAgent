@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 15,
+  "version": 16,
   "title": "Elite Dangerous hyperspace jump to one System",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

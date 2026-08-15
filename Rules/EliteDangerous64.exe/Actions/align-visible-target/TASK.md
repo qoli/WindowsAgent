@@ -42,7 +42,7 @@ enable this Gate retain the CV-only contract.
 An owning workflow that has independently confirmed the exact selected target
 and has just completed identity-bound Compass alignment may set
 `centerHintConfirmed=true`. In that explicit mode the first observation uses
-the 1920x1080 screen centre only as a bounded local-CV hint instead of repeating
+the caller-owned profile ROI as a bounded local-CV hint instead of repeating
 the slow label-to-ring acquisition. The hint never authorizes input: a fresh
 `supercruise-visible-reticle-position` `DETECTED` result is still required
 before any Pitch or Yaw pulse. Direct callers default to false, tracking loss
@@ -52,15 +52,16 @@ only the last fresh local hint for bounded stationary re-observation after a
 fresh local track has been established. A special one-attempt relocation route
 exists only for the initial confirmed centre hint. A caller setting
 `centerHintConfirmed=true` must also declare the exact layout context through
-`confirmedHintProfile`; `NONE` is rejected. `HYPERSPACE_CHARGE` owns alternate
+`confirmedHintProfile`; `NONE` is rejected. `HYPERSPACE_CHARGE` owns the initial
 hint `(800,345)`, based on post-Compass live A/B evidence that detected the
 reticle at `(807,345)` while `(960,540)` was `UNKNOWN`.
-`SUPERCRUISE_ASSIST` independently owns alternate hint `(930,450)`. If current
-`LOCAL_140` tracking at `(960,540)` returns `UNKNOWN`, the Action makes exactly
-one further call to the same `supercruise-visible-reticle-position` classifier,
-same `HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring
-algorithm at the caller-selected profile hint. Non-confirmed callers must use
-`NONE`; the child never infers a profile from the target name or prompt.
+`SUPERCRUISE_ASSIST` independently owns initial hint `(930,450)`. The Action
+starts directly with exactly one call to the same
+`supercruise-visible-reticle-position` classifier at the caller-selected
+profile hint; it does not first probe `(960,540)`. The profile observation is
+candidate-only even when `DETECTED` and therefore cannot authorize control.
+Non-confirmed callers must use `NONE`; the child never infers a profile from
+the target name or prompt.
 
 After any detector result establishes a true reticle centre, the
 `SUPERCRUISE_ASSIST` profile routes the next `LOCAL_140` crop with a fixed
@@ -70,16 +71,15 @@ while the motion-adjusted `(930,454)` detected the same ring. The
 bias applies only to the crop origin: the stored target, the 12-pixel
 relocalization consistency Gate, centre completion, and `choose_command` all
 continue to use the detector's unbiased true centre and offsets.
-`HYPERSPACE_CHARGE`, `NONE`, and the initial screen-centre seed remain
-unbiased. Bounds are checked against the actual biased hint sent to the local
-Action, and stream events publish that `trackingHintX/Y` separately from the
-true `referenceX/Y`.
+`HYPERSPACE_CHARGE` and `NONE` remain unbiased. Bounds are checked against the
+actual biased hint sent to the local Action, and stream events publish that
+`trackingHintX/Y` separately from the true `referenceX/Y`.
 
-The alternate observation never establishes identity and never authorizes an
-attitude, throttle, Blue-zone, heat, or FSD decision. A detected alternate
+The profile observation never establishes identity and never authorizes an
+attitude, throttle, Blue-zone, heat, or FSD decision. A detected profile
 candidate only supplies the hint for the next fresh `LOCAL_140` tracking frame.
 That frame must also detect a centre within 12 pixels of the relocation
-candidate before the ordinary controller may resume. Alternate `UNKNOWN`, an
+candidate before the ordinary controller may resume. Profile-hint `UNKNOWN`, an
 untrackable candidate, next-frame `UNKNOWN`, or a geometrically contradictory
 next frame fails explicitly. The event stream exposes
 `RETICLE_RELOCALIZATION`, its single attempt, and every triggered, candidate,
