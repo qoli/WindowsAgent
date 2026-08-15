@@ -6,10 +6,6 @@ MIN_DETECTION_CONFIDENCE = 0.45
 MIN_RECOGNITION_CONFIDENCE = 0.60
 COMMODITY_MARKET_X = 395
 COMMODITY_MARKET_Y = 704
-BUY_TILE_X = 174
-BUY_TILE_Y = 252
-SELL_TILE_X = 174
-SELL_TILE_Y = 401
 
 def emit_update(phase, operation, station_name, command=None, observation=None, reason=None):
     stream.emit(
@@ -124,7 +120,7 @@ def main(ctx):
     # From this point onward the Action may have entered Starport Services or
     # the market even when a later OCR postcondition fails. The shared cleanup
     # safely restores the cockpit from either surface.
-    action.on_failure(id="elite-dangerous/exit-commodity-market", inputs={"dialogMayBeOpen": False})
+    action.on_failure(id="elite-dangerous/exit-commodity-market", inputs={"dialogMayBeOpen": True})
 
     for _ in range(4):
         send("DOWN", operation, station_name)
@@ -140,18 +136,19 @@ def main(ctx):
     observation_count += initial["count"]
     initial_mode = initial["observation"]["mode"]
 
-    if initial_mode != operation:
-        tile_x = BUY_TILE_X if operation == "BUY" else SELL_TILE_X
-        tile_y = BUY_TILE_Y if operation == "BUY" else SELL_TILE_Y
-        emit_update("SWITCHING_MODE", operation, station_name, observation={"x": tile_x, "y": tile_y, "initialMode": initial_mode}, reason="RULE_OWNED_MARKET_MODE_TILE")
-        activate_pointer_target(tile_x, tile_y, operation, station_name, "RULE_OWNED_MARKET_MODE_TILE")
-        task.sleep(milliseconds=UI_SETTLE_MS)
-        confirmed = observe_market_stable(operation, station_name, "CONFIRMING_MODE", required_mode=operation)
-        observation_count += confirmed["count"]
+    profile = "BUY_ALL_GOODS" if operation == "BUY" else "SELL_SINGLE_CARGO"
+    expected_controls = 42 if operation == "BUY" else 63
+    emit_update("NORMALIZING_VIEW", operation, station_name, observation={"profile": profile, "initialMode": initial_mode}, reason="FIXED_COMMODITY_MARKET_VIEW_REQUIRED")
+    view = action.call(id="elite-dangerous/set-commodity-market-view", inputs={"profile": profile})
+    if not view["completed"] or not view["filterReplayCompleted"] or not view["listFocusCommanded"] or view["profile"] != profile or view["controlCount"] != expected_controls:
+        fail("Commodity Market view child returned an invalid mechanical replay result")
+
+    confirmed = observe_market_stable(operation, station_name, "CONFIRMING_MODE", required_mode=operation)
+    observation_count += confirmed["count"]
 
     action.clear_on_failure()
-    emit_update("COMPLETED", operation, station_name, observation={"initialMode": initial_mode, "finalMode": operation}, reason="MARKET_STATION_AND_MODE_CONFIRMED")
-    stream.activity(message="Commodity Market open in " + operation + " mode", level="info")
+    emit_update("COMPLETED", operation, station_name, observation={"initialMode": initial_mode, "finalMode": operation, "profile": profile, "controlCount": expected_controls}, reason="MARKET_VIEW_AND_MODE_CONFIRMED")
+    stream.activity(message="Commodity Market prepared in " + operation + " mode", level="info")
     return {
         "schemaVersion": 1,
         "task": "OPEN_COMMODITY_MARKET",
@@ -163,5 +160,9 @@ def main(ctx):
         "stationConfirmed": True,
         "modeConfirmed": True,
         "initialMode": initial_mode,
+        "marketViewProfile": profile,
+        "filterReplayCompleted": True,
+        "listFocusCommanded": True,
+        "viewControlCount": expected_controls,
         "observationCount": observation_count,
     }

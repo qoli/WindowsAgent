@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "version": 3,
-  "title": "Elite Dangerous trade one exact commodity with bounded list search",
+  "version": 4,
+  "title": "Buy one exact visible commodity or mechanically sell one Cargo.json commodity",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",

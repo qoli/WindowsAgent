@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "profile", "filterReplayCompleted", "listFocusCommanded", "controlCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "SET_COMMODITY_MARKET_VIEW"},
+    "completed": {"const": true},
+    "profile": {"enum": ["BUY_ALL_GOODS", "SELL_SINGLE_CARGO"]},
+    "filterReplayCompleted": {"const": true},
+    "listFocusCommanded": {"const": true},
+    "controlCount": {"enum": [42, 63]}
+  }
+}

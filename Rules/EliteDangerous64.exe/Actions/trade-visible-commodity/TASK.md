@@ -1,50 +1,42 @@
-# Trade one exact Commodity Market row
+# Buy one exact commodity or mechanically sell one cargo commodity
 
-This interruptible linear Streaming Action trades an exact commodity in the
-currently open Elite Dangerous Commodity Market. The caller supplies `BUY` or
-`SELL`, the exact commodity name, a quantity, and the expected Station name.
-It does not open Starport Services or change the BUY/SELL mode. When the exact
-commodity is not initially visible, it resets focus through the current mode
-tile, enters the first commodity row, and uses at most 180 binding-resolved
-`UI_Down` steps in ten-row batches. Every batch is followed by fresh OCR;
-there is no unbounded navigation or fuzzy name match.
+This interruptible linear Streaming Action trades in the deterministic market
+view produced by `open-commodity-market`. The caller supplies `BUY` or `SELL`,
+the exact commodity name, a quantity, and the expected Station. It does not
+open Starport Services or change filters itself.
 
-The Action requires two adjacent current PP-OCR cycles that prove the expected
-market title, Station, mode, and exactly one matching visible commodity row.
-The header, upper list/dialog slice, and lower GOODS-column slice use separate
-bounded captures to stay below the resident OCR runtime's pixel and detector
-shape limits. The two non-overlapping list slices cover every row currently
-visible in the market rather than only its upper portion. It clicks the exact
-commodity box returned by those list captures, immediately activates that
-focus with binding-resolved `UI_Select`,
-requires two dialog observations containing the exact
-commodity and matching `BUY COMMODITY` or `SELL COMMODITY` title, changes the
-quantity with binding-resolved `RIGHT`, focuses the matching confirmation
-button with `DOWN`, and sends `SELECT` once.
+BUY consumes `BUY_ALL_GOODS` and retains the exact OCR contract. When the
+commodity is not initially visible, it enters the goods list and uses at most
+180 binding-resolved `DOWN` steps in ten-row batches. Every batch is followed
+by fresh OCR; there is no unbounded navigation or fuzzy match. Two adjacent
+current PP-OCR cycles must prove the expected market title, Station, BUY mode,
+and exactly one matching visible row. Separate header and list slices stay
+below resident OCR shape limits. The same-frame exact commodity box is click
+authority. The Action activates it with binding-resolved `SELECT` and requires
+two dialog observations containing the exact commodity and `BUY COMMODITY`.
 
-Input success is not trade success. Before input, the Action reads an available
-Cargo.json snapshot and records the named inventory count, source timestamp,
-and reported freshness. The initial snapshot may be `UNKNOWN` freshness:
-Cargo.json is an event snapshot and unchanged inventory does not become false
-after fifteen seconds. It completes only after a snapshot with a different
-source timestamp contains the exact expected count delta. It then
-sends the shared `exit-commodity-market` cleanup Action, which spaces two
-`BACK` inputs across the actual UI transitions, and requires two header
-observations where `COMMODITIES MARKET` is absent. This proves exit from the
-market, not the exact resulting docked cockpit screen; the supervising model
-must use a fresh capture when that goal-layer distinction matters. Missing,
-stale, ambiguous, or
-contradictory OCR and Cargo evidence fails explicitly. Unknown initial
-freshness never weakens the required newer timestamp and exact post-trade
-delta. It never substitutes a
-different commodity, previous inventory, Market.json, Journal lines, or a
-pointer-only success claim. Quantity focus and submit inputs are separated by
-bounded UI-settle intervals rather than emitted back-to-back. Quantity changes
-are spaced by 60 ms; durable progress events are emitted for the first step,
-every twenty-five steps, and the requested final step rather than once per
-tonne.
+SELL consumes `SELL_SINGLE_CARGO` without OCR. Before any market input it
+requires Cargo.json to contain exactly one positive, non-stolen inventory
+entry; its exact name must equal `commodityName`, and its count must equal the
+requested quantity. Because the prepared view contains only that one sellable
+cargo row and leaves it focused, SELL sends `SELECT`, advances the exact full
+quantity, and submits mechanically. Multiple cargo commodities, partial
+quantity requests, a mismatched name, or stolen cargo fail before input. There
+is no OCR list search, dialog OCR, alternate row selection, or fallback in the
+SELL path.
 
-If the exact item cannot be found before the bounded navigation limit, or if
-market identity/mode changes during search, the Action fails without guessing
-another row. OCR-derived geometry remains click authority only for the same
-exact commodity box; keyboard navigation is only a search mechanism.
+Input success is not trade success. Before input, the Action records the
+Cargo.json count, source timestamp, and freshness. Initial freshness may be
+`UNKNOWN`: Cargo.json is an event snapshot. Both paths complete only after a
+snapshot with a different source timestamp contains the exact expected count
+delta. Quantity changes are spaced by 60ms, while progress events cover the
+first step, every twenty-five steps, and the requested final step.
+
+After the exact delta, the shared `exit-commodity-market` Action sends two
+spaced `BACK` inputs. BUY additionally requires two header observations where
+`COMMODITIES MARKET` is absent. Mechanical SELL deliberately does not add OCR
+after the sale; its output claims cleanup command completion, not visual market
+absence. The supervising model must use a fresh capture for the resulting
+cockpit goal. Missing, stale, ambiguous, or contradictory required evidence is
+terminal. No previous inventory, Market.json, Journal line, alternate
+commodity, pointer-only claim, or hidden fallback is accepted.

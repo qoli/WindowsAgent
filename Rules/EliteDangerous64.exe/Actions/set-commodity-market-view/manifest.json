@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "version": 4,
-  "title": "Open and mechanically normalize an Elite Dangerous Commodity Market view",
+  "version": 1,
+  "title": "Mechanically normalize an Elite Dangerous Commodity Market view",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",
   "inputSchema": "input.schema.json",
   "outputSchema": "output.schema.json",
   "eventSchema": "event.schema.json",
   "files": ["main.star", "TASK.md", "input.schema.json", "output.schema.json", "event.schema.json"],
-  "limits": {"maxSteps": 4000000, "maxOutputBytes": 8192, "maxEventBytes": 8192, "maxSleepMs": 1000}
+  "limits": {"maxSteps": 2000000, "maxOutputBytes": 4096, "maxEventBytes": 4096, "maxSleepMs": 1000}
 }

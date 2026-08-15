@@ -9,11 +9,12 @@ import (
 )
 
 type tradeVisibleCommodityCaller struct {
-	ocr      []json.RawMessage
-	cargo    []json.RawMessage
-	controls []string
-	clicks   []map[string]any
-	exits    int
+	ocr                 []json.RawMessage
+	cargo               []json.RawMessage
+	controls            []string
+	clicks              []map[string]any
+	exits               int
+	exitDialogMayBeOpen []bool
 }
 
 func (c *tradeVisibleCommodityCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -58,9 +59,8 @@ func (c *tradeVisibleCommodityCaller) Call(_ context.Context, id string, inputs 
 		return json.RawMessage(`{"schemaVersion":1}`), nil
 	case "elite-dangerous/exit-commodity-market":
 		c.exits++
-		if inputs["dialogMayBeOpen"] != false {
-			return nil, errors.New("normal cleanup unexpectedly allows an open dialog")
-		}
+		mayBeOpen, _ := inputs["dialogMayBeOpen"].(bool)
+		c.exitDialogMayBeOpen = append(c.exitDialogMayBeOpen, mayBeOpen)
 		return json.RawMessage(`{"schemaVersion":1,"backCount":2,"settleMs":1800}`), nil
 	default:
 		return nil, errors.New("unexpected trade-visible-commodity child Action: " + id)
@@ -132,6 +132,20 @@ func cargoFixture(timestamp, commodity string, count int) json.RawMessage {
 	return cargoFixtureWithFreshness(timestamp, commodity, count, "CURRENT")
 }
 
+func multiCargoFixture(timestamp string, items ...map[string]any) json.RawMessage {
+	count := 0
+	inventory := make([]any, len(items))
+	for index, item := range items {
+		count += item["Count"].(int)
+		inventory[index] = item
+	}
+	value, _ := json.Marshal(map[string]any{
+		"schemaVersion": 1, "state": "AVAILABLE", "freshness": "CURRENT", "source": map[string]any{},
+		"data": map[string]any{"timestamp": timestamp, "event": "Cargo", "Vessel": "Ship", "Count": count, "Inventory": inventory},
+	})
+	return value
+}
+
 func TestEliteTradeVisibleCommodityBuysExactQuantityAndRequiresNewCargo(t *testing.T) {
 	caller := &tradeVisibleCommodityCaller{
 		ocr: []json.RawMessage{
@@ -198,22 +212,8 @@ func TestEliteTradeVisibleCommodityFailsBeforeInputOnAmbiguousExactRows(t *testi
 	}
 }
 
-func TestEliteTradeVisibleCommoditySearchesBoundedListBeforeTrading(t *testing.T) {
-	marketWithoutTarget := []json.RawMessage{
-		commodityMarketOCR("SELL TO MARKET", "IGNORED"), commodityOCR(), commodityOCR(commodityRegion("COFFEE", 400, 625)),
-	}
-	marketWithTarget := []json.RawMessage{
-		commodityMarketOCR("SELL TO MARKET", "IGNORED"), commodityOCR(), commodityOCR(commodityRegion("SILVER", 400, 625)),
-	}
-	ocr := append([]json.RawMessage{}, marketWithoutTarget...)
-	ocr = append(ocr, marketWithoutTarget...)
-	ocr = append(ocr, marketWithoutTarget...)
-	ocr = append(ocr, marketWithTarget...)
-	ocr = append(ocr, marketWithTarget...)
-	ocr = append(ocr, commodityDialogOCR("SELL", "SILVER"), commodityDialogOCR("SELL", "SILVER"))
-	ocr = append(ocr, commodityOCR(), commodityOCR())
+func TestEliteTradeVisibleCommodityMechanicallySellsCompleteSingleCargoWithoutOCR(t *testing.T) {
 	caller := &tradeVisibleCommodityCaller{
-		ocr: ocr,
 		cargo: []json.RawMessage{
 			cargoFixture("2026-08-12T09:41:00Z", "Silver", 2),
 			cargoFixture("2026-08-12T09:42:00Z", "Silver", 0),
@@ -227,13 +227,18 @@ func TestEliteTradeVisibleCommoditySearchesBoundedListBeforeTrading(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caller.clicks) != 2 || caller.clicks[0]["x"] != int64(174) || caller.clicks[0]["y"] != int64(401) {
+	if len(caller.clicks) != 0 {
 		t.Fatalf("clicks=%v", caller.clicks)
 	}
-	if len(caller.controls) != 16 || caller.controls[0] != "RIGHT" || caller.controls[11] != "SELECT" {
+	if !equalStrings(caller.controls, []string{"SELECT", "RIGHT", "RIGHT", "DOWN", "SELECT"}) {
 		t.Fatalf("controls=%v", caller.controls)
 	}
-	if !contains(string(output), `"beforeCount":2`) || !contains(string(output), `"afterCount":0`) {
+	if len(caller.ocr) != 0 {
+		t.Fatalf("SELL unexpectedly consumed OCR fixtures")
+	}
+	if !contains(string(output), `"beforeCount":2`) || !contains(string(output), `"afterCount":0`) ||
+		!contains(string(output), `"selectionEvidence":"SINGLE_CARGO_JSON_AND_FIXED_FOCUS"`) ||
+		!contains(string(output), `"singleCargoConfirmed":true`) || !contains(string(output), `"dialogConfirmed":false`) {
 		t.Fatalf("output=%s", output)
 	}
 }
@@ -245,8 +250,48 @@ func TestEliteTradeVisibleCommodityRejectsInsufficientSellCargo(t *testing.T) {
 			"operation": "SELL", "commodityName": "Hydrogen Fuel", "quantity": 2, "stationName": "Creon's Standing",
 		}, caller, &fixtureReporter{},
 	)
-	if err == nil || !contains(err.Error(), "does not contain enough") {
+	if err == nil || !contains(err.Error(), "complete single-commodity") {
 		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 || caller.exits != 0 {
+		t.Fatalf("controls=%v exits=%d", caller.controls, caller.exits)
+	}
+}
+
+func TestEliteTradeVisibleCommodityRejectsMultipleSellCargoItemsBeforeInput(t *testing.T) {
+	caller := &tradeVisibleCommodityCaller{cargo: []json.RawMessage{multiCargoFixture(
+		"2026-08-12T09:41:00Z",
+		map[string]any{"Name": "silver", "Name_Localised": "Silver", "Count": 2, "Stolen": 0},
+		map[string]any{"Name": "gold", "Name_Localised": "Gold", "Count": 1, "Stolen": 0},
+	)}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteTradeVisibleCommodityPackage(t), map[string]any{
+			"operation": "SELL", "commodityName": "Silver", "quantity": 2, "stationName": "Creon's Standing",
+		}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "exactly one positive") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 || len(caller.clicks) != 0 || caller.exits != 0 {
+		t.Fatalf("controls=%v clicks=%v exits=%d", caller.controls, caller.clicks, caller.exits)
+	}
+}
+
+func TestEliteTradeVisibleCommodityRejectsStolenSingleCargoBeforeInput(t *testing.T) {
+	caller := &tradeVisibleCommodityCaller{cargo: []json.RawMessage{multiCargoFixture(
+		"2026-08-12T09:41:00Z",
+		map[string]any{"Name": "silver", "Name_Localised": "Silver", "Count": 2, "Stolen": 2},
+	)}}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteTradeVisibleCommodityPackage(t), map[string]any{
+			"operation": "SELL", "commodityName": "Silver", "quantity": 2, "stationName": "Creon's Standing",
+		}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "does not accept stolen cargo") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 || len(caller.clicks) != 0 || caller.exits != 0 {
+		t.Fatalf("controls=%v clicks=%v exits=%d", caller.controls, caller.clicks, caller.exits)
 	}
 }
 

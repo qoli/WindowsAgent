@@ -210,6 +210,37 @@ def commodity_count(cargo, commodity_name):
         fail("Cargo.json contains duplicate exact commodity entries")
     return {"count": count, "timestamp": cargo["data"]["timestamp"], "freshness": cargo["freshness"]}
 
+def single_sell_cargo(cargo, commodity_name, quantity):
+    if cargo["state"] != "AVAILABLE" or cargo["data"] == None:
+        fail("Cargo.json must be AVAILABLE")
+    expected = normalize_text(commodity_name)
+    positive = []
+    for item in cargo["data"]["Inventory"]:
+        if item["Count"] <= 0:
+            continue
+        localized = item["Name_Localised"] if "Name_Localised" in item else item["Name"]
+        positive.append({
+            "name": localized,
+            "normalizedName": normalize_text(localized),
+            "count": item["Count"],
+            "stolen": item["Stolen"] if "Stolen" in item else 0,
+        })
+    if len(positive) != 1:
+        fail("mechanical SELL requires exactly one positive Cargo.json commodity")
+    item = positive[0]
+    if item["normalizedName"] != expected:
+        fail("mechanical SELL Cargo.json commodity does not match the requested exact name")
+    if item["count"] != quantity:
+        fail("mechanical SELL requires selling the complete single-commodity Cargo.json count")
+    if item["stolen"] != 0:
+        fail("mechanical SELL does not accept stolen cargo")
+    return {
+        "count": item["count"],
+        "timestamp": cargo["data"]["timestamp"],
+        "freshness": cargo["freshness"],
+        "inventoryEntryCount": 1,
+    }
+
 def observe_market_absent(operation, commodity_name, quantity):
     previous = False
     count = 0
@@ -234,29 +265,45 @@ def main(ctx):
     station_name = ctx.inputs["stationName"]
 
     before_raw = action.call(id="elite-dangerous/filesystem/cargo", inputs={})
-    before = commodity_count(before_raw, commodity_name)
-    if operation == "SELL" and before["count"] < quantity:
-        fail("Cargo.json does not contain enough of the exact commodity to sell")
+    if operation == "SELL":
+        before = single_sell_cargo(before_raw, commodity_name, quantity)
+    else:
+        before = commodity_count(before_raw, commodity_name)
     emit_update("PREFLIGHT", operation, commodity_name, quantity, observation=before, reason="CURRENT_CARGO_BASELINE")
 
-    visible = locate_commodity(operation, commodity_name, quantity, station_name)
-    observation_count = visible["count"] + 1
-    commodity = visible["observation"]["commodity"]
-    click_x = int(commodity["bounds"]["centerX"])
-    click_y = int(commodity["bounds"]["centerY"])
+    observation_count = 1
+    market_mode_confirmed = False
+    dialog_confirmed = False
+    commodity_market_absent = False
+    single_cargo_confirmed = operation == "SELL"
+    selection_evidence = "SINGLE_CARGO_JSON_AND_FIXED_FOCUS" if operation == "SELL" else "EXACT_CURRENT_FRAME_OCR"
+    filter_profile = "SELL_SINGLE_CARGO" if operation == "SELL" else "BUY_ALL_GOODS"
 
-    # The shared cleanup Action spaces its two BACK inputs across the actual UI
-    # transitions. It is replaced by explicit normal cleanup below.
+    # The successful open-commodity-market predecessor leaves the requested
+    # deterministic list focus. Failure cleanup remains conditional because a
+    # failed trade may or may not have opened the modal dialog.
     action.on_failure(id="elite-dangerous/exit-commodity-market", inputs={"dialogMayBeOpen": True})
 
-    emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="POINTER_CLICK", observation={"x": click_x, "y": click_y, "commodity": commodity}, reason="SAME_FRAME_EXACT_OCR_BOX")
-    action.call(id="elite-dangerous/pointer-click", inputs={"x": click_x, "y": click_y, "holdMs": 40})
-    task.sleep(milliseconds=CONTROL_SETTLE_MS)
-    emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="SELECT", observation={"x": click_x, "y": click_y}, reason="POINTER_ESTABLISHES_FOCUS_AND_BOUND_UI_SELECT_ACTIVATES")
-    action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
-    task.sleep(milliseconds=UI_SETTLE_MS)
-    dialog = observe_dialog_stable(operation, commodity_name, quantity)
-    observation_count += dialog["count"]
+    if operation == "SELL":
+        emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="SELECT", observation={"selectionEvidence": selection_evidence, "singleCargo": before}, reason="MECHANICAL_FIRST_SELLABLE_CARGO_ROW")
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
+        task.sleep(milliseconds=UI_SETTLE_MS)
+    else:
+        visible = locate_commodity(operation, commodity_name, quantity, station_name)
+        observation_count += visible["count"]
+        market_mode_confirmed = True
+        commodity = visible["observation"]["commodity"]
+        click_x = int(commodity["bounds"]["centerX"])
+        click_y = int(commodity["bounds"]["centerY"])
+        emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="POINTER_CLICK", observation={"x": click_x, "y": click_y, "commodity": commodity}, reason="SAME_FRAME_EXACT_OCR_BOX")
+        action.call(id="elite-dangerous/pointer-click", inputs={"x": click_x, "y": click_y, "holdMs": 40})
+        task.sleep(milliseconds=CONTROL_SETTLE_MS)
+        emit_update("OPENING_DIALOG", operation, commodity_name, quantity, command="SELECT", observation={"x": click_x, "y": click_y}, reason="POINTER_ESTABLISHES_FOCUS_AND_BOUND_UI_SELECT_ACTIVATES")
+        action.call(id="elite-dangerous/ui-control", inputs={"control": "SELECT"})
+        task.sleep(milliseconds=UI_SETTLE_MS)
+        dialog = observe_dialog_stable(operation, commodity_name, quantity)
+        observation_count += dialog["count"]
+        dialog_confirmed = True
 
     for index in range(quantity):
         step = index + 1
@@ -265,7 +312,7 @@ def main(ctx):
         action.call(id="elite-dangerous/ui-control", inputs={"control": "RIGHT"})
         task.sleep(milliseconds=QUANTITY_STEP_MS)
     task.sleep(milliseconds=CONTROL_SETTLE_MS)
-    emit_update("SUBMITTING", operation, commodity_name, quantity, command="DOWN", observation=dialog["observation"], reason="FOCUS_MATCHING_CONFIRM_BUTTON")
+    emit_update("SUBMITTING", operation, commodity_name, quantity, command="DOWN", observation={"selectionEvidence": selection_evidence}, reason="FOCUS_MATCHING_CONFIRM_BUTTON")
     action.call(id="elite-dangerous/ui-control", inputs={"control": "DOWN"})
     task.sleep(milliseconds=CONTROL_SETTLE_MS)
     emit_update("SUBMITTING", operation, commodity_name, quantity, command="SELECT", observation=None, reason="ONE_CONFIRMED_TRADE_SUBMISSION")
@@ -287,10 +334,13 @@ def main(ctx):
 
     emit_update("RESTORING_COCKPIT", operation, commodity_name, quantity, command="EXIT_COMMODITY_MARKET", observation=after, reason="LEAVE_MARKET_AND_STARPORT_SERVICES")
     action.call(id="elite-dangerous/exit-commodity-market", inputs={"dialogMayBeOpen": False})
-    observation_count += observe_market_absent(operation, commodity_name, quantity)
+    if operation == "BUY":
+        observation_count += observe_market_absent(operation, commodity_name, quantity)
+        commodity_market_absent = True
     action.clear_on_failure()
 
-    emit_update("COMPLETED", operation, commodity_name, quantity, observation={"before": before, "after": after}, reason="EXACT_CARGO_DELTA_AND_COMMODITY_MARKET_ABSENT")
+    completion_reason = "EXACT_CARGO_DELTA_AND_COMMODITY_MARKET_ABSENT" if operation == "BUY" else "EXACT_CARGO_DELTA_AND_MECHANICAL_CLEANUP_COMPLETED"
+    emit_update("COMPLETED", operation, commodity_name, quantity, observation={"before": before, "after": after}, reason=completion_reason)
     stream.activity(message=operation + " confirmed: " + str(quantity) + "t " + commodity_name, level="info")
     return {
         "schemaVersion": 1,
@@ -304,8 +354,12 @@ def main(ctx):
         "afterCount": after["count"],
         "beforeTimestamp": before["timestamp"],
         "afterTimestamp": after["timestamp"],
-        "marketModeConfirmed": True,
-        "dialogConfirmed": True,
-        "commodityMarketAbsent": True,
+        "filterProfile": filter_profile,
+        "selectionEvidence": selection_evidence,
+        "singleCargoConfirmed": single_cargo_confirmed,
+        "marketModeConfirmed": market_mode_confirmed,
+        "dialogConfirmed": dialog_confirmed,
+        "cleanupCommandCompleted": True,
+        "commodityMarketAbsent": commodity_market_absent,
         "observationCount": observation_count,
     }

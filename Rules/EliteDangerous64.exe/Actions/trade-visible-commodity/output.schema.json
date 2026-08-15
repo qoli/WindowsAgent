@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "task", "completed", "operation", "commodityName", "quantity", "stationName", "beforeCount", "afterCount", "beforeTimestamp", "afterTimestamp", "marketModeConfirmed", "dialogConfirmed", "commodityMarketAbsent", "observationCount"],
+  "required": ["schemaVersion", "task", "completed", "operation", "commodityName", "quantity", "stationName", "beforeCount", "afterCount", "beforeTimestamp", "afterTimestamp", "filterProfile", "selectionEvidence", "singleCargoConfirmed", "marketModeConfirmed", "dialogConfirmed", "cleanupCommandCompleted", "commodityMarketAbsent", "observationCount"],
   "properties": {
     "schemaVersion": {"const": 1},
     "task": {"const": "TRADE_VISIBLE_COMMODITY"},
@@ -15,9 +15,23 @@
     "afterCount": {"type": "integer", "minimum": 0},
     "beforeTimestamp": {"type": "string"},
     "afterTimestamp": {"type": "string"},
-    "marketModeConfirmed": {"const": true},
-    "dialogConfirmed": {"const": true},
-    "commodityMarketAbsent": {"const": true},
-    "observationCount": {"type": "integer", "minimum": 5, "maximum": 64}
-  }
+    "filterProfile": {"enum": ["BUY_ALL_GOODS", "SELL_SINGLE_CARGO"]},
+    "selectionEvidence": {"enum": ["EXACT_CURRENT_FRAME_OCR", "SINGLE_CARGO_JSON_AND_FIXED_FOCUS"]},
+    "singleCargoConfirmed": {"type": "boolean"},
+    "marketModeConfirmed": {"type": "boolean"},
+    "dialogConfirmed": {"type": "boolean"},
+    "cleanupCommandCompleted": {"const": true},
+    "commodityMarketAbsent": {"type": "boolean"},
+    "observationCount": {"type": "integer", "minimum": 2, "maximum": 64}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"operation": {"const": "BUY"}}},
+      "then": {"properties": {"filterProfile": {"const": "BUY_ALL_GOODS"}, "selectionEvidence": {"const": "EXACT_CURRENT_FRAME_OCR"}, "singleCargoConfirmed": {"const": false}, "marketModeConfirmed": {"const": true}, "dialogConfirmed": {"const": true}, "commodityMarketAbsent": {"const": true}}}
+    },
+    {
+      "if": {"properties": {"operation": {"const": "SELL"}}},
+      "then": {"properties": {"filterProfile": {"const": "SELL_SINGLE_CARGO"}, "selectionEvidence": {"const": "SINGLE_CARGO_JSON_AND_FIXED_FOCUS"}, "singleCargoConfirmed": {"const": true}, "marketModeConfirmed": {"const": false}, "dialogConfirmed": {"const": false}, "commodityMarketAbsent": {"const": false}}}
+    }
+  ]
 }

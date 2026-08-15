@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "task", "completed", "operation", "stationName", "dockedMenuConfirmed", "marketTitleConfirmed", "stationConfirmed", "modeConfirmed", "initialMode", "observationCount"],
+  "required": ["schemaVersion", "task", "completed", "operation", "stationName", "dockedMenuConfirmed", "marketTitleConfirmed", "stationConfirmed", "modeConfirmed", "initialMode", "marketViewProfile", "filterReplayCompleted", "listFocusCommanded", "viewControlCount", "observationCount"],
   "properties": {
     "schemaVersion": {"const": 1},
     "task": {"const": "OPEN_COMMODITY_MARKET"},
@@ -14,6 +14,20 @@
     "stationConfirmed": {"const": true},
     "modeConfirmed": {"const": true},
     "initialMode": {"enum": ["BUY", "SELL"]},
+    "marketViewProfile": {"enum": ["BUY_ALL_GOODS", "SELL_SINGLE_CARGO"]},
+    "filterReplayCompleted": {"const": true},
+    "listFocusCommanded": {"const": true},
+    "viewControlCount": {"enum": [42, 63]},
     "observationCount": {"type": "integer", "minimum": 4, "maximum": 32}
-  }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"operation": {"const": "BUY"}}},
+      "then": {"properties": {"marketViewProfile": {"const": "BUY_ALL_GOODS"}, "viewControlCount": {"const": 42}}}
+    },
+    {
+      "if": {"properties": {"operation": {"const": "SELL"}}},
+      "then": {"properties": {"marketViewProfile": {"const": "SELL_SINGLE_CARGO"}, "viewControlCount": {"const": 63}}}
+    }
+  ]
 }

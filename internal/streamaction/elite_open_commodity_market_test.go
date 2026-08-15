@@ -9,11 +9,14 @@ import (
 )
 
 type openCommodityMarketCaller struct {
-	docked   []json.RawMessage
-	header   []json.RawMessage
-	controls []string
-	clicks   []map[string]any
-	exits    int
+	docked              []json.RawMessage
+	header              []json.RawMessage
+	controls            []string
+	clicks              []map[string]any
+	views               []string
+	viewOverride        json.RawMessage
+	exits               int
+	exitDialogMayBeOpen []bool
 }
 
 func (c *openCommodityMarketCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -42,11 +45,82 @@ func (c *openCommodityMarketCaller) Call(_ context.Context, id string, inputs ma
 	case "elite-dangerous/pointer-click":
 		c.clicks = append(c.clicks, inputs)
 		return json.RawMessage(`{"schemaVersion":1}`), nil
+	case "elite-dangerous/set-commodity-market-view":
+		profile, ok := inputs["profile"].(string)
+		if !ok {
+			return nil, errors.New("market view profile is not a string")
+		}
+		c.views = append(c.views, profile)
+		if c.viewOverride != nil {
+			return c.viewOverride, nil
+		}
+		controlCount := 42
+		if profile == "SELL_SINGLE_CARGO" {
+			controlCount = 63
+		}
+		value, _ := json.Marshal(map[string]any{
+			"schemaVersion": 1, "task": "SET_COMMODITY_MARKET_VIEW", "completed": true,
+			"profile": profile, "filterReplayCompleted": true, "listFocusCommanded": true, "controlCount": controlCount,
+		})
+		return value, nil
 	case "elite-dangerous/exit-commodity-market":
 		c.exits++
+		mayBeOpen, _ := inputs["dialogMayBeOpen"].(bool)
+		c.exitDialogMayBeOpen = append(c.exitDialogMayBeOpen, mayBeOpen)
 		return json.RawMessage(`{"schemaVersion":1,"backCount":2,"settleMs":1800}`), nil
 	default:
 		return nil, errors.New("unexpected open-commodity-market child Action: " + id)
+	}
+}
+
+func TestEliteOpenCommodityMarketNormalizesBuyAllGoodsAndReconfirmsMode(t *testing.T) {
+	caller := &openCommodityMarketCaller{
+		docked: []json.RawMessage{
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+		},
+		header: []json.RawMessage{
+			marketHeaderOCR("SHAW STATION", "SELL TO MARKET"),
+			marketHeaderOCR("SHAW STATION", "SELL TO MARKET"),
+			marketHeaderOCR("SHAW STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("SHAW STATION", "BUY FROM MARKET"),
+		},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteOpenCommodityMarketPackage(t), map[string]any{
+			"operation": "BUY", "stationName": "Shaw Station",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalStrings(caller.views, []string{"BUY_ALL_GOODS"}) || !contains(string(output), `"viewControlCount":42`) {
+		t.Fatalf("views=%v output=%s", caller.views, output)
+	}
+}
+
+func TestEliteOpenCommodityMarketRejectsInvalidMechanicalViewResultAndCleansUp(t *testing.T) {
+	caller := &openCommodityMarketCaller{
+		docked: []json.RawMessage{
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+			dockedMenuOCR("STARPORT SERVICES", "AUTO LAUNCH", "DISEMBARK"),
+		},
+		header: []json.RawMessage{
+			marketHeaderOCR("SHAW STATION", "BUY FROM MARKET"),
+			marketHeaderOCR("SHAW STATION", "BUY FROM MARKET"),
+		},
+		viewOverride: json.RawMessage(`{"schemaVersion":1,"task":"SET_COMMODITY_MARKET_VIEW","completed":true,"profile":"BUY_ALL_GOODS","filterReplayCompleted":true,"listFocusCommanded":true,"controlCount":41}`),
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteOpenCommodityMarketPackage(t), map[string]any{
+			"operation": "BUY", "stationName": "Shaw Station",
+		}, caller, &fixtureReporter{},
+	)
+	if err == nil || !contains(err.Error(), "invalid mechanical replay") {
+		t.Fatalf("error=%v", err)
+	}
+	if caller.exits != 1 || len(caller.exitDialogMayBeOpen) != 1 || !caller.exitDialogMayBeOpen[0] {
+		t.Fatalf("exits=%d exitDialogMayBeOpen=%v", caller.exits, caller.exitDialogMayBeOpen)
 	}
 }
 
@@ -101,18 +175,21 @@ func TestEliteOpenCommodityMarketOpensAndSwitchesToSellWithOCRPostcondition(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantControls := []string{"DOWN", "DOWN", "DOWN", "DOWN", "UP", "UP", "SELECT", "SELECT", "SELECT"}
+	wantControls := []string{"DOWN", "DOWN", "DOWN", "DOWN", "UP", "UP", "SELECT", "SELECT"}
 	if !equalStrings(caller.controls, wantControls) {
 		t.Fatalf("controls=%v want=%v", caller.controls, wantControls)
 	}
-	if len(caller.clicks) != 2 || caller.clicks[0]["x"] != int64(395) || caller.clicks[0]["y"] != int64(704) ||
-		caller.clicks[1]["x"] != int64(174) || caller.clicks[1]["y"] != int64(401) {
+	if len(caller.clicks) != 1 || caller.clicks[0]["x"] != int64(395) || caller.clicks[0]["y"] != int64(704) {
 		t.Fatalf("clicks=%v", caller.clicks)
+	}
+	if !equalStrings(caller.views, []string{"SELL_SINGLE_CARGO"}) {
+		t.Fatalf("views=%v", caller.views)
 	}
 	if caller.exits != 0 {
 		t.Fatalf("failure cleanup executed on success: exits=%d", caller.exits)
 	}
-	if !contains(string(output), `"initialMode":"BUY"`) || !contains(string(output), `"modeConfirmed":true`) {
+	if !contains(string(output), `"initialMode":"BUY"`) || !contains(string(output), `"modeConfirmed":true`) ||
+		!contains(string(output), `"marketViewProfile":"SELL_SINGLE_CARGO"`) || !contains(string(output), `"viewControlCount":63`) {
 		t.Fatalf("output=%s", output)
 	}
 }

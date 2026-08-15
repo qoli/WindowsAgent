@@ -660,21 +660,30 @@ primitives for the open Commodity Market. The first owns the title, Station,
 and BUY/SELL mode header; the second owns the lower GOODS column; the third
 owns the upper list and trade dialog. The two list ROIs meet without overlap so
 all currently visible rows are covered, while no request exceeds the OCR pixel
-or detector-shape limit. `elite-dangerous/trade-visible-commodity` is an
-interruptible linear Streaming Action for one exact row already visible in the
-caller's already-selected BUY or SELL tab. It requires two adjacent current
-header/list cycles, uses only the exact row box from the list capture for the
-click, confirms the matching trade dialog twice, and treats a newer exact
-`Cargo.json` count delta as the transaction postcondition. It neither opens
-Starport Services nor changes tabs or scrolls; those are explicit caller
-preconditions. On success and failure it uses
+or detector-shape limit. `elite-dangerous/set-commodity-market-view` is the
+internal mechanical normalization module. `BUY_ALL_GOODS` replays exactly 42
+binding-resolved controls to clear persistent filters, Apply, activate BUY, and
+focus the first goods row. `SELL_SINGLE_CARGO` replays exactly 63 controls to
+clear filters, select Cargo only, Apply, activate SELL, and focus the first
+sellable row. These fixed sequences clamp retained filter focus; completion is
+input-replay evidence, not visual proof of filter contents.
+
+`elite-dangerous/trade-visible-commodity` is an interruptible linear Streaming
+Action that consumes the prepared view. BUY retains exact current-frame OCR:
+it requires two adjacent header/list cycles, uses only the exact row box for
+the click, and confirms the matching BUY dialog twice. SELL uses no OCR for
+commodity selection or dialog confirmation. It requires Cargo.json to contain
+exactly one positive non-stolen commodity whose exact name and complete count
+match the request, then mechanically activates the already-focused sellable
+row. Both paths require a newer exact `Cargo.json` count delta as the
+transaction postcondition. On success and failure it uses
 `elite-dangerous/exit-commodity-market`, which spaces two binding-resolved
 `BACK` inputs across the Commodity Market and Starport Services transitions;
 failure cleanup allows one extra spaced `BACK` when a trade dialog may still
 be open.
-The successful path additionally requires the Commodity Market header to
-remain absent twice. That proves market exit, not the exact resulting cockpit
-screen, so goal-layer confirmation remains a fresh supervising-model capture.
+BUY additionally requires the Commodity Market header to remain absent twice.
+Mechanical SELL claims only cleanup command completion, so its resulting
+cockpit remains a fresh supervising-model capture requirement.
 The baseline
 Cargo event snapshot may report `UNKNOWN` freshness
 when inventory has not changed recently; completion still requires a different
@@ -684,9 +693,10 @@ Cargo source timestamp and the exact requested count delta.
 primitive for the three centered docked-menu labels. The interruptible linear
 `elite-dangerous/open-commodity-market` Action owns the missing transition from
 that menu to an exact Station's Commodity Market in caller-selected BUY or
-SELL mode. It uses clamped docked-menu navigation, the Rule-owned Market tile,
-and two current header confirmations before returning with the market still
-open. Input commands or tile clicks are never mode evidence. Use it before
+SELL operation. It uses clamped docked-menu navigation, the Rule-owned Market
+tile, the internal deterministic view profile, and two fresh final header
+confirmations before returning with the prepared list still open. Input
+commands or tile clicks are never mode evidence. Use it before
 `trade-visible-commodity`; do not reproduce its UI path through high-level
 primitive calls.
 Quantity changes are sent at 60 ms intervals, while progress events are

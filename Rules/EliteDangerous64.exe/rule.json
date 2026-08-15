@@ -82,6 +82,13 @@
       "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
       "registrableAs": []
     },
+    "elite-dangerous/set-commodity-market-view": {
+      "path": "Actions/set-commodity-market-view",
+      "runtime": "windows-streaming-action-v1",
+      "exposure": "internal",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
     "elite-dangerous/trade-visible-commodity": {
       "path": "Actions/trade-visible-commodity",
       "runtime": "windows-streaming-action-v1",

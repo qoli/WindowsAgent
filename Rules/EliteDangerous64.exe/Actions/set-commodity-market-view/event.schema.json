@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.set-commodity-market-view.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "profile", "command", "count", "reason"],
+      "properties": {
+        "phase": {"enum": ["RESETTING_FILTERS", "SELECTING_FILTER", "APPLYING_FILTERS", "SELECTING_MODE", "FOCUSING_LIST", "COMPLETED"]},
+        "profile": {"enum": ["BUY_ALL_GOODS", "SELL_SINGLE_CARGO"]},
+        "command": {"type": ["string", "null"]},
+        "count": {"type": "integer", "minimum": 0, "maximum": 63},
+        "reason": {"type": "string"}
+      }
+    }
+  }
+}
