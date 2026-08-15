@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": 5,
+  "version": 6,
   "title": "Enter and prove an Elite Dangerous planetary gravity well",
   "entrypoint": "main.star",
   "taskDocument": "TASK.md",

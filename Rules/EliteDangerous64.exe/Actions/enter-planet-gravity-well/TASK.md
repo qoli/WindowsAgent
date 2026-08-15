@@ -24,7 +24,8 @@ Otherwise the Action aligns the static destination, enters manual Supercruise,
 applies 100%, and observes the target-lock HUD distance plus the Supercruise
 speed display. The exact Status destination plus the immediately completed
 Compass alignment authorizes the visible child's
-`centerHintConfirmed=true` Gate; that child must still obtain a fresh local
+`centerHintConfirmed=true` Gate and the destination-layout
+`SUPERCRUISE_ASSIST` confirmed-hint profile; that child must still obtain a fresh local
 reticle detection before steering. It treats three consecutive samples below
 20 Mm and 20 km/s,
 with a non-increasing target distance, only as a candidate drop point. It then

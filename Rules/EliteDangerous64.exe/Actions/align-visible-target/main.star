@@ -38,11 +38,9 @@ MAX_TRACKING_HINT_X = 1850
 MAX_TRACKING_HINT_Y = 1010
 SCREEN_CENTER_X = 960
 SCREEN_CENTER_Y = 540
-CONFIRMED_HINT_ALTERNATE_X = 800
-CONFIRMED_HINT_ALTERNATE_Y = 345
 RELOCALIZATION_VALIDATION_MAX_DELTA_SQUARED = 12.0 * 12.0
 
-def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0, relocalization_state="INACTIVE", relocalization_attempt=0):
+def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0, relocalization_state="INACTIVE", relocalization_attempt=0, confirmed_hint_profile="NONE", relocalization_hint_x=None, relocalization_hint_y=None):
     presentation = None
     occupied_bins = None
     angular_runs = None
@@ -85,6 +83,9 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
             "blueZoneConfirmations": blue_zone_confirmations,
             "relocalizationState": relocalization_state,
             "relocalizationAttempt": relocalization_attempt,
+            "confirmedHintProfile": confirmed_hint_profile,
+            "relocalizationHintX": relocalization_hint_x,
+            "relocalizationHintY": relocalization_hint_y,
             "reason": reason,
             "observationErrorCode": error_code,
             "observationError": error,
@@ -139,6 +140,13 @@ def choose_command(target, position_source):
 
 def trackable_hint(target):
     return target["referenceX"] >= MIN_TRACKING_HINT and target["referenceX"] <= MAX_TRACKING_HINT_X and target["referenceY"] >= MIN_TRACKING_HINT and target["referenceY"] <= MAX_TRACKING_HINT_Y
+
+def alternate_hint_for_profile(profile):
+    if profile == "HYPERSPACE_CHARGE":
+        return [800, 345]
+    if profile == "SUPERCRUISE_ASSIST":
+        return [960, 450]
+    fail("centerHintConfirmed requires an explicit caller-owned confirmedHintProfile")
 
 def normalize_prompt_text(text):
     normalized = ""
@@ -235,11 +243,16 @@ def main(ctx):
     position_source = ctx.inputs["positionSource"] if "positionSource" in ctx.inputs else "DESTINATION"
     heat_policy = ctx.inputs["heatPolicy"] if "heatPolicy" in ctx.inputs else "STRICT"
     center_hint_confirmed = ctx.inputs["centerHintConfirmed"] if "centerHintConfirmed" in ctx.inputs else False
+    confirmed_hint_profile = ctx.inputs["confirmedHintProfile"] if "confirmedHintProfile" in ctx.inputs else "NONE"
     blue_zone_gate_enabled = ctx.inputs["blueZoneGateEnabled"] if "blueZoneGateEnabled" in ctx.inputs else False
     if heat_policy == "ESCAPE_VECTOR_CHARGE" and position_source != "ESCAPE_VECTOR":
         fail("ESCAPE_VECTOR_CHARGE heat policy requires the Escape Vector position source")
     if center_hint_confirmed and position_source != "DESTINATION":
         fail("centerHintConfirmed is valid only for the destination position source")
+    if center_hint_confirmed and confirmed_hint_profile == "NONE":
+        fail("centerHintConfirmed requires HYPERSPACE_CHARGE or SUPERCRUISE_ASSIST confirmedHintProfile")
+    if not center_hint_confirmed and confirmed_hint_profile != "NONE":
+        fail("confirmedHintProfile requires centerHintConfirmed")
     if blue_zone_gate_enabled and position_source != "DESTINATION":
         fail("blueZoneGateEnabled is valid only for the destination position source")
     stable_confirmations_required = 2 if position_source == "ESCAPE_VECTOR" else STABLE_CONFIRMATIONS
@@ -270,6 +283,7 @@ def main(ctx):
     relocalization_state = "INACTIVE"
     relocalization_attempt = 0
     relocalization_candidate = None
+    alternate_hint = alternate_hint_for_profile(confirmed_hint_profile) if center_hint_confirmed else None
     blue_zone_gate = {"enabled": blue_zone_gate_enabled, "confirmations": 0, "lastState": None, "lastPromptText": None}
     if observe_blue_zone_gate(target_name, 0, command_count, stable, blue_zone_gate):
         return blue_zone_completion(target_name, 0, command_count, final_target, blue_zone_gate)
@@ -331,7 +345,7 @@ def main(ctx):
             relocalization_attempt = 1
             attempt = action.try_call(
                 id="elite-dangerous/supercruise-visible-reticle-position",
-                inputs={"hintX": CONFIRMED_HINT_ALTERNATE_X, "hintY": CONFIRMED_HINT_ALTERNATE_Y, "evidencePolicy": "HUD_OVERLAY_AWARE"},
+                inputs={"hintX": alternate_hint[0], "hintY": alternate_hint[1], "evidencePolicy": "HUD_OVERLAY_AWARE"},
             )
         elif tracked_target != None and tracked_samples_since_identity < DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES and trackable_hint(tracked_target):
             observation_mode = "RETICLE_TRACKING"
@@ -347,19 +361,19 @@ def main(ctx):
             bounded = text if len(text) <= 512 else text[:512]
             if attempt["errorCode"] == "JOB_DEADLINE_EXCEEDED":
                 deadline_count += 1
-                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_DEADLINE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_DEADLINE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                 if deadline_count > MAX_DEADLINE_ERRORS:
                     fail("visible target deadline error limit exceeded after five skipped errors: " + text)
                 wait_for_cadence(started_ms, position_source)
                 continue
             if transient_wgc_region_capture_error(text):
                 wgc_capture_error_count += 1
-                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_WGC_CAPTURE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+                emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_WGC_CAPTURE_RETRY", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                 if wgc_capture_error_count > MAX_WGC_CAPTURE_ERRORS:
                     fail("visible target WGC region capture error limit exceeded after five skipped errors: " + text)
                 wait_for_cadence(started_ms, position_source)
                 continue
-            emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_OBSERVATION_FAILED", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+            emit_update("OBSERVATION_ERROR", target_name, sample, command_count, stable=stable, reason="TARGET_POSITION_OBSERVATION_FAILED", error_code=attempt["errorCode"], error=bounded, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
             fail("visible target observation failed: " + text)
 
         target = attempt["output"]["target"]
@@ -369,7 +383,7 @@ def main(ctx):
         if observation_mode == "RETICLE_RELOCALIZATION":
             if target["state"] != "DETECTED" or not trackable_hint(target):
                 relocalization_state = "MISS"
-                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_RELOCALIZATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_RELOCALIZATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                 fail("alternate local reticle hint did not produce an unambiguous current-frame position: " + target["reason"])
             tracked_target = target
             relocalization_candidate = target
@@ -379,7 +393,7 @@ def main(ctx):
             stable = 0
             entered_center_gate = False
             boundary_jitter_samples = 0
-            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_CANDIDATE_AWAITING_FRESH_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_CANDIDATE_AWAITING_FRESH_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
             wait_for_cadence(started_ms, position_source)
             continue
         if target["state"] != "DETECTED":
@@ -390,7 +404,7 @@ def main(ctx):
             if observation_mode == "RETICLE_TRACKING":
                 if relocalization_state == "CANDIDATE_FOUND":
                     relocalization_state = "MISS"
-                    emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+                    emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason="RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                     fail("relocalized reticle candidate was not confirmed by the next current-frame local track")
                 elif center_hint_confirmed and not fresh_local_track_seen and relocalization_attempt == 0:
                     # Post-Compass A/B evidence showed the already
@@ -417,7 +431,7 @@ def main(ctx):
                     unknown_reason = "RETICLE_TRACKING_LOST_REACQUIRE_IDENTITY"
             else:
                 unknown_reason = "VISIBLE_TARGET_UNKNOWN"
-            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason=unknown_reason, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+            emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason=unknown_reason, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
             if unknown_count >= TRANSIENT_UNKNOWN_LIMIT:
                 fail("visible target remained UNKNOWN after its bounded observation window")
             wait_for_cadence(started_ms, position_source)
@@ -430,10 +444,10 @@ def main(ctx):
                 validation_delta_squared = delta_x * delta_x + delta_y * delta_y
                 if validation_delta_squared > RELOCALIZATION_VALIDATION_MAX_DELTA_SQUARED:
                     relocalization_state = "CONTRADICTED"
-                    emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_CONTRADICTED_SQUARED:" + str(validation_delta_squared), heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+                    emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_CONTRADICTED_SQUARED:" + str(validation_delta_squared), heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                     fail("relocalized reticle candidate contradicted the next current-frame local track")
                 relocalization_state = "VALIDATED"
-                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="RELOCALIZED_CANDIDATE_VALIDATED_BY_FRESH_LOCAL_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt)
+                emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="RELOCALIZED_CANDIDATE_VALIDATED_BY_FRESH_LOCAL_TRACK", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
             fresh_local_track_seen = True
         if position_source == "DESTINATION":
             tracked_target = target

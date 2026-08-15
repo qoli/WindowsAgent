@@ -117,7 +117,7 @@ func TestEliteAlignVisibleTargetCompletesFromConcurrentBlueZoneGateDuringUnknown
 	}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
 	if err != nil || !contains(string(output), `"completionEvidence":"BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"`) || !contains(string(output), `"blueZoneConfirmations":2`) {
 		t.Fatalf("output=%s error=%v", output, err)
@@ -142,7 +142,7 @@ func TestEliteAlignVisibleTargetDoesNotCompleteFromInterruptedBlueZoneGate(t *te
 		caller.heats = append(caller.heats, visibleHeat("UNKNOWN", nil))
 	}
 	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, &fixtureReporter{})
 	if err == nil || !contains(err.Error(), "safe strict heat checkpoint") {
 		t.Fatalf("error=%v", err)
@@ -165,7 +165,7 @@ func TestEliteAlignVisibleTargetPollsBlueZoneWhileCVKeepsAligning(t *testing.T) 
 		},
 	}
 	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, &fixtureReporter{})
 	if err != nil || !contains(string(output), `"completionEvidence":"BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"`) {
 		t.Fatalf("output=%s error=%v", output, err)
@@ -211,7 +211,7 @@ func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *
 	}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
 	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"presentation":"DASHED"`) {
 		t.Fatalf("output=%s error=%v", output, err)
@@ -232,6 +232,36 @@ func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *
 	}
 }
 
+func TestEliteAlignVisibleTargetRequiresCallerOwnedConfirmedHintProfile(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		inputs map[string]any
+		want   string
+	}{
+		{
+			name: "confirmed centre cannot use NONE",
+			inputs: map[string]any{
+				"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "NONE", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+			},
+			want: "centerHintConfirmed requires HYPERSPACE_CHARGE or SUPERCRUISE_ASSIST confirmedHintProfile",
+		},
+		{
+			name: "profile requires confirmed centre",
+			inputs: map[string]any{
+				"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": false, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+			},
+			want: "confirmedHintProfile requires centerHintConfirmed",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), test.inputs, &alignVisibleTargetCaller{}, &fixtureReporter{})
+			if err == nil || !contains(err.Error(), test.want) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
 func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewedAlternateHint(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
@@ -246,7 +276,7 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 	}
 	reporter := &fixtureReporter{}
 	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "ARIETIS SECTOR LO-F A12-1", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "HYPERSPACE_CHARGE", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
 	if err != nil || !contains(string(output), `"completed":true`) {
 		t.Fatalf("output=%s error=%v", output, err)
@@ -264,6 +294,8 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 	events := joinEventPhases(reporter.payloads)
 	if !contains(events, `CENTER_HINT_UNKNOWN_TRIGGER_ALTERNATE_LOCAL_HINT`) ||
 		!contains(events, `"observationMode":"RETICLE_RELOCALIZATION"`) ||
+		!contains(events, `"confirmedHintProfile":"HYPERSPACE_CHARGE"`) ||
+		!contains(events, `"relocalizationHintX":800`) || !contains(events, `"relocalizationHintY":345`) ||
 		!contains(events, `"relocalizationState":"CANDIDATE_FOUND"`) ||
 		!contains(events, `"relocalizationState":"VALIDATED"`) ||
 		contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) {
@@ -278,7 +310,7 @@ func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testi
 	}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
 	if err == nil || !contains(err.Error(), "alternate local reticle hint did not produce an unambiguous current-frame position") {
 		t.Fatalf("error=%v", err)
@@ -287,7 +319,10 @@ func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testi
 		t.Fatalf("positions=%v controls=%v", caller.positionActions, caller.controls)
 	}
 	events := joinEventPhases(reporter.payloads)
-	if !contains(events, `"relocalizationState":"MISS"`) || !contains(events, `"relocalizationAttempt":1`) {
+	if caller.positionInputs[1]["hintX"].(int64) != 960 || caller.positionInputs[1]["hintY"].(int64) != 450 ||
+		!contains(events, `"relocalizationState":"MISS"`) || !contains(events, `"relocalizationAttempt":1`) ||
+		!contains(events, `"confirmedHintProfile":"SUPERCRUISE_ASSIST"`) ||
+		!contains(events, `"relocalizationHintX":960`) || !contains(events, `"relocalizationHintY":450`) {
 		t.Fatalf("events=%s", events)
 	}
 }
@@ -297,13 +332,13 @@ func TestEliteAlignVisibleTargetFailsWhenFreshLocalTrackContradictsRelocationCan
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			unknownVisiblePosition(),
-			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
-			visiblePositionWithPresentation(-100, -180, 205.9, "DASHED"),
+			visiblePositionWithPresentation(2, -92, 92.0, "DASHED"),
+			visiblePositionWithPresentation(20, -70, 72.8, "DASHED"),
 		},
 	}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
 	if err == nil || !contains(err.Error(), "relocalized reticle candidate contradicted the next current-frame local track") {
 		t.Fatalf("error=%v", err)
@@ -322,13 +357,13 @@ func TestEliteAlignVisibleTargetFailsWhenFreshLocalValidationIsUnknown(t *testin
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			unknownVisiblePosition(),
-			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
+			visiblePositionWithPresentation(2, -92, 92.0, "DASHED"),
 			unknownVisiblePosition(),
 		},
 	}
 	reporter := &fixtureReporter{}
 	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
-		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
 	}, caller, reporter)
 	if err == nil || !contains(err.Error(), "relocalized reticle candidate was not confirmed by the next current-frame local track") {
 		t.Fatalf("error=%v", err)

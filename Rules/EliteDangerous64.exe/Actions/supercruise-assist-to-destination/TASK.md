@@ -21,7 +21,10 @@ complete its `DESTINATION`/`STRICT` screen-centre Gate. Both children must
 complete at 0% throttle before Supercruise input or acceleration is permitted.
 The caller-owned exact target lock plus each immediately completed Compass
 child authorizes `centerHintConfirmed=true` for the visible child. This seeds
-only a current-frame local reticle observation at screen centre. This caller
+only a current-frame local reticle observation at screen centre and explicitly
+selects the caller-owned `SUPERCRUISE_ASSIST` confirmed-hint profile. That
+profile permits only the reviewed `(960,450)` alternate local ROI after a
+centre-hint miss. This caller
 also enables the visible child's concurrent Blue Zone game Gate: while CV and
 strict heat checks continue, the child samples `flight-status` about every
 2.25 seconds, and two uninterrupted fresh `MOVE THROTTLE TO BLUE ZONE`

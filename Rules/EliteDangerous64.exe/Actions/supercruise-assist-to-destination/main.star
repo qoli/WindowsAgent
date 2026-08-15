@@ -416,6 +416,7 @@ def align_visible_destination(target_name):
             "targetName": target_name,
             "stopBeforeAlign": False,
             "centerHintConfirmed": True,
+            "confirmedHintProfile": "SUPERCRUISE_ASSIST",
             "blueZoneGateEnabled": True,
             "positionSource": "DESTINATION",
             "heatPolicy": "STRICT",

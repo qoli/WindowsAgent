@@ -13,7 +13,10 @@ reticle centering before any FSD input. A current `DASHED` three-quarter
 destination reticle is acceptable under exact identity and stable-centre
 evidence; hyperspace does not require the presentation to become `SOLID`. It
 passes `centerHintConfirmed=true` only after the exact route target and Compass
-handoff are established; the visible child still requires a fresh local
+handoff are established and explicitly selects the caller-owned
+`HYPERSPACE_CHARGE` confirmed-hint profile. That profile permits only the
+reviewed `(800,345)` alternate local ROI after a centre-hint miss; the visible
+child still requires a fresh local
 reticle detection before it can steer. It
 immediately rechecks substantial stellar coverage
 from that Compass-aligned target line before visible-target fine alignment, so

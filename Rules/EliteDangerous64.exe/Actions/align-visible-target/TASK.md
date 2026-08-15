@@ -50,13 +50,17 @@ in the default mode still returns to exact identity acquisition, and Escape
 Vector mode rejects the flag. In confirmed-centre mode a tracking miss retains
 only the last fresh local hint for bounded stationary re-observation after a
 fresh local track has been established. A special one-attempt relocation route
-exists only for the initial confirmed centre hint: if current `LOCAL_140`
-tracking at `(960,540)` returns `UNKNOWN`, the Action makes exactly one further
-call to the same `supercruise-visible-reticle-position` classifier, same
-`HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring algorithm at
-the reviewed alternate hint `(800,345)`. Post-Compass live A/B evidence found
-the reticle at `(807,345)` from that alternate hint while both `(960,540)` and
-the pre-Compass `(800,300)` hint were `UNKNOWN`.
+exists only for the initial confirmed centre hint. A caller setting
+`centerHintConfirmed=true` must also declare the exact layout context through
+`confirmedHintProfile`; `NONE` is rejected. `HYPERSPACE_CHARGE` owns alternate
+hint `(800,345)`, based on post-Compass live A/B evidence that detected the
+reticle at `(807,345)` while `(960,540)` was `UNKNOWN`.
+`SUPERCRUISE_ASSIST` independently owns alternate hint `(960,450)`. If current
+`LOCAL_140` tracking at `(960,540)` returns `UNKNOWN`, the Action makes exactly
+one further call to the same `supercruise-visible-reticle-position` classifier,
+same `HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring
+algorithm at the caller-selected profile hint. Non-confirmed callers must use
+`NONE`; the child never infers a profile from the target name or prompt.
 
 The alternate observation never establishes identity and never authorizes an
 attitude, throttle, Blue-zone, heat, or FSD decision. A detected alternate
@@ -66,7 +70,8 @@ candidate before the ordinary controller may resume. Alternate `UNKNOWN`, an
 untrackable candidate, next-frame `UNKNOWN`, or a geometrically contradictory
 next frame fails explicitly. The event stream exposes
 `RETICLE_RELOCALIZATION`, its single attempt, and every triggered, candidate,
-validated, miss, or contradicted transition. No grid search, wider ROI, fuzzy
+validated, miss, or contradicted transition together with the caller profile
+and actual hint coordinates. No grid search, wider ROI, fuzzy
 identity, different capture, or second relocation attempt is permitted.
 Destination identity acquisition and local tracking explicitly request the
 `HUD_OVERLAY_AWARE` evidence policy. Adaptive orange remains primary; only

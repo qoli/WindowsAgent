@@ -177,7 +177,7 @@ func TestEliteEnterPlanetGravityWellApproachesDropsAndRequiresSecondEscapeVector
 	if caller.alignCompass != 1 || caller.alignVisible != 1 {
 		t.Fatalf("alignment calls compass=%d visible=%d", caller.alignCompass, caller.alignVisible)
 	}
-	if len(caller.alignVisibleInputs) != 1 || caller.alignVisibleInputs[0]["centerHintConfirmed"] != true {
+	if len(caller.alignVisibleInputs) != 1 || caller.alignVisibleInputs[0]["centerHintConfirmed"] != true || caller.alignVisibleInputs[0]["confirmedHintProfile"] != "SUPERCRUISE_ASSIST" {
 		t.Fatalf("visible alignment inputs=%v", caller.alignVisibleInputs)
 	}
 	if caller.toggles != 6 {

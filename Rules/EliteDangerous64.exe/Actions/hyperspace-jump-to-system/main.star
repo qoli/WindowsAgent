@@ -94,7 +94,7 @@ def align_target(target_system, sample, phase, control_profile, start_mode):
             escape_count += 1
             continue
         emit_update(phase, sample, target_system, child_action="elite-dangerous/align-visible-target", commanded_throttle=0, reason="VISIBLE_TARGET_FINE_ALIGNMENT")
-        fine_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_system, "stopBeforeAlign": False, "centerHintConfirmed": True})
+        fine_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_system, "stopBeforeAlign": False, "centerHintConfirmed": True, "confirmedHintProfile": "HYPERSPACE_CHARGE"})
         if not fine_attempt["ok"]:
             fail(fine_attempt["error"])
         fine = fine_attempt["output"]
