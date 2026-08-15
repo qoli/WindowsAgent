@@ -10,24 +10,25 @@ import (
 )
 
 type interSystemTransitCaller struct {
-	hyperspaceStates   []string
-	hyperspaceIndex    int
-	throttles          []int64
-	calls              []string
-	systemLocks        int
-	hudCalls           int
-	targetCalls        int
-	alignProfiles      []string
-	jumpStartModes     []string
-	jumpTargetLocks    []bool
-	failJump           bool
-	journalCalls       int
-	journalArrival     bool
-	resumeJournal      bool
-	hyperspaceControls int
-	occlusionStates    []string
-	occlusionIndex     int
-	occlusionEscapes   int
+	hyperspaceStates     []string
+	hyperspaceIndex      int
+	throttles            []int64
+	calls                []string
+	systemLocks          int
+	hudCalls             int
+	targetCalls          int
+	alignProfiles        []string
+	jumpStartModes       []string
+	jumpTargetLocks      []bool
+	failJump             bool
+	journalCalls         int
+	journalArrival       bool
+	resumeJournal        bool
+	hyperspaceControls   int
+	occlusionStates      []string
+	occlusionIndex       int
+	occlusionEscapes     int
+	failArrivalClearance bool
 }
 
 func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -106,7 +107,13 @@ func (c *interSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		return json.Marshal(map[string]any{"occlusion": map[string]any{"state": state, "brightRatio": ratio, "warmOrangeRatio": ratio, "stellarCoverageRatio": ratio, "centerCoverageRatio": ratio, "directionConfidence": 0.5, "recommendedControl": "PITCH_UP"}})
 	case "elite-dangerous/clear-hyperspace-occlusion":
 		c.occlusionEscapes++
-		return json.RawMessage(`{"completed":true,"turnCount":4,"finalOcclusionState":"CLEAR","finalSupercruiseConfirmed":true}`), nil
+		if inputs["startMode"] != "SUPERCRUISE" {
+			return nil, errors.New("arrival clearance did not use existing Supercruise")
+		}
+		if c.failArrivalClearance {
+			return nil, errors.New("sphere direction was not confirmed twice")
+		}
+		return json.RawMessage(`{"completed":true,"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_FIXED_SPHERE_SEPARATION","fixedOutwardTurnCompleted":true,"fixedTurnDurationMs":6400,"supercruiseEscapeDurationMs":30000,"finalSupercruiseConfirmed":true,"finalCommandedThrottle":0}`), nil
 	case "elite-dangerous/supercruise-target-position":
 		c.targetCalls++
 		return json.RawMessage(`{"target":{"state":"DETECTED","reason":"TARGET_LABEL_TO_MARKER_OFFSET_APPLIED"}}`), nil
@@ -188,6 +195,8 @@ func TestEliteInterSystemTransitComposesVisualSingleHopAndDocking(t *testing.T) 
 		t.Fatal(err)
 	}
 	if !contains(string(output), `"finalPhase":"VISUAL_CONFIRMATION_REQUIRED"`) ||
+		!contains(string(output), `"arrivalStarClearanceCompleted":true`) ||
+		!contains(string(output), `"arrivalStarClearanceEvidence":"EXISTING_SUPERCRUISE_FIXED_SPHERE_SEPARATION"`) ||
 		!contains(string(output), `"routeId":"2026-08-12T00:00:00Z:123:1"`) ||
 		!contains(string(output), `"destinationSystem":"NLTT 8084"`) ||
 		!contains(string(output), `"destinationStation":"SURAYEV HUB"`) ||
@@ -198,9 +207,44 @@ func TestEliteInterSystemTransitComposesVisualSingleHopAndDocking(t *testing.T) 
 		t.Fatalf("throttles=%v", caller.throttles)
 	}
 	joined := joinEventPhases(reporter.payloads)
-	for _, phase := range []string{"PLOTTING_ROUTE", "ROUTE_READY", "SYSTEM_LOCKED", "FSD_CHARGING", "HYPERSPACE_TRANSIT", "DESTINATION_SYSTEM_CONFIRMED", "STATION_LOCKED", "SUPERCRUISE_TO_STATION", "DOCKING", "VISUAL_CONFIRMATION_REQUIRED"} {
+	for _, phase := range []string{"PLOTTING_ROUTE", "ROUTE_READY", "SYSTEM_LOCKED", "FSD_CHARGING", "HYPERSPACE_TRANSIT", "DESTINATION_SYSTEM_CONFIRMED", "ARRIVAL_STAR_CLEARANCE", "ARRIVAL_STAR_CLEARANCE_COMPLETED", "STATION_LOCKED", "SUPERCRUISE_TO_STATION", "DOCKING", "VISUAL_CONFIRMATION_REQUIRED"} {
 		if !contains(joined, phase) {
 			t.Fatalf("missing phase %s in %s", phase, joined)
+		}
+	}
+	jumpIndex, clearanceIndex, stationIndex := -1, -1, -1
+	for index, call := range caller.calls {
+		if call == "elite-dangerous/hyperspace-jump-to-system" && jumpIndex < 0 {
+			jumpIndex = index
+		}
+		if call == "elite-dangerous/clear-hyperspace-occlusion" && clearanceIndex < 0 {
+			clearanceIndex = index
+		}
+		if call == "elite-dangerous/select-and-lock-destination" && stationIndex < 0 {
+			stationIndex = index
+		}
+	}
+	if !(jumpIndex >= 0 && clearanceIndex > jumpIndex && stationIndex > clearanceIndex) {
+		t.Fatalf("unsafe call order: %v", caller.calls)
+	}
+}
+
+func TestEliteInterSystemTransitFailsBeforeStationLockWhenArrivalClearanceFails(t *testing.T) {
+	pkg, err := Load(interSystemTransitPackageRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := &interSystemTransitCaller{failArrivalClearance: true}
+	_, err = (Runner{Sleep: immediateSleep}).Run(context.Background(), pkg, interSystemInputs(), caller, &fixtureReporter{})
+	if err == nil || !contains(err.Error(), "sphere direction was not confirmed twice") {
+		t.Fatalf("err=%v", err)
+	}
+	if caller.systemLocks != 0 {
+		t.Fatalf("station lock ran after failed arrival clearance: calls=%v", caller.calls)
+	}
+	for _, percent := range caller.throttles {
+		if percent != 0 {
+			t.Fatalf("unexpected throttle after failed arrival clearance: %v", caller.throttles)
 		}
 	}
 }

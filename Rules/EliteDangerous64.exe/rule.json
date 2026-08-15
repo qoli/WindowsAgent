@@ -348,6 +348,13 @@
       "execution": {"completion": "return"},
       "registrableAs": []
     },
+    "elite-dangerous/fixed-supercruise-sphere-separation": {
+      "path": "Actions/fixed-supercruise-sphere-separation",
+      "runtime": "windows-streaming-action-v1",
+      "exposure": "internal",
+      "execution": {"completion": "stream", "lifecycle": "linear", "interruptible": true},
+      "registrableAs": []
+    },
     "elite-dangerous/escape-vector-visible-position": {
       "path": "Actions/escape-vector-visible-position",
       "runtime": "windows-composite-action-v1",

@@ -1,5 +1,5 @@
 {
-  "schemaVersion":1,"version":55,"title":"Create safe angular and thermal separation from an arrival star",
+  "schemaVersion":1,"version":56,"title":"Create fixed mechanical separation from a Supercruise body or enter Supercruise safely",
   "entrypoint":"main.star","taskDocument":"TASK.md","inputSchema":"input.schema.json","outputSchema":"output.schema.json","eventSchema":"event.schema.json",
   "files":["main.star","TASK.md","input.schema.json","output.schema.json","event.schema.json"],
   "limits":{"maxSteps":500000,"maxOutputBytes":8192,"maxEventBytes":8192,"maxSleepMs":1000}

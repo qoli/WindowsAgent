@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {"const": "action.fixed-supercruise-sphere-separation.update"},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "sample", "sphereState", "directionState", "control", "directionConfirmations", "turnPulses", "fixedTurnElapsedMs", "separationSamples", "finalStatusConfirmations", "supercruise", "fsdCharging", "fsdHyperdriveCharging", "overHeating", "statusTimestamp", "commandedThrottle", "lastCommand", "reason"],
+      "properties": {
+        "phase": {"enum": ["VERIFYING_SUPERCRUISE", "CONFIRMING_OUTWARD_DIRECTION", "EXECUTING_FIXED_OUTWARD_TURN", "SEPARATION_FLIGHT", "VERIFYING_FINAL_STATUS", "COMPLETED"]},
+        "sample": {"type": "integer", "minimum": 0, "maximum": 80},
+        "sphereState": {"type": ["string", "null"], "enum": ["DETECTED", "ABSENT", "UNKNOWN", null]},
+        "directionState": {"type": ["string", "null"], "enum": ["READY", "UNKNOWN", null]},
+        "control": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT", null]},
+        "directionConfirmations": {"type": "integer", "minimum": 0, "maximum": 2},
+        "turnPulses": {"type": "integer", "minimum": 0, "maximum": 8},
+        "fixedTurnElapsedMs": {"type": "integer", "minimum": 0, "maximum": 6400, "multipleOf": 800},
+        "separationSamples": {"type": "integer", "minimum": 0, "maximum": 60},
+        "finalStatusConfirmations": {"type": "integer", "minimum": 0, "maximum": 2},
+        "supercruise": {"type": ["boolean", "null"]},
+        "fsdCharging": {"type": ["boolean", "null"]},
+        "fsdHyperdriveCharging": {"type": ["boolean", "null"]},
+        "overHeating": {"type": ["boolean", "null"]},
+        "statusTimestamp": {"type": ["string", "null"], "maxLength": 64},
+        "commandedThrottle": {"type": ["integer", "null"], "enum": [0, 100, null]},
+        "lastCommand": {"type": ["string", "null"], "maxLength": 64},
+        "reason": {"type": ["string", "null"], "maxLength": 192}
+      }
+    }
+  }
+}

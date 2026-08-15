@@ -536,53 +536,25 @@ def complete_supercruise_clearance(target_name, sample, turn_count, stable_headi
     emit_update("COMPLETED", target_name, sample, turn_count, observation=final_observation, target=final_target, stable_heading_confirmations=stable_heading_confirmations, alignment_confirmations=alignment_confirmations, throttle=0, mass_lock="OFF", supercruise=True, elapsed_ms=elapsed, reason="READY_TO_RESTORE_HYPERSPACE_DESTINATION")
     return {"schemaVersion":9,"task":"CLEAR_HYPERSPACE_OCCLUSION","completed":True,"targetName":target_name,"initialTurnCount":turn_count,"stableInitialHeadingConfirmations":stable_heading_confirmations,"maximumChargeStartHeatPercent":MAX_CHARGE_START_HEAT_PERCENT,"chargeStartHeatPercent":charge_start_heat_percent,"prealignmentProbeCount":prealignment_probe_count,"prealignmentTurnCount":prealignment_turn_count,"prealignmentCompassUnavailableCount":prealignment_compass_unavailable_count,"prealignmentElapsedMs":prealignment_elapsed_ms,"visibleHandoffAttemptCount":visible_handoff_attempt_count,"visibleHandoffFailureCount":visible_handoff_failure_count,"escapeVectorDetected":escape_vector_seen,"escapeVectorAlignmentConfirmations":alignment_confirmations,"entryAlignmentEvidence":entry_alignment_evidence,"escapeVectorAlignmentCommands":alignment_commands,"supercruiseEscapeDurationMs":elapsed,"totalElapsedMs":task.elapsed_milliseconds() - action_started_ms,"finalOcclusionState":final_observation["state"],"finalStellarCoverageRatio":final_observation["stellarCoverageRatio"],"finalSupercruiseConfirmed":True,"restoreHyperspaceDestinationRequired":True,"finalCommandedThrottle":0}
 
-def clear_existing_supercruise(target_name, sample, turn_count, initial, action_started_ms):
+def clear_existing_supercruise(target_name, sample, action_started_ms):
     status = observe_status_flags()
     if not status["supercruise"] or status["fsdCharging"] or status["fsdHyperdriveCharging"] or status["overHeating"]:
         fail("existing-Supercruise clearance requires idle Supercruise without active FSD charge or overheating")
-    clearance = turn_to_existing_supercruise_safe_heading(target_name, sample, turn_count, initial)
-    sample = clearance["sample"]
-    turn_count = clearance["turnCount"]
-    final_observation = clearance["observation"]
-    action.call(id="elite-dangerous/set-throttle", inputs={"percent": 100})
-    elapsed = 0
-    while elapsed < EXISTING_SUPERCRUISE_CLEAR_FLIGHT_MS:
-        task.sleep(milliseconds=1000)
-        elapsed += 1000
-        sample += 1
-        status = observe_status_flags()
-        if not status["supercruise"] or status["fsdCharging"] or status["fsdHyperdriveCharging"] or status["overHeating"]:
-            action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-            fail("existing-Supercruise clear flight crossed a Status safety gate")
-        if elapsed % 2000 == 0:
-            final_observation = observe_obstruction()
-            emit_update("SUPERCRUISE_CLEAR_FLIGHT", target_name, sample, turn_count, observation=final_observation, throttle=100, mass_lock="ON" if status["massLock"] else "OFF", supercruise=True, elapsed_ms=elapsed, reason="SHORT_ARRIVAL_STAR_CLEARANCE")
-            if final_observation["state"] == "BLOCKING":
-                action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-                fail("existing-Supercruise clear flight turned back toward a blocking stellar view")
-    action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
-    final_observation = observe_obstruction()
-    if not final_observation["safeToCharge"]:
-        clearance = turn_to_existing_supercruise_safe_heading(target_name, sample, turn_count, final_observation)
-        sample = clearance["sample"]
-        turn_count = clearance["turnCount"]
-        final_observation = clearance["observation"]
-    for _ in range(2):
-        task.sleep(milliseconds=250)
-        sample += 1
-        status = observe_status_flags()
-        final_observation = observe_obstruction()
-        emit_update("VERIFYING_EXISTING_SUPERCRUISE_CLEARANCE", target_name, sample, turn_count, observation=final_observation, throttle=0, mass_lock="ON" if status["massLock"] else "OFF", supercruise=status["supercruise"], reason="EXISTING_SUPERCRUISE_CLEAR_HEADING")
-        if not status["supercruise"] or status["fsdCharging"] or status["fsdHyperdriveCharging"] or status["overHeating"] or not final_observation["safeToCharge"]:
-            fail("existing-Supercruise stellar clearance did not remain safely CLEAR")
+    emit_update("VERIFYING_EXISTING_SUPERCRUISE_CLEARANCE", target_name, sample, 0, throttle=0, mass_lock="ON" if status["massLock"] else "OFF", supercruise=True, reason="FIXED_SPHERE_SEPARATION_REQUIRED")
+    separation = action.call(id="elite-dangerous/fixed-supercruise-sphere-separation", inputs={})
+    if (
+        not separation["completed"] or
+        separation["directionConfirmations"] != 2 or
+        separation["turnPulses"] != 8 or
+        separation["fixedTurnDurationMs"] != 6400 or
+        separation["separationDurationMs"] != 30000 or
+        not separation["finalSupercruiseConfirmed"] or
+        separation["finalCommandedThrottle"] != 0
+    ):
+        fail("fixed Supercruise sphere-separation child returned an invalid terminal result")
     action.clear_on_failure()
-    emit_update("COMPLETED", target_name, sample, turn_count, observation=final_observation, throttle=0, mass_lock="ON" if status["massLock"] else "OFF", supercruise=True, reason="READY_TO_REALIGN_HYPERSPACE_DESTINATION")
-    # The hyperspace destination projection can cover the heat digits until the
-    # parent has restored and aligned that target. Existing-Supercruise escape
-    # therefore owns only Status.overHeating during the tangential flight. The
-    # parent must acquire fresh visual heat after full target alignment and
-    # before it is allowed to issue FSD control.
-    return {"schemaVersion":9,"task":"CLEAR_HYPERSPACE_OCCLUSION","completed":True,"targetName":target_name,"initialTurnCount":turn_count,"stableInitialHeadingConfirmations":0,"maximumChargeStartHeatPercent":MAX_CHARGE_START_HEAT_PERCENT,"chargeStartHeatPercent":None,"prealignmentProbeCount":0,"prealignmentTurnCount":turn_count,"prealignmentCompassUnavailableCount":0,"prealignmentElapsedMs":0,"visibleHandoffAttemptCount":0,"visibleHandoffFailureCount":0,"escapeVectorDetected":False,"escapeVectorAlignmentConfirmations":0,"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_CLEAR_HEADING","escapeVectorAlignmentCommands":0,"supercruiseEscapeDurationMs":elapsed,"totalElapsedMs":task.elapsed_milliseconds() - action_started_ms,"finalOcclusionState":final_observation["state"],"finalStellarCoverageRatio":final_observation["stellarCoverageRatio"],"finalSupercruiseConfirmed":True,"restoreHyperspaceDestinationRequired":True,"finalCommandedThrottle":0}
+    emit_update("COMPLETED", target_name, sample + separation["sampleCount"], separation["turnPulses"], selected_control=separation["control"], stable_heading_confirmations=separation["directionConfirmations"], throttle=0, mass_lock="OFF", supercruise=True, elapsed_ms=separation["separationDurationMs"], reason="EXISTING_SUPERCRUISE_FIXED_SPHERE_SEPARATION")
+    return {"schemaVersion":10,"task":"CLEAR_HYPERSPACE_OCCLUSION","completed":True,"targetName":target_name,"initialTurnCount":separation["turnPulses"],"stableInitialHeadingConfirmations":separation["directionConfirmations"],"maximumChargeStartHeatPercent":MAX_CHARGE_START_HEAT_PERCENT,"chargeStartHeatPercent":None,"prealignmentProbeCount":0,"prealignmentTurnCount":separation["turnPulses"],"prealignmentCompassUnavailableCount":0,"prealignmentElapsedMs":0,"visibleHandoffAttemptCount":0,"visibleHandoffFailureCount":0,"escapeVectorDetected":False,"escapeVectorAlignmentConfirmations":0,"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_FIXED_SPHERE_SEPARATION","escapeVectorAlignmentCommands":0,"fixedOutwardTurnCompleted":True,"fixedTurnDurationMs":separation["fixedTurnDurationMs"],"directionConfirmations":separation["directionConfirmations"],"turnPulses":separation["turnPulses"],"supercruiseEscapeDurationMs":separation["separationDurationMs"],"totalElapsedMs":task.elapsed_milliseconds() - action_started_ms,"finalOcclusionState":None,"finalStellarCoverageRatio":None,"finalSupercruiseConfirmed":True,"restoreHyperspaceDestinationRequired":True,"finalCommandedThrottle":0}
 
 def main(ctx):
     action_started_ms = task.elapsed_milliseconds()
@@ -594,14 +566,14 @@ def main(ctx):
     action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
     sample = 1
     turn_count = 0
+    if start_mode == "SUPERCRUISE":
+        return clear_existing_supercruise(target_name, sample, action_started_ms)
+
     initial = observe_obstruction()
     emit_update("OBSERVING_FORWARD_VIEW", target_name, sample, turn_count, observation=initial, reason="DIAGNOSTIC_ONLY_ESCAPE_VECTOR_OWNS_ANGLE")
     selected_control = None
     final_observation = initial
     stable_heading_confirmations = 0
-
-    if start_mode == "SUPERCRUISE":
-        return clear_existing_supercruise(target_name, sample, turn_count, initial, action_started_ms)
 
     ship = action.call(id="elite-dangerous/ship-status", inputs={})["shipStatus"]
     if ship["landingGear"]["state"] != "OFF" or ship["cargoScoop"]["state"] != "OFF":

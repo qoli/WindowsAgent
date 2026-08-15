@@ -20,6 +20,8 @@ SUPERCRUISE_VISIBLE_HANDOFF_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_VISIBLE_HANDOFF_ULTRA_FINE_DISTANCE_PIXELS = 24
 HYPERSPACE_CHARGE_RADIUS_PIXELS = 10.0
 HYPERSPACE_CHARGE_HYSTERESIS_PIXELS = 2.0
+HYPERSPACE_CHARGE_HORIZONTAL_RADIUS_PIXELS = 4.0
+HYPERSPACE_CHARGE_HORIZONTAL_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_HYPERSPACE_CHARGE_RADIUS_PIXELS = 4.0
 SUPERCRUISE_HYPERSPACE_CHARGE_HYSTERESIS_PIXELS = 2.0
 SUPERCRUISE_STATIC_TRACK_CENTER_RADIUS_PIXELS = 4.0
@@ -176,11 +178,12 @@ def directional_control_progress(commanded_target, target, control):
             progress = pitch_progress
     return progress
 
-def is_alignment_centered(target, radius_pixels):
+def is_alignment_centered(target, radius_pixels, horizontal_radius_pixels=None):
     return (
         target["detected"] and
         target["presentation"] == "SOLID" and
-        target["centerDistancePixels"] <= radius_pixels
+        target["centerDistancePixels"] <= radius_pixels and
+        (horizontal_radius_pixels == None or abs(target["offsetX"]) <= horizontal_radius_pixels)
     )
 
 def choose_pulse(target, no_movement_count, fine_distance_pixels, fine_hold_ms, supercruise_profile, single_axis_fine=False):
@@ -348,6 +351,8 @@ def main(ctx):
     stable_confirmations_required = 2 if supercruise_profile else STABLE_CENTER_CONFIRMATIONS
     alignment_radius = SUPERCRUISE_CENTER_RADIUS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else ALIGN_CENTER_RADIUS_PIXELS
     alignment_hysteresis = SUPERCRUISE_CENTER_HYSTERESIS_PIXELS if control_profile == "SUPERCRUISE_ASSIST" else 0.0
+    alignment_horizontal_radius = None
+    alignment_horizontal_hysteresis = 0.0
     if control_profile == "NORMAL_SPACE" and mode == "ALIGN" and target_motion == "STATIC":
         alignment_radius = NORMAL_SPACE_STATIC_ALIGN_CENTER_RADIUS_PIXELS
         alignment_hysteresis = NORMAL_SPACE_STATIC_ALIGN_HYSTERESIS_PIXELS
@@ -369,6 +374,9 @@ def main(ctx):
         # normal space retains its calibrated ten/twelve-pixel Gate.
         alignment_radius = SUPERCRUISE_HYPERSPACE_CHARGE_RADIUS_PIXELS if supercruise_profile else HYPERSPACE_CHARGE_RADIUS_PIXELS
         alignment_hysteresis = SUPERCRUISE_HYPERSPACE_CHARGE_HYSTERESIS_PIXELS if supercruise_profile else HYPERSPACE_CHARGE_HYSTERESIS_PIXELS
+        if not supercruise_profile:
+            alignment_horizontal_radius = HYPERSPACE_CHARGE_HORIZONTAL_RADIUS_PIXELS
+            alignment_horizontal_hysteresis = HYPERSPACE_CHARGE_HORIZONTAL_HYSTERESIS_PIXELS
         stable_confirmations_required = STABLE_CENTER_CONFIRMATIONS
     elif control_profile == "SUPERCRUISE_ASSIST" and mode == "TRACK" and target_motion != "STATIC":
         alignment_radius = SUPERCRUISE_TRACK_CENTER_RADIUS_PIXELS
@@ -673,7 +681,10 @@ def main(ctx):
                 emit_update("OBSERVING", sample, command_count, target, 0, lease_id=active_lease_id, lease_state="RELEASED" if active_lease_id != None else None, sample_started_ms=sample_started_ms, sample_duration_ms=sample_duration_ms, sample_interval_ms=sample_interval_ms, reason="ATTITUDE_CONTROL_NO_PROGRESS", observed_movement_pixels=observed_movement, control_progress_pixels=control_progress, no_movement_count=no_movement_count, distance_delta_pixels=distance_delta, away_trend_count=away_trend_count)
                 fail("Ship attitude control stopped producing measurable Compass movement after earlier verified response")
         active_alignment_radius = alignment_radius + alignment_hysteresis if stable_confirmations > 0 else alignment_radius
-        alignment_centered = is_alignment_centered(control_target, active_alignment_radius)
+        active_alignment_horizontal_radius = None
+        if alignment_horizontal_radius != None:
+            active_alignment_horizontal_radius = alignment_horizontal_radius + alignment_horizontal_hysteresis if stable_confirmations > 0 else alignment_horizontal_radius
+        alignment_centered = is_alignment_centered(control_target, active_alignment_radius, active_alignment_horizontal_radius)
         phase = "TURNING_TO_FRONT"
         if control_target["presentation"] == "SOLID":
             if alignment_centered:

@@ -251,4 +251,27 @@ mod tests {
         assert_eq!(code, 0);
         assert_eq!(out.state, 2);
     }
+
+    #[test]
+    fn detects_a_low_luminance_magenta_arrival_star_that_legacy_brightness_rejects() {
+        let (w, h) = (256usize, 144usize);
+        let mut pixels = vec![0x030507u32; w * h];
+        let (cx, cy, radius) = (94.0, 20.0, 71.0);
+        let magenta = 0xf010e8u32;
+        assert!(luminance(magenta) < 180);
+        for y in 0..h {
+            for x in 0..w {
+                if (x as f64 - cx).hypot(y as f64 - cy) <= radius {
+                    pixels[y * w + x] = magenta;
+                }
+            }
+        }
+        let mut out = SphereResult::default();
+        let code = unsafe { elite_supercruise_sphere_analyze(pixels.as_ptr(), w as u32, h as u32, &mut out) };
+        assert_eq!(code, 0);
+        assert_eq!(out.state, 1);
+        assert_eq!(out.control, 8, "the outward direction must be pitch-down plus yaw-right");
+        assert!(out.radius_milli > 65_000, "radius={}", out.radius_milli);
+        assert!(out.occupied_angular_bins >= 18, "bins={}", out.occupied_angular_bins);
+    }
 }

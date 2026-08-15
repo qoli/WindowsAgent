@@ -110,6 +110,21 @@ def main(ctx):
     stream.activity(message="Destination system arrival confirmed", level="info")
     emit_update("DESTINATION_SYSTEM_CONFIRMED", sample, target_name=destination_system, child_action="elite-dangerous/hyperspace-jump-to-system", commanded_throttle=0, reason=jump["arrivalEvidence"])
 
+    stream.activity(message="Creating fixed separation from the arrival star", level="info")
+    emit_update("ARRIVAL_STAR_CLEARANCE", sample, target_name=destination_station, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason="MECHANICAL_SPHERE_DIRECTION_AND_SEPARATION_REQUIRED")
+    arrival_clearance = action.call(id="elite-dangerous/clear-hyperspace-occlusion", inputs={"targetName": destination_station, "startMode": "SUPERCRUISE"})
+    if (
+        not arrival_clearance["completed"] or
+        arrival_clearance["entryAlignmentEvidence"] != "EXISTING_SUPERCRUISE_FIXED_SPHERE_SEPARATION" or
+        not arrival_clearance["fixedOutwardTurnCompleted"] or
+        arrival_clearance["fixedTurnDurationMs"] != 6400 or
+        arrival_clearance["supercruiseEscapeDurationMs"] != 30000 or
+        not arrival_clearance["finalSupercruiseConfirmed"] or
+        arrival_clearance["finalCommandedThrottle"] != 0
+    ):
+        fail("arrival-star clearance child did not confirm fixed turn, separation, Supercruise, and final 0% throttle")
+    emit_update("ARRIVAL_STAR_CLEARANCE_COMPLETED", sample, target_name=destination_station, child_action="elite-dangerous/clear-hyperspace-occlusion", commanded_throttle=0, reason=arrival_clearance["entryAlignmentEvidence"] + ":" + str(arrival_clearance["fixedTurnDurationMs"]) + "+" + str(arrival_clearance["supercruiseEscapeDurationMs"]) + "MS")
+
     stream.activity(message="Locking destination station", level="info")
     emit_update("LOCKING_STATION", sample, target_name=destination_station, child_action="elite-dangerous/select-and-lock-destination", commanded_throttle=0)
     station_lock = action.call(id="elite-dangerous/select-and-lock-destination", inputs={"targetName": destination_station})
@@ -140,7 +155,7 @@ def main(ctx):
     stream.activity(message="Inter-system transit visual confirmation required", level="warning")
     emit_update("VISUAL_CONFIRMATION_REQUIRED", sample, target_name=destination_station, child_action="elite-dangerous/dock-at-station", commanded_throttle=0, reason="DOCK_AT_STATION_COMPLETED")
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "task": "INTER_SYSTEM_TRANSIT_TO_STATION",
         "completed": True,
         "finalPhase": "VISUAL_CONFIRMATION_REQUIRED",
@@ -154,6 +169,10 @@ def main(ctx):
         "cockpitReturnConfirmations": jump["cockpitReturnConfirmations"],
         "supercruiseHudConfirmations": jump["supercruiseHudConfirmations"],
         "destinationSystemArrivalEvidence": jump["arrivalEvidence"],
+        "arrivalStarClearanceCompleted": True,
+        "arrivalStarClearanceEvidence": arrival_clearance["entryAlignmentEvidence"],
+        "arrivalStarFixedTurnDurationMs": arrival_clearance["fixedTurnDurationMs"],
+        "arrivalStarSeparationDurationMs": arrival_clearance["supercruiseEscapeDurationMs"],
         "initialAlignment": jump["initialAlignment"],
         "recoveryAlignment": jump["recoveryAlignment"],
         "supercruiseCompleted": True,

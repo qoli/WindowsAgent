@@ -21,7 +21,7 @@
         "safeToCharge": {"type": ["boolean", "null"]},
         "directionConfidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "recommendedControl": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
-        "selectedControl": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", null]},
+        "selectedControl": {"type": ["string", "null"], "enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT", null]},
         "commandHoldMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 5000},
         "probeDelta": {"type": ["number", "null"], "minimum": -1, "maximum": 1},
         "stableHeadingConfirmations": {"type": "integer", "minimum": 0, "maximum": 3},

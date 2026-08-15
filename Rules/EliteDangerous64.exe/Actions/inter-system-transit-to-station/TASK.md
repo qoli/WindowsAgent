@@ -24,11 +24,22 @@ deliberately does not require the hyperspace destination label to remain
 visible after arrival: Elite Dangerous may clear that target together with
 `NavRoute.json` once the jump completes.
 
+Every ordinary arrival and `ARRIVED_SUPERCRUISE` recovery then performs an
+unconditional arrival-star separation before the Station is selected. The
+parent calls `clear-hyperspace-occlusion` in its existing-Supercruise mode and
+requires the shared mechanical contract: two fresh compatible sphere
+directions, a fixed 6400 ms outward turn, a fixed 30000 ms separation flight,
+persistent Supercruise, and final commanded throttle 0%. No colour-coverage
+`CLEAR`, empty detector frame, or sphere disappearance can skip this segment
+or authorize thrust. The Station remains deliberately unlocked until the
+segment completes because the outward turn changes the ship attitude.
+
 `ARRIVED_SUPERCRUISE` is the explicit recovery entry after a parent-level
 failure in the destination System. It requires the latest retained `FSDJump`
 to match `destinationSystem` case-insensitively but otherwise exactly and two
 current Supercruise HUD observations,
-then resumes at Station selection without plotting or repeating the jump.
+then resumes at arrival-star separation without plotting or repeating the
+jump.
 
 Because a hyperspace exit is already in Supercruise, the Action does not wait
 for `ship-speed STOPPED`. It locks the exact destination Station, resumes

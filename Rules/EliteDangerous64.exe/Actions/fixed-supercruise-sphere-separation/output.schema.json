@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "task", "completed", "control", "directionConfirmations", "turnPulses", "fixedTurnDurationMs", "separationDurationMs", "separationSamples", "finalStatusConfirmations", "finalSupercruiseConfirmed", "finalCommandedThrottle", "sampleCount"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "task": {"const": "FIXED_SUPERCRUISE_SPHERE_SEPARATION"},
+    "completed": {"const": true},
+    "control": {"enum": ["PITCH_UP", "PITCH_DOWN", "YAW_LEFT", "YAW_RIGHT", "PITCH_UP_YAW_LEFT", "PITCH_UP_YAW_RIGHT", "PITCH_DOWN_YAW_LEFT", "PITCH_DOWN_YAW_RIGHT"]},
+    "directionConfirmations": {"const": 2},
+    "turnPulses": {"const": 8},
+    "fixedTurnDurationMs": {"const": 6400},
+    "separationDurationMs": {"const": 30000},
+    "separationSamples": {"const": 60},
+    "finalStatusConfirmations": {"const": 2},
+    "finalSupercruiseConfirmed": {"const": true},
+    "finalCommandedThrottle": {"const": 0},
+    "sampleCount": {"type": "integer", "minimum": 73, "maximum": 80}
+  }
+}

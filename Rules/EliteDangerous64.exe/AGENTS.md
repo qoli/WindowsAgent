@@ -471,9 +471,9 @@ most 2%. A symmetric or full-frame body returns no recommended control rather
 than inventing a direction.
 
 `elite-dangerous/clear-hyperspace-occlusion` is its interruptible streaming
-owner and owns the complete local realtime escape loop. It stops first,
-records forward-view CV only as diagnostic context, and never uses CV to
-calculate the escape angle. Landing Gear and Cargo Scoop must be visually OFF;
+owner for normal-space Supercruise entry. It stops first, records forward-view
+coverage only as diagnostic context, and never uses that coverage to calculate
+the Escape Vector angle. Landing Gear and Cargo Scoop must be visually OFF;
 the latest AVAILABLE `Status.json` baseline must show normal-space idle with
 Mass Lock OFF; and `ship-heat` must return three known readings at or below 60%
 before activation. Since Status is persistent event state rather than a
@@ -523,9 +523,19 @@ Supercruise transition wins the race before cancellation. Mass Lock and
 hyperspace-charge flags remain immediate failures. Failure or cancellation
 owns STOP-hold, one verified Supercruise-toggle cancellation, and 0% throttle
 compensation locally. After current Status confirms Supercruise, toggle
-compensation is removed; the Action follows the aligned escape for 30 seconds
-and completes at 0% with current `CLEAR` and Supercruise evidence. The parent
-must then restore the original hyperspace destination.
+compensation is removed; the normal-space branch follows the aligned Escape
+Vector for 30 seconds and completes at 0%. The parent must then restore the
+original hyperspace destination.
+
+For `startMode=SUPERCRUISE`, `clear-hyperspace-occlusion` does not use the
+five-strip coverage classifier or any `CLEAR`/`safeToCharge` state. It delegates
+to internal `fixed-supercruise-sphere-separation`, the same mechanical core as
+Supercruise Assist LOS recovery: Status-safe 0%, two fresh compatible robust
+circle directions, eight fixed 800 ms outward pulses, 30 seconds at 100%, then
+0% and two fresh Supercruise Status confirmations. `ABSENT`, `UNKNOWN`, and
+direction disagreement fail before attitude or full-throttle input; later
+detector absence cannot truncate or reverse the fixed manoeuvre. Completion
+does not claim that CV observed a clear viewport or that FSD charging is safe.
 
 `elite-dangerous/ship-heat` is the finite visual charge-start Gate. Its OCR
 front end reads the fixed two- or three-digit cockpit heat percentage with
@@ -559,9 +569,9 @@ or cancellation terminates with registered 0% compensation.
 
 `elite-dangerous/inter-system-transit-to-station` is the parent single-hop
 Streaming Action. It may delegate a docked start to `leave-station`, then
-delegates its one System transition to `hyperspace-jump-to-system`. The parent
-still requires two exact destination-System target-text observations before it
-enters the Station phase. The destination Station
+delegates its one System transition to `hyperspace-jump-to-system`. Every
+ordinary arrival and matching `ARRIVED_SUPERCRUISE` recovery must complete the
+fixed sphere-separation core before Station selection. The destination Station
 must already be present in the current visible Navigation list; stale filters
 fail as a missing target rather than triggering blind icon-menu input. A hyperspace exit is
 already Supercruise, so the workflow locks the exact Station and resumes

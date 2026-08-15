@@ -108,7 +108,7 @@ func (c *multiSystemTransitCaller) Call(_ context.Context, id string, inputs map
 		if inputs["startMode"] != "SUPERCRUISE" {
 			return nil, errors.New("arrival clearance did not use SUPERCRUISE mode")
 		}
-		return json.RawMessage(`{"completed":true,"finalOcclusionState":"CLEAR","finalSupercruiseConfirmed":true,"finalCommandedThrottle":0,"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_CLEAR_HEADING","supercruiseEscapeDurationMs":24000}`), nil
+		return json.RawMessage(`{"completed":true,"fixedOutwardTurnCompleted":true,"fixedTurnDurationMs":6400,"finalSupercruiseConfirmed":true,"finalCommandedThrottle":0,"entryAlignmentEvidence":"EXISTING_SUPERCRUISE_FIXED_SPHERE_SEPARATION","supercruiseEscapeDurationMs":30000}`), nil
 	case "elite-dangerous/set-throttle":
 		percent, _ := inputs["percent"].(int64)
 		c.throttles = append(c.throttles, percent)

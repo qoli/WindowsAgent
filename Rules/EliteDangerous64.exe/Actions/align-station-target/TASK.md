@@ -30,14 +30,23 @@ delegates local reticle geometry.
 handoff. It
 is valid for STATIC ALIGN in normal space or Supercruise; the start mode must
 select the matching control profile. It requires three consecutive SOLID
-Compass observations after entering ten reference pixels in normal space, or
-the actual four-pixel Compass center zone in Supercruise, with a two-pixel
+Compass observations after entering ten radial reference pixels and four
+horizontal reference pixels in normal space, or the actual four-pixel Compass
+center zone in Supercruise. Normal-space verification permits twelve radial
+pixels but only six horizontal pixels; Supercruise retains its two-pixel radial
 verification hysteresis. A 45-second normal-space Evidence interval with zero
 gaps or missing frames showed the 40 ms control law repeatedly cycling through
 roughly 5-15 pixels until the full 120-command budget was exhausted, even
 though the destination reticle remained visible to the next controller. The
 ten/twelve-pixel Gate stops injecting at that useful handoff instead of asking
-Compass to perform the following controller's job. A later 81-second
+Compass to perform the following controller's job. A later normal-space live
+failure proved that the radial Gate alone was insufficient: three current
+Compass samples at offset `(+8,-1)` and 8.062 pixels completed the handoff while
+the hyperspace target label remained clipped behind the right cockpit pillar;
+the required visible-target child then returned eight consecutive
+`VISIBLE_TARGET_UNKNOWN` samples. The asymmetric four/six-pixel horizontal
+Gate corrects that pillar-occlusion axis without narrowing the calibrated
+vertical tolerance. A later 81-second
 Supercruise Evidence interval with 81 frames, zero gaps, and zero missing slots
 showed the former 40 ms inner-band pulses being lost to heading drift and
 trapping the Compass at roughly 15-21 pixels. Replacing them with 160 ms
@@ -50,7 +59,8 @@ moved the same current target from 13 pixels to 5 pixels. Supercruise therefore
 uses that effective inner-band pulse and must enter the true four-pixel Compass
 center zone, then remain within six pixels for three current observations,
 before handoff. Normal space retains its calibrated 40 ms pulse and
-ten/twelve-pixel Gate. The caller must still require exact visible-target completion and recheck the
+ten/twelve-pixel radial Gate together with the four/six-pixel horizontal Gate.
+The caller must still require exact visible-target completion and recheck the
 stellar `safeToCharge` Gate before sending FSD input.
 
 By default the Action first commands 0% throttle, then repeatedly reads

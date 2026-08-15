@@ -573,22 +573,42 @@ func TestEliteAlignStationTargetHyperspaceChargeDrivesThroughFormerSupercruiseQu
 	}
 }
 
-func TestEliteAlignStationTargetHyperspaceChargeAcceptsObservedNormalSpaceQuantizedEquilibrium(t *testing.T) {
+func TestEliteAlignStationTargetHyperspaceChargeRequiresStrictNormalSpaceHorizontalHandoff(t *testing.T) {
 	caller := &alignStationTargetCaller{observations: []json.RawMessage{
-		alignObservation("SOLID", 8, -6, 10, false),
-		alignObservation("SOLID", 9, -6, 10.817, false),
-		alignObservation("SOLID", 10, -6, 11.662, false),
+		alignObservation("SOLID", 8, -1, 8.062, false),
+		alignObservation("SOLID", 3, -1, 3.162, true),
+		alignObservation("SOLID", 4, -1, 4.123, false),
+		alignObservation("SOLID", 5, -1, 5.099, false),
 	}}
 	output, err := (Runner{Sleep: immediateSleep}).Run(
 		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
 			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "HYPERSPACE_CHARGE", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
 		}, caller, &fixtureReporter{},
 	)
-	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"controlProfile":"NORMAL_SPACE"`) || !contains(string(output), `"stableConfirmations":3`) {
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"controlProfile":"NORMAL_SPACE"`) || !contains(string(output), `"sampleCount":4`) || !contains(string(output), `"stableConfirmations":3`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if strings.Join(caller.controls, ",") != "YAW_RIGHT" || len(caller.holds) != 1 || caller.holds[0] != 40 {
+		t.Fatalf("normal-space HYPERSPACE_CHARGE must correct the live +8px horizontal pillar-occlusion case before handoff: controls=%v holds=%v", caller.controls, caller.holds)
+	}
+}
+
+func TestEliteAlignStationTargetHyperspaceChargePreservesNormalSpaceVerticalTolerance(t *testing.T) {
+	caller := &alignStationTargetCaller{observations: []json.RawMessage{
+		alignObservation("SOLID", 0, 8, 8, false),
+		alignObservation("SOLID", 0, 9, 9, false),
+		alignObservation("SOLID", 0, 10, 10, false),
+	}}
+	output, err := (Runner{Sleep: immediateSleep}).Run(
+		context.Background(), loadEliteAlignStationTargetPackage(t), map[string]any{
+			"mode": "ALIGN", "targetMotion": "STATIC", "alignmentPurpose": "HYPERSPACE_CHARGE", "stopBeforeAlign": false, "controlProfile": "NORMAL_SPACE",
+		}, caller, &fixtureReporter{},
+	)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"stableConfirmations":3`) {
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 	if len(caller.controls) != 0 || len(caller.holds) != 0 {
-		t.Fatalf("normal-space HYPERSPACE_CHARGE must stop injecting once the observed quantized equilibrium is inside the handoff hysteresis: controls=%v holds=%v", caller.controls, caller.holds)
+		t.Fatalf("horizontal strictness must not narrow the calibrated normal-space vertical tolerance: controls=%v holds=%v", caller.controls, caller.holds)
 	}
 }
 
