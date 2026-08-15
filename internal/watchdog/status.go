@@ -2,10 +2,19 @@ package watchdog
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
+)
+
+const (
+	statusReplaceMaxAttempts = 40
+	statusReplaceRetryDelay  = 25 * time.Millisecond
 )
 
 const (
@@ -88,11 +97,38 @@ func (s FileStatusSink) Write(status Status) error {
 	if err := temporary.Close(); err != nil {
 		return fmt.Errorf("close watchdog status staging file: %w", err)
 	}
-	if err := os.Rename(temporaryName, s.Name); err != nil {
+	if err := replaceStatusFile(temporaryName, s.Name); err != nil {
 		return fmt.Errorf("replace watchdog status: %w", err)
 	}
 	keep = true
 	return nil
+}
+
+func replaceStatusFile(source, destination string) error {
+	return retryStatusReplace(func() error {
+		return os.Rename(source, destination)
+	}, isRetryableStatusReplaceError, time.Sleep)
+}
+
+func retryStatusReplace(operation func() error, retryable func(error) bool, wait func(time.Duration)) error {
+	for attempt := 1; attempt <= statusReplaceMaxAttempts; attempt++ {
+		err := operation()
+		if err == nil {
+			return nil
+		}
+		if !retryable(err) || attempt == statusReplaceMaxAttempts {
+			return fmt.Errorf("atomic replace failed after %d attempt(s): %w", attempt, err)
+		}
+		wait(statusReplaceRetryDelay)
+	}
+	panic("unreachable status replace retry state")
+}
+
+func isRetryableStatusReplaceError(err error) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.Errno(32))
 }
 
 var osGetpid = os.Getpid

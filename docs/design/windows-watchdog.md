@@ -38,6 +38,13 @@ be explicit targets in that graph so their authenticated control APIs remain
 available. Process recovery never starts a recording or inference run; those
 capabilities remain explicitly on demand.
 
+The Event Web projection is also a watchdog-managed resident process. It starts
+only after Event Stream is healthy, preventing an interactive-logon race where
+its required event source is unavailable and startup exits terminally. A
+private-LAN-only Event Web listener uses an exact process probe because watchdog
+HTTP probes are deliberately restricted to loopback; live acceptance separately
+verifies the configured `/healthz` endpoint.
+
 The watchdog understands only two generic probe types:
 
 - `process`: require exactly one process at an exact absolute executable path,
@@ -125,9 +132,10 @@ A typical installed graph is:
 | `evidence-recorder` | `[]` |
 | `capture-agent` | `["event-stream"]` |
 | `action-osd` | `["event-stream"]` |
+| `event-web` | `["event-stream"]` |
 | `visual-log` | `["event-stream", "evidence-recorder"]` |
 
-This ordering is watchdog-owned configuration only. None of the five target
+This ordering is watchdog-owned configuration only. None of the six target
 executables reads or references it. Evidence Recorder and Visual Log remain
 independent executables even when this graph supervises their availability.
 
@@ -139,6 +147,12 @@ timestamps, target state, observation evidence, failure count, and recovery
 count. A stale `lastCycleCompletedAt` plus an absent PID distinguishes a dead
 watchdog from a currently idle one. File absence alone is not proof of a
 watchdog failure unless installation previously verified the file.
+
+On Windows, a reader can briefly deny replacement sharing while it has the
+current status file open. Publication retries only the same atomic rename for a
+bounded one-second window when Windows reports access denied or a sharing
+violation. It never switches to an in-place or non-atomic write; a non-transient
+error or exhausted retry budget remains terminal and preserves the cause.
 
 The JSONL log records target transitions and recovery decisions. Neither
 status nor logging depends on Event Stream, so an Event Stream failure cannot
@@ -161,14 +175,14 @@ the registered task's zero restart count. It does not modify a firewall,
 install a service, modify any monitored module, or grant the watchdog
 self-recovery.
 
-The Capture Agent/Event Stream and Action OSD installers default to
+The Capture Agent/Event Stream, Action OSD, and Event Web installers default to
 `WatchdogManaged`: they register on-demand Tasks with no triggers and a zero
 restart count, then start them once for installation acceptance. The Evidence
 Recorder/Visual Log installer registers independent triggerless Tasks with zero
 task-level restart; their Watchdog targets keep the resident services available.
-A developer who deliberately needs the old
-independent startup behavior for Capture/Event/OSD must pass `-StartupMode
-Standalone`; it is never selected automatically.
+A developer who deliberately needs the old independent startup behavior for
+Capture/Event/OSD/Web must pass `-StartupMode Standalone`; it is never selected
+automatically.
 
 ## Acceptance
 

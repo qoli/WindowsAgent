@@ -14,7 +14,11 @@ func TestInstallerPreservesWindowlessInteractiveLoopbackContract(t *testing.T) {
 	script := string(data)
 	for _, required := range []string{
 		`[string]$WebListen = "127.0.0.1:8790"`,
-		`[string]$StartupMode = "Standalone"`,
+		`[ValidateSet("WatchdogManaged", "Standalone")]`,
+		`[string]$StartupMode = "WatchdogManaged"`,
+		`if ($StartupMode -eq "Standalone")`,
+		`$settingsArguments.RestartCount = 3`,
+		`$taskArguments.Trigger = New-ScheduledTaskTrigger -AtLogOn`,
 		`Event Web executable must use PE Windows GUI subsystem 2`,
 		`New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited`,
 		`if ($process.MainWindowHandle -ne 0)`,

@@ -21,6 +21,12 @@ reads the session-local recent-capture and Evidence-recording signals, the
 installed process runs as the signed-in user in the interactive session rather
 than as a traditional Session 0 service.
 
+The installer defaults to a watchdog-managed Scheduled Task with no trigger and
+no task-level restart policy. The external Watchdog owns persistent startup and
+recovery, with Event Stream declared as a healthy startup prerequisite. An
+explicit `-StartupMode Standalone` remains available for development without a
+Watchdog.
+
 ## Process and security contract
 
 The process listens only on one explicit IPv4 address. Loopback is the default;

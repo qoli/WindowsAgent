@@ -9,8 +9,8 @@ param(
     [string]$WebListen = "127.0.0.1:8790",
     [string]$TaskName = "gameGuide Windows Event Web",
     [timespan]$Timeout = ([timespan]::FromSeconds(20)),
-    [ValidateSet("Standalone", "WatchdogManaged")]
-    [string]$StartupMode = "Standalone",
+    [ValidateSet("WatchdogManaged", "Standalone")]
+    [string]$StartupMode = "WatchdogManaged",
     [uint64]$MinimumEventCursor = 0
 )
 

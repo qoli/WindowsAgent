@@ -30,6 +30,7 @@ func TestModuleInstallersDefaultToWatchdogManagedTasks(t *testing.T) {
 	for _, name := range []string{
 		"../../scripts/install-windows-capture-agent.ps1",
 		"../../scripts/install-windows-action-osd.ps1",
+		"../../scripts/install-windows-event-web.ps1",
 	} {
 		data, err := os.ReadFile(name)
 		if err != nil {

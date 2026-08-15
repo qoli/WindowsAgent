@@ -2,6 +2,7 @@ package watchdog
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,5 +31,57 @@ func TestFileStatusSinkAtomicallyPublishesStrictStatus(t *testing.T) {
 	staged, err := filepath.Glob(filepath.Join(filepath.Dir(name), ".watchdog-status-*.tmp"))
 	if err != nil || len(staged) != 0 {
 		t.Fatalf("staging files = %v, error = %v", staged, err)
+	}
+}
+
+func TestRetryStatusReplaceRetriesOnlyDeclaredTransientErrors(t *testing.T) {
+	transient := errors.New("transient sharing violation")
+	attempts := 0
+	waits := 0
+	err := retryStatusReplace(func() error {
+		attempts++
+		if attempts < 3 {
+			return transient
+		}
+		return nil
+	}, func(err error) bool {
+		return errors.Is(err, transient)
+	}, func(delay time.Duration) {
+		waits++
+		if delay != statusReplaceRetryDelay {
+			t.Fatalf("retry delay = %s", delay)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 || waits != 2 {
+		t.Fatalf("attempts=%d waits=%d", attempts, waits)
+	}
+}
+
+func TestRetryStatusReplacePreservesTerminalErrorWithoutRetry(t *testing.T) {
+	terminal := errors.New("terminal replace failure")
+	attempts := 0
+	err := retryStatusReplace(func() error {
+		attempts++
+		return terminal
+	}, func(error) bool { return false }, func(time.Duration) {
+		t.Fatal("terminal failure must not wait")
+	})
+	if !errors.Is(err, terminal) || attempts != 1 {
+		t.Fatalf("error=%v attempts=%d", err, attempts)
+	}
+}
+
+func TestRetryStatusReplaceFailsAfterBoundedAttempts(t *testing.T) {
+	transient := errors.New("persistent sharing violation")
+	attempts := 0
+	err := retryStatusReplace(func() error {
+		attempts++
+		return transient
+	}, func(error) bool { return true }, func(time.Duration) {})
+	if !errors.Is(err, transient) || attempts != statusReplaceMaxAttempts {
+		t.Fatalf("error=%v attempts=%d", err, attempts)
 	}
 }

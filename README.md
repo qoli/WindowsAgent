@@ -402,7 +402,11 @@ Install the optional browser projection after the Event Stream is healthy:
 
 The installer creates a distinct local Web bearer token, starts a hidden
 interactive-user Scheduled Task, and verifies that the executable has no main
-window. The default page is `http://127.0.0.1:8790/`. An operator may explicitly
+window. By default the Task has no trigger or task-level restart policy; add an
+exact `event-web` target depending on healthy `event-stream` to the Watchdog
+configuration for persistent startup and recovery. Pass `-StartupMode
+Standalone` only for an explicit development installation without the
+Watchdog. The default page is `http://127.0.0.1:8790/`. An operator may explicitly
 pass a private address such as `-WebListen <PC-LAN-IP>:8790` for trusted-LAN
 access; wildcard and public listeners are rejected and the installer does not
 alter Windows Firewall. Private-LAN HTTP is not transport encrypted. The page
@@ -523,14 +527,15 @@ parameter is omitted. Changing an installed endpoint requires both an explicit
 new value and `-AllowVisualLogModelBaseURLChange`; the replacement endpoint is
 verified before the resident processes are stopped.
 
-Add exact `evidence-recorder` and `visual-log` targets to the Watchdog
-configuration. The executables remain independent processes and expose
-authenticated run-control APIs, while the Watchdog owns only process
-availability. Neither process starts a run as a side effect of installation or
-recovery.
+Add exact `event-web`, `evidence-recorder`, and `visual-log` targets to the
+Watchdog configuration. Event Web depends on healthy `event-stream`; Visual Log
+depends on healthy `event-stream` and `evidence-recorder`. The executables remain
+independent processes, while the Watchdog owns only process availability.
+Evidence Recorder and Visual Log expose authenticated run-control APIs, and
+neither starts a run as a side effect of installation or recovery.
 
 After all module installers have created their watchdog-managed Tasks, author
-an exact local configuration containing all five targets and install the
+an exact local configuration containing all six targets and install the
 external Watchdog:
 
 ```powershell
@@ -630,8 +635,8 @@ standalone task policy rather than relying on an automatic compatibility path:
   -StartupMode Standalone
 ```
 
-The Action OSD installer follows the same explicit `WatchdogManaged` default
-and `Standalone` override.
+The Action OSD and Event Web installers follow the same explicit
+`WatchdogManaged` default and `Standalone` override.
 
 The persistent installation enables bounded crash diagnostics for the capture
 process and its WGC worker. Structured WGC lifecycle records are written to
