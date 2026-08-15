@@ -232,11 +232,13 @@ func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *
 	}
 }
 
-func TestEliteAlignVisibleTargetRetriesConfirmedLocalHintWithoutIdentityFallback(t *testing.T) {
+func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewedAlternateHint(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
 		positions: []json.RawMessage{
 			unknownVisiblePosition(),
+			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
+			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
 			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
 			visiblePositionWithPresentation(8, -5, 9.4, "DASHED"),
 			visiblePositionWithPresentation(7, -4, 8.1, "DASHED"),
@@ -251,11 +253,91 @@ func TestEliteAlignVisibleTargetRetriesConfirmedLocalHintWithoutIdentityFallback
 	}
 	for index, actionID := range caller.positionActions {
 		if actionID != "elite-dangerous/supercruise-visible-reticle-position" {
-			t.Fatalf("confirmed hint fell back to %s at %d; actions=%v", actionID, index, caller.positionActions)
+			t.Fatalf("confirmed hint used a different classifier %s at %d; actions=%v", actionID, index, caller.positionActions)
 		}
 	}
+	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
+		caller.positionInputs[1]["hintX"].(int64) != 800 || caller.positionInputs[1]["hintY"].(int64) != 300 ||
+		caller.positionInputs[2]["hintX"].(int64) != 802 || caller.positionInputs[2]["hintY"].(int64) != 298 {
+		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
+	}
 	events := joinEventPhases(reporter.payloads)
-	if !contains(events, `"reason":"RETICLE_TRACKING_LOST_RETRY_CONFIRMED_HINT"`) || contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) {
+	if !contains(events, `CENTER_HINT_UNKNOWN_TRIGGER_ALTERNATE_LOCAL_HINT`) ||
+		!contains(events, `"observationMode":"RETICLE_RELOCALIZATION"`) ||
+		!contains(events, `"relocalizationState":"CANDIDATE_FOUND"`) ||
+		!contains(events, `"relocalizationState":"VALIDATED"`) ||
+		contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats:     []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{unknownVisiblePosition(), unknownVisiblePosition()},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err == nil || !contains(err.Error(), "alternate local reticle hint did not produce an unambiguous current-frame position") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 || len(caller.positionActions) != 2 {
+		t.Fatalf("positions=%v controls=%v", caller.positionActions, caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"relocalizationState":"MISS"`) || !contains(events, `"relocalizationAttempt":1`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetFailsWhenFreshLocalTrackContradictsRelocationCandidate(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			unknownVisiblePosition(),
+			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
+			visiblePositionWithPresentation(-100, -180, 205.9, "DASHED"),
+		},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err == nil || !contains(err.Error(), "relocalized reticle candidate contradicted the next current-frame local track") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("contradicted candidate authorized controls=%v", caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"relocalizationState":"CONTRADICTED"`) || !contains(events, `RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_CONTRADICTED`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetFailsWhenFreshLocalValidationIsUnknown(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			unknownVisiblePosition(),
+			visiblePositionWithPresentation(-158, -242, 289.1, "DASHED"),
+			unknownVisiblePosition(),
+		},
+	}
+	reporter := &fixtureReporter{}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err == nil || !contains(err.Error(), "relocalized reticle candidate was not confirmed by the next current-frame local track") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("UNKNOWN local validation authorized controls=%v", caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"relocalizationState":"MISS"`) || !contains(events, `RELOCALIZED_CANDIDATE_LOCAL_VALIDATION_UNKNOWN`) {
 		t.Fatalf("events=%s", events)
 	}
 }

@@ -48,9 +48,25 @@ the slow label-to-ring acquisition. The hint never authorizes input: a fresh
 before any Pitch or Yaw pulse. Direct callers default to false, tracking loss
 in the default mode still returns to exact identity acquisition, and Escape
 Vector mode rejects the flag. In confirmed-centre mode a tracking miss retains
-only the last fresh local hint for bounded stationary re-observation. UNKNOWN
-still sends no input and eight consecutive misses fail; the retained hint is
-never treated as current position evidence.
+only the last fresh local hint for bounded stationary re-observation after a
+fresh local track has been established. A special one-attempt relocation route
+exists only for the initial confirmed centre hint: if current `LOCAL_140`
+tracking at `(960,540)` returns `UNKNOWN`, the Action makes exactly one further
+call to the same `supercruise-visible-reticle-position` classifier, same
+`HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring algorithm at
+the reviewed alternate hint `(800,300)`. Live A/B evidence found the reticle at
+`(802,298)` from that alternate hint while the centre hint was `UNKNOWN`.
+
+The alternate observation never establishes identity and never authorizes an
+attitude, throttle, Blue-zone, heat, or FSD decision. A detected alternate
+candidate only supplies the hint for the next fresh `LOCAL_140` tracking frame.
+That frame must also detect a centre within 12 pixels of the relocation
+candidate before the ordinary controller may resume. Alternate `UNKNOWN`, an
+untrackable candidate, next-frame `UNKNOWN`, or a geometrically contradictory
+next frame fails explicitly. The event stream exposes
+`RETICLE_RELOCALIZATION`, its single attempt, and every triggered, candidate,
+validated, miss, or contradicted transition. No grid search, wider ROI, fuzzy
+identity, different capture, or second relocation attempt is permitted.
 Destination identity acquisition and local tracking explicitly request the
 `HUD_OVERLAY_AWARE` evidence policy. Adaptive orange remains primary; only
 when both adaptive planes reject a current frame may a valid strict-RGB
