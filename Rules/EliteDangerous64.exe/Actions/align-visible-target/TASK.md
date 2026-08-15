@@ -23,6 +23,20 @@ topology, and capture time in the alignment stream. Completion still requires
 the tracked marker to remain within 12 reference pixels of the 1920x1080 screen
 centre for three consecutive destination samples.
 
+When an owning `supercruise-assist-to-destination` workflow explicitly enables
+`blueZoneGateEnabled`, the Action also samples current `flight-status` inside
+the alignment loop every three destination samples (about 2.25 seconds at the
+declared cadence). The first sample is taken when alignment starts. If the
+strict heat checkpoint remains UNKNOWN for all eight same-provider retries,
+the Action takes the next game-status sample before failing that heat Gate.
+Two uninterrupted fresh `FSD_THROTTLE_UP_REQUIRED` observations, whose visible
+meaning is `MOVE THROTTLE TO BLUE ZONE`, are independent positive game evidence
+that the selected destination is aligned and may complete this Action. Any
+other state, including UNKNOWN, resets the confirmation count. One observation
+never completes, no cached prompt is accepted, and no game-status observation
+authorizes an attitude or throttle command. Callers that do not explicitly
+enable this Gate retain the CV-only contract.
+
 An owning workflow that has independently confirmed the exact selected target
 and has just completed identity-bound Compass alignment may set
 `centerHintConfirmed=true`. In that explicit mode the first observation uses

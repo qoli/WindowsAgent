@@ -8,9 +8,9 @@
     "payload": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["phase", "targetName", "sample", "commandCount", "targetState", "observationMode", "offsetX", "offsetY", "centerDistancePixels", "stableConfirmations", "command", "commandHoldMs", "heatState", "heatPercent", "heatReason", "presentation", "occupiedAngularBins", "angularRuns", "reticleEvidencePlane", "reticleEvidenceQuality", "reticleCapturedAt", "reason", "observationErrorCode", "observationError"],
+      "required": ["phase", "targetName", "sample", "commandCount", "targetState", "observationMode", "offsetX", "offsetY", "centerDistancePixels", "stableConfirmations", "command", "commandHoldMs", "heatState", "heatPercent", "heatReason", "presentation", "occupiedAngularBins", "angularRuns", "reticleEvidencePlane", "reticleEvidenceQuality", "reticleCapturedAt", "flightStatus", "flightPromptText", "blueZoneConfirmations", "reason", "observationErrorCode", "observationError"],
       "properties": {
-        "phase": {"enum": ["STOPPING", "OBSERVING", "ALIGNING", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR", "SAFETY_GATE"]},
+        "phase": {"enum": ["STOPPING", "OBSERVING", "ALIGNING", "VERIFYING_CENTER", "COMPLETED", "OBSERVATION_ERROR", "SAFETY_GATE", "GAME_ALIGNMENT_GATE"]},
         "targetName": {"type": "string", "maxLength": 96},
         "sample": {"type": "integer", "minimum": 0, "maximum": 192},
         "commandCount": {"type": "integer", "minimum": 0, "maximum": 160},
@@ -31,6 +31,9 @@
         "reticleEvidencePlane": {"type": ["string", "null"], "enum": ["STRICT_RGB", "ORANGE_OPPONENT", "HSV_ORANGE", null]},
         "reticleEvidenceQuality": {"type": ["integer", "null"], "minimum": 0},
         "reticleCapturedAt": {"type": ["string", "null"]},
+        "flightStatus": {"type": ["string", "null"], "enum": ["FSD_THROTTLE_UP_REQUIRED", "SUPERCRUISE_ASSIST_ACTIVE", "SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED", "SUPERCRUISE", "FSD_CHARGING", "FSD_ALIGNMENT_REQUIRED", "FSD_ESCAPE_VECTOR_REQUIRED", "SAFE_DISENGAGE_READY", "AUTO_LAUNCH", "WAITING_IN_QUEUE", "SLOW_DOWN_FOR_AUTO_DOCK", "AUTO_DOCK", "UNKNOWN", null]},
+        "flightPromptText": {"type": ["string", "null"], "maxLength": 128},
+        "blueZoneConfirmations": {"type": "integer", "minimum": 0, "maximum": 2},
         "reason": {"type": ["string", "null"], "maxLength": 256},
         "observationErrorCode": {"type": ["string", "null"], "maxLength": 96},
         "observationError": {"type": ["string", "null"], "maxLength": 512}

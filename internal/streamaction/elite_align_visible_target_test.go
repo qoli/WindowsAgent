@@ -12,12 +12,14 @@ import (
 type alignVisibleTargetCaller struct {
 	heats           []json.RawMessage
 	positions       []json.RawMessage
+	flightStatuses  []json.RawMessage
 	posErrors       []error
 	controls        []string
 	positionActions []string
 	positionInputs  []map[string]any
 	heatIndex       int
 	posIndex        int
+	flightIndex     int
 }
 
 func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -28,6 +30,13 @@ func (c *alignVisibleTargetCaller) Call(_ context.Context, id string, inputs map
 		}
 		value := c.heats[c.heatIndex]
 		c.heatIndex++
+		return value, nil
+	case "elite-dangerous/flight-status":
+		if c.flightIndex >= len(c.flightStatuses) {
+			return nil, errors.New("unexpected flight-status observation")
+		}
+		value := c.flightStatuses[c.flightIndex]
+		c.flightIndex++
 		return value, nil
 	case "elite-dangerous/escape-vector-visible-position", "elite-dangerous/supercruise-target-position", "elite-dangerous/supercruise-visible-reticle-position":
 		c.positionActions = append(c.positionActions, id)
@@ -93,6 +102,76 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 	if !contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) ||
 		strings.Count(events, `"observationMode":"RETICLE_TRACKING"`) != 4 {
 		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetCompletesFromConcurrentBlueZoneGateDuringUnknownHeat(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		flightStatuses: []json.RawMessage{
+			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+		},
+	}
+	for index := 0; index < 8; index++ {
+		caller.heats = append(caller.heats, visibleHeat("UNKNOWN", nil))
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completionEvidence":"BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"`) || !contains(string(output), `"blueZoneConfirmations":2`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.heatIndex != 8 || caller.flightIndex != 2 || len(caller.positionActions) != 0 || len(caller.controls) != 0 {
+		t.Fatalf("heat=%d flight=%d positions=%v controls=%v", caller.heatIndex, caller.flightIndex, caller.positionActions, caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `BLUE_ZONE_ALIGNMENT_GATE_1_OF_2`) || !contains(events, `BLUE_ZONE_ALIGNMENT_GATE_2_OF_2`) || !contains(events, `"phase":"COMPLETED"`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
+func TestEliteAlignVisibleTargetDoesNotCompleteFromInterruptedBlueZoneGate(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		flightStatuses: []json.RawMessage{
+			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("UNKNOWN", ""),
+		},
+	}
+	for index := 0; index < 8; index++ {
+		caller.heats = append(caller.heats, visibleHeat("UNKNOWN", nil))
+	}
+	_, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, &fixtureReporter{})
+	if err == nil || !contains(err.Error(), "safe strict heat checkpoint") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(caller.positionActions) != 0 || len(caller.controls) != 0 {
+		t.Fatalf("interrupted Gate authorized alignment: positions=%v controls=%v", caller.positionActions, caller.controls)
+	}
+}
+
+func TestEliteAlignVisibleTargetPollsBlueZoneWhileCVKeepsAligning(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		flightStatuses: []json.RawMessage{
+			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+			visibleFlightStatus("FSD_THROTTLE_UP_REQUIRED", "MOVE THROTTLE TO BLUE ZONE"),
+		},
+		positions: []json.RawMessage{
+			visiblePositionWithPresentation(35, -40, 53.2, "DASHED"),
+			visiblePositionWithPresentation(29, -34, 44.7, "DASHED"),
+		},
+	}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "blueZoneGateEnabled": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, &fixtureReporter{})
+	if err != nil || !contains(string(output), `"completionEvidence":"BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 2 || caller.flightIndex != 2 || caller.posIndex != 2 {
+		t.Fatalf("controls=%v flight=%d positions=%d", caller.controls, caller.flightIndex, caller.posIndex)
 	}
 }
 
@@ -295,6 +374,14 @@ func visibleHeat(state string, percent any) json.RawMessage {
 	value, _ := json.Marshal(map[string]any{"heat": map[string]any{
 		"state": state, "percent": percent, "evidence": map[string]any{"reason": reason},
 	}})
+	return value
+}
+
+func visibleFlightStatus(state, text string) json.RawMessage {
+	value, _ := json.Marshal(map[string]any{
+		"flightStatus": map[string]any{"state": state},
+		"source":       map[string]any{"text": text},
+	})
 	return value
 }
 

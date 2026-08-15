@@ -7,6 +7,7 @@
     "targetName": {"type": "string", "minLength": 2, "maxLength": 96},
     "stopBeforeAlign": {"type": "boolean", "default": true},
     "centerHintConfirmed": {"type": "boolean", "default": false},
+    "blueZoneGateEnabled": {"type": "boolean", "default": false},
     "positionSource": {"enum": ["DESTINATION", "ESCAPE_VECTOR"], "default": "DESTINATION"},
     "heatPolicy": {"enum": ["STRICT", "ESCAPE_VECTOR_CHARGE"], "default": "STRICT"}
   }

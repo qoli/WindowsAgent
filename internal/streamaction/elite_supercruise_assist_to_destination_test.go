@@ -180,6 +180,7 @@ func (c *supercruiseAssistDestinationCaller) Call(_ context.Context, id string, 
 			"targetName":          inputs["targetName"],
 			"stopBeforeAlign":     inputs["stopBeforeAlign"],
 			"centerHintConfirmed": inputs["centerHintConfirmed"],
+			"blueZoneGateEnabled": inputs["blueZoneGateEnabled"],
 			"positionSource":      inputs["positionSource"],
 			"heatPolicy":          inputs["heatPolicy"],
 		})
@@ -415,6 +416,7 @@ func TestEliteSupercruiseAssistToDestinationHandsFlightToGameComputer(t *testing
 	if len(caller.visibleAlignmentInputs) != 1 ||
 		caller.visibleAlignmentInputs[0]["targetName"] != "NAV BEACON" ||
 		caller.visibleAlignmentInputs[0]["centerHintConfirmed"] != true ||
+		caller.visibleAlignmentInputs[0]["blueZoneGateEnabled"] != true ||
 		caller.visibleAlignmentInputs[0]["positionSource"] != "DESTINATION" ||
 		caller.visibleAlignmentInputs[0]["heatPolicy"] != "STRICT" {
 		t.Fatalf("initial visible alignment inputs=%v", caller.visibleAlignmentInputs)
@@ -692,7 +694,9 @@ func TestEliteSupercruiseAssistRequiresCompassVisibleAndPromptClearBeforeRestori
 		caller.visibleAlignmentInputs[0]["targetName"] != "NAV BEACON" ||
 		caller.visibleAlignmentInputs[0]["stopBeforeAlign"] != false ||
 		caller.visibleAlignmentInputs[0]["centerHintConfirmed"] != true ||
+		caller.visibleAlignmentInputs[0]["blueZoneGateEnabled"] != true ||
 		caller.visibleAlignmentInputs[1]["centerHintConfirmed"] != true ||
+		caller.visibleAlignmentInputs[1]["blueZoneGateEnabled"] != true ||
 		caller.visibleAlignmentInputs[0]["positionSource"] != "DESTINATION" ||
 		caller.visibleAlignmentInputs[0]["heatPolicy"] != "STRICT" {
 		t.Fatalf("visible alignment inputs=%v", caller.visibleAlignmentInputs)

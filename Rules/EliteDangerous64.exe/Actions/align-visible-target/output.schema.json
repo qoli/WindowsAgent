@@ -2,15 +2,33 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "task", "completed", "targetName", "sampleCount", "commandCount", "stableConfirmations", "finalTarget"],
+  "required": ["schemaVersion", "task", "completed", "targetName", "sampleCount", "commandCount", "stableConfirmations", "blueZoneConfirmations", "completionEvidence", "finalTarget"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "task": {"const": "ALIGN_VISIBLE_TARGET"},
     "completed": {"const": true},
     "targetName": {"type": "string"},
     "sampleCount": {"type": "integer", "minimum": 2, "maximum": 192},
     "commandCount": {"type": "integer", "minimum": 0, "maximum": 160},
-    "stableConfirmations": {"type": "integer", "minimum": 2, "maximum": 120},
-    "finalTarget": {"type": "object"}
-  }
+    "stableConfirmations": {"type": "integer", "minimum": 0, "maximum": 120},
+    "blueZoneConfirmations": {"type": "integer", "minimum": 0, "maximum": 2},
+    "completionEvidence": {"enum": ["VISIBLE_TARGET_STABLY_CENTERED", "BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"]},
+    "finalTarget": {"type": ["object", "null"]}
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "completionEvidence": {"const": "VISIBLE_TARGET_STABLY_CENTERED"},
+        "stableConfirmations": {"minimum": 2},
+        "finalTarget": {"type": "object"}
+      }
+    },
+    {
+      "properties": {
+        "completionEvidence": {"const": "BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED"},
+        "stableConfirmations": {"const": 0},
+        "blueZoneConfirmations": {"const": 2}
+      }
+    }
+  ]
 }

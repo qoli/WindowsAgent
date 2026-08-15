@@ -21,8 +21,14 @@ complete its `DESTINATION`/`STRICT` screen-centre Gate. Both children must
 complete at 0% throttle before Supercruise input or acceleration is permitted.
 The caller-owned exact target lock plus each immediately completed Compass
 child authorizes `centerHintConfirmed=true` for the visible child. This seeds
-only a current-frame local reticle observation at screen centre; it does not
-bypass reticle detection, heat, or the three-sample stable-centre Gate.
+only a current-frame local reticle observation at screen centre. This caller
+also enables the visible child's concurrent Blue Zone game Gate: while CV and
+strict heat checks continue, the child samples `flight-status` about every
+2.25 seconds, and two uninterrupted fresh `MOVE THROTTLE TO BLUE ZONE`
+confirmations may establish alignment. A single or UNKNOWN prompt cannot do
+so. The Gate never sends throttle or attitude input; absent that positive game
+evidence, reticle detection, heat, and the three-sample stable-centre Gate
+remain mandatory.
 If charging later reports `FSD_ALIGNMENT_REQUIRED`, the Action returns to 0%,
 repeats the same Compass-to-visible pair, and restores 100% only after both
 children complete. A Compass handoff alone never authorizes charging recovery.

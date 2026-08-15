@@ -28,6 +28,8 @@ MAX_UNKNOWN_HEAT_SAMPLES = 3
 DESTINATION_HEAT_CHECKPOINT_SAMPLES = 8
 DESTINATION_HEAT_UNKNOWN_RETRY_MS = 250
 DESTINATION_HEAT_CHECKPOINT_INTERVAL = 8
+BLUE_ZONE_GATE_SAMPLE_INTERVAL = 3
+BLUE_ZONE_GATE_CONFIRMATIONS = 2
 ESCAPE_CHARGE_LAST_KNOWN_MAX_PERCENT = 60
 ESCAPE_CHARGE_UNKNOWN_GRACE_MS = 4000
 DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES = 32
@@ -37,7 +39,7 @@ MAX_TRACKING_HINT_Y = 1010
 SCREEN_CENTER_X = 960
 SCREEN_CENTER_Y = 540
 
-def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None):
+def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0):
     presentation = None
     occupied_bins = None
     angular_runs = None
@@ -75,6 +77,9 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
             "reticleEvidencePlane": evidence_plane,
             "reticleEvidenceQuality": evidence_quality,
             "reticleCapturedAt": captured_at,
+            "flightStatus": flight_status,
+            "flightPromptText": flight_prompt_text,
+            "blueZoneConfirmations": blue_zone_confirmations,
             "reason": reason,
             "observationErrorCode": error_code,
             "observationError": error,
@@ -130,7 +135,60 @@ def choose_command(target, position_source):
 def trackable_hint(target):
     return target["referenceX"] >= MIN_TRACKING_HINT and target["referenceX"] <= MAX_TRACKING_HINT_X and target["referenceY"] >= MIN_TRACKING_HINT and target["referenceY"] <= MAX_TRACKING_HINT_Y
 
-def observe_destination_heat_checkpoint(target_name, sample, command_count, stable):
+def observe_blue_zone_gate(target_name, sample, command_count, stable, gate):
+    if not gate["enabled"]:
+        return False
+    flight = action.call(id="elite-dangerous/flight-status", inputs={})
+    state = flight["flightStatus"]["state"]
+    prompt_text = flight["source"]["text"]
+    gate["lastPromptText"] = prompt_text
+    if state == "FSD_THROTTLE_UP_REQUIRED":
+        gate["confirmations"] += 1
+        reason = "BLUE_ZONE_ALIGNMENT_GATE_" + str(gate["confirmations"]) + "_OF_2"
+    else:
+        gate["confirmations"] = 0
+        reason = "BLUE_ZONE_ALIGNMENT_GATE_NOT_CONFIRMED"
+    emit_update(
+        "GAME_ALIGNMENT_GATE",
+        target_name,
+        sample,
+        command_count,
+        stable=stable,
+        reason=reason,
+        flight_status=state,
+        flight_prompt_text=prompt_text,
+        blue_zone_confirmations=gate["confirmations"],
+    )
+    return gate["confirmations"] >= BLUE_ZONE_GATE_CONFIRMATIONS
+
+def blue_zone_completion(target_name, sample, command_count, final_target, gate):
+    emit_update(
+        "COMPLETED",
+        target_name,
+        sample,
+        command_count,
+        target=final_target,
+        stable=0,
+        reason="BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED",
+        flight_status="FSD_THROTTLE_UP_REQUIRED",
+        flight_prompt_text=gate["lastPromptText"],
+        blue_zone_confirmations=gate["confirmations"],
+    )
+    stream.activity(message="Visible target alignment confirmed by the game blue-zone prompt", level="info")
+    return {
+        "schemaVersion": 2,
+        "task": "ALIGN_VISIBLE_TARGET",
+        "completed": True,
+        "targetName": target_name,
+        "sampleCount": max(sample, gate["confirmations"]),
+        "commandCount": command_count,
+        "stableConfirmations": 0,
+        "blueZoneConfirmations": gate["confirmations"],
+        "completionEvidence": "BLUE_ZONE_GAME_ALIGNMENT_CONFIRMED",
+        "finalTarget": final_target,
+    }
+
+def observe_destination_heat_checkpoint(target_name, sample, command_count, stable, blue_zone_gate):
     high_heat_count = 0
     for checkpoint_sample in range(DESTINATION_HEAT_CHECKPOINT_SAMPLES):
         heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
@@ -150,7 +208,9 @@ def observe_destination_heat_checkpoint(target_name, sample, command_count, stab
             emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HIGH_HEAT_AWAITING_CONFIRMATION", heat_state=heat_state, heat_percent=heat_percent, heat_reason=heat_reason)
             continue
         emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="STRICT_HEAT_CHECKPOINT_ACCEPTED", heat_state=heat_state, heat_percent=heat_percent, heat_reason=heat_reason)
-        return heat
+        return {"heat": heat, "blueZoneConfirmed": False}
+    if blue_zone_gate["confirmations"] > 0 and observe_blue_zone_gate(target_name, sample, command_count, stable, blue_zone_gate):
+        return {"heat": None, "blueZoneConfirmed": True}
     fail("visible target alignment did not obtain a safe strict heat checkpoint after eight samples")
 
 def main(ctx):
@@ -159,10 +219,13 @@ def main(ctx):
     position_source = ctx.inputs["positionSource"] if "positionSource" in ctx.inputs else "DESTINATION"
     heat_policy = ctx.inputs["heatPolicy"] if "heatPolicy" in ctx.inputs else "STRICT"
     center_hint_confirmed = ctx.inputs["centerHintConfirmed"] if "centerHintConfirmed" in ctx.inputs else False
+    blue_zone_gate_enabled = ctx.inputs["blueZoneGateEnabled"] if "blueZoneGateEnabled" in ctx.inputs else False
     if heat_policy == "ESCAPE_VECTOR_CHARGE" and position_source != "ESCAPE_VECTOR":
         fail("ESCAPE_VECTOR_CHARGE heat policy requires the Escape Vector position source")
     if center_hint_confirmed and position_source != "DESTINATION":
         fail("centerHintConfirmed is valid only for the destination position source")
+    if blue_zone_gate_enabled and position_source != "DESTINATION":
+        fail("blueZoneGateEnabled is valid only for the destination position source")
     stable_confirmations_required = 2 if position_source == "ESCAPE_VECTOR" else STABLE_CONFIRMATIONS
     if stop_before_align:
         throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
@@ -187,15 +250,24 @@ def main(ctx):
     # must still be DETECTED before any attitude command is sent.
     tracked_target = {"referenceX": SCREEN_CENTER_X, "referenceY": SCREEN_CENTER_Y} if center_hint_confirmed else None
     tracked_samples_since_identity = 0
+    blue_zone_gate = {"enabled": blue_zone_gate_enabled, "confirmations": 0, "lastPromptText": None}
+    if observe_blue_zone_gate(target_name, 0, command_count, stable, blue_zone_gate):
+        return blue_zone_completion(target_name, 0, command_count, final_target, blue_zone_gate)
     if position_source == "DESTINATION":
-        observe_destination_heat_checkpoint(target_name, 0, command_count, stable)
+        initial_heat = observe_destination_heat_checkpoint(target_name, 0, command_count, stable, blue_zone_gate)
+        if initial_heat["blueZoneConfirmed"]:
+            return blue_zone_completion(target_name, 0, command_count, final_target, blue_zone_gate)
     for sample in range(1, MAX_SAMPLES + 1):
         started_ms = task.elapsed_milliseconds()
         heat_state = None
         heat_percent = None
         if position_source == "DESTINATION":
+            if sample % BLUE_ZONE_GATE_SAMPLE_INTERVAL == 0 and observe_blue_zone_gate(target_name, sample, command_count, stable, blue_zone_gate):
+                return blue_zone_completion(target_name, sample, command_count, final_target, blue_zone_gate)
             if sample > 1 and (sample - 1) % DESTINATION_HEAT_CHECKPOINT_INTERVAL == 0:
-                observe_destination_heat_checkpoint(target_name, sample, command_count, stable)
+                checkpoint = observe_destination_heat_checkpoint(target_name, sample, command_count, stable, blue_zone_gate)
+                if checkpoint["blueZoneConfirmed"]:
+                    return blue_zone_completion(target_name, sample, command_count, final_target, blue_zone_gate)
         else:
             heat = action.call(id="elite-dangerous/ship-heat", inputs={})["heat"]
             heat_state = heat["state"]
@@ -319,13 +391,15 @@ def main(ctx):
                 emit_update("COMPLETED", target_name, sample, command_count, target=target, stable=stable, reason="VISIBLE_TARGET_STABLY_CENTERED", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)
                 stream.activity(message="Visible target precisely aligned", level="info")
                 return {
-                    "schemaVersion": 1,
+                    "schemaVersion": 2,
                     "task": "ALIGN_VISIBLE_TARGET",
                     "completed": True,
                     "targetName": target_name,
                     "sampleCount": sample,
                     "commandCount": command_count,
                     "stableConfirmations": stable,
+                    "blueZoneConfirmations": blue_zone_gate["confirmations"],
+                    "completionEvidence": "VISIBLE_TARGET_STABLY_CENTERED",
                     "finalTarget": final_target,
                 }
             wait_for_cadence(started_ms, position_source)
