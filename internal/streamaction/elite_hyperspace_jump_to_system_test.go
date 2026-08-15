@@ -12,21 +12,23 @@ import (
 )
 
 type hyperspaceJumpCaller struct {
-	hyperspaceObservations int
-	hyperspaceFailuresAt   map[int][]error
-	hyperspaceControls     int
-	alignVisibleError      error
-	throttles              []int
-	forceObstruction       bool
-	postAlignObstruction   bool
-	heatUnknown            bool
-	occlusionCalls         int
-	clearStartModes        []string
-	alignmentPurposes      []string
-	alignmentProfiles      []string
-	alignmentRequired      bool
-	journalCaseVariant     bool
-	calls                  []string
+	hyperspaceObservations   int
+	hyperspaceFailuresAt     map[int][]error
+	hyperspaceControls       int
+	alignVisibleError        error
+	alignVisiblePresentation string
+	alignVisibleInputs       []map[string]any
+	throttles                []int
+	forceObstruction         bool
+	postAlignObstruction     bool
+	heatUnknown              bool
+	occlusionCalls           int
+	clearStartModes          []string
+	alignmentPurposes        []string
+	alignmentProfiles        []string
+	alignmentRequired        bool
+	journalCaseVariant       bool
+	calls                    []string
 }
 
 func (c *hyperspaceJumpCaller) Call(_ context.Context, id string, inputs map[string]any) (json.RawMessage, error) {
@@ -52,10 +54,15 @@ func (c *hyperspaceJumpCaller) Call(_ context.Context, id string, inputs map[str
 		return json.RawMessage(`{"completed":true,"finalOcclusionState":"CLEAR"}`), nil
 	case "elite-dangerous/align-visible-target":
 		c.calls = append(c.calls, id)
+		c.alignVisibleInputs = append(c.alignVisibleInputs, inputs)
 		if c.alignVisibleError != nil {
 			return nil, c.alignVisibleError
 		}
-		return json.RawMessage(`{"completed":true,"sampleCount":3,"finalTarget":{"presentation":"SOLID"}}`), nil
+		presentation := c.alignVisiblePresentation
+		if presentation == "" {
+			presentation = "SOLID"
+		}
+		return json.Marshal(map[string]any{"completed": true, "sampleCount": 3, "finalTarget": map[string]any{"presentation": presentation}})
 	case "elite-dangerous/ship-heat":
 		c.calls = append(c.calls, id)
 		if c.heatUnknown {
@@ -189,6 +196,23 @@ func TestEliteHyperspaceJumpRejectsVisibleTargetDomainUnknownBeforeFSD(t *testin
 	}
 	if caller.hyperspaceControls != 0 || len(caller.throttles) != 1 || caller.throttles[0] != 0 {
 		t.Fatalf("controls=%d throttles=%v", caller.hyperspaceControls, caller.throttles)
+	}
+}
+
+func TestEliteHyperspaceJumpAcceptsCompletedDashedVisibleTargetBeforeFSD(t *testing.T) {
+	caller := &hyperspaceJumpCaller{alignVisiblePresentation: "DASHED"}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteHyperspaceJumpPackage(t), hyperspaceJumpInputs(), caller, &fixtureReporter{})
+	if err != nil || !strings.Contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.hyperspaceControls != 1 || len(caller.alignVisibleInputs) != 1 {
+		t.Fatalf("controls=%d alignVisibleInputs=%v", caller.hyperspaceControls, caller.alignVisibleInputs)
+	}
+	if caller.alignVisibleInputs[0]["targetName"] != "87 Mu Ceti" || caller.alignVisibleInputs[0]["stopBeforeAlign"] != false {
+		t.Fatalf("align visible inputs=%v", caller.alignVisibleInputs[0])
+	}
+	if caller.occlusionCalls != 3 {
+		t.Fatalf("dashed reticle bypassed stellar gates: occlusionCalls=%d", caller.occlusionCalls)
 	}
 }
 

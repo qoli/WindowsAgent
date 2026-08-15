@@ -6,7 +6,7 @@ ROI_SIZE = 140
 ROI_HALF = 70
 CANDIDATE_SPAN = 28
 CANDIDATE_STEP = 4
-PIXEL_STEP = 2
+REFINEMENT_RADIUS = 4
 INNER_RADIUS_SQUARED = 34 * 34
 OUTER_RADIUS_SQUARED = 58 * 58
 SEARCH_INNER_RADIUS_SQUARED = 40 * 40
@@ -31,10 +31,7 @@ LABEL_SECTOR_START = 27
 LABEL_SECTOR_END = 44
 STRUCTURAL_ARC_BINS = 54
 LABEL_SECTOR_BINS = 18
-PERCENTILE_NUMERATOR = 995
-PERCENTILE_DENOMINATOR = 1000
-ADAPTIVE_THRESHOLD_PERCENT = 35
-MIN_ADAPTIVE_THRESHOLD = 20
+MIN_OTSU_NONZERO_PIXELS = 24
 MAX_EVIDENCE_PLANE_PIXELS = 10000
 
 def channels(pixel):
@@ -66,21 +63,66 @@ def hsv_orange_score(red, green, blue):
     value_weight = math.sqrt(float(maximum) / 255.0)
     return int(255.0 * affinity * saturation * value_weight)
 
-def adaptive_threshold(histogram, pixel_count):
-    target = (pixel_count * PERCENTILE_NUMERATOR + PERCENTILE_DENOMINATOR - 1) // PERCENTILE_DENOMINATOR
-    cumulative = 0
-    percentile = 0
-    for score in range(256):
-        cumulative += histogram[score]
-        if cumulative >= target:
-            percentile = score
-            break
-    return max(MIN_ADAPTIVE_THRESHOLD, percentile * ADAPTIVE_THRESHOLD_PERCENT // 100)
+def otsu_threshold(histogram):
+    # Zero is not orange evidence. Including the black/background population in
+    # Otsu makes the result depend on how much empty HUD space happens to lie in
+    # the hint window, so threshold only the retained non-zero scores.
+    nonzero_count = 0
+    nonzero_sum = 0
+    minimum = None
+    maximum = None
+    for score in range(1, 256):
+        count = histogram[score]
+        if count == 0:
+            continue
+        nonzero_count += count
+        nonzero_sum += score * count
+        if minimum == None:
+            minimum = score
+        maximum = score
+    if nonzero_count < MIN_OTSU_NONZERO_PIXELS or minimum == maximum:
+        return {
+            "method": "OTSU", "threshold": 0,
+            "nonzeroCount": nonzero_count,
+            "nonzeroRatioPermille": nonzero_count * 1000 // (ROI_SIZE * ROI_SIZE),
+            "degenerate": True,
+        }
+
+    background_count = 0
+    background_sum = 0
+    best_variance = -1.0
+    best_threshold = 0
+    for score in range(1, 256):
+        background_count += histogram[score]
+        background_sum += score * histogram[score]
+        foreground_count = nonzero_count - background_count
+        if background_count == 0 or foreground_count == 0:
+            continue
+        background_mean = float(background_sum) / float(background_count)
+        foreground_mean = float(nonzero_sum - background_sum) / float(foreground_count)
+        difference = background_mean - foreground_mean
+        variance = float(background_count * foreground_count) * difference * difference
+        if variance > best_variance:
+            best_variance = variance
+            best_threshold = score + 1
+    if best_threshold <= 1 or best_threshold > 255:
+        return {
+            "method": "OTSU", "threshold": 0,
+            "nonzeroCount": nonzero_count,
+            "nonzeroRatioPermille": nonzero_count * 1000 // (ROI_SIZE * ROI_SIZE),
+            "degenerate": True,
+        }
+    return {
+        "method": "OTSU", "threshold": best_threshold,
+        "nonzeroCount": nonzero_count,
+        "nonzeroRatioPermille": nonzero_count * 1000 // (ROI_SIZE * ROI_SIZE),
+        "degenerate": False,
+    }
 
 def points_at_or_above(scores, threshold):
     points = []
     for index in range(len(scores)):
-        if scores[index] >= threshold:
+        if scores[index] > 0 and scores[index] >= threshold:
             points.append([index % ROI_SIZE, index // ROI_SIZE])
     return points
 
@@ -146,28 +188,53 @@ def shape_confidence(best, second_quality, shape):
     confidence = (structural_coverage * 55 + radial_contrast * 20 + centre_uniqueness * 15 + label_gap_clarity * 10) // 100
     return [confidence, structural_coverage, label_gap_clarity, radial_contrast, centre_uniqueness]
 
-def evaluate_plane(name, points, threshold):
+def evaluate_plane(name, points, threshold_evidence):
+    threshold = threshold_evidence["threshold"]
+    base = {
+        "name": name, "state": "REJECTED", "reason": "RING_SCORE_LOW",
+        "thresholdMethod": threshold_evidence["method"],
+        "threshold": threshold,
+        "nonzeroCount": threshold_evidence["nonzeroCount"],
+        "nonzeroRatioPermille": threshold_evidence["nonzeroRatioPermille"],
+        "thresholdDegenerate": threshold_evidence["degenerate"],
+        "pixelCount": len(points), "x": ROI_HALF, "y": ROI_HALF,
+        "quality": 0, "ringScore": 0, "secondQuality": 0, "secondRingScore": 0,
+        "clutterScore": 0, "centerMargin": 0,
+        "occupiedAngularBins": 0, "angularTransitions": 0,
+        "angularRuns": 0, "structuralArcOccupiedBins": 0,
+        "labelSectorOccupiedBins": 0, "structuralCoveragePermille": 0,
+        "labelGapClarityPermille": 0, "radialContrastPermille": 0,
+        "centerUniquenessPermille": 0, "shapeConfidencePermille": 0,
+        "presentation": None,
+    }
+    if threshold_evidence["degenerate"]:
+        base["reason"] = "HISTOGRAM_DEGENERATE"
+        return base
     if len(points) > MAX_EVIDENCE_PLANE_PIXELS:
-        return {
-            "name": name, "state": "REJECTED", "reason": "PIXEL_DENSITY_HIGH",
-            "threshold": threshold, "pixelCount": len(points), "x": ROI_HALF, "y": ROI_HALF,
-            "quality": 0, "ringScore": 0, "secondQuality": 0, "secondRingScore": 0,
-            "clutterScore": 0, "occupiedAngularBins": 0, "angularTransitions": 0,
-            "angularRuns": 0, "structuralArcOccupiedBins": 0,
-            "labelSectorOccupiedBins": 0, "structuralCoveragePermille": 0,
-            "labelGapClarityPermille": 0, "radialContrastPermille": 0,
-            "centerUniquenessPermille": 0, "shapeConfidencePermille": 0,
-            "presentation": None,
-        }
-    sampled_points = []
-    for point in points:
-        if point[0] % PIXEL_STEP == 0 and point[1] % PIXEL_STEP == 0:
-            sampled_points.append(point)
+        base["reason"] = "PIXEL_DENSITY_HIGH"
+        return base
     candidates = []
-    best = None
+    coarse_best = None
     for candidate_y in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
         for candidate_x in range(ROI_HALF - CANDIDATE_SPAN, ROI_HALF + CANDIDATE_SPAN + 1, CANDIDATE_STEP):
-            score = candidate_score(sampled_points, candidate_x, candidate_y)
+            score = candidate_score(points, candidate_x, candidate_y)
+            candidate = {
+                "x": candidate_x,
+                "y": candidate_y,
+                "quality": score[0],
+                "ringScore": score[1],
+                "clutterScore": score[2],
+            }
+            candidates.append(candidate)
+            if coarse_best == None or candidate["quality"] > coarse_best["quality"]:
+                coarse_best = candidate
+    # The four-pixel grid bounds global search cost. A fixed one-pixel local
+    # refinement removes the measured hint/grid phase flicker without changing
+    # capture, ROI, evidence plane, or frame.
+    best = None
+    for candidate_y in range(coarse_best["y"] - REFINEMENT_RADIUS, coarse_best["y"] + REFINEMENT_RADIUS + 1):
+        for candidate_x in range(coarse_best["x"] - REFINEMENT_RADIUS, coarse_best["x"] + REFINEMENT_RADIUS + 1):
+            score = candidate_score(points, candidate_x, candidate_y)
             candidate = {
                 "x": candidate_x,
                 "y": candidate_y,
@@ -186,31 +253,15 @@ def evaluate_plane(name, points, threshold):
         if dx * dx + dy * dy >= DISTINCT_CENTER_DISTANCE_SQUARED and candidate["quality"] > second_quality:
             second_quality = candidate["quality"]
             second_ring_score = candidate["ringScore"]
-    result = {
-        "name": name,
-        "state": "REJECTED",
-        "reason": "RING_SCORE_LOW",
-        "threshold": threshold,
-        "pixelCount": len(points),
-        "x": best["x"],
-        "y": best["y"],
-        "quality": best["quality"],
-        "ringScore": best["ringScore"],
-        "secondQuality": max(0, second_quality),
-        "secondRingScore": second_ring_score,
-        "clutterScore": best["clutterScore"],
-        "occupiedAngularBins": 0,
-        "angularTransitions": 0,
-        "angularRuns": 0,
-        "structuralArcOccupiedBins": 0,
-        "labelSectorOccupiedBins": 0,
-        "structuralCoveragePermille": 0,
-        "labelGapClarityPermille": 0,
-        "radialContrastPermille": 0,
-        "centerUniquenessPermille": 0,
-        "shapeConfidencePermille": 0,
-        "presentation": None,
-    }
+    result = base
+    result["x"] = best["x"]
+    result["y"] = best["y"]
+    result["quality"] = best["quality"]
+    result["ringScore"] = best["ringScore"]
+    result["secondQuality"] = max(0, second_quality)
+    result["secondRingScore"] = second_ring_score
+    result["clutterScore"] = best["clutterScore"]
+    result["centerMargin"] = best["quality"] - max(0, second_quality)
     if best["ringScore"] < MIN_RING_SCORE:
         return result
     if best["quality"] <= 0:
@@ -248,7 +299,11 @@ def public_plane(plane, roi_x, roi_y):
         "name": plane["name"],
         "state": plane["state"],
         "reason": plane["reason"],
+        "thresholdMethod": plane["thresholdMethod"],
         "threshold": plane["threshold"],
+        "nonzeroCount": plane["nonzeroCount"],
+        "nonzeroRatioPermille": plane["nonzeroRatioPermille"],
+        "thresholdDegenerate": plane["thresholdDegenerate"],
         "pixelCount": plane["pixelCount"],
         "referenceX": roi_x + plane["x"],
         "referenceY": roi_y + plane["y"],
@@ -256,6 +311,7 @@ def public_plane(plane, roi_x, roi_y):
         "ringScore": plane["ringScore"],
         "secondQuality": plane["secondQuality"],
         "clutterScore": plane["clutterScore"],
+        "centerMargin": plane["centerMargin"],
         "occupiedAngularBins": plane["occupiedAngularBins"],
         "angularTransitions": plane["angularTransitions"],
         "angularRuns": plane["angularRuns"],
@@ -324,12 +380,18 @@ def main(ctx):
         opponent_histogram[opponent] += 1
         hsv_histogram[hsv] += 1
 
-    opponent_threshold = adaptive_threshold(opponent_histogram, len(image["pixels"]))
-    hsv_threshold = adaptive_threshold(hsv_histogram, len(image["pixels"]))
+    opponent_threshold = otsu_threshold(opponent_histogram)
+    hsv_threshold = otsu_threshold(hsv_histogram)
+    strict_threshold = {
+        "method": "FIXED_STRICT_RGB", "threshold": 1,
+        "nonzeroCount": len(strict_points),
+        "nonzeroRatioPermille": len(strict_points) * 1000 // (ROI_SIZE * ROI_SIZE),
+        "degenerate": False,
+    }
     planes = [
-        evaluate_plane("STRICT_RGB", strict_points, 1),
-        evaluate_plane("ORANGE_OPPONENT", points_at_or_above(opponent_scores, opponent_threshold), opponent_threshold),
-        evaluate_plane("HSV_ORANGE", points_at_or_above(hsv_scores, hsv_threshold), hsv_threshold),
+        evaluate_plane("STRICT_RGB", strict_points, strict_threshold),
+        evaluate_plane("ORANGE_OPPONENT", points_at_or_above(opponent_scores, opponent_threshold["threshold"]), opponent_threshold),
+        evaluate_plane("HSV_ORANGE", points_at_or_above(hsv_scores, hsv_threshold["threshold"]), hsv_threshold),
     ]
     adaptive_viable = []
     strict_viable = None

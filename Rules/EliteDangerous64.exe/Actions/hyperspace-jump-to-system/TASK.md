@@ -9,7 +9,10 @@ stellar-angle clearance. Only then does it align at 0% through the strict
 `HYPERSPACE_CHARGE` Compass purpose (ten-pixel entry, then three consecutive
 SOLID observations within the twelve-pixel verification band). This is only a
 bounded handoff to the required `align-visible-target` child, which owns exact
-reticle centering before any FSD input. It immediately rechecks substantial stellar coverage
+reticle centering before any FSD input. A current `DASHED` three-quarter
+destination reticle is acceptable under exact identity and stable-centre
+evidence; hyperspace does not require the presentation to become `SOLID`. It
+immediately rechecks substantial stellar coverage
 from that Compass-aligned target line before visible-target fine alignment, so
 a destination behind the arrival star is cleared before its reticle becomes
 washed out. It then fine-aligns, rechecks substantial stellar coverage again,
@@ -52,7 +55,7 @@ strict Compass and visible-target Gates. At most two such escapes are allowed;
 FSD input is never sent through a currently obstructed target line.
 
 Compass and stellar evidence never substitute for visible-target completion.
-An UNKNOWN visible target, deadline, WGC, schema, runtime, or any other child
+An UNKNOWN or ambiguous visible target, deadline, WGC, schema, runtime, or any other child
 failure is terminal before FSD control. If the game nevertheless returns
 `ALIGNMENT_REQUIRED` after charge begins, the Action cancels that charge and
 fails explicitly; it does not perform attitude correction under active charge.

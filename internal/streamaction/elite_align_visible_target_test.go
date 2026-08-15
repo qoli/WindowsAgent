@@ -96,6 +96,31 @@ func TestEliteAlignVisibleTargetAcquiresIdentityThenTracksReticle(t *testing.T) 
 	}
 }
 
+func TestEliteAlignVisibleTargetAcceptsIdentityBoundDashedReticle(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePositionWithPresentation(9, 6, 10.8, "DASHED"),
+			visiblePositionWithPresentation(8, 5, 9.4, "DASHED"),
+			visiblePositionWithPresentation(7, 4, 8.1, "DASHED"),
+			visiblePositionWithPresentation(6, 3, 6.7, "DASHED"),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "ARIETIS SECTOR LO-F A12-1", "stopBeforeAlign": false, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"presentation":"DASHED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.controls) != 0 {
+		t.Fatalf("already-centred dashed reticle authorized controls: %v", caller.controls)
+	}
+	if strings.Count(joinEventPhases(reporter.payloads), `"presentation":"DASHED"`) != 5 {
+		t.Fatalf("events=%s", joinEventPhases(reporter.payloads))
+	}
+}
+
 func TestEliteAlignVisibleTargetKeepsContinuousReticleTrackThroughPillarOcclusion(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 46), visibleHeat("KNOWN", 46)},
@@ -214,10 +239,15 @@ func visibleHeat(state string, percent any) json.RawMessage {
 }
 
 func visiblePosition(x, y, distance float64) json.RawMessage {
+	return visiblePositionWithPresentation(x, y, distance, "SOLID")
+}
+
+func visiblePositionWithPresentation(x, y, distance float64, presentation string) json.RawMessage {
 	value, _ := json.Marshal(map[string]any{"schemaVersion": 1, "target": map[string]any{
 		"state": "DETECTED", "referenceX": 960 + x, "referenceY": 540 + y,
 		"offsetX": x, "offsetY": y, "centerDistancePixels": distance,
-		"reason": "TEST", "rawTexts": []string{"ESCAPE", "VECTOR"},
+		"reason": "TEST", "presentation": presentation, "occupiedAngularBins": 24, "angularRuns": 8,
+		"rawTexts": []string{"ESCAPE", "VECTOR"},
 	}, "timing": map[string]any{}, "evidence": map[string]any{"capturedAt": "2026-08-13T01:02:03Z"}})
 	return value
 }

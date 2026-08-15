@@ -455,7 +455,13 @@ after the game has already auto-selected the plotted route's next jump. It
 coarsely aligns through Compass, runs the current-frame stellar obstruction
 Gate before and after visible-target fine alignment, and permits at most two
 trend-guided Supercruise escapes when the destination projects through the
-local star. Only a `CLEAR` target line may reach `hyperspace-control`.
+local star. The identity-bound local reticle tracker accepts both `SOLID` and
+`DASHED` three-quarter destination rings. Its adaptive planes use deterministic
+same-frame non-zero Otsu thresholds, all retained pixels, a four-pixel coarse
+centre grid, and a fixed one-pixel local refinement; degenerate histograms or
+ambiguous centres remain `UNKNOWN` and authorize no steering. Only a `CLEAR`
+target line and completed stable visible alignment may reach
+`hyperspace-control`.
 It then requires charging before stable cockpit absence, and sends 0% on the first
 returning cockpit frame after transit has been established. Stable cockpit and
 Supercruise HUD evidence then complete the child at

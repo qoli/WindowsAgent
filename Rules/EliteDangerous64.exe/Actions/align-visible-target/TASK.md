@@ -51,6 +51,13 @@ failures remain explicit.
 `escape-vector-visible-position` Gate. The latter must actually detect the
 two-line blue reticle label; a SOLID Compass marker alone never selects it.
 
+After exact destination identity acquisition, current-frame local tracking
+accepts either the reviewed `SOLID` or `DASHED` three-quarter selected-target
+reticle presentation. A `DASHED` ring is valid position evidence for a plotted
+hyperspace destination; it does not bypass identity, heat, stable-centre,
+stellar-obstruction, or caller-owned FSD Gates. `UNKNOWN` still authorizes no
+steering.
+
 The Action never searches for an absent target. An UNKNOWN target frame emits
 no attitude command, and eight consecutive misses fail explicitly. The owning
 workflow must first use Compass or another domain Action to bring the selected

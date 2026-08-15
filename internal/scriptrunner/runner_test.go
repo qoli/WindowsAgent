@@ -249,7 +249,14 @@ func reticleFixturePixels(centerX, centerY int, dashed bool, ring uint32, backgr
 					continue
 				}
 			}
-			pixels[y*140+x] = ring
+			// WGC/JPEG anti-aliasing gives the real thin reticle a small score
+			// distribution. Preserve that property so deterministic non-zero Otsu
+			// is tested instead of a physically impossible constant histogram.
+			pixel := ring
+			if (x+y)%3 == 0 {
+				pixel += 0x030200
+			}
+			pixels[y*140+x] = pixel
 		}
 	}
 	return pixels
@@ -2064,6 +2071,52 @@ func TestEliteSupercruiseVisibleReticleUsesAdaptivePlaneForDimDashedRingOnMagent
 	if len(evidence["planes"].([]any)) != 3 || evidence["selectionReason"] != "MAX_THREE_QUARTER_SHAPE_CONFIDENCE_THEN_RADIAL_QUALITY" {
 		t.Fatalf("evidence = %#v", evidence)
 	}
+	selectedPlane := evidence["planes"].([]any)[2].(map[string]any)
+	if selectedPlane["thresholdMethod"] != "OTSU" || selectedPlane["thresholdDegenerate"] != false ||
+		selectedPlane["nonzeroCount"].(float64) == 0 || selectedPlane["centerMargin"].(float64) <= 0 {
+		t.Fatalf("selected plane = %#v", selectedPlane)
+	}
+}
+
+func TestEliteSupercruiseVisibleReticleKeepsDashedRingAcrossOnePixelHintPhases(t *testing.T) {
+	pkg, err := scriptpackage.Load(supercruiseVisibleReticlePackageRoot(t), "elite-dangerous/supercruise-visible-reticle-position")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for axis := 0; axis < 2; axis++ {
+		for delta := -8; delta <= 8; delta++ {
+			centerX, centerY := 78, 78
+			hintX, hintY := 960, 540
+			if axis == 0 {
+				centerX -= delta
+				hintX += delta
+			} else {
+				centerY -= delta
+				hintY += delta
+			}
+			pixels := reticleFixturePixels(centerX, centerY, true, 0x8A5A18, func(x, y int) uint32 {
+				value := uint32((x*5 + y*9) % 18)
+				return (value << 16) | (value << 8) | value
+			})
+			runner, err := New(&compassBroker{pixels: pixels})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := runner.Run(context.Background(), pkg, map[string]any{"hintX": hintX, "hintY": hintY, "evidencePolicy": "HUD_OVERLAY_AWARE"})
+			if err != nil {
+				t.Fatalf("axis=%d delta=%d: %v", axis, delta, err)
+			}
+			var result map[string]any
+			if err := json.Unmarshal(output, &result); err != nil {
+				t.Fatal(err)
+			}
+			target := result["target"].(map[string]any)
+			if target["state"] != "DETECTED" || target["presentation"] != "DASHED" ||
+				math.Abs(target["referenceX"].(float64)-968) > 4 || math.Abs(target["referenceY"].(float64)-548) > 4 {
+				t.Fatalf("axis=%d delta=%d target=%#v", axis, delta, target)
+			}
+		}
+	}
 }
 
 func TestEliteSupercruiseVisibleReticleOcclusionAwareSelectsStrictRGBOnlyAfterAdaptiveRejection(t *testing.T) {
@@ -2128,10 +2181,13 @@ func TestEliteSupercruiseVisibleReticleKeepsSolidTopologyWithoutClosingGap(t *te
 	if err != nil {
 		t.Fatalf("run package: %v", err)
 	}
-	if !strings.Contains(string(output), `"state":"DETECTED"`) ||
-		!strings.Contains(string(output), `"presentation":"SOLID"`) ||
-		strings.Contains(string(output), `"angularRuns":0`) {
-		t.Fatalf("output=%s", output)
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatal(err)
+	}
+	target := result["target"].(map[string]any)
+	if target["state"] != "DETECTED" || target["presentation"] != "SOLID" || target["angularRuns"].(float64) == 0 {
+		t.Fatalf("target=%#v output=%s", target, output)
 	}
 }
 
@@ -2153,7 +2209,9 @@ func TestEliteSupercruiseVisibleReticleRejectsFilledWarmField(t *testing.T) {
 		t.Fatalf("run package: %v", err)
 	}
 	if !strings.Contains(string(output), `"state":"UNKNOWN"`) ||
-		!strings.Contains(string(output), `"reason":"PIXEL_DENSITY_HIGH"`) {
+		!strings.Contains(string(output), `"reason":"PIXEL_DENSITY_HIGH"`) ||
+		!strings.Contains(string(output), `"reason":"HISTOGRAM_DEGENERATE"`) ||
+		!strings.Contains(string(output), `"thresholdDegenerate":true`) {
 		t.Fatalf("output=%s", output)
 	}
 }
