@@ -208,7 +208,7 @@ func TestEliteHyperspaceJumpAcceptsCompletedDashedVisibleTargetBeforeFSD(t *test
 	if caller.hyperspaceControls != 1 || len(caller.alignVisibleInputs) != 1 {
 		t.Fatalf("controls=%d alignVisibleInputs=%v", caller.hyperspaceControls, caller.alignVisibleInputs)
 	}
-	if caller.alignVisibleInputs[0]["targetName"] != "87 Mu Ceti" || caller.alignVisibleInputs[0]["stopBeforeAlign"] != false {
+	if caller.alignVisibleInputs[0]["targetName"] != "87 Mu Ceti" || caller.alignVisibleInputs[0]["stopBeforeAlign"] != false || caller.alignVisibleInputs[0]["centerHintConfirmed"] != true {
 		t.Fatalf("align visible inputs=%v", caller.alignVisibleInputs[0])
 	}
 	if caller.occlusionCalls != 3 {

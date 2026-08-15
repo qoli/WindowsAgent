@@ -34,6 +34,8 @@ DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES = 32
 MIN_TRACKING_HINT = 70
 MAX_TRACKING_HINT_X = 1850
 MAX_TRACKING_HINT_Y = 1010
+SCREEN_CENTER_X = 960
+SCREEN_CENTER_Y = 540
 
 def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None):
     presentation = None
@@ -156,8 +158,11 @@ def main(ctx):
     stop_before_align = ctx.inputs["stopBeforeAlign"] if "stopBeforeAlign" in ctx.inputs else True
     position_source = ctx.inputs["positionSource"] if "positionSource" in ctx.inputs else "DESTINATION"
     heat_policy = ctx.inputs["heatPolicy"] if "heatPolicy" in ctx.inputs else "STRICT"
+    center_hint_confirmed = ctx.inputs["centerHintConfirmed"] if "centerHintConfirmed" in ctx.inputs else False
     if heat_policy == "ESCAPE_VECTOR_CHARGE" and position_source != "ESCAPE_VECTOR":
         fail("ESCAPE_VECTOR_CHARGE heat policy requires the Escape Vector position source")
+    if center_hint_confirmed and position_source != "DESTINATION":
+        fail("centerHintConfirmed is valid only for the destination position source")
     stable_confirmations_required = 2 if position_source == "ESCAPE_VECTOR" else STABLE_CONFIRMATIONS
     if stop_before_align:
         throttle = action.call(id="elite-dangerous/set-throttle", inputs={"percent": 0})
@@ -175,7 +180,12 @@ def main(ctx):
     last_known_heat_percent = None
     last_known_heat_ms = None
     final_target = None
-    tracked_target = None
+    # An owning workflow may provide this Gate only after it has independently
+    # confirmed the exact selected target and completed its identity-bound
+    # Compass alignment. Seed the current screen centre as a local CV hint; the
+    # hint itself never authorizes steering, and the first fresh reticle result
+    # must still be DETECTED before any attitude command is sent.
+    tracked_target = {"referenceX": SCREEN_CENTER_X, "referenceY": SCREEN_CENTER_Y} if center_hint_confirmed else None
     tracked_samples_since_identity = 0
     if position_source == "DESTINATION":
         observe_destination_heat_checkpoint(target_name, 0, command_count, stable)

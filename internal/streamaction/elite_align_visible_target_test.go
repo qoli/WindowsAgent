@@ -121,6 +121,38 @@ func TestEliteAlignVisibleTargetAcceptsIdentityBoundDashedReticle(t *testing.T) 
 	}
 }
 
+func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
+			visiblePositionWithPresentation(8, -5, 9.4, "DASHED"),
+			visiblePositionWithPresentation(7, -4, 8.1, "DASHED"),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) || !contains(string(output), `"presentation":"DASHED"`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if len(caller.positionActions) != 3 {
+		t.Fatalf("position Actions=%v", caller.positionActions)
+	}
+	for index, actionID := range caller.positionActions {
+		if actionID != "elite-dangerous/supercruise-visible-reticle-position" {
+			t.Fatalf("confirmed centre called %s at %d; actions=%v", actionID, index, caller.positionActions)
+		}
+	}
+	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 {
+		t.Fatalf("first centre hint inputs=%v", caller.positionInputs[0])
+	}
+	if contains(joinEventPhases(reporter.payloads), `"observationMode":"IDENTITY_ACQUISITION"`) {
+		t.Fatalf("confirmed centre unexpectedly repeated identity acquisition: %s", joinEventPhases(reporter.payloads))
+	}
+}
+
 func TestEliteAlignVisibleTargetKeepsContinuousReticleTrackThroughPillarOcclusion(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 46), visibleHeat("KNOWN", 46)},

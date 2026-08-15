@@ -415,6 +415,7 @@ def align_visible_destination(target_name):
         inputs={
             "targetName": target_name,
             "stopBeforeAlign": False,
+            "centerHintConfirmed": True,
             "positionSource": "DESTINATION",
             "heatPolicy": "STRICT",
         },

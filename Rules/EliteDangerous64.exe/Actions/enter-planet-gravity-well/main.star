@@ -280,7 +280,7 @@ def main(ctx):
         stream.activity(message="Aligning locked planetary destination", level="info")
         emit_update("ALIGNING", target_name, initial_probe["sample"], status=initial_probe["status"], heat_percent=heat_percent, reason="ESCAPE_VECTOR_NOT_PRESENT_AT_CURRENT_POSITION")
         action.call(id="elite-dangerous/align-station-target", inputs={"mode": "ALIGN", "targetMotion": "STATIC", "trackingSamples": 120, "stopBeforeAlign": True, "controlProfile": "NORMAL_SPACE"})
-        visible_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_name, "stopBeforeAlign": False, "positionSource": "DESTINATION", "heatPolicy": "STRICT"})
+        visible_attempt = action.try_call(id="elite-dangerous/align-visible-target", inputs={"targetName": target_name, "stopBeforeAlign": False, "centerHintConfirmed": True, "positionSource": "DESTINATION", "heatPolicy": "STRICT"})
         visible_reason = "VISIBLE_TARGET_ALIGNMENT_COMPLETED" if visible_attempt["ok"] else "VISIBLE_TARGET_ALIGNMENT_UNAVAILABLE: " + visible_attempt["error"]
         emit_update("ALIGNING", target_name, initial_probe["sample"], status=initial_probe["status"], heat_percent=heat_percent, reason=visible_reason)
 

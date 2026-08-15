@@ -22,6 +22,16 @@ planes on one current 140x140 RGB region and reports the chosen plane, quality,
 topology, and capture time in the alignment stream. Completion still requires
 the tracked marker to remain within 12 reference pixels of the 1920x1080 screen
 centre for three consecutive destination samples.
+
+An owning workflow that has independently confirmed the exact selected target
+and has just completed identity-bound Compass alignment may set
+`centerHintConfirmed=true`. In that explicit mode the first observation uses
+the 1920x1080 screen centre only as a bounded local-CV hint instead of repeating
+the slow label-to-ring acquisition. The hint never authorizes input: a fresh
+`supercruise-visible-reticle-position` `DETECTED` result is still required
+before any Pitch or Yaw pulse. Direct callers default to false, tracking loss
+still returns to exact identity acquisition, and Escape Vector mode rejects the
+flag.
 Destination identity acquisition and local tracking explicitly request the
 `HUD_OVERLAY_AWARE` evidence policy. Adaptive orange remains primary; only
 when both adaptive planes reject a current frame may a valid strict-RGB

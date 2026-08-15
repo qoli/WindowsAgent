@@ -19,6 +19,10 @@ entry it uses the strict `NORMAL_SPACE` Compass profile with the
 Gate; the visible child then requires the current destination focus frame to
 complete its `DESTINATION`/`STRICT` screen-centre Gate. Both children must
 complete at 0% throttle before Supercruise input or acceleration is permitted.
+The caller-owned exact target lock plus each immediately completed Compass
+child authorizes `centerHintConfirmed=true` for the visible child. This seeds
+only a current-frame local reticle observation at screen centre; it does not
+bypass reticle detection, heat, or the three-sample stable-centre Gate.
 If charging later reports `FSD_ALIGNMENT_REQUIRED`, the Action returns to 0%,
 repeats the same Compass-to-visible pair, and restores 100% only after both
 children complete. A Compass handoff alone never authorizes charging recovery.

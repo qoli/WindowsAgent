@@ -12,6 +12,9 @@ bounded handoff to the required `align-visible-target` child, which owns exact
 reticle centering before any FSD input. A current `DASHED` three-quarter
 destination reticle is acceptable under exact identity and stable-centre
 evidence; hyperspace does not require the presentation to become `SOLID`. It
+passes `centerHintConfirmed=true` only after the exact route target and Compass
+handoff are established; the visible child still requires a fresh local
+reticle detection before it can steer. It
 immediately rechecks substantial stellar coverage
 from that Compass-aligned target line before visible-target fine alignment, so
 a destination behind the arrival star is cleared before its reticle becomes

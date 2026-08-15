@@ -22,6 +22,7 @@ type enterPlanetGravityWellCaller struct {
 	distanceIndex          int
 	alignCompass           int
 	alignVisible           int
+	alignVisibleInputs     []map[string]any
 	flightCalls            int
 	autoDropAfterDistances int
 }
@@ -95,6 +96,7 @@ func (c *enterPlanetGravityWellCaller) Call(_ context.Context, id string, inputs
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_STATION_TARGET","completed":true}`), nil
 	case "elite-dangerous/align-visible-target":
 		c.alignVisible++
+		c.alignVisibleInputs = append(c.alignVisibleInputs, inputs)
 		return json.RawMessage(`{"schemaVersion":1,"task":"ALIGN_VISIBLE_TARGET","completed":true}`), nil
 	case "elite-dangerous/request-docking-range":
 		if c.distanceIndex >= len(c.distances) {
@@ -174,6 +176,9 @@ func TestEliteEnterPlanetGravityWellApproachesDropsAndRequiresSecondEscapeVector
 	}
 	if caller.alignCompass != 1 || caller.alignVisible != 1 {
 		t.Fatalf("alignment calls compass=%d visible=%d", caller.alignCompass, caller.alignVisible)
+	}
+	if len(caller.alignVisibleInputs) != 1 || caller.alignVisibleInputs[0]["centerHintConfirmed"] != true {
+		t.Fatalf("visible alignment inputs=%v", caller.alignVisibleInputs)
 	}
 	if caller.toggles != 6 {
 		t.Fatalf("toggles=%d, want initial probe start/cancel, entry/drop, final probe start/cancel", caller.toggles)
