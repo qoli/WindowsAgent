@@ -39,8 +39,10 @@ MAX_TRACKING_HINT_Y = 1010
 SCREEN_CENTER_X = 960
 SCREEN_CENTER_Y = 540
 RELOCALIZATION_VALIDATION_MAX_DELTA_SQUARED = 12.0 * 12.0
+SUPERCRUISE_ASSIST_TRACKING_BIAS_X = -33
+SUPERCRUISE_ASSIST_TRACKING_BIAS_Y = -20
 
-def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0, relocalization_state="INACTIVE", relocalization_attempt=0, confirmed_hint_profile="NONE", relocalization_hint_x=None, relocalization_hint_y=None):
+def emit_update(phase, target_name, sample, command_count, target=None, stable=0, command=None, hold_ms=None, reason=None, error_code=None, error=None, heat_state=None, heat_percent=None, heat_reason=None, observation_mode=None, flight_status=None, flight_prompt_text=None, blue_zone_confirmations=0, relocalization_state="INACTIVE", relocalization_attempt=0, confirmed_hint_profile="NONE", relocalization_hint_x=None, relocalization_hint_y=None, tracking_hint_x=None, tracking_hint_y=None):
     presentation = None
     occupied_bins = None
     angular_runs = None
@@ -54,6 +56,8 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
         evidence_plane = target.get("reticleEvidencePlane", target.get("evidencePlane"))
         evidence_quality = target.get("reticleEvidenceQuality", target.get("evidenceQuality"))
         captured_at = target.get("reticleCapturedAt")
+        tracking_hint_x = target.get("trackingHintX", tracking_hint_x)
+        tracking_hint_y = target.get("trackingHintY", tracking_hint_y)
     stream.emit(
         type="action.align-visible-target.update",
         payload={
@@ -86,6 +90,8 @@ def emit_update(phase, target_name, sample, command_count, target=None, stable=0
             "confirmedHintProfile": confirmed_hint_profile,
             "relocalizationHintX": relocalization_hint_x,
             "relocalizationHintY": relocalization_hint_y,
+            "trackingHintX": tracking_hint_x,
+            "trackingHintY": tracking_hint_y,
             "reason": reason,
             "observationErrorCode": error_code,
             "observationError": error,
@@ -138,8 +144,16 @@ def choose_command(target, position_source):
         return ["PITCH_DOWN" if offset_y > 0 else "PITCH_UP", hold_ms]
     return None
 
-def trackable_hint(target):
-    return target["referenceX"] >= MIN_TRACKING_HINT and target["referenceX"] <= MAX_TRACKING_HINT_X and target["referenceY"] >= MIN_TRACKING_HINT and target["referenceY"] <= MAX_TRACKING_HINT_Y
+def trackable_hint_coordinates(hint):
+    return hint[0] >= MIN_TRACKING_HINT and hint[0] <= MAX_TRACKING_HINT_X and hint[1] >= MIN_TRACKING_HINT and hint[1] <= MAX_TRACKING_HINT_Y
+
+def tracking_hint_for_target(target, confirmed_hint_profile, detected_center):
+    hint_x = int(target["referenceX"])
+    hint_y = int(target["referenceY"])
+    if detected_center and confirmed_hint_profile == "SUPERCRUISE_ASSIST":
+        hint_x += SUPERCRUISE_ASSIST_TRACKING_BIAS_X
+        hint_y += SUPERCRUISE_ASSIST_TRACKING_BIAS_Y
+    return [hint_x, hint_y]
 
 def alternate_hint_for_profile(profile):
     if profile == "HYPERSPACE_CHARGE":
@@ -278,6 +292,7 @@ def main(ctx):
     # hint itself never authorizes steering, and the first fresh reticle result
     # must still be DETECTED before any attitude command is sent.
     tracked_target = {"referenceX": SCREEN_CENTER_X, "referenceY": SCREEN_CENTER_Y} if center_hint_confirmed else None
+    tracked_target_has_detected_center = False
     tracked_samples_since_identity = 0
     fresh_local_track_seen = False
     relocalization_state = "INACTIVE"
@@ -338,20 +353,23 @@ def main(ctx):
                     emit_update("SAFETY_GATE", target_name, sample, command_count, stable=stable, reason="HEAT_UNKNOWN_LIMIT_REACHED", heat_state=heat_state, heat_percent=heat_percent)
                     fail("visible target alignment heat remained UNKNOWN for three consecutive samples")
         observation_mode = "ESCAPE_VECTOR_POSITION"
+        observation_hint = None
         if position_source == "ESCAPE_VECTOR":
             attempt = action.try_call(id="elite-dangerous/escape-vector-visible-position", inputs={})
         elif relocalization_state == "TRIGGERED":
             observation_mode = "RETICLE_RELOCALIZATION"
             relocalization_attempt = 1
+            observation_hint = alternate_hint
             attempt = action.try_call(
                 id="elite-dangerous/supercruise-visible-reticle-position",
                 inputs={"hintX": alternate_hint[0], "hintY": alternate_hint[1], "evidencePolicy": "HUD_OVERLAY_AWARE"},
             )
-        elif tracked_target != None and tracked_samples_since_identity < DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES and trackable_hint(tracked_target):
+        elif tracked_target != None and tracked_samples_since_identity < DESTINATION_IDENTITY_REVALIDATION_TRACKED_SAMPLES and trackable_hint_coordinates(tracking_hint_for_target(tracked_target, confirmed_hint_profile, tracked_target_has_detected_center)):
             observation_mode = "RETICLE_TRACKING"
+            observation_hint = tracking_hint_for_target(tracked_target, confirmed_hint_profile, tracked_target_has_detected_center)
             attempt = action.try_call(
                 id="elite-dangerous/supercruise-visible-reticle-position",
-                inputs={"hintX": int(tracked_target["referenceX"]), "hintY": int(tracked_target["referenceY"]), "evidencePolicy": "HUD_OVERLAY_AWARE"},
+                inputs={"hintX": observation_hint[0], "hintY": observation_hint[1], "evidencePolicy": "HUD_OVERLAY_AWARE"},
             )
         else:
             observation_mode = "IDENTITY_ACQUISITION"
@@ -377,15 +395,20 @@ def main(ctx):
             fail("visible target observation failed: " + text)
 
         target = attempt["output"]["target"]
+        if observation_hint != None:
+            target["trackingHintX"] = observation_hint[0]
+            target["trackingHintY"] = observation_hint[1]
         if observation_mode in ["RETICLE_TRACKING", "RETICLE_RELOCALIZATION"]:
             target["reticleCapturedAt"] = attempt["output"]["evidence"]["capturedAt"]
         final_target = target
         if observation_mode == "RETICLE_RELOCALIZATION":
-            if target["state"] != "DETECTED" or not trackable_hint(target):
+            candidate_tracking_hint = tracking_hint_for_target(target, confirmed_hint_profile, True) if target["state"] == "DETECTED" else None
+            if target["state"] != "DETECTED" or not trackable_hint_coordinates(candidate_tracking_hint):
                 relocalization_state = "MISS"
                 emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=0, reason="ALTERNATE_LOCAL_HINT_RELOCALIZATION_UNKNOWN", heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode, relocalization_state=relocalization_state, relocalization_attempt=relocalization_attempt, confirmed_hint_profile=confirmed_hint_profile, relocalization_hint_x=None if alternate_hint == None else alternate_hint[0], relocalization_hint_y=None if alternate_hint == None else alternate_hint[1])
                 fail("alternate local reticle hint did not produce an unambiguous current-frame position: " + target["reason"])
             tracked_target = target
+            tracked_target_has_detected_center = True
             relocalization_candidate = target
             tracked_samples_since_identity = 0
             relocalization_state = "CANDIDATE_FOUND"
@@ -427,6 +450,7 @@ def main(ctx):
                     unknown_reason = "RETICLE_TRACKING_LOST_RETRY_CONFIRMED_HINT"
                 else:
                     tracked_target = None
+                    tracked_target_has_detected_center = False
                     tracked_samples_since_identity = 0
                     unknown_reason = "RETICLE_TRACKING_LOST_REACQUIRE_IDENTITY"
             else:
@@ -451,6 +475,7 @@ def main(ctx):
             fresh_local_track_seen = True
         if position_source == "DESTINATION":
             tracked_target = target
+            tracked_target_has_detected_center = True
             if observation_mode == "IDENTITY_ACQUISITION":
                 tracked_samples_since_identity = 0
                 # OCR establishes the requested identity and supplies a local

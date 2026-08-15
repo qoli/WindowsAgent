@@ -303,6 +303,41 @@ func TestEliteAlignVisibleTargetRelocalizesInitialConfirmedCenterThroughReviewed
 	}
 }
 
+func TestEliteAlignVisibleTargetBiasesAssistTrackingROIWithoutBiasingControlTarget(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			unknownVisiblePosition(),
+			visiblePositionWithPresentation(3, -91, 91.0, "DASHED"), // true centre 963,449
+			visiblePositionWithPresentation(3, -91, 91.0, "DASHED"), // fresh local validation
+			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
+			visiblePositionWithPresentation(8, -5, 9.4, "DASHED"),
+			visiblePositionWithPresentation(7, -4, 8.1, "DASHED"),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "confirmedHintProfile": "SUPERCRUISE_ASSIST", "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
+		caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 430 ||
+		caller.positionInputs[2]["hintX"].(int64) != 930 || caller.positionInputs[2]["hintY"].(int64) != 429 {
+		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
+	}
+	if len(caller.controls) == 0 || caller.controls[0] != "PITCH_UP" {
+		t.Fatalf("control must use true offset (3,-91), controls=%v", caller.controls)
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"trackingHintX":930`) || !contains(events, `"trackingHintY":429`) ||
+		!contains(events, `"offsetX":3`) || !contains(events, `"offsetY":-91`) ||
+		!contains(events, `"command":"PITCH_UP"`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
 func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats:     []json.RawMessage{visibleHeat("KNOWN", 23)},

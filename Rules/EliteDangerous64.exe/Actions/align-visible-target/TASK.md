@@ -62,6 +62,18 @@ same `HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring
 algorithm at the caller-selected profile hint. Non-confirmed callers must use
 `NONE`; the child never infers a profile from the target name or prompt.
 
+After any detector result establishes a true reticle centre, the
+`SUPERCRUISE_ASSIST` profile routes the next `LOCAL_140` crop with a fixed
+`(-33,-20)` hint bias. Live A/B evidence showed exact-centre hint `(963,449)`
+rejecting a dense Assist crop while `(930,430)` detected the same ring. The
+bias applies only to the crop origin: the stored target, the 12-pixel
+relocalization consistency Gate, centre completion, and `choose_command` all
+continue to use the detector's unbiased true centre and offsets.
+`HYPERSPACE_CHARGE`, `NONE`, and the initial screen-centre seed remain
+unbiased. Bounds are checked against the actual biased hint sent to the local
+Action, and stream events publish that `trackingHintX/Y` separately from the
+true `referenceX/Y`.
+
 The alternate observation never establishes identity and never authorizes an
 attitude, throttle, Blue-zone, heat, or FSD decision. A detected alternate
 candidate only supplies the hint for the next fresh `LOCAL_140` tracking frame.
