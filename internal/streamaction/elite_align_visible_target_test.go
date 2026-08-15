@@ -319,10 +319,10 @@ func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testi
 		t.Fatalf("positions=%v controls=%v", caller.positionActions, caller.controls)
 	}
 	events := joinEventPhases(reporter.payloads)
-	if caller.positionInputs[1]["hintX"].(int64) != 960 || caller.positionInputs[1]["hintY"].(int64) != 450 ||
+	if caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 430 ||
 		!contains(events, `"relocalizationState":"MISS"`) || !contains(events, `"relocalizationAttempt":1`) ||
 		!contains(events, `"confirmedHintProfile":"SUPERCRUISE_ASSIST"`) ||
-		!contains(events, `"relocalizationHintX":960`) || !contains(events, `"relocalizationHintY":450`) {
+		!contains(events, `"relocalizationHintX":930`) || !contains(events, `"relocalizationHintY":430`) {
 		t.Fatalf("events=%s", events)
 	}
 }
