@@ -3,10 +3,11 @@
 ## Status
 
 **Partially landed.** Per-game prompt configuration, PC-local frame-tap input,
-direct LAN oMLX requests, warm-up, independent control, failure isolation, and
-event append passed live Windows acceptance. The idle control service is
-installed as an independent process supervised by the external Watchdog,
-without starting a Visual Log inference run.
+direct LAN oMLX requests, warm-up, passive process-owned production, failure
+isolation, and event append are implemented. The older high-level start/stop
+interface passed live Windows acceptance but was retired after it allowed one
+task's cleanup to remove observation capability from later tasks. The passive
+lifecycle still requires fresh live Windows acceptance after deployment.
 
 ## Responsibility
 
@@ -27,37 +28,41 @@ description <Gemma description>
 The event marks the description `untrusted` and retains the model ID, latency,
 Evidence slot, and local capture identity.
 
-## Independent data path and lifecycle
+## Independent data path and passive lifecycle
 
-Evidence and Visual Log own separate schedules. Evidence records continuously
-at 1 FPS. On each Visual Log interval, the PC process reads the newest frame
-newer than its own cursor from the configured named shared-memory tap, converts
-that local BGRX frame to a bounded JPEG for model input, and sends exactly one
-image to the configured oMLX LAN endpoint. It does not call the screenshot API,
-the Evidence range API, or an Evidence single-frame HTTP route.
+Evidence and Visual Log own separate schedules. Evidence records at 1 FPS
+during an explicitly requested finite run. On each Visual Log interval, the PC
+process reads the newest frame newer than its own cursor from the configured
+named shared-memory tap, converts that local BGRX frame to a bounded JPEG for
+model input, and sends exactly one image to the configured oMLX LAN endpoint.
+It does not call the screenshot API, the Evidence range API, or an Evidence
+single-frame HTTP route.
 
-The high-level model starts and stops only a Visual Log run:
+The process exposes only health and authenticated read-only status:
 
 ```text
+GET    /healthz
 GET    /v1/visual-log/status
-POST   /v1/visual-log/runs
-DELETE /v1/visual-log/runs/current
 ```
 
-The control server is authenticated and loopback-only. Starting creates a new
-session and performs the configured warm-up. Stopping cancels only that run and
-leaves Evidence untouched.
+The status server is authenticated and loopback-only. The high-level model has
+no Visual Log lifecycle operation. The external Watchdog owns process
+availability; process start creates one producer session and begins waiting for
+a fresh matching Evidence frame. That frame performs the configured warm-up,
+and later fresh frames trigger one description attempt per Visual Log interval.
+When Evidence is idle there is no new frame, so Visual Log waits without model
+calls. A later Evidence run resumes input without a separate Visual Log start.
 
-The resident control process is kept available in the interactive-user session
-and remains ready to accept those requests. Process startup or Watchdog recovery
-never starts inference; the Visual Log run is still explicitly on demand.
-
-An absent, stale, mismatched, or changing tap frame drops that index sample. An
-invalid or low-quality Gemma answer records a Visual Log failure when
-provenance is available and drops only that sample. Neither path can terminate
-Evidence. No old frame, prior description, alternate model, screenshot call,
-or hidden provider is substituted. The high-level model can always bypass the
-index and request authoritative Evidence ranges.
+No new tap frame is a normal wait. A stale, mismatched, invalid, or unreadable
+frame drops that index sample. An unavailable model, invalid or low-quality
+Gemma answer, or unavailable journal also drops only that sample; the next
+fresh frame is attempted with the same configured model and journal. These
+operational failures cannot stop the passive producer or Evidence. Invalid
+configuration, required secret, frame-tap ABI, or process setup remains an
+explicit process failure for Watchdog recovery. No old frame, prior
+description, alternate model, screenshot call, hidden provider, or substitute
+journal is used. The high-level model can always bypass the index and request
+authoritative Evidence ranges.
 
 ## Elite Dangerous prompt
 
@@ -95,3 +100,5 @@ gaps and zero tap failures. The production capture Agent remained PID 15032.
 ## Deferred
 
 - automatic retention policy for Evidence recordings.
+- live Windows acceptance of passive startup, oMLX-late recovery, journal-late
+  recovery, Evidence idle/resume, and the removed mutation routes.

@@ -10,18 +10,13 @@ import (
 )
 
 const (
-	RunIdle     = "idle"
-	RunWarming  = "warming"
-	RunActive   = "active"
-	RunStopping = "stopping"
-	RunStopped  = "stopped"
-	RunFailed   = "failed"
+	StateWarming = "warming"
+	StateActive  = "active"
+	StateStopped = "stopped"
+	StateFailed  = "failed"
 )
 
-var ErrRunActive = errors.New("visual log run is already active")
-var ErrRunInactive = errors.New("visual log run is not active")
-
-type RunStatus struct {
+type Status struct {
 	State          string    `json:"state"`
 	SessionID      string    `json:"sessionId,omitempty"`
 	StartedAt      time.Time `json:"startedAt,omitempty"`
@@ -32,62 +27,56 @@ type RunStatus struct {
 	Error          string    `json:"error,omitempty"`
 }
 
-type Controller struct {
+type Producer struct {
 	mu     sync.Mutex
 	root   context.Context
 	runner Runner
-	status RunStatus
+	status Status
 	cancel context.CancelFunc
 	done   chan struct{}
+	err    error
 	now    func() time.Time
 }
 
-func NewController(root context.Context, runner Runner) (*Controller, error) {
+func NewProducer(root context.Context, runner Runner) (*Producer, error) {
 	if root == nil {
-		return nil, errors.New("visual log controller context is required")
+		return nil, errors.New("visual log producer context is required")
 	}
 	if err := runner.Validate(); err != nil {
 		return nil, err
 	}
 	now := time.Now
-	return &Controller{
+	producer := &Producer{
 		root: root, runner: runner, now: now,
-		status: RunStatus{State: RunIdle, UpdatedAt: now().UTC()},
-	}, nil
+	}
+	producer.start()
+	return producer, nil
 }
 
-func (c *Controller) Start() (RunStatus, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.status.State == RunWarming || c.status.State == RunActive || c.status.State == RunStopping {
-		return c.status, ErrRunActive
-	}
-	sessionID, err := NewIdentity("vlogsession")
-	if err != nil {
-		return c.status, err
-	}
+func (c *Producer) start() {
 	startedAt := c.now().UTC()
 	runContext, cancel := context.WithCancel(c.root)
 	done := make(chan struct{})
 	c.cancel = cancel
 	c.done = done
-	c.status = RunStatus{State: RunWarming, SessionID: sessionID, StartedAt: startedAt, UpdatedAt: startedAt}
+	c.status = Status{State: StateWarming, SessionID: c.runner.SessionID, StartedAt: startedAt, UpdatedAt: startedAt}
 	runner := c.runner
-	runner.SessionID = sessionID
+	originalWarmed := runner.OnWarmed
 	originalCommitted := runner.OnCommitted
 	originalDropped := runner.OnDropped
 	runner.OnWarmed = func() {
-		c.update(func(status *RunStatus) {
-			if status.State == RunWarming {
-				status.State = RunActive
+		c.update(func(status *Status) {
+			if status.State == StateWarming {
+				status.State = StateActive
 			}
 		})
+		if originalWarmed != nil {
+			originalWarmed()
+		}
 	}
 	runner.OnCommitted = func(event eventstream.Event) {
-		c.update(func(status *RunStatus) {
-			if status.State != RunStopping {
-				status.State = RunActive
-			}
+		c.update(func(status *Status) {
+			status.State = StateActive
 			status.LastSequence = event.Sequence
 		})
 		if originalCommitted != nil {
@@ -95,7 +84,7 @@ func (c *Controller) Start() (RunStatus, error) {
 		}
 	}
 	runner.OnDropped = func(sample DroppedSample) {
-		c.update(func(status *RunStatus) {
+		c.update(func(status *Status) {
 			status.DroppedSamples++
 			status.LastDropStage = sample.Stage
 		})
@@ -106,37 +95,37 @@ func (c *Controller) Start() (RunStatus, error) {
 	go func() {
 		defer close(done)
 		err := runner.Run(runContext)
-		c.update(func(status *RunStatus) {
+		c.update(func(status *Status) {
+			c.err = err
 			if err != nil {
-				status.State = RunFailed
+				status.State = StateFailed
 				status.Error = err.Error()
 				return
 			}
-			status.State = RunStopped
+			status.State = StateStopped
 		})
 	}()
-	return c.status, nil
 }
 
-func (c *Controller) Stop() (RunStatus, error) {
+func (c *Producer) Done() <-chan struct{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.status.State != RunWarming && c.status.State != RunActive {
-		return c.status, ErrRunInactive
-	}
-	c.status.State = RunStopping
-	c.status.UpdatedAt = c.now().UTC()
-	c.cancel()
-	return c.status, nil
+	return c.done
 }
 
-func (c *Controller) Status() RunStatus {
+func (c *Producer) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.err
+}
+
+func (c *Producer) Status() Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.status
 }
 
-func (c *Controller) Close() {
+func (c *Producer) Close() {
 	c.mu.Lock()
 	cancel := c.cancel
 	done := c.done
@@ -149,7 +138,7 @@ func (c *Controller) Close() {
 	}
 }
 
-func (c *Controller) update(change func(*RunStatus)) {
+func (c *Producer) update(change func(*Status)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	change(&c.status)

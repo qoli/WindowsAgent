@@ -1,7 +1,6 @@
 package visualloghttp
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -39,10 +38,10 @@ func (f *eventFixture) Append(_ context.Context, request eventstream.AppendReque
 	return eventstream.Event{Sequence: f.sequence, SessionID: request.SessionID, ObservedAt: request.ObservedAt, Type: request.Type}, nil
 }
 
-func TestAuthenticatedControlStartsAndStopsIndependentRun(t *testing.T) {
-	controller := testController(t)
-	defer controller.Close()
-	server, err := New(controller, controlToken)
+func TestAuthenticatedStatusIsReadOnly(t *testing.T) {
+	producer := testProducer(t)
+	defer producer.Close()
+	server, err := New(producer, controlToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,24 +50,27 @@ func TestAuthenticatedControlStartsAndStopsIndependentRun(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized status = %d", unauthorized.Code)
 	}
-	start := httptest.NewRequest(http.MethodPost, "/v1/visual-log/runs", bytes.NewReader([]byte(`{}`)))
-	start.Header.Set("Content-Type", "application/json")
-	start.Header.Set("Authorization", "Bearer "+controlToken)
-	started := httptest.NewRecorder()
-	server.Handler().ServeHTTP(started, start)
-	if started.Code != http.StatusCreated {
-		t.Fatalf("start status=%d body=%s", started.Code, started.Body.String())
+	statusRequest := httptest.NewRequest(http.MethodGet, "/v1/visual-log/status", nil)
+	statusRequest.Header.Set("Authorization", "Bearer "+controlToken)
+	status := httptest.NewRecorder()
+	server.Handler().ServeHTTP(status, statusRequest)
+	if status.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", status.Code, status.Body.String())
 	}
-	stop := httptest.NewRequest(http.MethodDelete, "/v1/visual-log/runs/current", nil)
-	stop.Header.Set("Authorization", "Bearer "+controlToken)
-	stopped := httptest.NewRecorder()
-	server.Handler().ServeHTTP(stopped, stop)
-	if stopped.Code != http.StatusOK {
-		t.Fatalf("stop status=%d body=%s", stopped.Code, stopped.Body.String())
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/v1/visual-log/runs", nil),
+		httptest.NewRequest(http.MethodDelete, "/v1/visual-log/runs/current", nil),
+	} {
+		request.Header.Set("Authorization", "Bearer "+controlToken)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("mutation route %s %s status=%d body=%s", request.Method, request.URL.Path, response.Code, response.Body.String())
+		}
 	}
 }
 
-func testController(t *testing.T) *visuallog.Controller {
+func testProducer(t *testing.T) *visuallog.Producer {
 	t.Helper()
 	config := visuallog.Config{
 		SchemaVersion: 2, ModuleID: "elite-dangerous/visual-log", Kind: "visual-log", Runtime: visuallog.RuntimeID,
@@ -84,9 +86,9 @@ func testController(t *testing.T) *visuallog.Controller {
 		Config: config, Frames: frameFixture{}, Describer: describerFixture{}, Events: &eventFixture{},
 		SessionID: "bootstrap_session", InstanceID: "instance_1",
 	}
-	controller, err := visuallog.NewController(context.Background(), runner)
+	producer, err := visuallog.NewProducer(context.Background(), runner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return controller
+	return producer
 }

@@ -1,6 +1,6 @@
 ---
 name: use-visual-log
-description: Operate WindowsAgent's independent finite Evidence recordings and visual-log process, and interpret Gemma output only as an untrusted timeline index. Use when a supervising model needs to request a bounded Evidence run, start or stop on-demand Gemma scene descriptions, correlate Action timestamps with recorded motion, retrieve or page visual-log events for a UTC range, locate a likely interval with a contact sheet, verify an Evidence ZIP and its MP4 manifest, or decide which recorded range still needs authoritative review.
+description: Operate WindowsAgent's independent finite Evidence recordings and passive visual-log process, and interpret Gemma output only as an untrusted timeline index. Use when a supervising model needs to request a bounded Evidence run, confirm passive Gemma indexing health, correlate Action timestamps with recorded motion, retrieve or page visual-log events for a UTC range, locate a likely interval with a contact sheet, verify an Evidence ZIP and its MP4 manifest, or decide which recorded range still needs authoritative review.
 ---
 
 # Use Visual Log
@@ -11,10 +11,11 @@ against the independent evidence layer before making a game-state claim.
 
 ## Preserve the module boundaries
 
-- Keep evidence recording, visual logging, and high-level analysis on separate
-  lifecycles.
-- Request Evidence explicitly through its own finite-run interface. Never
-  start or extend Evidence as a side effect of starting Visual Log.
+- Keep evidence recording, passive visual logging, and high-level analysis in
+  separate processes and data contracts. Only Evidence has a task-controlled
+  lifecycle.
+- Request Evidence explicitly through its own finite-run interface. Visual Log
+  has no lifecycle operation and can never start, extend, pause, or stop Evidence.
 - Evidence has no extension, pause, manual-stop, or delete operation. A new run
   may be requested only after the previous run reaches a terminal state.
 - Do not synchronize the visual-log interval with the evidence recorder's 1 FPS
@@ -38,12 +39,12 @@ Dangerous values for another game.
 For operation-only work, do not edit the prompt, sampling, model, interval, or
 Evidence max-frame age. Those are game configuration and development decisions.
 
-Use the operator-provided control and event Bearer tokens without printing,
+Use the operator-provided status, Evidence, and event Bearer tokens without printing,
 logging, committing, or copying them into the Rule. The default local surfaces
 are:
 
 ```text
-visual-log control  http://127.0.0.1:8789
+visual-log status   http://127.0.0.1:8789
 event journal       http://127.0.0.1:8788
 evidence control    http://127.0.0.1:8792
 ```
@@ -92,24 +93,27 @@ deadline; do not retry in a loop or treat the conflict as an extension. Invalid
 or over-3600 duration input is a caller error and must be corrected rather than
 clamped.
 
-## Start the on-demand Visual Log run
+## Confirm the passive Visual Log producer
 
-1. Check `GET /healthz` on the visual-log control process.
+1. Check `GET /healthz` on the visual-log process.
 2. Send authenticated `GET /v1/visual-log/status`.
-3. If state is `warming`, `active`, or `stopping`, do not send a duplicate
-   start request.
-4. If logging is useful and no run is active, send authenticated
-   `POST /v1/visual-log/runs` with `Content-Type: application/json` and the
-   exact body `{}`.
-5. Expect HTTP `201` and state `warming`. Poll status with a bounded deadline
-   until it becomes `active`, `failed`, or the task no longer needs the log.
-6. Record `sessionId`, `startedAt`, `lastSequence`, `droppedSamples`, and
-   `lastDropStage`. State `active` proves only that warm-up ended and the loop
-   is running; it does not prove that any useful description was committed.
+3. Require one process-owned `sessionId` and a non-terminal state. Treat
+   `updatedAt` as the last status change, not a heartbeat; `/healthz` proves
+   current process availability. Record `lastSequence`, `droppedSamples`, and
+   `lastDropStage`.
+4. Do not send `POST` or `DELETE`: Visual Log exposes no lifecycle mutation.
+5. Start only the finite Evidence run. Visual Log waits while no fresh matching
+   frame exists, performs configured warm-up on the first fresh frame, and then
+   attempts one Gemma description per configured interval when newer frames
+   arrive.
+6. `active` proves only that warm-up ended and the passive loop is running; it
+   does not prove that any useful description was committed. Confirm advancing
+   observation sequences or inspect drops after Evidence begins.
 
-The model needs warm-up, but a warm-up frame-tap read or model failure drops that
+A warm-up frame, model, output-validation, or journal failure drops only that
 attempt and does not authorize a substitute model, old frame, prior
-description, or direct screenshot request.
+description, alternate journal, or direct screenshot request. Later fresh
+Evidence frames must still be attempted with the configured provider.
 
 ## Query a time range
 
@@ -245,21 +249,16 @@ not alter the active Evidence run. If the needed time was never covered by a
 run, report the missing coverage; starting a new run cannot recover past
 frames.
 
-## Stop when no longer useful
+## Leave the passive producer available
 
-Send authenticated `DELETE /v1/visual-log/runs/current` only when the current
-high-level task no longer benefits from new index entries. Expect HTTP `200`
-and state `stopping`, then use status to observe `stopped` or `failed` when
-needed. Stopping the run affects only the visual logger.
+Do not stop, restart, or otherwise manage Visual Log after a range query or
+high-level task completes. When a finite Evidence run reaches `completed`, the
+producer naturally becomes quiet because no newer frame-tap input exists. A
+later Evidence run resumes input without a separate Visual Log start.
 
-Do not stop a run owned by another active task merely because one range query
-completed. Use `sessionId` and current task context to establish ownership.
-
-When a finite Evidence run reaches `completed` while its owned Visual Log is
-still active, stop that Visual Log once no later index entry can help. New
-`lastDropStage: evidence` samples after the immutable Evidence `endsAt` normally
-mean there is no newer frame-tap source. Report them as an uncovered tail; do
-not reinterpret them as gaps in the already committed Evidence interval.
+Only an authorized installation, deployment, or process-health repair may
+restart its Scheduled Task or Watchdog target. Process lifecycle work belongs
+to the runtime operator, never to the supervising high-level model.
 
 ## Diagnose without architectural bypasses
 
@@ -273,10 +272,9 @@ not reinterpret them as gaps in the already committed Evidence interval.
   `lastError` and do not substitute request-driven screenshots.
 - Evidence `completed` with gaps or missing slots remains authoritative about
   those absences. Never fill them from the frame tap or Gemma output.
-- `failed` with an event-append error means the visual logger cannot guarantee
-  durable output. Leave evidence untouched and fall back to evidence analysis.
-- HTTP `409 visual_log_already_active` means re-read status; do not restart the
-  process.
+- An event-append drop means that sample is not durable. The passive producer
+  remains alive and tries the configured journal again for later fresh frames;
+  leave Evidence untouched and use authoritative Evidence analysis meanwhile.
 - HTTP `409 event_cursor_ahead` means the requested cursor exceeds the current
   journal. Reconcile the stored cursor with `lastSequence`; do not guess data.
 - Authentication, process, frame-tap publication, model, journal, domain interpretation, and

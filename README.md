@@ -114,7 +114,7 @@ The Action runtime and registration refactor is partially landed:
   of that journal and the exact Action OSD state. It accepts only an explicit
   loopback or private-LAN listener and uses a browser-facing token distinct from
   the loopback journal credential;
-- `windows-visual-log.exe` is an optional independent producer that warms one
+- `windows-visual-log.exe` is an optional independent passive producer that warms one
   exactly configured oMLX model, reads the newest frame from the Evidence
   recorder's PC-local shared-memory tap on its own loop tick, and appends an
   untrusted timestamped scene description. Invalid model output
@@ -415,10 +415,11 @@ remains on authenticated loopback `127.0.0.1:8788` and is never exposed to the
 browser.
 
 Run the partially landed Elite Dangerous visual log as its own process after
-the Evidence recorder and event stream are healthy. Both processes may remain
-idle; before starting a Visual Log run, explicitly start a finite Evidence run
-and wait for its state to become `recording`. The model key file is local
-operator configuration and must not be stored in the Rule:
+the Evidence recorder and event stream are healthy. The Visual Log process
+immediately waits for fresh PC-local Evidence frames; before requesting a
+finite Evidence run, require its process and read-only status surface to be
+healthy. The model key file is local operator configuration and must not be
+stored in the Rule:
 
 ```powershell
 .\.build\windows-visual-log.exe `
@@ -427,24 +428,26 @@ operator configuration and must not be stored in the Rule:
   --model-api-key-file (Resolve-Path .\omlx-api.key) `
   --event-base-url http://127.0.0.1:8788 `
   --event-token-file (Resolve-Path .\event-stream.token) `
-  --control-listen 127.0.0.1:8789 `
-  --control-token-file (Resolve-Path .\visual-log-control.token) `
+  --status-listen 127.0.0.1:8789 `
+  --status-token-file (Resolve-Path .\visual-log-control.token) `
   --log-file (Join-Path $PWD "visual-log.jsonl") `
   --status-file (Join-Path $PWD "visual-log-status.json")
 ```
 
-The independent process starts idle. A high-level model may request and stop
-one logging run through its authenticated loopback control interface:
+The independent process owns one passive producer loop for its full process
+lifetime. Its loopback interface is read-only:
 
 ```text
 GET    http://127.0.0.1:8789/v1/visual-log/status
-POST   http://127.0.0.1:8789/v1/visual-log/runs       body: {}
-DELETE http://127.0.0.1:8789/v1/visual-log/runs/current
 ```
 
-Starting a run creates a new producer session and performs the configured
-warm-up before the process-owned description loop becomes active. Stopping the
-run leaves the independent process idle and has no path to the evidence layer.
+The high-level model cannot start or stop Visual Log. A fresh matching Evidence
+frame triggers configured warm-up and later description attempts; no new frame
+is a normal wait state. Model, output-validation, or journal failures drop only
+that sample and the next fresh frame is attempted with the same configured
+provider. No old frame, prior description, alternate model, or substitute
+journal is used. Evidence remains finite and explicitly requested through its
+own interface; Visual Log has no path to start, extend, pause, or stop it.
 
 Run the evidence recorder as a separate on-demand PC process. The process stays
 idle until an authenticated finite recording run is accepted. The token is
@@ -507,11 +510,12 @@ rejects an existing malformed token instead of replacing it. Append, replay,
 and NDJSON live-stream requests require the exact token; `/healthz` is the only
 unauthenticated route.
 
-Install the Evidence Recorder and Visual Log control processes independently.
+Install the Evidence Recorder control process and passive Visual Log producer independently.
 The installer creates independent interactive-user Tasks without their own
-trigger or restart policy and starts each resident control service for health
-acceptance. The Watchdog keeps those processes available; service availability
-does not start an Evidence recording or Visual Log inference run:
+trigger or restart policy and starts each resident process for health
+acceptance. The Watchdog keeps those processes available. Evidence remains
+idle until a finite run is requested; Visual Log waits passively for fresh
+Evidence frames and therefore performs no inference while Evidence is idle:
 
 ```powershell
 .\scripts\install-windows-observation-processes.ps1 `
@@ -531,8 +535,8 @@ Add exact `event-web`, `evidence-recorder`, and `visual-log` targets to the
 Watchdog configuration. Event Web depends on healthy `event-stream`; Visual Log
 depends on healthy `event-stream` and `evidence-recorder`. The executables remain
 independent processes, while the Watchdog owns only process availability.
-Evidence Recorder and Visual Log expose authenticated run-control APIs, and
-neither starts a run as a side effect of installation or recovery.
+Evidence Recorder exposes authenticated finite-run control. Visual Log exposes
+authenticated read-only status and owns no externally controllable run.
 
 After all module installers have created their watchdog-managed Tasks, author
 an exact local configuration containing all six targets and install the
@@ -1007,7 +1011,7 @@ internal/evidencehttp/           authenticated Evidence run-control and read int
 internal/mfvideo/                native Media Foundation Evidence encoder and decoder
 internal/recordingindicator/      session-local Evidence recording-presence signal
 internal/visuallog/              strict Game config, evidence/model adapters, and producer loop
-internal/visualloghttp/          authenticated loopback visual-log control adapter
+internal/visualloghttp/          authenticated read-only visual-log status adapter
 internal/watchdog/               target probes, bounded recovery, atomic status
 internal/scenereducer/            cursor, scene delta, and append recovery
 internal/foreground/             foreground process observation

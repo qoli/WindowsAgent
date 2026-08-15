@@ -74,13 +74,14 @@ func TestRunnerWarmsWithoutPublishingThenCommitsTimestampedDescription(t *testin
 	}}
 	events := &fakeAppender{}
 	runner := Runner{Config: config, Frames: frames, Describer: describer, Events: events, SessionID: "session_1", InstanceID: "instance_1"}
-	if err := runner.Warmup(context.Background()); err != nil {
+	var cursor time.Time
+	if err := runner.warmup(context.Background(), &cursor); err != nil {
 		t.Fatal(err)
 	}
 	if len(events.requests) != 0 || frames.calls != 1 || describer.calls != 1 {
 		t.Fatalf("warmup frames=%d descriptions=%d events=%d", frames.calls, describer.calls, len(events.requests))
 	}
-	result, err := runner.Observe(context.Background())
+	result, err := runner.observe(context.Background(), &cursor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestRunnerWarmsWithoutPublishingThenCommitsTimestampedDescription(t *testin
 	}
 }
 
-func TestRunOnceAdvancesEvidenceCursorBetweenWarmupAndObservation(t *testing.T) {
+func TestRunnerAdvancesEvidenceCursorBetweenWarmupAndObservation(t *testing.T) {
 	config, _ := ParseConfig([]byte(validConfigJSON()))
 	first := testFrame()
 	second := testFrame()
@@ -110,7 +111,11 @@ func TestRunOnceAdvancesEvidenceCursorBetweenWarmupAndObservation(t *testing.T) 
 	source := &cursorFrameSource{frames: []Frame{first, second}}
 	events := &fakeAppender{}
 	runner := Runner{Config: config, Frames: source, Describer: &fakeDescriber{description: Description{Text: "Vast illuminated station interior surrounds large curved industrial docking structures.", ModelID: config.Model.ID}}, Events: events, SessionID: "session_1", InstanceID: "instance_1"}
-	if err := runner.RunOnce(context.Background()); err != nil {
+	var cursor time.Time
+	if err := runner.warmup(context.Background(), &cursor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.observe(context.Background(), &cursor); err != nil {
 		t.Fatal(err)
 	}
 	if len(source.after) != 2 || !source.after[0].IsZero() || source.after[1] != first.ScheduledAt {
@@ -136,7 +141,8 @@ func TestRunnerModelFailurePublishesFailureDropsSampleAndContinues(t *testing.T)
 		Config: config, Frames: &fakeFrameSource{frame: testFrame()}, Describer: &fakeDescriber{err: cause},
 		Events: events, SessionID: "session_1", InstanceID: "instance_1",
 	}
-	result, err := runner.Observe(context.Background())
+	var cursor time.Time
+	result, err := runner.observe(context.Background(), &cursor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +165,7 @@ func TestRunnerModelFailurePublishesFailureDropsSampleAndContinues(t *testing.T)
 		Text:    "Vast illuminated station interior surrounds large curved industrial docking structures.",
 		ModelID: config.Model.ID,
 	}
-	next, err := runner.Observe(context.Background())
+	next, err := runner.observe(context.Background(), &cursor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,22 +174,49 @@ func TestRunnerModelFailurePublishesFailureDropsSampleAndContinues(t *testing.T)
 	}
 }
 
-func TestRunnerEvidenceFailureDropsSampleWithoutInventingForegroundFailureEvent(t *testing.T) {
+func TestRunnerNoNewEvidenceWaitsWithoutDropOrEvent(t *testing.T) {
 	config, _ := ParseConfig([]byte(validConfigJSON()))
 	events := &fakeAppender{}
 	runner := Runner{
 		Config: config, Frames: &fakeFrameSource{err: ErrNoNewEvidenceFrame},
 		Describer: &fakeDescriber{}, Events: events, SessionID: "session_1", InstanceID: "instance_1",
 	}
-	result, err := runner.Observe(context.Background())
+	var cursor time.Time
+	result, err := runner.observe(context.Background(), &cursor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Dropped == nil || result.Dropped.Stage != "evidence" || !strings.Contains(result.Dropped.Cause.Error(), "no new evidence frame") {
+	if result.Dropped != nil || result.Event != nil {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(events.requests) != 0 {
 		t.Fatalf("capture failure invented events: %+v", events.requests)
+	}
+}
+
+func TestRunnerJournalFailureDropsSampleAndContinues(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	events := &fakeAppender{err: errors.New("journal temporarily unavailable")}
+	runner := Runner{
+		Config: config, Frames: &fakeFrameSource{frame: testFrame()}, Describer: &fakeDescriber{description: Description{
+			Text: "Vast illuminated station interior surrounds large curved industrial docking structures.", ModelID: config.Model.ID,
+		}}, Events: events, SessionID: "session_1", InstanceID: "instance_1",
+	}
+	var cursor time.Time
+	result, err := runner.observe(context.Background(), &cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Dropped == nil || result.Dropped.Stage != "journal" || !strings.Contains(result.Dropped.Cause.Error(), "journal temporarily unavailable") {
+		t.Fatalf("result = %+v", result)
+	}
+	events.err = nil
+	next, err := runner.observe(context.Background(), &cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Event == nil || next.Dropped != nil {
+		t.Fatalf("next = %+v", next)
 	}
 }
 

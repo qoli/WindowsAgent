@@ -89,33 +89,40 @@ func (r Runner) Validate() error {
 	return nil
 }
 
-func (r Runner) Warmup(ctx context.Context) error {
-	var cursor time.Time
-	return r.warmup(ctx, &cursor)
-}
-
 func (r Runner) warmup(ctx context.Context, cursor *time.Time) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
-	warmupContext, cancel := context.WithTimeout(ctx, r.Config.WarmupFrameTimeout())
-	defer cancel()
 	var frame Frame
 	for {
-		var err error
-		frame, err = r.Frames.Latest(warmupContext, *cursor)
-		if err == nil {
+		warmupContext, cancel := context.WithTimeout(ctx, r.Config.WarmupFrameTimeout())
+		for {
+			var err error
+			frame, err = r.Frames.Latest(warmupContext, *cursor)
+			if err == nil {
+				cancel()
+				break
+			}
+			if ctx.Err() != nil {
+				cancel()
+				return ctx.Err()
+			}
+			delay := r.Config.Interval()
+			if !errors.Is(err, ErrNoNewEvidenceFrame) {
+				r.drop(DroppedSample{Stage: "warmup_evidence", Cause: err})
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-warmupContext.Done():
+				timer.Stop()
+				cancel()
+			case <-timer.C:
+				continue
+			}
 			break
 		}
-		if !errors.Is(err, ErrNoNewEvidenceFrame) {
-			return fmt.Errorf("read warmup evidence frame: %w", err)
-		}
-		timer := time.NewTimer(100 * time.Millisecond)
-		select {
-		case <-warmupContext.Done():
-			timer.Stop()
-			return fmt.Errorf("wait for warmup evidence frame: %w", warmupContext.Err())
-		case <-timer.C:
+		if !frame.ScheduledAt.IsZero() {
+			break
 		}
 	}
 	*cursor = frame.ScheduledAt
@@ -130,11 +137,6 @@ func (r Runner) warmup(ctx context.Context, cursor *time.Time) error {
 	return nil
 }
 
-func (r Runner) Observe(ctx context.Context) (ObservationResult, error) {
-	var cursor time.Time
-	return r.observe(ctx, &cursor)
-}
-
 func (r Runner) observe(ctx context.Context, cursor *time.Time) (ObservationResult, error) {
 	if err := r.Validate(); err != nil {
 		return ObservationResult{}, err
@@ -143,6 +145,9 @@ func (r Runner) observe(ctx context.Context, cursor *time.Time) (ObservationResu
 	if err != nil {
 		if ctx.Err() != nil {
 			return ObservationResult{}, ctx.Err()
+		}
+		if errors.Is(err, ErrNoNewEvidenceFrame) {
+			return ObservationResult{}, nil
 		}
 		dropped := DroppedSample{Stage: "evidence", Cause: err}
 		r.drop(dropped)
@@ -155,7 +160,9 @@ func (r Runner) observe(ctx context.Context, cursor *time.Time) (ObservationResu
 			return ObservationResult{}, ctx.Err()
 		}
 		if appendErr := r.appendFailure(ctx, frame, "model", err); appendErr != nil {
-			return ObservationResult{}, fmt.Errorf("describe visual log frame: %v; append failure event: %w", err, appendErr)
+			dropped := DroppedSample{Stage: "journal", CaptureID: frame.CaptureID, Cause: fmt.Errorf("record model failure after %v: %w", err, appendErr)}
+			r.drop(dropped)
+			return ObservationResult{Dropped: &dropped}, nil
 		}
 		dropped := DroppedSample{Stage: "model", CaptureID: frame.CaptureID, Cause: err}
 		r.drop(dropped)
@@ -174,7 +181,12 @@ func (r Runner) observe(ctx context.Context, cursor *time.Time) (ObservationResu
 	}
 	event, err := r.Events.Append(ctx, r.request(frame, r.Config.Output.ObservationType, payload))
 	if err != nil {
-		return ObservationResult{}, fmt.Errorf("append visual log observation: %w", err)
+		if ctx.Err() != nil {
+			return ObservationResult{}, ctx.Err()
+		}
+		dropped := DroppedSample{Stage: "journal", CaptureID: frame.CaptureID, Cause: fmt.Errorf("append visual log observation: %w", err)}
+		r.drop(dropped)
+		return ObservationResult{Dropped: &dropped}, nil
 	}
 	if r.OnCommitted != nil {
 		r.OnCommitted(event)
@@ -217,15 +229,6 @@ func (r Runner) Run(ctx context.Context) error {
 			}
 		}
 	}
-}
-
-func (r Runner) RunOnce(ctx context.Context) error {
-	var cursor time.Time
-	if err := r.warmup(ctx, &cursor); err != nil {
-		return err
-	}
-	_, err := r.observe(ctx, &cursor)
-	return err
 }
 
 func (r Runner) drop(sample DroppedSample) {

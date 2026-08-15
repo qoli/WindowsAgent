@@ -27,18 +27,17 @@ import (
 )
 
 type commandConfig struct {
-	ConfigFile       string
-	ModelBaseURL     string
-	ModelKeyFile     string
-	EventBaseURL     string
-	EventTokenFile   string
-	ControlListen    string
-	ControlTokenFile string
-	LogFile          string
-	StatusFile       string
-	ModelTimeout     time.Duration
-	Once             bool
-	ValidateOnly     bool
+	ConfigFile      string
+	ModelBaseURL    string
+	ModelKeyFile    string
+	EventBaseURL    string
+	EventTokenFile  string
+	StatusListen    string
+	StatusTokenFile string
+	LogFile         string
+	StatusFile      string
+	ModelTimeout    time.Duration
+	ValidateOnly    bool
 }
 
 func main() {
@@ -71,8 +70,8 @@ func run() (runErr error) {
 		return err
 	}
 	if cfg.ValidateOnly {
-		if _, err := readSecret(cfg.ControlTokenFile, 32); err != nil {
-			return fmt.Errorf("read visual log control token: %w", err)
+		if _, err := readSecret(cfg.StatusTokenFile, 32); err != nil {
+			return fmt.Errorf("read visual log status token: %w", err)
 		}
 		return nil
 	}
@@ -124,65 +123,67 @@ func run() (runErr error) {
 		OnDropped: func(sample visuallog.DroppedSample) {
 			logger.Warn("visual_log_sample_dropped", "stage", sample.Stage, "capture_id", sample.CaptureID, "error", sample.Cause.Error())
 		},
+		OnWarmed: func() {
+			logger.Info("visual_log_model_warmup_completed")
+			_ = visuallog.WriteJSONAtomic(cfg.StatusFile, status(manifest, "active", sessionID, 0, ""))
+		},
 	}
 	logger.Info("visual_log_process_started", "module_id", manifest.ModuleID, "target_executable", manifest.TargetExecutable,
 		"model", manifest.Model.ID, "interval_ms", manifest.IntervalMS, "warmup_calls", manifest.WarmupCalls)
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if cfg.Once {
-		if err := visuallog.WriteJSONAtomic(cfg.StatusFile, status(manifest, "warming", sessionID, 0, "")); err != nil {
-			return err
+	statusToken, err := readSecret(cfg.StatusTokenFile, 32)
+	if err != nil {
+		return fmt.Errorf("read visual log status token: %w", err)
+	}
+	if err := visuallog.WriteJSONAtomic(cfg.StatusFile, status(manifest, "warming", sessionID, 0, "")); err != nil {
+		return err
+	}
+	producer, err := visuallog.NewProducer(signalContext, runner)
+	if err != nil {
+		return err
+	}
+	defer producer.Close()
+	statusAPI, err := visualloghttp.New(producer, statusToken)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", cfg.StatusListen)
+	if err != nil {
+		return fmt.Errorf("listen on visual log status %s: %w", cfg.StatusListen, err)
+	}
+	defer listener.Close()
+	server := &http.Server{
+		Handler: statusAPI.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second,
+		ErrorLog: log.New(&slogWriter{logger: logger}, "", 0),
+	}
+	logger.Info("visual_log_status_started", "listen", listener.Addr().String())
+	serveError := make(chan error, 1)
+	go func() { serveError <- server.Serve(listener) }()
+	select {
+	case err := <-serveError:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve visual log status: %w", err)
 		}
-		if err := runner.RunOnce(signalContext); err != nil {
-			return err
+	case <-producer.Done():
+		if err := producer.Err(); err != nil {
+			return fmt.Errorf("run passive visual log producer: %w", err)
 		}
-	} else {
-		controlToken, err := readSecret(cfg.ControlTokenFile, 32)
-		if err != nil {
-			return fmt.Errorf("read visual log control token: %w", err)
+		if signalContext.Err() == nil {
+			return errors.New("passive visual log producer stopped without process cancellation")
 		}
-		controller, err := visuallog.NewController(signalContext, runner)
-		if err != nil {
-			return err
+	case <-signalContext.Done():
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			return fmt.Errorf("shutdown visual log status: %w", err)
 		}
-		defer controller.Close()
-		controlAPI, err := visualloghttp.New(controller, controlToken)
-		if err != nil {
-			return err
-		}
-		listener, err := net.Listen("tcp", cfg.ControlListen)
-		if err != nil {
-			return fmt.Errorf("listen on visual log control %s: %w", cfg.ControlListen, err)
-		}
-		defer listener.Close()
-		server := &http.Server{
-			Handler: controlAPI.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
-			WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second,
-			ErrorLog: log.New(&slogWriter{logger: logger}, "", 0),
-		}
-		if err := visuallog.WriteJSONAtomic(cfg.StatusFile, status(manifest, "idle", "", 0, "")); err != nil {
-			return err
-		}
-		logger.Info("visual_log_control_started", "listen", listener.Addr().String())
-		serveError := make(chan error, 1)
-		go func() { serveError <- server.Serve(listener) }()
-		select {
-		case err := <-serveError:
-			if !errors.Is(err, http.ErrServerClosed) {
-				return fmt.Errorf("serve visual log control: %w", err)
-			}
-		case <-signalContext.Done():
-			shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := server.Shutdown(shutdownContext); err != nil {
-				return fmt.Errorf("shutdown visual log control: %w", err)
-			}
-			if err := <-serveError; err != nil && !errors.Is(err, http.ErrServerClosed) {
-				return fmt.Errorf("serve visual log control during shutdown: %w", err)
-			}
+		if err := <-serveError; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve visual log status during shutdown: %w", err)
 		}
 	}
-	logger.Info("visual_log_process_stopped", "reason", "cancellation_or_once")
+	logger.Info("visual_log_process_stopped", "reason", "process_cancellation")
 	return visuallog.WriteJSONAtomic(cfg.StatusFile, status(manifest, "stopped", sessionID, 0, ""))
 }
 
@@ -195,12 +196,11 @@ func parseFlags(args []string) (commandConfig, error) {
 	flags.StringVar(&cfg.ModelKeyFile, "model-api-key-file", "", "absolute model API key file")
 	flags.StringVar(&cfg.EventBaseURL, "event-base-url", "http://127.0.0.1:8788", "loopback event API origin")
 	flags.StringVar(&cfg.EventTokenFile, "event-token-file", "", "absolute event API token file")
-	flags.StringVar(&cfg.ControlListen, "control-listen", "127.0.0.1:8789", "loopback visual log control listen address")
-	flags.StringVar(&cfg.ControlTokenFile, "control-token-file", "", "absolute visual log control bearer token file")
+	flags.StringVar(&cfg.StatusListen, "status-listen", "127.0.0.1:8789", "loopback visual log read-only status listen address")
+	flags.StringVar(&cfg.StatusTokenFile, "status-token-file", "", "absolute visual log read-only status bearer token file")
 	flags.StringVar(&cfg.LogFile, "log-file", "", "absolute process JSONL log path")
 	flags.StringVar(&cfg.StatusFile, "status-file", "", "absolute atomically replaced status path")
 	flags.DurationVar(&cfg.ModelTimeout, "model-timeout", 30*time.Second, "maximum duration of one oMLX request")
-	flags.BoolVar(&cfg.Once, "once", false, "warm the model, commit one description, and exit")
 	flags.BoolVar(&cfg.ValidateOnly, "validate-only", false, "validate config and secrets without contacting runtimes")
 	if err := flags.Parse(args); err != nil {
 		return commandConfig{}, fmt.Errorf("parse flags: %w", err)
@@ -210,7 +210,7 @@ func parseFlags(args []string) (commandConfig, error) {
 	}
 	for name, value := range map[string]string{
 		"--config": cfg.ConfigFile, "--model-api-key-file": cfg.ModelKeyFile, "--event-token-file": cfg.EventTokenFile,
-		"--control-token-file": cfg.ControlTokenFile, "--log-file": cfg.LogFile, "--status-file": cfg.StatusFile,
+		"--status-token-file": cfg.StatusTokenFile, "--log-file": cfg.LogFile, "--status-file": cfg.StatusFile,
 	} {
 		if value == "" || !filepath.IsAbs(value) {
 			return commandConfig{}, fmt.Errorf("%s must be an absolute path", name)
@@ -219,7 +219,7 @@ func parseFlags(args []string) (commandConfig, error) {
 	if cfg.ModelTimeout <= 0 || cfg.ModelTimeout > 5*time.Minute {
 		return commandConfig{}, errors.New("--model-timeout must be greater than zero and at most five minutes")
 	}
-	if err := validateLoopbackListen(cfg.ControlListen); err != nil {
+	if err := validateLoopbackListen(cfg.StatusListen); err != nil {
 		return commandConfig{}, err
 	}
 	return cfg, nil
@@ -228,11 +228,11 @@ func parseFlags(args []string) (commandConfig, error) {
 func validateLoopbackListen(value string) error {
 	host, port, err := net.SplitHostPort(value)
 	if err != nil || port == "" {
-		return errors.New("--control-listen must be an explicit loopback IP and port")
+		return errors.New("--status-listen must be an explicit loopback IP and port")
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || !ip.IsLoopback() {
-		return errors.New("--control-listen must use an explicit loopback IP")
+		return errors.New("--status-listen must use an explicit loopback IP")
 	}
 	return nil
 }

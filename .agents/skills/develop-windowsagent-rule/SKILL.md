@@ -157,7 +157,7 @@ Report each evidence layer separately:
 5. **Goal** — the user's complete requested outcome is confirmed.
 
 When temporal behavior matters, read `../use-visual-log/SKILL.md` completely
-before starting Evidence or Visual Log. Action events are authoritative for the
+before starting Evidence and confirming passive Visual Log health. Action events are authoritative for the
 controller; Visual Log descriptions are only an untrusted timeline index;
 verified Evidence MP4 and manifest are the visual record. Do not use slow visual
 sampling to claim absence of a shorter-lived state.

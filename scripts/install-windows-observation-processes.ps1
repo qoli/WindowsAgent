@@ -1,4 +1,4 @@
-# Installs resident Evidence and Visual Log control services as independent interactive-user processes.
+# Installs the resident Evidence control process and passive Visual Log producer as independent interactive-user processes.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -23,7 +23,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $evidenceDescription = "gameGuide independent resident Evidence control service; interactive-user session required"
-$visualLogDescription = "gameGuide independent resident Visual Log control service; interactive-user session required"
+$visualLogDescription = "gameGuide independent passive Visual Log producer; interactive-user session required"
 
 function Get-WindowsPESubsystem {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -238,7 +238,7 @@ foreach ($config in @($evidenceConfig, $visualLogConfig)) {
     }
 }
 Assert-RegularTokenFile -Path $evidenceToken -Label "Evidence token"
-Assert-RegularTokenFile -Path $visualLogToken -Label "Visual Log control token"
+Assert-RegularTokenFile -Path $visualLogToken -Label "Visual Log status token"
 Assert-RegularTokenFile -Path $eventToken -Label "event stream token"
 Assert-RegularTokenFile -Path $modelToken -Label "model API key"
 
@@ -246,7 +246,10 @@ $modelBaseURLResolution = Resolve-VisualLogModelBaseURL `
     -Requested $VisualLogModelBaseURL `
     -TaskName $VisualLogTaskName `
     -Description $visualLogDescription `
-    -PreviousDescriptions @("gameGuide independent on-demand Visual Log; interactive-user session required") `
+    -PreviousDescriptions @(
+        "gameGuide independent resident Visual Log control service; interactive-user session required",
+        "gameGuide independent on-demand Visual Log; interactive-user session required"
+    ) `
     -AllowChange $AllowVisualLogModelBaseURLChange.IsPresent
 $resolvedModelBaseURL = [uri]$modelBaseURLResolution.URL
 if ($resolvedModelBaseURL.Scheme -notin @("http", "https") -or -not $resolvedModelBaseURL.Host) {
@@ -255,7 +258,10 @@ if ($resolvedModelBaseURL.Scheme -notin @("http", "https") -or -not $resolvedMod
 Assert-VisualLogModelEndpoint -BaseURL $resolvedModelBaseURL -APIKeyPath $modelToken
 
 Stop-OwnedTaskProcess -TaskName $VisualLogTaskName -Description $visualLogDescription `
-    -PreviousDescriptions @("gameGuide independent on-demand Visual Log; interactive-user session required") `
+    -PreviousDescriptions @(
+        "gameGuide independent resident Visual Log control service; interactive-user session required",
+        "gameGuide independent on-demand Visual Log; interactive-user session required"
+    ) `
     -ProcessName "windows-visual-log" -ExecutablePath $installedVisualLog
 Stop-OwnedTaskProcess -TaskName $EvidenceTaskName -Description $evidenceDescription `
     -PreviousDescriptions @("gameGuide independent finite Evidence recorder; interactive-user session required") `
@@ -304,8 +310,8 @@ $visualLogArguments = @(
     "--model-api-key-file", (ConvertTo-NativeQuotedArgument $modelToken),
     "--event-base-url", "http://127.0.0.1:8788",
     "--event-token-file", (ConvertTo-NativeQuotedArgument $eventToken),
-    "--control-listen", $VisualLogListen,
-    "--control-token-file", (ConvertTo-NativeQuotedArgument $visualLogToken),
+    "--status-listen", $VisualLogListen,
+    "--status-token-file", (ConvertTo-NativeQuotedArgument $visualLogToken),
     "--log-file", (ConvertTo-NativeQuotedArgument (Join-Path $resolvedDataDir "visual-log.jsonl")),
     "--status-file", (ConvertTo-NativeQuotedArgument (Join-Path $resolvedDataDir "visual-log-status.json"))
 ) -join " "
@@ -340,6 +346,7 @@ $visualLogProcess = Wait-HealthyProcess `
         health = "ok"
     }
     visual_log = [ordered]@{
+        mode = "passive"
         task_name = $VisualLogTaskName
         task_state = (Get-ScheduledTask -TaskName $VisualLogTaskName).State.ToString()
         trigger_count = @((Get-ScheduledTask -TaskName $VisualLogTaskName).Triggers | Where-Object { $null -ne $_ }).Count
