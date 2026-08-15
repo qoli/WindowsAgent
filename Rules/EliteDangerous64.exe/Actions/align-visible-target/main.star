@@ -159,7 +159,7 @@ def alternate_hint_for_profile(profile):
     if profile == "HYPERSPACE_CHARGE":
         return [800, 345]
     if profile == "SUPERCRUISE_ASSIST":
-        return [930, 430]
+        return [930, 450]
     fail("centerHintConfirmed requires an explicit caller-owned confirmedHintProfile")
 
 def normalize_prompt_text(text):

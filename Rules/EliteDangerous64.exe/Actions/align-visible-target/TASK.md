@@ -55,7 +55,7 @@ exists only for the initial confirmed centre hint. A caller setting
 `confirmedHintProfile`; `NONE` is rejected. `HYPERSPACE_CHARGE` owns alternate
 hint `(800,345)`, based on post-Compass live A/B evidence that detected the
 reticle at `(807,345)` while `(960,540)` was `UNKNOWN`.
-`SUPERCRUISE_ASSIST` independently owns alternate hint `(930,430)`. If current
+`SUPERCRUISE_ASSIST` independently owns alternate hint `(930,450)`. If current
 `LOCAL_140` tracking at `(960,540)` returns `UNKNOWN`, the Action makes exactly
 one further call to the same `supercruise-visible-reticle-position` classifier,
 same `HUD_OVERLAY_AWARE` policy, same thresholding, and same polar-ring

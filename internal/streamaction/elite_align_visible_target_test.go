@@ -323,7 +323,7 @@ func TestEliteAlignVisibleTargetBiasesAssistTrackingROIWithoutBiasingControlTarg
 		t.Fatalf("output=%s error=%v", output, err)
 	}
 	if caller.positionInputs[0]["hintX"].(int64) != 960 || caller.positionInputs[0]["hintY"].(int64) != 540 ||
-		caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 430 ||
+		caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 450 ||
 		caller.positionInputs[2]["hintX"].(int64) != 933 || caller.positionInputs[2]["hintY"].(int64) != 437 {
 		t.Fatalf("position inputs=%v", caller.positionInputs[:3])
 	}
@@ -354,10 +354,10 @@ func TestEliteAlignVisibleTargetFailsWhenReviewedAlternateHintIsUnknown(t *testi
 		t.Fatalf("positions=%v controls=%v", caller.positionActions, caller.controls)
 	}
 	events := joinEventPhases(reporter.payloads)
-	if caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 430 ||
+	if caller.positionInputs[1]["hintX"].(int64) != 930 || caller.positionInputs[1]["hintY"].(int64) != 450 ||
 		!contains(events, `"relocalizationState":"MISS"`) || !contains(events, `"relocalizationAttempt":1`) ||
 		!contains(events, `"confirmedHintProfile":"SUPERCRUISE_ASSIST"`) ||
-		!contains(events, `"relocalizationHintX":930`) || !contains(events, `"relocalizationHintY":430`) {
+		!contains(events, `"relocalizationHintX":930`) || !contains(events, `"relocalizationHintY":450`) {
 		t.Fatalf("events=%s", events)
 	}
 }
