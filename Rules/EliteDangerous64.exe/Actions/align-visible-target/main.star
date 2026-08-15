@@ -273,9 +273,18 @@ def main(ctx):
             entered_center_gate = False
             boundary_jitter_samples = 0
             if observation_mode == "RETICLE_TRACKING":
-                tracked_target = None
-                tracked_samples_since_identity = 0
-                unknown_reason = "RETICLE_TRACKING_LOST_REACQUIRE_IDENTITY"
+                if center_hint_confirmed:
+                    # The caller has already bound identity and the previous
+                    # current-frame local result supplied this hint. Preserve
+                    # that hint only for bounded stationary re-observation; an
+                    # UNKNOWN frame still sends no input and eight consecutive
+                    # misses still fail.
+                    tracked_samples_since_identity = 0
+                    unknown_reason = "RETICLE_TRACKING_LOST_RETRY_CONFIRMED_HINT"
+                else:
+                    tracked_target = None
+                    tracked_samples_since_identity = 0
+                    unknown_reason = "RETICLE_TRACKING_LOST_REACQUIRE_IDENTITY"
             else:
                 unknown_reason = "VISIBLE_TARGET_UNKNOWN"
             emit_update("OBSERVING", target_name, sample, command_count, target=target, stable=stable, reason=unknown_reason, heat_state=heat_state, heat_percent=heat_percent, observation_mode=observation_mode)

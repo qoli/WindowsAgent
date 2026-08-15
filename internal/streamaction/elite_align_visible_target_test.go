@@ -153,6 +153,34 @@ func TestEliteAlignVisibleTargetUsesConfirmedCompassCenterAsFreshReticleHint(t *
 	}
 }
 
+func TestEliteAlignVisibleTargetRetriesConfirmedLocalHintWithoutIdentityFallback(t *testing.T) {
+	caller := &alignVisibleTargetCaller{
+		heats: []json.RawMessage{visibleHeat("KNOWN", 23)},
+		positions: []json.RawMessage{
+			unknownVisiblePosition(),
+			visiblePositionWithPresentation(9, -6, 10.8, "DASHED"),
+			visiblePositionWithPresentation(8, -5, 9.4, "DASHED"),
+			visiblePositionWithPresentation(7, -4, 8.1, "DASHED"),
+		},
+	}
+	reporter := &fixtureReporter{}
+	output, err := (Runner{Sleep: immediateSleep}).Run(context.Background(), loadEliteAlignVisibleTargetPackage(t), map[string]any{
+		"targetName": "DROWNED RAT ORBITAL", "stopBeforeAlign": false, "centerHintConfirmed": true, "positionSource": "DESTINATION", "heatPolicy": "STRICT",
+	}, caller, reporter)
+	if err != nil || !contains(string(output), `"completed":true`) {
+		t.Fatalf("output=%s error=%v", output, err)
+	}
+	for index, actionID := range caller.positionActions {
+		if actionID != "elite-dangerous/supercruise-visible-reticle-position" {
+			t.Fatalf("confirmed hint fell back to %s at %d; actions=%v", actionID, index, caller.positionActions)
+		}
+	}
+	events := joinEventPhases(reporter.payloads)
+	if !contains(events, `"reason":"RETICLE_TRACKING_LOST_RETRY_CONFIRMED_HINT"`) || contains(events, `"observationMode":"IDENTITY_ACQUISITION"`) {
+		t.Fatalf("events=%s", events)
+	}
+}
+
 func TestEliteAlignVisibleTargetKeepsContinuousReticleTrackThroughPillarOcclusion(t *testing.T) {
 	caller := &alignVisibleTargetCaller{
 		heats: []json.RawMessage{visibleHeat("KNOWN", 46), visibleHeat("KNOWN", 46)},

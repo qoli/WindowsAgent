@@ -30,8 +30,11 @@ the 1920x1080 screen centre only as a bounded local-CV hint instead of repeating
 the slow label-to-ring acquisition. The hint never authorizes input: a fresh
 `supercruise-visible-reticle-position` `DETECTED` result is still required
 before any Pitch or Yaw pulse. Direct callers default to false, tracking loss
-still returns to exact identity acquisition, and Escape Vector mode rejects the
-flag.
+in the default mode still returns to exact identity acquisition, and Escape
+Vector mode rejects the flag. In confirmed-centre mode a tracking miss retains
+only the last fresh local hint for bounded stationary re-observation. UNKNOWN
+still sends no input and eight consecutive misses fail; the retained hint is
+never treated as current position evidence.
 Destination identity acquisition and local tracking explicitly request the
 `HUD_OVERLAY_AWARE` evidence policy. Adaptive orange remains primary; only
 when both adaptive planes reject a current frame may a valid strict-RGB
