@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "title": "Cyberpunk 2077 click at current pointer position",
+  "operation": "click-current-position",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md"
+}

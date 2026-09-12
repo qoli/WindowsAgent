@@ -171,6 +171,14 @@ The Action runtime and registration refactor is partially landed:
   compensation, and Agent shutdown release the exact resolved key. A Rule
   package may declare literal canonical keys directly or select a game-specific
   binding source; callers still choose only schema-valid logical selections;
+- `windows-pointer-action-v1` is a game-neutral finite runtime for one
+  foreground-bound left click. A package explicitly selects either a centered
+  1920x1080 reference point or the current primary-screen pointer position;
+  the current-position operation does not move the pointer and reports the
+  exact position used;
+- Cyberpunk 2077 exposes both pointer operations. Its
+  `cyberpunk-2077/click-current-pointer` Action accepts no inputs and emits one
+  fixed 40 ms left click at the already-positioned pointer;
 - `elite-dangerous/ui-control` performs exactly one model-selected logical UI
   movement or selection. It is intentionally a slow screenshot/one-key
   interaction surface for tasks such as arranging `AUTO LAUNCH`;

@@ -83,10 +83,14 @@ diagnostic-only filename.
   the player's active binding preset and an optional bounded hold override.
 - `elite-dangerous/ship-attitude-hold`: one leased pitch, yaw, or roll key hold
   with explicit start, renewal, and release evidence.
+- `cyberpunk-2077/pointer-click`: one foreground-validated left click at a
+  caller-supplied centered 1920x1080 reference point.
+- `cyberpunk-2077/click-current-pointer`: one foreground-validated 40 ms left
+  click at the current primary-screen pointer position without moving it.
 
 ## Deferred
 
-- pointer input, chords, multiple independent held-key leases, and arbitrary
+- chords, multiple independent held-key leases, and arbitrary
   multi-key sequences;
 - authenticated remote Action invocation and a complete durable finite-action
   lifecycle journal.

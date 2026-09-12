@@ -15,10 +15,16 @@ type Manifest struct {
 	SchemaVersion uint32 `json:"schemaVersion"`
 	Version       uint32 `json:"version"`
 	Title         string `json:"title"`
+	Operation     string `json:"operation,omitempty"`
 	InputSchema   string `json:"inputSchema"`
 	OutputSchema  string `json:"outputSchema"`
 	TaskDocument  string `json:"taskDocument"`
 }
+
+const (
+	OperationClickReference       = "click-reference"
+	OperationClickCurrentPosition = "click-current-position"
+)
 
 type Package struct {
 	Manifest     Manifest
@@ -45,8 +51,21 @@ func Load(root string) (*Package, error) {
 	if err := dec.Decode(&manifest); err != nil {
 		return nil, err
 	}
-	if manifest.SchemaVersion != 1 || manifest.Version == 0 || manifest.Title == "" || manifest.InputSchema != "input.schema.json" || manifest.OutputSchema != "output.schema.json" || manifest.TaskDocument != "TASK.md" {
+	if manifest.Version == 0 || manifest.Title == "" || manifest.InputSchema != "input.schema.json" || manifest.OutputSchema != "output.schema.json" || manifest.TaskDocument != "TASK.md" {
 		return nil, errors.New("pointer Action manifest is invalid")
+	}
+	switch manifest.SchemaVersion {
+	case 1:
+		if manifest.Operation != "" {
+			return nil, errors.New("pointer Action manifest schemaVersion 1 forbids operation")
+		}
+		manifest.Operation = OperationClickReference
+	case 2:
+		if manifest.Operation != OperationClickReference && manifest.Operation != OperationClickCurrentPosition {
+			return nil, errors.New("pointer Action manifest schemaVersion 2 has unsupported operation")
+		}
+	default:
+		return nil, errors.New("pointer Action manifest has unsupported schemaVersion")
 	}
 	inputBytes, err := os.ReadFile(filepath.Join(root, manifest.InputSchema))
 	if err != nil {

@@ -29,10 +29,48 @@ var (
 	sendInputProc        = user32DLL.NewProc("SendInput")
 	mapVirtualKeyProc    = user32DLL.NewProc("MapVirtualKeyW")
 	setCursorPosProc     = user32DLL.NewProc("SetCursorPos")
+	getCursorPosProc     = user32DLL.NewProc("GetCursorPos")
 	getSystemMetricsProc = user32DLL.NewProc("GetSystemMetrics")
 )
 
 type WindowsDriver struct{}
+
+type screenPoint struct {
+	X int32
+	Y int32
+}
+
+func (WindowsDriver) ClickCurrent(ctx context.Context, request CurrentPointerClickRequest) (PointerEvidence, error) {
+	if ctx == nil {
+		return PointerEvidence{}, errors.New("context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return PointerEvidence{}, err
+	}
+	if request.Hold <= 0 || request.Hold > 2*time.Second {
+		return PointerEvidence{}, errors.New("pointer hold duration must be between 1ms and 2s")
+	}
+	width, _, _ := getSystemMetricsProc.Call(smCXScreen)
+	height, _, _ := getSystemMetricsProc.Call(smCYScreen)
+	if width == 0 || height == 0 {
+		return PointerEvidence{}, errors.New("GetSystemMetrics returned an empty primary display")
+	}
+	var point screenPoint
+	read, _, readErr := getCursorPosProc.Call(uintptr(unsafe.Pointer(&point)))
+	if read == 0 {
+		if readErr != nil && readErr != syscall.Errno(0) {
+			return PointerEvidence{}, fmt.Errorf("GetCursorPos failed: %w", readErr)
+		}
+		return PointerEvidence{}, errors.New("GetCursorPos failed")
+	}
+	if point.X < 0 || point.Y < 0 || point.X >= int32(width) || point.Y >= int32(height) {
+		return PointerEvidence{}, fmt.Errorf("current pointer position (%d,%d) is outside the primary display %dx%d", point.X, point.Y, width, height)
+	}
+	if err := clickLeft(ctx, request.Hold); err != nil {
+		return PointerEvidence{}, err
+	}
+	return PointerEvidence{Backend: BackendSendInputPointer, ScreenX: int(point.X), ScreenY: int(point.Y), ScreenWidth: int(width), ScreenHeight: int(height), HoldMS: request.Hold.Milliseconds()}, nil
+}
 
 func (WindowsDriver) ClickReference(ctx context.Context, request PointerClickRequest) (PointerEvidence, error) {
 	if ctx == nil {
@@ -70,10 +108,20 @@ func (WindowsDriver) ClickReference(ctx context.Context, request PointerClickReq
 		}
 		return PointerEvidence{}, errors.New("SetCursorPos failed")
 	}
-	if err := sendMouseButton(mouseEventLeftDown); err != nil {
-		return PointerEvidence{}, fmt.Errorf("send pointer left down: %w", err)
+	if err := clickLeft(ctx, request.Hold); err != nil {
+		return PointerEvidence{}, err
 	}
-	timer := time.NewTimer(request.Hold)
+	return PointerEvidence{Backend: BackendSendInputPointer, ReferenceX: request.ReferenceX, ReferenceY: request.ReferenceY,
+		ScreenX: screenX, ScreenY: screenY, ScreenWidth: screenWidth, ScreenHeight: screenHeight,
+		ViewportX: viewportX, ViewportY: viewportY, ViewportWidth: viewportWidth, ViewportHeight: viewportHeight,
+		HoldMS: request.Hold.Milliseconds()}, nil
+}
+
+func clickLeft(ctx context.Context, hold time.Duration) error {
+	if err := sendMouseButton(mouseEventLeftDown); err != nil {
+		return fmt.Errorf("send pointer left down: %w", err)
+	}
+	timer := time.NewTimer(hold)
 	select {
 	case <-ctx.Done():
 		if !timer.Stop() {
@@ -81,16 +129,11 @@ func (WindowsDriver) ClickReference(ctx context.Context, request PointerClickReq
 		}
 	case <-timer.C:
 	}
-	if err := sendMouseButton(mouseEventLeftUp); err != nil {
-		return PointerEvidence{}, fmt.Errorf("send pointer left up: %w", err)
+	releaseErr := sendMouseButton(mouseEventLeftUp)
+	if releaseErr != nil {
+		releaseErr = fmt.Errorf("send pointer left up: %w", releaseErr)
 	}
-	if err := ctx.Err(); err != nil {
-		return PointerEvidence{}, err
-	}
-	return PointerEvidence{Backend: BackendSendInputPointer, ReferenceX: request.ReferenceX, ReferenceY: request.ReferenceY,
-		ScreenX: screenX, ScreenY: screenY, ScreenWidth: screenWidth, ScreenHeight: screenHeight,
-		ViewportX: viewportX, ViewportY: viewportY, ViewportWidth: viewportWidth, ViewportHeight: viewportHeight,
-		HoldMS: request.Hold.Milliseconds()}, nil
+	return errors.Join(ctx.Err(), releaseErr)
 }
 
 func (WindowsDriver) Press(ctx context.Context, request PressRequest) (Evidence, error) {

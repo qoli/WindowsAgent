@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 6,
+  "description": "Cyberpunk 2077 exposes a bounded foreground-validated pointer click for operating in-game overlays.",
+  "runtimeProfiles": {},
+  "actions": {
+    "cyberpunk-2077/pointer-click": {
+      "path": "Actions/pointer-click",
+      "runtime": "windows-pointer-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    },
+    "cyberpunk-2077/click-current-pointer": {
+      "path": "Actions/click-current-pointer",
+      "runtime": "windows-pointer-action-v1",
+      "execution": {"completion": "return"},
+      "registrableAs": []
+    }
+  },
+  "ephemeralActionSequence": {
+    "allowedActions": []
+  },
+  "registrations": {}
+}

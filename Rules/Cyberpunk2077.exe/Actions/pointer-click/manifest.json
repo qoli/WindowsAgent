@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Cyberpunk 2077 reference-coordinate pointer click",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "taskDocument": "TASK.md"
+}

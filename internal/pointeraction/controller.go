@@ -14,6 +14,7 @@ import (
 
 type Driver interface {
 	ClickReference(context.Context, windowsinput.PointerClickRequest) (windowsinput.PointerEvidence, error)
+	ClickCurrent(context.Context, windowsinput.CurrentPointerClickRequest) (windowsinput.PointerEvidence, error)
 }
 
 type Controller struct {
@@ -32,15 +33,8 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	if err := pkg.ValidateInput(inputs); err != nil {
 		return nil, fmt.Errorf("validate pointer Action inputs: %w", err)
 	}
-	x, err := integer(inputs["x"])
-	if err != nil {
-		return nil, err
-	}
-	y, err := integer(inputs["y"])
-	if err != nil {
-		return nil, err
-	}
 	holdMS := 40
+	var err error
 	if value, ok := inputs["holdMs"]; ok {
 		holdMS, err = integer(value)
 		if err != nil {
@@ -61,14 +55,40 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	if before.ProcessID != current.ProcessID || !strings.EqualFold(current.ExecutableName, ruleID) {
 		return nil, errors.New("foreground process changed before pointer injection")
 	}
-	evidence, err := c.driver.ClickReference(ctx, windowsinput.PointerClickRequest{ReferenceX: x, ReferenceY: y, Hold: time.Duration(holdMS) * time.Millisecond})
+	var evidence windowsinput.PointerEvidence
+	result := map[string]any{"schemaVersion": 1, "button": "LEFT"}
+	switch pkg.Manifest.Operation {
+	case OperationClickReference:
+		x, coordinateErr := integer(inputs["x"])
+		if coordinateErr != nil {
+			return nil, coordinateErr
+		}
+		y, coordinateErr := integer(inputs["y"])
+		if coordinateErr != nil {
+			return nil, coordinateErr
+		}
+		evidence, err = c.driver.ClickReference(ctx, windowsinput.PointerClickRequest{ReferenceX: x, ReferenceY: y, Hold: time.Duration(holdMS) * time.Millisecond})
+		result["coordinateSpace"] = "reference-1920x1080-centered"
+		result["x"] = evidence.ReferenceX
+		result["y"] = evidence.ReferenceY
+		result["viewportX"] = evidence.ViewportX
+		result["viewportY"] = evidence.ViewportY
+		result["viewportWidth"] = evidence.ViewportWidth
+		result["viewportHeight"] = evidence.ViewportHeight
+	case OperationClickCurrentPosition:
+		evidence, err = c.driver.ClickCurrent(ctx, windowsinput.CurrentPointerClickRequest{Hold: time.Duration(holdMS) * time.Millisecond})
+		result["coordinateSpace"] = "current-primary-screen-position"
+	default:
+		return nil, fmt.Errorf("unsupported pointer Action operation %q", pkg.Manifest.Operation)
+	}
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]any{"schemaVersion": 1, "coordinateSpace": "reference-1920x1080-centered", "button": "LEFT", "backend": evidence.Backend,
-		"x": evidence.ReferenceX, "y": evidence.ReferenceY, "screenX": evidence.ScreenX, "screenY": evidence.ScreenY,
-		"screenWidth": evidence.ScreenWidth, "screenHeight": evidence.ScreenHeight,
-		"viewportX": evidence.ViewportX, "viewportY": evidence.ViewportY, "viewportWidth": evidence.ViewportWidth, "viewportHeight": evidence.ViewportHeight}
+	result["backend"] = evidence.Backend
+	result["screenX"] = evidence.ScreenX
+	result["screenY"] = evidence.ScreenY
+	result["screenWidth"] = evidence.ScreenWidth
+	result["screenHeight"] = evidence.ScreenHeight
 	result["holdMs"] = holdMS
 	if err := pkg.ValidateOutput(result); err != nil {
 		return nil, err

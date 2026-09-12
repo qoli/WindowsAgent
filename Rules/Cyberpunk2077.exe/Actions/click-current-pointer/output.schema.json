@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "coordinateSpace", "button", "backend", "holdMs", "screenX", "screenY", "screenWidth", "screenHeight"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "coordinateSpace": {"const": "current-primary-screen-position"},
+    "button": {"const": "LEFT"},
+    "backend": {"const": "sendinput-pointer"},
+    "holdMs": {"const": 40},
+    "screenX": {"type": "integer", "minimum": 0},
+    "screenY": {"type": "integer", "minimum": 0},
+    "screenWidth": {"type": "integer", "minimum": 1},
+    "screenHeight": {"type": "integer", "minimum": 1}
+  }
+}

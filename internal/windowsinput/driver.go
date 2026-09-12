@@ -32,6 +32,10 @@ type PointerClickRequest struct {
 	Hold       time.Duration
 }
 
+type CurrentPointerClickRequest struct {
+	Hold time.Duration
+}
+
 type PointerEvidence struct {
 	Backend        string
 	ReferenceX     int
