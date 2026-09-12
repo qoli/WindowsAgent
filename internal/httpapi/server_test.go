@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"image"
@@ -27,6 +28,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
+	"github.com/qoli/WindowsAgent/internal/windowsautomation"
 )
 
 type fakeCapturer struct {
@@ -48,20 +50,24 @@ type fakeScriptExecutor struct {
 }
 
 type fakeActionService struct {
-	invokeResult   actionrun.Invocation
-	invokeErr      error
-	getResult      actionrun.Invocation
-	getErr         error
-	stopResult     actionrun.Invocation
-	stopErr        error
-	events         []eventstream.Event
-	invocation     scriptlaunch.Invocation
-	sequence       actionsequence.Request
-	sequenceResult actionrun.Invocation
-	sequenceErr    error
-	toolSchema     actionsequence.ToolSchema
-	toolSchemaErr  error
-	after          uint64
+	invokeResult    actionrun.Invocation
+	invokeErr       error
+	getResult       actionrun.Invocation
+	getErr          error
+	stopResult      actionrun.Invocation
+	stopErr         error
+	events          []eventstream.Event
+	invocation      scriptlaunch.Invocation
+	sequence        actionsequence.Request
+	sequenceResult  actionrun.Invocation
+	sequenceErr     error
+	toolSchema      actionsequence.ToolSchema
+	toolSchemaErr   error
+	after           uint64
+	starlarkPackage *windowsautomation.Package
+	starlarkInputs  map[string]any
+	starlarkResult  actionrun.Invocation
+	starlarkErr     error
 }
 
 func (f *fakeActionService) Invoke(_ context.Context, invocation scriptlaunch.Invocation) (actionrun.Invocation, error) {
@@ -72,6 +78,12 @@ func (f *fakeActionService) Invoke(_ context.Context, invocation scriptlaunch.In
 func (f *fakeActionService) InvokeSequence(_ context.Context, request actionsequence.Request) (actionrun.Invocation, error) {
 	f.sequence = request
 	return f.sequenceResult, f.sequenceErr
+}
+
+func (f *fakeActionService) InvokeStarlark(_ context.Context, pkg *windowsautomation.Package, inputs map[string]any) (actionrun.Invocation, error) {
+	f.starlarkPackage = pkg
+	f.starlarkInputs = inputs
+	return f.starlarkResult, f.starlarkErr
 }
 
 func (f *fakeActionService) SequenceToolSchema(string) (actionsequence.ToolSchema, error) {
@@ -529,6 +541,46 @@ func TestActionInvokeFiniteAndStreamingContracts(t *testing.T) {
 	}
 }
 
+func TestEphemeralStarlarkActionUploadAndStrictRequest(t *testing.T) {
+	archive := testStarlarkArchive(t)
+	service := &fakeActionService{starlarkResult: actionrun.Invocation{
+		InvocationID: "act_starlark", ActionID: actionrun.EphemeralStarlarkActionID,
+		Runtime: windowsautomation.RuntimeID, State: actionrun.StateRunning,
+		Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true},
+		Watch:     &actionrun.WatchTarget{URL: "/v1/action-invocations/act_starlark/events?after=4", ContentType: "application/x-ndjson", AfterCursor: 4},
+		Stop:      &actionrun.StopTarget{Method: http.MethodPost, URL: "/v1/action-invocations/act_starlark/stop"},
+	}}
+	server, _ := newTestServerWithActionService(t, service)
+	body, err := json.Marshal(map[string]any{
+		"schemaVersion": 1, "packageBase64": base64.StdEncoding.EncodeToString(archive),
+		"inputs": map[string]any{"value": "remote"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/starlark-actions/invoke", bytes.NewReader(body)))
+	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/v1/action-invocations/act_starlark" {
+		t.Fatalf("status = %d, location = %q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if service.starlarkPackage == nil || service.starlarkPackage.Digest == "" || service.starlarkInputs["value"] != "remote" {
+		t.Fatalf("uploaded package = %+v, inputs = %+v", service.starlarkPackage, service.starlarkInputs)
+	}
+
+	for _, invalid := range []string{
+		`{"schemaVersion":1,"schemaVersion":1,"packageBase64":"x","inputs":{}}`,
+		`{"schemaVersion":1,"packageBase64":"not-base64","inputs":{}}`,
+		`{"schemaVersion":1,"packageBase64":"eA==","inputs":{},"unknown":true}`,
+	} {
+		failed := httptest.NewRecorder()
+		server.Handler().ServeHTTP(failed, httptest.NewRequest(http.MethodPost, "/v1/starlark-actions/invoke", strings.NewReader(invalid)))
+		if failed.Code != http.StatusBadRequest {
+			t.Fatalf("invalid request %q status = %d, body = %s", invalid, failed.Code, failed.Body.String())
+		}
+		assertErrorCode(t, failed.Body.Bytes(), "invalid_starlark_action")
+	}
+}
+
 func TestActionSequenceToolAndInvokeContracts(t *testing.T) {
 	service := &fakeActionService{
 		toolSchema: actionsequence.ToolSchema{
@@ -883,6 +935,28 @@ func testStatus() capture.Status {
 			ColorSpace: "RGB_FULL_G22_NONE_P709",
 		},
 	}
+}
+
+func testStarlarkArchive(t *testing.T) []byte {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"manifest.json":      `{"schemaVersion":1,"version":1,"title":"HTTP fixture","entrypoint":"main.star","taskDocument":"TASK.md","inputSchema":"input.schema.json","outputSchema":"output.schema.json","files":["main.star","TASK.md","input.schema.json","output.schema.json"],"limits":{"wallTimeMs":1000,"maxSteps":10000,"maxResultBytes":4096,"maxProcessOutputBytes":4096}}`,
+		"main.star":          "def main(ctx):\n    return {\"value\": ctx.inputs[\"value\"]}\n",
+		"TASK.md":            "# HTTP fixture\n",
+		"input.schema.json":  `{"type":"object","required":["value"],"properties":{"value":{"type":"string"}},"additionalProperties":false}`,
+		"output.schema.json": `{"type":"object","required":["value"],"properties":{"value":{"type":"string"}},"additionalProperties":false}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive, err := windowsautomation.ArchiveDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return archive
 }
 
 func testResult() capture.Result {

@@ -22,6 +22,8 @@ jobs:
       - run: go test ./...
       - name: Check Action dependencies
         run: go run ./cmd/windows-action-check --rules-dir Rules
+      - name: Check example Starlark automation package
+        run: go run ./cmd/windows-starlark-check --package docs/examples/windows-starlark-hello
       - name: Test ScreenParser DirectML contract
         run: >-
           dotnet run
@@ -89,10 +91,20 @@ jobs:
           go build -trimpath
           -o .build/windows-action-check.exe
           ./cmd/windows-action-check
+      - name: Build Starlark automation clients
+        run: |
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+            -o .build/windows-starlark-check.exe ./cmd/windows-starlark-check
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+            -o .build/windows-starlark-invoke.exe ./cmd/windows-starlark-invoke
       - name: Verify event-stream PE subsystem
         run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-event-stream.exe --expect gui
       - name: Verify Action dependency checker PE subsystem
         run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-action-check.exe --expect console
+      - name: Verify Starlark automation client PE subsystems
+        run: |
+          python3 scripts/verify-windows-pe-subsystem.py .build/windows-starlark-check.exe --expect console
+          python3 scripts/verify-windows-pe-subsystem.py .build/windows-starlark-invoke.exe --expect console
       - name: Publish ScreenParser DirectML runtime
         run: >-
           python3 tools/screenparser-runtime/publish.py

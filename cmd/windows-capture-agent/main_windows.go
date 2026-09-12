@@ -31,6 +31,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/wgcworker"
+	"github.com/qoli/WindowsAgent/internal/windowsautomation"
 	"github.com/qoli/WindowsAgent/internal/windowsinput"
 )
 
@@ -72,7 +73,7 @@ func run() (runErr error) {
 	}()
 	logger.Warn("unauthenticated_lan_listener",
 		"listen", cfg.Listen,
-		"warning", "any device that can reach this address can trigger and download screenshots",
+		"warning", "any device that can reach this address can capture the desktop and execute full-trust Starlark automation in the Agent's Windows session",
 	)
 
 	store, err := artifact.New(filepath.Join(cfg.DataDir, "captures"), cfg.Retention)
@@ -148,6 +149,10 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize Action executor: %w", err)
 	}
+	automationExecutor, err := windowsautomation.NewLocalRunner()
+	if err != nil {
+		return fmt.Errorf("initialize Starlark automation executor: %w", err)
+	}
 	eventHTTPClient := &http.Client{Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		DialContext:           (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -167,7 +172,7 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("require event journal service: %w", err)
 	}
-	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, eventJournal, foreground.Snapshot, logger)
+	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, automationExecutor, eventJournal, foreground.Snapshot, logger)
 	if err != nil {
 		return fmt.Errorf("initialize Action invocation manager: %w", err)
 	}
@@ -209,6 +214,7 @@ func run() (runErr error) {
 		"capture_timeout", cfg.CaptureTimeout.String(),
 		"rules_root", ruleStore.Root(),
 		"script_api_auth", "none",
+		"starlark_automation_api_auth", "none",
 		"event_api_url", cfg.EventAPIURL,
 		"frontier_bindings_root", cfg.FrontierBindingsRoot,
 		"runtime_stderr_log", cfg.RuntimeLogFile,

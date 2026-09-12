@@ -12,6 +12,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Observation script package](observation-script-package.md) | Landed | Validate external Starlark logic, task documentation, input/output schemas, Observer permissions, native DLL artifacts, and limits. |
 | [Windows observer protocol](observation-worker-protocol.md) | Landed | Unify finite read-only memory, file, and reference/native sampled screen-region calls behind framed process boundaries. |
 | [Script Runner native-library FFI](native-library-ffi.md) | Landed | Load package-owned DLL aliases and execute package-owned ABIs through a provider-neutral Windows amd64 FFI. |
+| [Starlark automation runtime](starlark-automation-runtime.md) | Partially landed | Upload and run one ephemeral, general Windows Starlark Action in the Agent's signed-in interactive session with process, filesystem, activity, cancellation, and durable-result contracts. |
 | [Event stream runtime](event-stream-runtime.md) | Partially landed | Persist strict ordered events and expose authenticated local append/replay for independent modules. |
 | [Event Web runtime](event-web-runtime.md) | Landed | Project the durable event timeline and exact Action OSD state through an authenticated, explicitly bound, windowless Web executable. |
 | [Visual log runtime](visual-log-runtime.md) | Partially landed | Run an optional single-frame Gemma description loop as an untrusted timeline index without controlling evidence recording. |

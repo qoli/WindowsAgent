@@ -20,6 +20,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
+	"github.com/qoli/WindowsAgent/internal/windowsautomation"
 )
 
 var errTerminalSeen = errors.New("terminal event seen")
@@ -69,6 +70,28 @@ type fakeExecutor struct {
 	mu               sync.Mutex
 	calls            []string
 	validationErrors map[string]error
+}
+
+type fakeAutomationExecutor struct {
+	output  json.RawMessage
+	err     error
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *fakeAutomationExecutor) Run(ctx context.Context, _ *windowsautomation.Package, _ map[string]any, _ windowsautomation.Reporter) (json.RawMessage, error) {
+	if f.started != nil {
+		f.once.Do(func() { close(f.started) })
+	}
+	if f.release != nil {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return f.output, f.err
 }
 
 func (f *fakeExecutor) ValidateAction(invocation scriptlaunch.Invocation) (rules.Action, error) {
@@ -176,6 +199,52 @@ func TestFiniteActionReturnsTerminalOutputWithoutEventCallback(t *testing.T) {
 	}
 }
 
+func TestEphemeralStarlarkRunsOutsideRuleAndKeepsRemoteResult(t *testing.T) {
+	automation := &fakeAutomationExecutor{output: json.RawMessage(`{"remote":true}`)}
+	manager, store := newTestManagerWithAutomation(t, &fakeExecutor{}, automation)
+	pkg := testAutomationPackage(t)
+	response, err := manager.InvokeStarlark(context.Background(), pkg, map[string]any{"value": "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.ActionID != EphemeralStarlarkActionID || response.RuleID != "" || response.Runtime != windowsautomation.RuntimeID || response.State != StateRunning || response.Watch == nil || response.Stop == nil {
+		t.Fatalf("response = %+v", response)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.completed" {
+		t.Fatalf("event types = %s", got)
+	}
+	if events[0].Foreground.ExecutableName != "Game.exe" || events[0].Source.ModuleID != EphemeralStarlarkActionID || !strings.Contains(string(events[0].Payload), pkg.Digest) {
+		t.Fatalf("start event = %+v", events[0])
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCompleted || status.RuleID != "" || string(status.Output) != `{"remote":true}` {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+	last, err := store.LastSequence()
+	if err != nil || last < 2 {
+		t.Fatalf("last sequence = %d, err = %v", last, err)
+	}
+}
+
+func TestEphemeralStarlarkPreservesTypedRuntimeFailure(t *testing.T) {
+	automation := &fakeAutomationExecutor{err: &windowsautomation.Error{Code: "PROCESS_START_FAILED", Stage: "starting-process", Cause: errors.New("missing executable")}}
+	manager, _ := newTestManagerWithAutomation(t, &fakeExecutor{}, automation)
+	response, err := manager.InvokeStarlark(context.Background(), testAutomationPackage(t), map[string]any{"value": "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if !strings.Contains(string(events[len(events)-1].Payload), `"errorCode":"PROCESS_START_FAILED"`) ||
+		!strings.Contains(string(events[len(events)-1].Payload), `"errorStage":"starting-process"`) {
+		t.Fatalf("terminal event = %+v", events[len(events)-1])
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || status.ErrorCode != "PROCESS_START_FAILED" || status.ErrorStage != "starting-process" {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
 func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
 	executor := &fakeExecutor{}
 	previous, store := newTestManager(t, executor)
@@ -193,7 +262,7 @@ func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewManager(previous.rules, executor, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager, err := NewManager(previous.rules, executor, &fakeAutomationExecutor{}, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +288,7 @@ func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
 	if err := manager.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewManager(previous.rules, executor, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	restarted, err := NewManager(previous.rules, executor, &fakeAutomationExecutor{}, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,6 +503,10 @@ func TestActionSequenceForwardsStreamingChildThroughNaturalCompletion(t *testing
 }
 
 func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstream.Store) {
+	return newTestManagerWithAutomation(t, executor, &fakeAutomationExecutor{})
+}
+
+func newTestManagerWithAutomation(t *testing.T, executor *fakeExecutor, automation AutomationExecutor) (*Manager, *eventstream.Store) {
 	t.Helper()
 	rulesRoot := t.TempDir()
 	ruleRoot := filepath.Join(rulesRoot, "Game.exe")
@@ -470,7 +543,7 @@ func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstrea
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	manager, err := NewManager(ruleStore, executor, storeJournal{store: store}, func() (foreground.Info, error) {
+	manager, err := NewManager(ruleStore, executor, automation, storeJournal{store: store}, func() (foreground.Info, error) {
 		return foreground.Info{
 			ObservedAt: time.Now().UTC(), ProcessID: 42, ExecutableName: "Game.exe", ExecutablePath: `C:\Games\Game.exe`,
 		}, nil
@@ -481,6 +554,28 @@ func newTestManager(t *testing.T, executor *fakeExecutor) (*Manager, *eventstrea
 	manager.random = strings.NewReader(strings.Repeat("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 10))
 	t.Cleanup(func() { manager.Close() })
 	return manager, store
+}
+
+func testAutomationPackage(t *testing.T) *windowsautomation.Package {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"manifest.json":      `{"schemaVersion":1,"version":1,"title":"Fixture","entrypoint":"main.star","taskDocument":"TASK.md","inputSchema":"input.schema.json","outputSchema":"output.schema.json","files":["main.star","TASK.md","input.schema.json","output.schema.json"],"limits":{"wallTimeMs":1000,"maxSteps":10000,"maxResultBytes":4096,"maxProcessOutputBytes":4096}}`,
+		"main.star":          "def main(ctx):\n    return {\"remote\": True}\n",
+		"TASK.md":            "# Fixture\n",
+		"input.schema.json":  `{"type":"object","required":["value"],"properties":{"value":{"type":"string"}},"additionalProperties":false}`,
+		"output.schema.json": `{"type":"object","additionalProperties":true}`,
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pkg, err := windowsautomation.LoadDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pkg
 }
 
 func collectUntilTerminal(t *testing.T, manager *Manager, identity string, after uint64) []eventstream.Event {

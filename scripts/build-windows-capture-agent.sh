@@ -35,6 +35,14 @@ output_dir="$(cd "${output_dir}" && pwd)"
     -o "${output_dir}/windows-action-check.exe" \
     ./cmd/windows-action-check
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath \
+    -o "${output_dir}/windows-starlark-check.exe" \
+    ./cmd/windows-starlark-check
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath \
+    -o "${output_dir}/windows-starlark-invoke.exe" \
+    ./cmd/windows-starlark-invoke
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -trimpath -ldflags "-H=windowsgui" \
     -o "${output_dir}/windows-action-osd.exe" \
     ./cmd/windows-action-osd
@@ -80,6 +88,10 @@ python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-wgc-worker.exe" --expect console
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-action-check.exe" --expect console
+python3 "${script_dir}/verify-windows-pe-subsystem.py" \
+  "${output_dir}/windows-starlark-check.exe" --expect console
+python3 "${script_dir}/verify-windows-pe-subsystem.py" \
+  "${output_dir}/windows-starlark-invoke.exe" --expect console
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-action-osd.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \

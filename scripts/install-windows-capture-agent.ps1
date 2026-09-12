@@ -21,6 +21,8 @@ param(
     [bool]$WGCTrace = $true,
     [ValidateSet("WatchdogManaged", "Standalone")]
     [string]$StartupMode = "WatchdogManaged",
+    [ValidateSet("Limited", "Highest")]
+    [string]$AgentRunLevel = "Limited",
     [string]$TaskName = "gameGuide Windows Capture Agent",
     [string]$EventListen = "127.0.0.1:8788",
     [string]$EventTaskName = "gameGuide Windows Event Stream"
@@ -408,7 +410,8 @@ $eventArguments = @(
 ) -join " "
 
 $action = New-ScheduledTaskAction -Execute $installedExecutable -Argument $agentArguments
-$principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
+$agentPrincipal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel $AgentRunLevel
+$eventPrincipal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
 $settingsArguments = @{
     AllowStartIfOnBatteries = $true
     DontStopIfGoingOnBatteries = $true
@@ -424,7 +427,7 @@ if ($StartupMode -eq "Standalone") {
 $settings = New-ScheduledTaskSettingsSet @settingsArguments
 $taskArguments = @{
     Action = $action
-    Principal = $principal
+    Principal = $agentPrincipal
     Settings = $settings
     Description = $taskDescription
 }
@@ -436,7 +439,7 @@ Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 $eventAction = New-ScheduledTaskAction -Execute $installedEventExecutable -Argument $eventArguments
 $eventTaskArguments = @{
     Action = $eventAction
-    Principal = $principal
+    Principal = $eventPrincipal
     Settings = $settings
     Description = $eventTaskDescription
 }
@@ -515,6 +518,7 @@ if ($process.SessionId -eq 0) {
 
 [ordered]@{
 	startup_mode = $StartupMode
+	agent_run_level = $AgentRunLevel
     task_name = $TaskName
     task_state = (Get-ScheduledTask -TaskName $TaskName).State.ToString()
 	task_trigger_count = @((Get-ScheduledTask -TaskName $TaskName).Triggers | Where-Object { $null -ne $_ }).Count

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,13 +25,15 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
+	"github.com/qoli/WindowsAgent/internal/windowsautomation"
 )
 
 const (
-	maxRequestBody       = 4 << 10
-	maxScriptRequestBody = scriptlaunch.MaxRequestBytes + 4<<10
-	maxSequenceBody      = 64 << 10
-	scriptRequestTimeout = 80 * time.Second
+	maxRequestBody        = 4 << 10
+	maxScriptRequestBody  = scriptlaunch.MaxRequestBytes + 4<<10
+	maxSequenceBody       = 64 << 10
+	maxStarlarkActionBody = 32 << 20
+	scriptRequestTimeout  = 80 * time.Second
 )
 
 type Server struct {
@@ -50,6 +53,7 @@ type Server struct {
 type ActionService interface {
 	Invoke(context.Context, scriptlaunch.Invocation) (actionrun.Invocation, error)
 	InvokeSequence(context.Context, actionsequence.Request) (actionrun.Invocation, error)
+	InvokeStarlark(context.Context, *windowsautomation.Package, map[string]any) (actionrun.Invocation, error)
 	SequenceToolSchema(string) (actionsequence.ToolSchema, error)
 	Get(string) (actionrun.Invocation, error)
 	Stop(string) (actionrun.Invocation, error)
@@ -208,6 +212,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleActionInvoke)
 	case r.URL.Path == "/v1/action-sequences/invoke":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleActionSequenceInvoke)
+	case r.URL.Path == "/v1/starlark-actions/invoke":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleStarlarkActionInvoke)
 	case strings.HasPrefix(r.URL.Path, "/v1/action-invocations/"):
 		s.handleActionInvocationResource(recorder, r, requestID)
 	default:
@@ -383,6 +389,7 @@ func decodeActionInvocation(w http.ResponseWriter, r *http.Request) (scriptlaunc
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
 	if err := decoder.Decode(&request); err != nil {
 		return scriptlaunch.Invocation{}, fmt.Errorf("decode JSON body: %w", err)
 	}
@@ -393,6 +400,72 @@ func decodeActionInvocation(w http.ResponseWriter, r *http.Request) (scriptlaunc
 		return scriptlaunch.Invocation{}, errors.New("inputs object is required")
 	}
 	return scriptlaunch.Invocation{Capability: request.ActionID, Inputs: request.Inputs}, nil
+}
+
+func (s *Server) handleStarlarkActionInvoke(w http.ResponseWriter, r *http.Request, requestID string) {
+	pkg, inputs, err := decodeStarlarkActionInvocation(w, r)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_starlark_action", err.Error())
+		return
+	}
+	result, err := s.actions.InvokeStarlark(r.Context(), pkg, inputs)
+	if err != nil {
+		s.writeActionError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/action-invocations/"+result.InvocationID)
+	s.logger.InfoContext(r.Context(), "starlark_action_invoked",
+		"request_id", requestID,
+		"invocation_id", result.InvocationID,
+		"package_digest", pkg.Digest,
+		"package_version", pkg.Manifest.Version,
+		"state", result.State,
+	)
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func decodeStarlarkActionInvocation(w http.ResponseWriter, r *http.Request) (*windowsautomation.Package, map[string]any, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxStarlarkActionBody)
+	defer r.Body.Close()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read JSON body: %w", err)
+	}
+	if err := strictjson.Validate(data); err != nil {
+		return nil, nil, fmt.Errorf("validate JSON body: %w", err)
+	}
+	var request struct {
+		SchemaVersion uint32         `json:"schemaVersion"`
+		PackageBase64 string         `json:"packageBase64"`
+		Inputs        map[string]any `json:"inputs"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	if err := decoder.Decode(&request); err != nil {
+		return nil, nil, fmt.Errorf("decode JSON body: %w", err)
+	}
+	if request.SchemaVersion != 1 {
+		return nil, nil, errors.New("schemaVersion must equal 1")
+	}
+	if request.PackageBase64 == "" {
+		return nil, nil, errors.New("packageBase64 is required")
+	}
+	if request.Inputs == nil {
+		return nil, nil, errors.New("inputs object is required")
+	}
+	archive, err := base64.StdEncoding.DecodeString(request.PackageBase64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode packageBase64: %w", err)
+	}
+	pkg, err := windowsautomation.LoadArchive(archive)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load Starlark Action package: %w", err)
+	}
+	if err := pkg.ValidateInputs(request.Inputs); err != nil {
+		return nil, nil, fmt.Errorf("validate Starlark Action inputs: %w", err)
+	}
+	return pkg, request.Inputs, nil
 }
 
 func (s *Server) handleActionSequenceInvoke(w http.ResponseWriter, r *http.Request, requestID string) {

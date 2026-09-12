@@ -70,3 +70,22 @@ func TestCaptureInstallerStopsExactResidentOCRRuntimeBeforeCopy(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureInstallerMakesAgentRunLevelAnInstallChoice(t *testing.T) {
+	data, err := os.ReadFile("../../scripts/install-windows-capture-agent.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`[ValidateSet("Limited", "Highest")]`,
+		`[string]$AgentRunLevel = "Limited"`,
+		`-LogonType Interactive -RunLevel $AgentRunLevel`,
+		`$eventPrincipal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited`,
+		`agent_run_level = $AgentRunLevel`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("capture installer is missing Agent run-level contract %q", required)
+		}
+	}
+}

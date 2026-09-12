@@ -15,9 +15,9 @@ permission, and validation boundary.
 
 > [!WARNING]
 > The current HTTP server listens on `0.0.0.0:8787` without authentication,
-> TLS, or CORS by default. Anyone who can reach that port can trigger and
-> download screenshots and read foreground process metadata, including window
-> titles and executable paths. Use it only on a trusted LAN or private overlay
+> TLS, or CORS by default. Anyone who can reach that port can capture the
+> desktop and invoke mutable, full-trust Starlark automation with the Agent's
+> installed Windows token. Use it only on a trusted LAN or private overlay
 > network.
 
 ## Status
@@ -100,6 +100,18 @@ today:
 This is not a general remote memory API. HTTP exposes a live read-only Script
 catalog; the unauthenticated run endpoint delegates one strictly validated
 request to the local launcher inside the signed-in Windows session.
+
+The general `windows-starlark-action-v1` automation runtime is partially
+landed. It accepts an ephemeral Starlark package, runs it inside the
+WindowsAgent process in the signed-in interactive desktop session, and exposes
+structured `windows.process.run`, `windows.fs.*`, and `task.*` operations. The
+Agent installer's `-AgentRunLevel Limited|Highest` choice owns the runtime
+privilege; a package cannot elevate itself. Invocation, activity, cancellation,
+and terminal results use the durable Action lifecycle. The runtime does not
+internally insert a PowerShell command string, SSH, Windows MCP, or fallback
+transport between the package and Windows. See the
+[runtime design](docs/design/starlark-automation-runtime.md) and
+[minimal package](docs/examples/windows-starlark-hello/).
 
 The Action runtime and registration refactor is partially landed:
 
@@ -222,6 +234,7 @@ the target Windows machine.
 mkdir -p .build
 go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
+go run ./cmd/windows-starlark-check --package docs/examples/windows-starlark-hello
 ./scripts/build-windows-capture-agent.sh
 cp -R Rules .build/
 ```
@@ -230,8 +243,11 @@ cp -R Rules .build/
 The build script also emits `windows-capture-agent-console.exe` for interactive
 terminal diagnostics, `windows-wgc-worker.exe` for the Agent-owned persistent
 and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
-validation,
-`windows-action-osd.exe` for the display-only capture, Action, and
+validation, and `windows-starlark-check.exe` plus
+`windows-starlark-invoke.exe` as local console clients for automation package
+preflight and upload. The two Starlark clients are not part of the installed
+Agent binary payload. It also emits `windows-action-osd.exe` for the
+display-only capture, Action, and
 Evidence-recording overlay, and the optional `windows-watchdog.exe` and independent
 `windows-evidence-recorder.exe`, `windows-visual-log.exe`, and
 `windows-event-web.exe`. It also emits the
@@ -619,7 +635,8 @@ From the repository root in PowerShell:
 .\scripts\install-windows-capture-agent.ps1 `
   -ExecutablePath .\.build\windows-capture-agent.exe `
   -RulesPath .\.build\Rules `
-  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle
+  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
+  -AgentRunLevel Limited
 ```
 
 The installer copies the capture executable, generic Starlark launcher,
@@ -635,6 +652,11 @@ The installer does not create an SCM service or modify Windows Firewall.
 It validates that both persistent executables use PE subsystem `Windows GUI`
 before stopping any existing task. A console build is rejected because Task
 Scheduler's `Hidden` setting cannot suppress its console window.
+
+Select `-AgentRunLevel Highest` when this trusted-device installation must run
+automation with the installing user's elevated token. The default `Limited`
+keeps the ordinary interactive token. This is an installation choice shared by
+all Starlark invocations, not a per-package elevation mechanism.
 
 For an explicit development environment without the Watchdog, request the
 standalone task policy rather than relying on an automatic compatibility path:
@@ -810,6 +832,7 @@ GET  /v3/rules/{rule-id}/action-sequence-tool
 GET  /v4/rules/{rule-id}/runtimes
 POST /v1/scripts/run
 POST /v1/actions/invoke
+POST /v1/starlark-actions/invoke
 POST /v1/action-sequences/invoke
 GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
@@ -862,6 +885,31 @@ The invocation body contains only `capability` and package-defined `inputs`;
 Host filesystem roots are never caller input. No bearer token or other HTTP
 credential is required. Script execution is serialized and does not upload,
 rewrite, or reload a Rule plugin.
+
+Invoke an ephemeral general Windows Starlark Action from macOS or Linux after
+creating a strict inputs JSON object:
+
+```bash
+go run ./cmd/windows-starlark-invoke \
+  --url http://Windows-PC:8787 \
+  --package docs/examples/windows-starlark-hello \
+  --inputs /absolute/path/to/inputs.json
+```
+
+The client performs local package, syntax, schema, and inputs preflight, builds
+the deterministic ZIP, and posts it to `POST /v1/starlark-actions/invoke`. It
+fails on a non-2xx response and otherwise prints the remote JSON unchanged.
+The accepted response is normally HTTP `202` with `watch` and `stop` targets;
+it is not proof that the remote runtime completed. Only Windows can answer
+questions about paths, programs, privileges, desktop state, and postconditions.
+The client never falls back to SSH, PowerShell, Windows MCP, or another runtime;
+an Action may still explicitly launch an executable through
+`windows.process.run`.
+
+The Agent listener is unauthenticated and defaults to `0.0.0.0:8787`. With the
+general mutation surface enabled, anyone who can reach that listener can run
+operations with the Agent's installed run level. Keep it on a trusted LAN or
+private overlay network and never expose it directly to the public Internet.
 
 Invoke any Action through the unified surface:
 
@@ -988,6 +1036,8 @@ this build with a new, empty data directory; there is no automatic migration.
 
 ```text
 cmd/windows-capture-agent/       screenshot capability executable
+cmd/windows-starlark-check/      local Starlark automation package preflight
+cmd/windows-starlark-invoke/     local Starlark automation upload client
 cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
@@ -1010,6 +1060,7 @@ internal/config/                 process configuration
 internal/actionrun/              finite and streaming invocation lifecycle
 internal/actionsequence/         bounded ephemeral sequence and strict model schema
 internal/actioncheck/            offline Action package and dependency validation
+internal/windowsautomation/      ephemeral general Windows Starlark runtime
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal

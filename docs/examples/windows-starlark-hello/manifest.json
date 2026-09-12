@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "version": 1,
+  "title": "Windows Starlark hello",
+  "entrypoint": "main.star",
+  "taskDocument": "TASK.md",
+  "inputSchema": "input.schema.json",
+  "outputSchema": "output.schema.json",
+  "files": [
+    "main.star",
+    "TASK.md",
+    "input.schema.json",
+    "output.schema.json"
+  ],
+  "limits": {
+    "wallTimeMs": 5000,
+    "maxSteps": 100000,
+    "maxResultBytes": 4096,
+    "maxProcessOutputBytes": 4096
+  }
+}
