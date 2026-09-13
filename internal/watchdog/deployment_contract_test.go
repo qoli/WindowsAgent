@@ -19,6 +19,8 @@ func TestBinaryDeploymentUsesExactInstalledWatchdogTargets(t *testing.T) {
 		`Invoke-WebRequest -Uri ([string]$probe.url)`,
 		`target Scheduled Task ownership mismatch`,
 		`installed Watchdog tasks do not map the complete binary set`,
+		`"windows-sftp.exe"`,
+		`payload must contain exactly the twelve deployed binaries`,
 		`binary deployment changed Scheduled Task configuration`,
 		`task_actions_preserved = $true`,
 	} {

@@ -19,7 +19,8 @@ $expectedNames = @(
     "windows-capture-agent.exe", "windows-wgc-worker.exe", "windows-event-stream.exe",
     "windows-action-osd.exe", "windows-watchdog.exe", "windows-observer.exe",
     "windows-observation-script-runner.exe", "windows-observation-job.exe",
-    "windows-evidence-recorder.exe", "windows-visual-log.exe", "windows-event-web.exe"
+    "windows-evidence-recorder.exe", "windows-visual-log.exe", "windows-event-web.exe",
+    "windows-sftp.exe"
 )
 
 function Get-Sha256 {
@@ -312,7 +313,7 @@ try {
         $hashes[$Matches[2]] = $Matches[1]
     }
     if ((($hashes.Keys | Sort-Object) -join "`n") -cne (($expectedNames | Sort-Object) -join "`n")) {
-        throw "payload must contain exactly the eleven deployed binaries"
+        throw "payload must contain exactly the twelve deployed binaries"
     }
     foreach ($name in $expectedNames) {
         $source = Join-Path $payload $name

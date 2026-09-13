@@ -94,6 +94,7 @@ binaries=(
   windows-evidence-recorder.exe
   windows-visual-log.exe
   windows-event-web.exe
+  windows-sftp.exe
 )
 
 : >"${release_dir}/SHA256SUMS"

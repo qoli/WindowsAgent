@@ -134,8 +134,9 @@ A typical installed graph is:
 | `action-osd` | `["event-stream"]` |
 | `event-web` | `["event-stream"]` |
 | `visual-log` | `["event-stream", "evidence-recorder"]` |
+| `sftp` | `[]` |
 
-This ordering is watchdog-owned configuration only. None of the six target
+This ordering is watchdog-owned configuration only. None of the seven target
 executables reads or references it. Evidence Recorder and Visual Log remain
 independent executables even when this graph supervises their availability.
 
@@ -175,14 +176,14 @@ the registered task's zero restart count. It does not modify a firewall,
 install a service, modify any monitored module, or grant the watchdog
 self-recovery.
 
-The Capture Agent/Event Stream, Action OSD, and Event Web installers default to
-`WatchdogManaged`: they register on-demand Tasks with no triggers and a zero
-restart count, then start them once for installation acceptance. The Evidence
-Recorder/Visual Log installer registers independent triggerless Tasks with zero
-task-level restart; their Watchdog targets keep the resident services available.
-A developer who deliberately needs the old independent startup behavior for
-Capture/Event/OSD/Web must pass `-StartupMode Standalone`; it is never selected
-automatically.
+The Capture Agent/Event Stream, Action OSD, Event Web, and SFTP installers
+default to `WatchdogManaged`: they register on-demand Tasks with no triggers
+and a zero restart count, then start them once for installation acceptance. The
+Evidence Recorder/Visual Log installer registers independent triggerless Tasks
+with zero task-level restart; their Watchdog targets keep the resident services
+available. A developer who deliberately needs independent startup behavior for
+Capture/Event/OSD/Web/SFTP must pass `-StartupMode Standalone`; it is never
+selected automatically.
 
 ## Acceptance
 

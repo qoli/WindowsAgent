@@ -18,7 +18,9 @@ permission, and validation boundary.
 > TLS, or CORS by default. Anyone who can reach that port can capture the
 > desktop and invoke mutable, full-trust Starlark automation with the Agent's
 > installed Windows token. Use it only on a trusted LAN or private overlay
-> network.
+> network. The optional SFTP runtime likewise defaults to `0.0.0.0:2022`,
+> accepts SSH `none` authentication, and exposes the filesystem visible to its
+> elevated Windows token. Do not expose either listener to the public Internet.
 
 ## Status
 
@@ -112,6 +114,16 @@ internally insert a PowerShell command string, SSH, Windows MCP, or fallback
 transport between the package and Windows. See the
 [runtime design](docs/design/starlark-automation-runtime.md) and
 [minimal package](docs/examples/windows-starlark-hello/).
+
+The separate `windows-sftp-v1` runtime is also partially landed. It is the
+filesystem data plane for uploading, downloading, enumerating, renaming, and
+removing Windows files without putting file payloads or path quoting inside a
+PowerShell command. It accepts only the SFTP subsystem, uses the fixed protocol
+username `windowsagent` with SSH `none` authentication, and exposes Windows
+drives through virtual `/`. Shell, exec, PTY, and forwarding requests are
+rejected. Its actual filesystem permissions come from the dedicated process's
+Windows token; they do not come from the interactive desktop session. See the
+[SFTP runtime design](docs/design/sftp-filesystem-runtime.md).
 
 The Action runtime and registration refactor is partially landed:
 
@@ -252,12 +264,13 @@ Evidence-recording overlay, and the optional `windows-watchdog.exe` and independ
 `windows-evidence-recorder.exe`, `windows-visual-log.exe`, and
 `windows-event-web.exe`. It also emits the
 Event Stream and all three observation runtimes required by the persistent
-installer. It verifies the expected PE subsystem for every emitted executable.
+installer, plus the dedicated GUI-subsystem `windows-sftp.exe`. It verifies the
+expected PE subsystem for every emitted executable.
 
 ## Deploy from macOS
 
 `scripts/deploy-windows-agent.sh` is the single macOS interface for a complete
-binary update. It validates source, builds and hashes all eleven deployed
+binary update. It validates source, builds and hashes all twelve deployed
 executables, uploads one ZIP over SSH, stops the installed Watchdog and its
 currently configured targets, replaces only their binaries, maintains bounded
 process-scoped crash dumps for the Agent and WGC worker, then restarts the
@@ -438,6 +451,31 @@ prompts for the Web token; do not put either token in a URL. The event journal
 remains on authenticated loopback `127.0.0.1:8788` and is never exposed to the
 browser.
 
+Install the SFTP filesystem data plane as a separate elevated current-user
+Scheduled Task:
+
+```powershell
+.\scripts\install-windows-sftp.ps1 `
+  -ExecutablePath .\.build\windows-sftp.exe
+```
+
+The default listener is `0.0.0.0:2022`; the unauthenticated loopback health
+surface is `http://127.0.0.1:8793/healthz`. The installer creates a persistent
+Ed25519 host key only when it is absent, never replaces an existing key, does
+not alter Windows Firewall, and returns the exact `sftp` Watchdog target for the
+operator-owned configuration. It does not rewrite that configuration. After
+the host key has been verified out of band, a client connects without an
+account credential:
+
+```bash
+sftp -P 2022 windowsagent@Windows-PC
+```
+
+The username is only a fixed SSH protocol label; it does not select or
+impersonate a Windows account. The installer must itself run from an elevated
+Administrator session, and the server process uses that Windows identity with
+the registered `Highest` run level.
+
 Run the partially landed Elite Dangerous visual log as its own process after
 the Evidence recorder and event stream are healthy. The Visual Log process
 immediately waits for fresh PC-local Evidence frames; before requesting a
@@ -555,15 +593,16 @@ parameter is omitted. Changing an installed endpoint requires both an explicit
 new value and `-AllowVisualLogModelBaseURLChange`; the replacement endpoint is
 verified before the resident processes are stopped.
 
-Add exact `event-web`, `evidence-recorder`, and `visual-log` targets to the
-Watchdog configuration. Event Web depends on healthy `event-stream`; Visual Log
-depends on healthy `event-stream` and `evidence-recorder`. The executables remain
-independent processes, while the Watchdog owns only process availability.
+Add exact `event-web`, `evidence-recorder`, `visual-log`, and `sftp` targets to
+the Watchdog configuration. Event Web depends on healthy `event-stream`; Visual
+Log depends on healthy `event-stream` and `evidence-recorder`; SFTP has no
+runtime dependency. The executables remain independent processes, while the
+Watchdog owns only process availability.
 Evidence Recorder exposes authenticated finite-run control. Visual Log exposes
 authenticated read-only status and owns no externally controllable run.
 
 After all module installers have created their watchdog-managed Tasks, author
-an exact local configuration containing all six targets and install the
+an exact local configuration containing all seven targets and install the
 external Watchdog:
 
 ```powershell
@@ -1043,6 +1082,7 @@ cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
 cmd/windows-event-stream/        authenticated local event journal service
 cmd/windows-event-web/           windowless read-only browser projection
+cmd/windows-sftp/                SFTP-only Windows filesystem data plane
 cmd/windows-visual-log/          optional independent oMLX scene-description producer
 cmd/windows-watchdog/            external one-way process observer and recovery
 cmd/windows-screen-scene-reducer/ retired raw-screen reducer reference
@@ -1065,6 +1105,7 @@ internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal
 internal/eventweb/               authenticated Web UI, replay, stream, and OSD projection
+internal/sftpruntime/            SSH none-auth, SFTP-only server, host identity, and health
 internal/evidence/               finite recording lifecycle, authoritative video store, range archive, and contact sheets
 internal/evidencehttp/           authenticated Evidence run-control and read interface
 internal/mfvideo/                native Media Foundation Evidence encoder and decoder

@@ -106,10 +106,12 @@ class DeployWindowsBinariesContractTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, self.powershell)
 
-    def test_event_web_is_part_of_the_complete_transactional_binary_set(self):
+    def test_resident_modules_are_part_of_the_complete_transactional_binary_set(self):
         self.assertIn("windows-event-web.exe", self.bash)
         self.assertIn('"windows-event-web.exe"', self.powershell)
-        self.assertIn("exactly the eleven deployed binaries", self.powershell)
+        self.assertIn("windows-sftp.exe", self.bash)
+        self.assertIn('"windows-sftp.exe"', self.powershell)
+        self.assertIn("exactly the twelve deployed binaries", self.powershell)
 
 
 if __name__ == "__main__":

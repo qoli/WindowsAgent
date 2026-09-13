@@ -67,6 +67,10 @@ output_dir="$(cd "${output_dir}" && pwd)"
     -o "${output_dir}/windows-event-web.exe" \
     ./cmd/windows-event-web
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath -ldflags "-H=windowsgui" \
+    -o "${output_dir}/windows-sftp.exe" \
+    ./cmd/windows-sftp
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -trimpath \
     -o "${output_dir}/windows-observation-job.exe" \
     ./cmd/windows-observation-job
@@ -104,6 +108,8 @@ python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-event-stream.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-event-web.exe" --expect gui
+python3 "${script_dir}/verify-windows-pe-subsystem.py" \
+  "${output_dir}/windows-sftp.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-observation-job.exe" --expect console
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
