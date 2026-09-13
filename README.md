@@ -257,7 +257,7 @@ installer. It verifies the expected PE subsystem for every emitted executable.
 ## Deploy from macOS
 
 `scripts/deploy-windows-agent.sh` is the single macOS interface for a complete
-binary update. It validates source, builds and hashes all ten deployed
+binary update. It validates source, builds and hashes all eleven deployed
 executables, uploads one ZIP over SSH, stops the installed Watchdog and its
 currently configured targets, replaces only their binaries, maintains bounded
 process-scoped crash dumps for the Agent and WGC worker, then restarts the

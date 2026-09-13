@@ -93,6 +93,7 @@ binaries=(
   windows-observation-job.exe
   windows-evidence-recorder.exe
   windows-visual-log.exe
+  windows-event-web.exe
 )
 
 : >"${release_dir}/SHA256SUMS"
