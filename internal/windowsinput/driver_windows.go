@@ -167,7 +167,7 @@ func (WindowsDriver) Press(ctx context.Context, request PressRequest) (Evidence,
 	}
 	releaseErr := sendKeyboardScanCode(evidence.ScanCode, flags|keyEventKeyUp)
 	if releaseErr != nil {
-		releaseErr = fmt.Errorf("send scan-code key up: %w", releaseErr)
+		releaseErr = &ReleaseError{Cause: fmt.Errorf("send scan-code key up: %w", releaseErr)}
 	}
 	if err := errors.Join(waitErr, releaseErr); err != nil {
 		return Evidence{}, err

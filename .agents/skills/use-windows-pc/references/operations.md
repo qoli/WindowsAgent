@@ -109,6 +109,32 @@ go run ./cmd/windows-exec ps1 \
 
 The runtime uses built-in Windows PowerShell 5.1 with `-File`. Do not silently
 select `pwsh`, inline the file with `-Command`, or fall back to SSH execution.
+Do not upload a PowerShell P/Invoke or `SendInput` script to approximate a key
+Action.
+
+## Direct foreground-pinned key press
+
+Obtain a fresh capture immediately before the press, then pass its exact
+foreground identity without deriving it from a title or process inventory:
+
+```bash
+cd "$WINDOWS_AGENT_REPO"
+
+go run ./cmd/windows-key press \
+  --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  --key Key_Home \
+  --hold 180ms \
+  --expected-process-id 1234 \
+  --expected-executable-name Game.exe \
+  --expected-executable-path 'C:\Games\Game.exe'
+```
+
+Use only canonical `Key_*` names accepted by the runtime. The client follows
+the durable Action invocation to a terminal state. `COMPLETED` proves the
+bounded scan-code press and release only; capture again when visible or domain
+acceptance matters. Foreground drift, an active lease conflict, injection
+failure, and release failure are terminal. Do not switch to a PowerShell,
+SSH, virtual-key, or window-message input path.
 
 ## Starlark automation
 

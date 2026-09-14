@@ -21,6 +21,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
@@ -32,6 +33,7 @@ const StreamName = "action.runs"
 
 const EphemeralStarlarkActionID = "windows/ephemeral-starlark"
 const EphemeralExecutionActionID = "windows/ephemeral-execution"
+const DirectKeyInputActionID = "windows/direct-key-input"
 
 var (
 	ErrInvocationNotFound = errors.New("Action invocation not found")
@@ -59,6 +61,7 @@ type Executor interface {
 	RunStreaming(context.Context, scriptlaunch.Invocation, streamaction.Reporter) (actionlaunch.Result, error)
 	ValidateAction(scriptlaunch.Invocation) (rules.Action, error)
 	Contract(string) (actionlaunch.Contract, error)
+	RunDirectKey(context.Context, inputaction.DirectPressRequest) (inputaction.DirectPressResult, error)
 }
 
 type AutomationExecutor interface {
@@ -120,19 +123,93 @@ type run struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
 
-	mu                sync.Mutex
-	eventMu           sync.Mutex
-	state             string
-	errorText         string
-	output            json.RawMessage
-	lastEventID       string
-	afterCursor       uint64
-	sequence          *actionsequence.Request
-	automationPackage *windowsautomation.Package
-	automationInputs  map[string]any
-	executionRequest  *windowsexec.Request
-	errorCode         string
-	errorStage        string
+	mu                 sync.Mutex
+	eventMu            sync.Mutex
+	state              string
+	errorText          string
+	output             json.RawMessage
+	lastEventID        string
+	afterCursor        uint64
+	sequence           *actionsequence.Request
+	automationPackage  *windowsautomation.Package
+	automationInputs   map[string]any
+	executionRequest   *windowsexec.Request
+	directInputRequest *inputaction.DirectPressRequest
+	errorCode          string
+	errorStage         string
+}
+
+// InvokeDirectKey starts one host-owned foreground-pinned key press. It uses
+// the same controller as Rule-owned key Actions without requiring Rule
+// resolution or a package-declared binding.
+func (m *Manager) InvokeDirectKey(ctx context.Context, request inputaction.DirectPressRequest) (Invocation, error) {
+	if m == nil {
+		return Invocation{}, errors.New("Action invocation manager is required")
+	}
+	if ctx == nil {
+		return Invocation{}, errors.New("context is required")
+	}
+	if err := request.Validate(); err != nil {
+		return Invocation{}, fmt.Errorf("validate direct key input request: %w", err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return Invocation{}, fmt.Errorf("encode direct key input request: %w", err)
+	}
+	var cloned inputaction.DirectPressRequest
+	if err := json.Unmarshal(encoded, &cloned); err != nil {
+		return Invocation{}, fmt.Errorf("clone direct key input request: %w", err)
+	}
+	identity, err := newInvocationID(m.random)
+	if err != nil {
+		return Invocation{}, fmt.Errorf("create direct key input invocation ID: %w", err)
+	}
+	observed, foregroundErr := m.foreground()
+	foregroundUnavailable := foregroundErr != nil
+	if foregroundErr != nil {
+		m.logger.Warn("direct_key_input_foreground_unavailable", "error", foregroundErr)
+	}
+	action := rules.Action{
+		ID: DirectKeyInputActionID, Runtime: rules.WindowsKeyActionRuntimeV1,
+		Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true},
+	}
+	runContext, cancel := context.WithCancel(context.Background())
+	instance := &run{
+		manager: m, action: action, identity: identity, foreground: observed, foregroundUnavailable: foregroundUnavailable,
+		ctx: runContext, cancel: cancel, state: StateRunning, directInputRequest: &cloned,
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		cancel()
+		return Invocation{}, errors.New("Action invocation manager is closed")
+	}
+	m.runs[identity] = instance
+	m.mu.Unlock()
+	digest := sha256.Sum256(encoded)
+	started, err := instance.appendEvent(context.Background(), "action.started", map[string]any{
+		"state": StateRunning, "actionId": action.ID, "lifecycle": action.Execution.Lifecycle,
+		"interruptible": true, "key": request.Key, "holdMs": request.HoldMS,
+		"expectedForeground": request.ExpectedForeground, "requestDigest": hex.EncodeToString(digest[:]),
+	})
+	if err != nil {
+		cancel()
+		m.mu.Lock()
+		delete(m.runs, identity)
+		m.mu.Unlock()
+		return Invocation{}, fmt.Errorf("commit direct key input start event: %w", err)
+	}
+	instance.mu.Lock()
+	instance.afterCursor = started.Sequence - 1
+	instance.mu.Unlock()
+	m.wg.Add(1)
+	go instance.execute()
+	return Invocation{
+		InvocationID: identity, ActionID: action.ID, Runtime: action.Runtime,
+		State: StateRunning, Execution: action.Execution,
+		Watch: &WatchTarget{URL: "/v1/action-invocations/" + identity + "/events?after=" + fmt.Sprint(started.Sequence-1), ContentType: "application/x-ndjson", AfterCursor: started.Sequence - 1},
+		Stop:  &StopTarget{Method: "POST", URL: "/v1/action-invocations/" + identity + "/stop"},
+	}, nil
 }
 
 func NewManager(ruleStore *rules.Store, executor Executor, automation AutomationExecutor, execution windowsexec.Executor, journal Journal, foregroundSnapshot func() (foreground.Info, error), logger *slog.Logger) (*Manager, error) {
@@ -184,7 +261,7 @@ func (m *Manager) recoverInterrupted(ctx context.Context) error {
 					ID: event.Source.ModuleID, Runtime: event.Source.Runtime,
 					Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: payload.Lifecycle, Interruptible: payload.Interruptible},
 				}
-				if event.Source.ModuleID != EphemeralStarlarkActionID && event.Source.ModuleID != EphemeralExecutionActionID {
+				if !isHostOwnedActionID(event.Source.ModuleID) {
 					action.RuleID = event.Foreground.ExecutableName
 				}
 				instance := &run{
@@ -252,6 +329,10 @@ func (m *Manager) recoverInterrupted(ctx context.Context) error {
 		)
 	}
 	return nil
+}
+
+func isHostOwnedActionID(actionID string) bool {
+	return actionID == EphemeralStarlarkActionID || actionID == EphemeralExecutionActionID || actionID == DirectKeyInputActionID
 }
 
 func (m *Manager) Invoke(ctx context.Context, invocation scriptlaunch.Invocation) (Invocation, error) {
@@ -789,6 +870,7 @@ func (r *run) execute() {
 	isSequence := r.sequence != nil
 	isAutomation := r.automationPackage != nil
 	isExecution := r.executionRequest != nil
+	isDirectInput := r.directInputRequest != nil
 	if isSequence {
 		defer r.manager.releaseSequence(r.action.RuleID, r.identity)
 	}
@@ -803,6 +885,14 @@ func (r *run) execute() {
 		if err == nil {
 			var output []byte
 			output, err = json.Marshal(executionResult)
+			result = actionlaunch.Result{ActionID: r.action.ID, Runtime: r.action.Runtime, Output: output}
+		}
+		runErr = err
+	} else if isDirectInput {
+		directResult, err := r.manager.executor.RunDirectKey(r.ctx, *r.directInputRequest)
+		if err == nil {
+			var output []byte
+			output, err = json.Marshal(directResult)
 			result = actionlaunch.Result{ActionID: r.action.ID, Runtime: r.action.Runtime, Output: output}
 		}
 		runErr = err
@@ -824,6 +914,8 @@ func (r *run) execute() {
 	var terminalErrorCode, terminalErrorStage string
 	var executionError *windowsexec.Error
 	_ = errors.As(runErr, &executionError)
+	var inputError *inputaction.Error
+	_ = errors.As(runErr, &inputError)
 	switch {
 	case cancelled && isSequence && runErr != nil && !errors.Is(runErr, context.Canceled):
 		state, eventType = StateFailed, "action.failed"
@@ -831,6 +923,13 @@ func (r *run) execute() {
 	case cancelled && isExecution && executionError != nil && executionError.Code == "EXEC_CANCEL_FAILED":
 		state, eventType = StateFailed, "action.failed"
 		terminalErrorCode, terminalErrorStage = executionError.Code, executionError.Stage
+		payload = map[string]any{
+			"state": state, "error": runErr.Error(),
+			"errorCode": terminalErrorCode, "errorStage": terminalErrorStage,
+		}
+	case cancelled && isDirectInput && inputError != nil && inputError.Code == "INPUT_RELEASE_FAILED":
+		state, eventType = StateFailed, "action.failed"
+		terminalErrorCode, terminalErrorStage = inputError.Code, inputError.Stage
 		payload = map[string]any{
 			"state": state, "error": runErr.Error(),
 			"errorCode": terminalErrorCode, "errorStage": terminalErrorStage,
@@ -853,6 +952,12 @@ func (r *run) execute() {
 			payload["errorStage"] = executionError.Stage
 			terminalErrorCode = executionError.Code
 			terminalErrorStage = executionError.Stage
+		}
+		if errors.As(runErr, &inputError) {
+			payload["errorCode"] = inputError.Code
+			payload["errorStage"] = inputError.Stage
+			terminalErrorCode = inputError.Code
+			terminalErrorStage = inputError.Stage
 		}
 	case r.action.Execution.Lifecycle == rules.LifecycleLoop:
 		state, eventType = StateFailed, "action.failed"
@@ -877,6 +982,9 @@ func (r *run) execute() {
 	}
 	if isExecution {
 		r.executionRequest = nil
+	}
+	if isDirectInput {
+		r.directInputRequest = nil
 	}
 	r.state = state
 	if state == StateCompleted {
@@ -1049,6 +1157,9 @@ func (r *run) recoverPanic() {
 	} else if r.action.Runtime == windowsexec.RuntimeID {
 		payload["errorCode"] = "WINDOWS_EXECUTION_RUNTIME_PANICKED"
 		payload["errorStage"] = "executing-execution"
+	} else if r.action.ID == DirectKeyInputActionID {
+		payload["errorCode"] = "INPUT_RUNTIME_PANICKED"
+		payload["errorStage"] = "executing-input"
 	}
 	_, appendErr := r.appendEvent(context.Background(), "action.failed", payload)
 	r.mu.Lock()
@@ -1056,6 +1167,7 @@ func (r *run) recoverPanic() {
 	r.automationPackage = nil
 	r.automationInputs = nil
 	r.executionRequest = nil
+	r.directInputRequest = nil
 	r.state = StateFailed
 	r.errorText = errorText
 	if r.action.Runtime == windowsautomation.RuntimeID {
@@ -1064,6 +1176,9 @@ func (r *run) recoverPanic() {
 	} else if r.action.Runtime == windowsexec.RuntimeID {
 		r.errorCode = "WINDOWS_EXECUTION_RUNTIME_PANICKED"
 		r.errorStage = "executing-execution"
+	} else if r.action.ID == DirectKeyInputActionID {
+		r.errorCode = "INPUT_RUNTIME_PANICKED"
+		r.errorStage = "executing-input"
 	}
 	if appendErr != nil {
 		r.errorText += "; commit terminal Action event: " + appendErr.Error()

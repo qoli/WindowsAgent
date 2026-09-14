@@ -3,6 +3,7 @@ package windowsinput
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -24,6 +25,27 @@ type Evidence struct {
 	ScanCode uint16
 	Extended bool
 	HoldMS   int64
+}
+
+// ReleaseError reports that a key-down was sent but the compensating key-up
+// failed. Callers must treat this as a safety failure even when cancellation
+// triggered the release attempt.
+type ReleaseError struct {
+	Cause error
+}
+
+func (e *ReleaseError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "release input key"
+	}
+	return fmt.Sprintf("release input key: %v", e.Cause)
+}
+
+func (e *ReleaseError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 type PointerClickRequest struct {

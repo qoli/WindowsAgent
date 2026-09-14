@@ -105,6 +105,12 @@ jobs:
           go build -trimpath
           -o .build/windows-exec.exe
           ./cmd/windows-exec
+      - name: Build direct key client
+        run: >-
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          go build -trimpath
+          -o .build/windows-key.exe
+          ./cmd/windows-key
       - name: Build SFTP filesystem service
         run: >-
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0
@@ -122,6 +128,8 @@ jobs:
           python3 scripts/verify-windows-pe-subsystem.py .build/windows-starlark-invoke.exe --expect console
       - name: Verify Windows execution client PE subsystem
         run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-exec.exe --expect console
+      - name: Verify direct key client PE subsystem
+        run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-key.exe --expect console
       - name: Verify SFTP filesystem service PE subsystem
         run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-sftp.exe --expect gui
       - name: Publish ScreenParser DirectML runtime

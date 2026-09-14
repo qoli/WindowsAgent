@@ -34,6 +34,102 @@ type Controller struct {
 	releasedLeaseOrder   []string
 }
 
+const DirectSchemaVersion = 1
+
+// ExpectedForeground pins one direct key press to the foreground process that
+// the caller deliberately observed before requesting input.
+type ExpectedForeground struct {
+	ProcessID      uint32 `json:"processId"`
+	ExecutableName string `json:"executableName"`
+	ExecutablePath string `json:"executablePath"`
+}
+
+// DirectPressRequest exposes the game-neutral key runtime without requiring a
+// Rule package. It deliberately retains the existing finite press bounds.
+type DirectPressRequest struct {
+	SchemaVersion      uint32             `json:"schemaVersion"`
+	ExpectedForeground ExpectedForeground `json:"expectedForeground"`
+	Key                string             `json:"key"`
+	HoldMS             uint32             `json:"holdMs"`
+}
+
+type DirectPressResult struct {
+	SchemaVersion uint32             `json:"schemaVersion"`
+	Operation     string             `json:"operation"`
+	Foreground    ExpectedForeground `json:"foreground"`
+	Key           string             `json:"key"`
+	Backend       string             `json:"backend"`
+	ScanCode      uint16             `json:"scanCode"`
+	Extended      bool               `json:"extended"`
+	HoldMS        int64              `json:"holdMs"`
+}
+
+// Error preserves a stable machine-readable failure boundary for direct key
+// input while retaining the underlying diagnostic cause.
+type Error struct {
+	Code  string
+	Stage string
+	Cause error
+}
+
+func (e *Error) Error() string {
+	if e == nil || e.Cause == nil {
+		return "direct key input failed"
+	}
+	return e.Cause.Error()
+}
+
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (request DirectPressRequest) Validate() error {
+	if request.SchemaVersion != DirectSchemaVersion {
+		return errors.New("direct key press schemaVersion must equal 1")
+	}
+	if request.ExpectedForeground.ProcessID == 0 || request.ExpectedForeground.ExecutableName == "" || request.ExpectedForeground.ExecutablePath == "" ||
+		strings.TrimSpace(request.ExpectedForeground.ExecutableName) != request.ExpectedForeground.ExecutableName ||
+		strings.ContainsAny(request.ExpectedForeground.ExecutableName, `\\/`) ||
+		strings.TrimSpace(request.ExpectedForeground.ExecutablePath) != request.ExpectedForeground.ExecutablePath ||
+		!isAbsoluteWindowsPath(request.ExpectedForeground.ExecutablePath) ||
+		!strings.EqualFold(windowsPathBase(request.ExpectedForeground.ExecutablePath), request.ExpectedForeground.ExecutableName) {
+		return errors.New("expectedForeground requires a positive processId and matching canonical executableName and absolute executablePath")
+	}
+	if _, err := windowsinput.VirtualKey(request.Key); err != nil {
+		return fmt.Errorf("validate direct key: %w", err)
+	}
+	if request.HoldMS < 1 || request.HoldMS > 1000 {
+		return errors.New("direct key press holdMs must be between 1 and 1000")
+	}
+	return nil
+}
+
+// PressDirect executes one literal canonical key press against an exact
+// caller-observed foreground process. Success proves injection, not an
+// application or user-goal postcondition.
+func (c *Controller) PressDirect(ctx context.Context, request DirectPressRequest) (DirectPressResult, error) {
+	if c == nil || ctx == nil {
+		return DirectPressResult{}, errors.New("input Action controller and context are required")
+	}
+	if err := request.Validate(); err != nil {
+		return DirectPressResult{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	evidence, observed, err := c.pressLocked(ctx, resolvedBinding{key: request.Key}, request.HoldMS, request.ExpectedForeground, nil)
+	if err != nil {
+		return DirectPressResult{}, err
+	}
+	return DirectPressResult{
+		SchemaVersion: DirectSchemaVersion, Operation: "press", Foreground: foregroundIdentity(observed),
+		Key: evidence.Key, Backend: evidence.Backend, ScanCode: evidence.ScanCode,
+		Extended: evidence.Extended, HoldMS: evidence.HoldMS,
+	}, nil
+}
+
 type keyLease struct {
 	id            string
 	ruleID        string
@@ -109,25 +205,9 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	if revalidated != resolved {
 		return nil, errors.New("input Action binding changed before injection")
 	}
-	current, err := c.foreground()
+	evidence, _, err := c.pressLocked(ctx, resolved, holdMS, ExpectedForeground{ExecutableName: ruleID}, &before)
 	if err != nil {
-		return nil, fmt.Errorf("revalidate foreground before input injection: %w", err)
-	}
-	if !sameForeground(before, current) || !strings.EqualFold(current.ExecutableName, ruleID) {
-		return nil, errors.New("foreground process changed before input injection")
-	}
-	if c.activeLease != nil {
-		for _, held := range c.activeLease.resolved {
-			if held.key == resolved.key {
-				return nil, fmt.Errorf("press Action key %s conflicts with active key hold lease %q", resolved.key, c.activeLease.id)
-			}
-		}
-	}
-	evidence, err := c.driver.Press(ctx, windowsinput.PressRequest{
-		Key: resolved.key, Hold: time.Duration(holdMS) * time.Millisecond,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("press input Action key %s: %w", resolved.key, err)
+		return nil, err
 	}
 	result := map[string]any{
 		"schemaVersion": 1, "selection": selection,
@@ -146,6 +226,74 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 		return nil, fmt.Errorf("validate input Action output: %w", err)
 	}
 	return json.Marshal(result)
+}
+
+func (c *Controller) pressLocked(ctx context.Context, resolved resolvedBinding, holdMS uint32, expected ExpectedForeground, observedBefore *foreground.Info) (windowsinput.Evidence, foreground.Info, error) {
+	var before foreground.Info
+	if observedBefore == nil {
+		observed, err := c.foreground()
+		if err != nil {
+			return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_FOREGROUND_UNAVAILABLE", "resolving-foreground", fmt.Errorf("resolve foreground before input Action: %w", err))
+		}
+		before = observed
+	} else {
+		before = *observedBefore
+	}
+	if !matchesExpectedForeground(before, expected) {
+		return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_FOREGROUND_MISMATCH", "validating-foreground", fmt.Errorf(
+			"foreground process is %s pid %d, expected %s pid %d",
+			before.ExecutableName, before.ProcessID, expected.ExecutableName, expected.ProcessID,
+		))
+	}
+	current, err := c.foreground()
+	if err != nil {
+		return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_FOREGROUND_UNAVAILABLE", "revalidating-foreground", fmt.Errorf("revalidate foreground before input injection: %w", err))
+	}
+	if !sameForeground(before, current) || !matchesExpectedForeground(current, expected) {
+		return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_FOREGROUND_CHANGED", "revalidating-foreground", errors.New("foreground process changed before input injection"))
+	}
+	if c.activeLease != nil {
+		for _, held := range c.activeLease.resolved {
+			if held.key == resolved.key {
+				return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_KEY_CONFLICT", "preflighting-input", fmt.Errorf("press Action key %s conflicts with active key hold lease %q", resolved.key, c.activeLease.id))
+			}
+		}
+	}
+	evidence, err := c.driver.Press(ctx, windowsinput.PressRequest{Key: resolved.key, Hold: time.Duration(holdMS) * time.Millisecond})
+	if err != nil {
+		var releaseError *windowsinput.ReleaseError
+		if errors.As(err, &releaseError) {
+			return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_RELEASE_FAILED", "releasing-input", fmt.Errorf("press input Action key %s: %w", resolved.key, err))
+		}
+		return windowsinput.Evidence{}, foreground.Info{}, directError("INPUT_INJECTION_FAILED", "injecting-input", fmt.Errorf("press input Action key %s: %w", resolved.key, err))
+	}
+	return evidence, current, nil
+}
+
+func directError(code, stage string, cause error) error {
+	return &Error{Code: code, Stage: stage, Cause: cause}
+}
+
+func matchesExpectedForeground(observed foreground.Info, expected ExpectedForeground) bool {
+	return strings.EqualFold(observed.ExecutableName, expected.ExecutableName) &&
+		(expected.ProcessID == 0 || observed.ProcessID == expected.ProcessID) &&
+		(expected.ExecutablePath == "" || strings.EqualFold(filepath.Clean(observed.ExecutablePath), filepath.Clean(expected.ExecutablePath)))
+}
+
+func foregroundIdentity(info foreground.Info) ExpectedForeground {
+	return ExpectedForeground{ProcessID: info.ProcessID, ExecutableName: info.ExecutableName, ExecutablePath: info.ExecutablePath}
+}
+
+func isAbsoluteWindowsPath(value string) bool {
+	return len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) &&
+		value[1] == ':' && (value[2] == '\\' || value[2] == '/')
+}
+
+func windowsPathBase(value string) string {
+	if index := strings.LastIndexAny(value, `\\/`); index >= 0 {
+		return value[index+1:]
+	}
+	return value
 }
 
 func (c *Controller) runLease(ctx context.Context, pkg *Package, inputs map[string]any, ruleID, selection string, binding Binding) (json.RawMessage, error) {

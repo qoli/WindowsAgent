@@ -4,22 +4,32 @@
 
 **Partially landed.** The game-neutral `windows-key-action-v1` runtime
 implements serialized, foreground-bound keyboard presses and one non-blocking
-held-key lease through Windows scan-code `SendInput`. Pointer input, chords,
-and arbitrary key sequences remain deferred.
+held-key lease through Windows scan-code `SendInput`. A host-owned direct press
+surface is implemented for callers that already hold a fresh exact foreground
+identity; installed-Agent Windows acceptance of that surface remains pending.
+Pointer input, direct leases, chords, and arbitrary key sequences remain
+deferred.
 
 ## Boundary
 
-Each key Action package is finite, schema-bound, and owned by one executable
-Rule. A package maps a schema-valid selection to one manifest-declared binding;
-the caller cannot provide an undeclared physical key. The package selects one
-of two binding sources:
+The runtime has two adapters over one controller, lock, foreground validator,
+lease-conflict table, scan-code driver, and release behavior:
+
+- a Rule-owned package maps a schema-valid selection to one
+  manifest-declared binding; the caller cannot provide an undeclared physical
+  key;
+- `POST /v1/key-inputs/invoke` accepts one literal canonical key and bounded
+  hold from an operator that supplies the exact process ID, executable name,
+  and absolute executable path from a fresh foreground observation.
+
+A Rule package selects one of two binding sources:
 
 - `literal-key-v1` declares a canonical key directly in each binding;
 - `frontier-active-preset-v1` declares an Elite logical control such as
   `SetSpeed100` or `UI_Select` and resolves its physical key from the active
   Frontier preset.
 
-Both sources use the same `windowsinput` driver. The manifest declares either
+Both adapters use the same `windowsinput` driver. The manifest declares either
 a `press` gesture or a `lease` gesture. A press has a default hold time from 1
 to 1000 milliseconds. A
 package may expose one schema-validated integer input as an explicit hold-time
@@ -35,6 +45,27 @@ an exact key conflict fails before injection. Explicit stop, expiry, streaming f
 and Agent shutdown release the same resolved key or key pair.
 Literal-key packages do not require Frontier configuration; a missing Frontier
 root fails only a package that explicitly selects the Frontier binding source.
+
+The direct request schema is deliberately narrow and all fields are required:
+
+```json
+{
+  "schemaVersion": 1,
+  "expectedForeground": {
+    "processId": 1234,
+    "executableName": "Game.exe",
+    "executablePath": "C:\\Games\\Game.exe"
+  },
+  "key": "Key_Home",
+  "holdMs": 180
+}
+```
+
+It creates the host-owned Action identity `windows/direct-key-input` using the
+existing durable status, watch, stop, and terminal event contract. A successful
+result reports the second foreground snapshot actually used for injection plus
+the scan-code evidence. It proves only that the input runtime completed, not
+that the application accepted the key or that a visual goal was reached.
 
 For a Frontier binding, every invocation reads `StartPreset.4.start`, locates
 the unique regular `.binds` file whose XML `PresetName` matches, and requires
@@ -53,7 +84,11 @@ Missing or ambiguous preset files, no/ambiguous Keyboard binding, unsupported
 key names, invalid hold duration, failed scan-code mapping, foreground drift,
 partial `SendInput`, cancellation, and schema errors fail explicitly. The
 Windows driver attempts key release after an accepted key-down even when the
-hold is cancelled. It does not choose a substitute preset, key, device, input
+hold is cancelled. A failed release is terminal `INPUT_RELEASE_FAILED`,
+including during cancellation; it is not reported as a safe `CANCELLED`.
+Direct foreground, conflict, and injection failures retain stable `INPUT_*`
+codes in the durable terminal result. The runtime does not choose a substitute
+preset, key, device, input
 provider, virtual-key injection path, or window-message path.
 
 Canonical keys currently include `Key_A` through `Key_Z`, `Key_0` through
@@ -92,5 +127,7 @@ diagnostic-only filename.
 
 - chords, multiple independent held-key leases, and arbitrary
   multi-key sequences;
+- direct operator leases; lease ownership, renewal, expiry, restart recovery,
+  and release are not approximated with repeated direct presses;
 - authenticated remote Action invocation and a complete durable finite-action
   lifecycle journal.

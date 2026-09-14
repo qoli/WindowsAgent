@@ -3,6 +3,7 @@ package inputaction
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,113 @@ func TestControllerResolvesCurrentKeyboardBindingAndPressesIt(t *testing.T) {
 		!strings.Contains(string(output), `"key":"Key_F7"`) || !strings.Contains(string(output), `"activePreset":"ControlPadKeyboard"`) ||
 		!strings.Contains(string(output), `"backend":"sendinput-scancode"`) {
 		t.Fatalf("requests=%v output=%s", driver.requests, output)
+	}
+}
+
+func TestControllerPressesDirectCanonicalKeyAgainstExactForeground(t *testing.T) {
+	driver := &recordingDriver{}
+	controller, err := NewController("", driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := controller.PressDirect(context.Background(), DirectPressRequest{
+		SchemaVersion: DirectSchemaVersion,
+		ExpectedForeground: ExpectedForeground{
+			ProcessID: 42, ExecutableName: "EliteDangerous64.exe", ExecutablePath: `D:\EliteDangerous64.exe`,
+		},
+		Key: "Key_Home", HoldMS: 180,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.requests) != 1 || driver.requests[0].Key != "Key_Home" || driver.requests[0].Hold != 180*time.Millisecond {
+		t.Fatalf("requests=%v", driver.requests)
+	}
+	if result.Key != "Key_Home" || result.HoldMS != 180 || result.Foreground.ProcessID != 42 ||
+		result.Backend != windowsinput.BackendSendInputScanCode {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestControllerRejectsInvalidDirectPressBeforeInjection(t *testing.T) {
+	tests := []DirectPressRequest{
+		{SchemaVersion: 2, ExpectedForeground: ExpectedForeground{ProcessID: 42, ExecutableName: "game.exe", ExecutablePath: `C:\game.exe`}, Key: "Key_Home", HoldMS: 40},
+		{SchemaVersion: 1, ExpectedForeground: ExpectedForeground{ExecutableName: "game.exe", ExecutablePath: `C:\game.exe`}, Key: "Key_Home", HoldMS: 40},
+		{SchemaVersion: 1, ExpectedForeground: ExpectedForeground{ProcessID: 42, ExecutableName: `C:\\game.exe`, ExecutablePath: `C:\game.exe`}, Key: "Key_Home", HoldMS: 40},
+		{SchemaVersion: 1, ExpectedForeground: ExpectedForeground{ProcessID: 42, ExecutableName: "game.exe", ExecutablePath: `C:\game.exe`}, Key: "Home", HoldMS: 40},
+		{SchemaVersion: 1, ExpectedForeground: ExpectedForeground{ProcessID: 42, ExecutableName: "game.exe", ExecutablePath: `C:\game.exe`}, Key: "Key_Home", HoldMS: 0},
+	}
+	for _, request := range tests {
+		driver := &recordingDriver{}
+		controller, err := NewController("", driver, fixtureForeground)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := controller.PressDirect(context.Background(), request); err == nil {
+			t.Fatalf("request unexpectedly succeeded: %+v", request)
+		}
+		if len(driver.requests) != 0 {
+			t.Fatalf("invalid request injected input: %+v", driver.requests)
+		}
+	}
+}
+
+func TestControllerRejectsDirectForegroundMismatchAndDrift(t *testing.T) {
+	request := DirectPressRequest{
+		SchemaVersion:      DirectSchemaVersion,
+		ExpectedForeground: ExpectedForeground{ProcessID: 42, ExecutableName: "EliteDangerous64.exe", ExecutablePath: `D:\EliteDangerous64.exe`},
+		Key:                "Key_Insert", HoldMS: 40,
+	}
+	driver := &recordingDriver{}
+	controller, err := NewController("", driver, func() (foreground.Info, error) {
+		return foreground.Info{ProcessID: 7, ExecutableName: "Other.exe", ExecutablePath: `C:\Other.exe`}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.PressDirect(context.Background(), request); err == nil || !strings.Contains(err.Error(), "expected EliteDangerous64.exe pid 42") {
+		t.Fatalf("mismatch error=%v", err)
+	} else if typed := new(Error); !errors.As(err, &typed) || typed.Code != "INPUT_FOREGROUND_MISMATCH" {
+		t.Fatalf("mismatch typed error=%+v", typed)
+	}
+
+	calls := 0
+	controller, err = NewController("", driver, func() (foreground.Info, error) {
+		calls++
+		if calls == 1 {
+			return fixtureForeground()
+		}
+		return foreground.Info{ProcessID: 43, ExecutableName: "EliteDangerous64.exe", ExecutablePath: `D:\EliteDangerous64.exe`}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controller.PressDirect(context.Background(), request); err == nil || !strings.Contains(err.Error(), "foreground process changed") {
+		t.Fatalf("drift error=%v", err)
+	} else if typed := new(Error); !errors.As(err, &typed) || typed.Code != "INPUT_FOREGROUND_CHANGED" {
+		t.Fatalf("drift typed error=%+v", typed)
+	}
+	if len(driver.requests) != 0 {
+		t.Fatalf("foreground failure injected input: %+v", driver.requests)
+	}
+}
+
+func TestControllerClassifiesDirectKeyReleaseFailure(t *testing.T) {
+	driver := &recordingDriver{err: errors.Join(context.Canceled, &windowsinput.ReleaseError{Cause: errors.New("key up failed")})}
+	controller, err := NewController("", driver, fixtureForeground)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = controller.PressDirect(context.Background(), DirectPressRequest{
+		SchemaVersion: DirectSchemaVersion,
+		ExpectedForeground: ExpectedForeground{
+			ProcessID: 42, ExecutableName: "EliteDangerous64.exe", ExecutablePath: `D:\EliteDangerous64.exe`,
+		},
+		Key: "Key_Home", HoldMS: 40,
+	})
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Code != "INPUT_RELEASE_FAILED" || typed.Stage != "releasing-input" {
+		t.Fatalf("error=%v typed=%+v", err, typed)
 	}
 }
 

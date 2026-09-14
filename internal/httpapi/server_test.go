@@ -26,6 +26,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -73,6 +74,9 @@ type fakeActionService struct {
 	execution       windowsexec.Request
 	executionResult actionrun.Invocation
 	executionErr    error
+	directKey       inputaction.DirectPressRequest
+	directKeyResult actionrun.Invocation
+	directKeyErr    error
 }
 
 type fakeProcessCollector struct {
@@ -105,6 +109,11 @@ func (f *fakeActionService) InvokeStarlark(_ context.Context, pkg *windowsautoma
 func (f *fakeActionService) InvokeExecution(_ context.Context, request windowsexec.Request) (actionrun.Invocation, error) {
 	f.execution = request
 	return f.executionResult, f.executionErr
+}
+
+func (f *fakeActionService) InvokeDirectKey(_ context.Context, request inputaction.DirectPressRequest) (actionrun.Invocation, error) {
+	f.directKey = request
+	return f.directKeyResult, f.directKeyErr
 }
 
 func (f *fakeActionService) SequenceToolSchema(string) (actionsequence.ToolSchema, error) {
@@ -715,6 +724,40 @@ func TestWindowsExecutionInvokeStrictRequest(t *testing.T) {
 			t.Fatalf("invalid request %q status = %d, body = %s", invalid, failed.Code, failed.Body.String())
 		}
 		assertErrorCode(t, failed.Body.Bytes(), "invalid_execution_request")
+	}
+}
+
+func TestDirectKeyInputInvokeStrictRequest(t *testing.T) {
+	service := &fakeActionService{directKeyResult: actionrun.Invocation{
+		InvocationID: "act_key", ActionID: actionrun.DirectKeyInputActionID,
+		Runtime: rules.WindowsKeyActionRuntimeV1, State: actionrun.StateRunning,
+		Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true},
+		Watch:     &actionrun.WatchTarget{URL: "/v1/action-invocations/act_key/events?after=9", ContentType: "application/x-ndjson", AfterCursor: 9},
+		Stop:      &actionrun.StopTarget{Method: http.MethodPost, URL: "/v1/action-invocations/act_key/stop"},
+	}}
+	server, _ := newTestServerWithActionService(t, service)
+	body := `{"schemaVersion":1,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"key":"Key_Home","holdMs":180}`
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/key-inputs/invoke", strings.NewReader(body)))
+	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/v1/action-invocations/act_key" {
+		t.Fatalf("status = %d, location = %q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if service.directKey.Key != "Key_Home" || service.directKey.HoldMS != 180 || service.directKey.ExpectedForeground.ProcessID != 42 {
+		t.Fatalf("direct key request = %+v", service.directKey)
+	}
+
+	for _, invalid := range []string{
+		`{"schemaVersion":1,"schemaVersion":1,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"key":"Key_Home","holdMs":40}`,
+		`{"schemaVersion":1,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"key":"Key_Home","holdMs":40,"unknown":true}`,
+		`{"schemaVersion":1,"expectedForeground":{"processId":0,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"key":"Key_Home","holdMs":40}`,
+		`{"schemaVersion":1,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"key":"Home","holdMs":40}`,
+	} {
+		failed := httptest.NewRecorder()
+		server.Handler().ServeHTTP(failed, httptest.NewRequest(http.MethodPost, "/v1/key-inputs/invoke", strings.NewReader(invalid)))
+		if failed.Code != http.StatusBadRequest {
+			t.Fatalf("invalid request %q status = %d, body = %s", invalid, failed.Code, failed.Body.String())
+		}
+		assertErrorCode(t, failed.Body.Bytes(), "invalid_key_input_request")
 	}
 }
 

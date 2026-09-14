@@ -21,6 +21,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -36,6 +37,7 @@ const (
 	maxSequenceBody       = 64 << 10
 	maxStarlarkActionBody = 32 << 20
 	maxExecutionBody      = 32 << 20
+	maxKeyInputBody       = 4 << 10
 	scriptRequestTimeout  = 80 * time.Second
 )
 
@@ -59,6 +61,7 @@ type ActionService interface {
 	InvokeSequence(context.Context, actionsequence.Request) (actionrun.Invocation, error)
 	InvokeStarlark(context.Context, *windowsautomation.Package, map[string]any) (actionrun.Invocation, error)
 	InvokeExecution(context.Context, windowsexec.Request) (actionrun.Invocation, error)
+	InvokeDirectKey(context.Context, inputaction.DirectPressRequest) (actionrun.Invocation, error)
 	SequenceToolSchema(string) (actionsequence.ToolSchema, error)
 	Get(string) (actionrun.Invocation, error)
 	Stop(string) (actionrun.Invocation, error)
@@ -228,6 +231,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleStarlarkActionInvoke)
 	case r.URL.Path == "/v1/executions/invoke":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleExecutionInvoke)
+	case r.URL.Path == "/v1/key-inputs/invoke":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleDirectKeyInvoke)
 	case strings.HasPrefix(r.URL.Path, "/v1/action-invocations/"):
 		s.handleActionInvocationResource(recorder, r, requestID)
 	default:
@@ -483,6 +488,52 @@ func (s *Server) handleExecutionInvoke(w http.ResponseWriter, r *http.Request, r
 		"state", result.State,
 	)
 	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) handleDirectKeyInvoke(w http.ResponseWriter, r *http.Request, requestID string) {
+	request, err := decodeDirectKeyInvocation(w, r)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_key_input_request", err.Error())
+		return
+	}
+	result, err := s.actions.InvokeDirectKey(r.Context(), request)
+	if err != nil {
+		s.writeActionError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/action-invocations/"+result.InvocationID)
+	s.logger.InfoContext(r.Context(), "direct_key_input_invoked",
+		"request_id", requestID,
+		"invocation_id", result.InvocationID,
+		"key", request.Key,
+		"hold_ms", request.HoldMS,
+		"expected_foreground_process_id", request.ExpectedForeground.ProcessID,
+		"expected_foreground_executable_name", request.ExpectedForeground.ExecutableName,
+		"state", result.State,
+	)
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func decodeDirectKeyInvocation(w http.ResponseWriter, r *http.Request) (inputaction.DirectPressRequest, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxKeyInputBody)
+	defer r.Body.Close()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return inputaction.DirectPressRequest{}, fmt.Errorf("read JSON body: %w", err)
+	}
+	if err := strictjson.Validate(data); err != nil {
+		return inputaction.DirectPressRequest{}, fmt.Errorf("validate JSON body: %w", err)
+	}
+	var request inputaction.DirectPressRequest
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return inputaction.DirectPressRequest{}, fmt.Errorf("decode JSON body: %w", err)
+	}
+	if err := request.Validate(); err != nil {
+		return inputaction.DirectPressRequest{}, err
+	}
+	return request, nil
 }
 
 func decodeExecutionInvocation(w http.ResponseWriter, r *http.Request) (windowsexec.Request, error) {

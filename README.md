@@ -256,7 +256,12 @@ The Action runtime and registration refactor is partially landed:
   packages expose explicit `START`, `RENEW`, and `STOP`; expiry, failure
   compensation, and Agent shutdown release the exact resolved key. A Rule
   package may declare literal canonical keys directly or select a game-specific
-  binding source; callers still choose only schema-valid logical selections;
+  binding source; callers still choose only schema-valid logical selections.
+  The host-owned `POST /v1/key-inputs/invoke` adapter accepts one canonical key
+  and bounded hold only when the caller pins the exact PID, executable name,
+  and absolute path from a fresh foreground observation. It shares the same
+  controller, serialization, lease conflicts, key release, and durable Action
+  lifecycle without requiring a matched Rule;
 - `windows-pointer-action-v1` is a game-neutral finite runtime for one
   foreground-bound left click. A package explicitly selects either a centered
   1920x1080 reference point or the current primary-screen pointer position;
@@ -320,8 +325,9 @@ and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
 validation, and `windows-starlark-check.exe` plus
 `windows-starlark-invoke.exe` as local console clients for automation package
 preflight and upload. The two Starlark clients are not part of the installed
-Agent binary payload. `windows-exec.exe` is likewise a console client rather
-than an installed Agent payload. It also emits `windows-action-osd.exe` for the
+Agent binary payload. `windows-exec.exe` and `windows-key.exe` are likewise
+console clients rather than installed Agent payloads. It also emits
+`windows-action-osd.exe` for the
 display-only capture, Action, and
 Evidence-recording overlay, and the optional `windows-watchdog.exe` and independent
 `windows-evidence-recorder.exe`, `windows-visual-log.exe`, and
@@ -937,6 +943,7 @@ POST /v1/scripts/run
 POST /v1/actions/invoke
 POST /v1/starlark-actions/invoke
 POST /v1/executions/invoke
+POST /v1/key-inputs/invoke
 POST /v1/action-sequences/invoke
 GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
@@ -1051,10 +1058,31 @@ make the client exit nonzero. The `ps1` path is remote: upload the file through
 SFTP first. Neither the client nor Agent inserts the script into `-Command` or
 selects an alternate shell.
 
+For one explicit foreground-pinned key press, use the direct key client with
+identity copied from a fresh capture:
+
+```bash
+go run ./cmd/windows-key press \
+  --url http://Windows-PC:8787 \
+  --key Key_Home \
+  --hold 180ms \
+  --expected-process-id 1234 \
+  --expected-executable-name Game.exe \
+  --expected-executable-path 'C:\Games\Game.exe'
+```
+
+The client posts `POST /v1/key-inputs/invoke`, follows the existing durable
+invocation status, and prints the terminal JSON. Foreground mismatch or drift,
+key conflict, injection failure, and release failure are explicit `INPUT_*`
+failures. There is no PowerShell, SSH, virtual-key, or window-message fallback.
+Completion proves the bounded scan-code operation, not the application's visual
+or domain postcondition.
+
 The Agent listener is unauthenticated and defaults to `0.0.0.0:8787`. With the
-general mutation surface enabled, anyone who can reach that listener can run
-operations with the Agent's installed run level. Keep it on a trusted LAN or
-private overlay network and never expose it directly to the public Internet.
+general mutation and direct input surfaces enabled, anyone who can reach that
+listener can run operations and inject a foreground-pinned key with the Agent's
+installed run level. Keep it on a trusted LAN or private overlay network and
+never expose it directly to the public Internet.
 
 Invoke any Action through the unified surface:
 
@@ -1184,6 +1212,7 @@ cmd/windows-capture-agent/       screenshot capability executable
 cmd/windows-starlark-check/      local Starlark automation package preflight
 cmd/windows-starlark-invoke/     local Starlark automation upload client
 cmd/windows-exec/                direct run, detached-start, and PS1 client
+cmd/windows-key/                 direct foreground-pinned key press client
 cmd/windows-agent-pi/            authenticated delegated PI WEB task control plane
 cmd/windows-agent-pi-component/  GUI Job Object owner for one PI WEB process tree
 cmd/windows-observation-job/     generic local windows-observation-v1 launcher

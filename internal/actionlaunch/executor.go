@@ -41,6 +41,14 @@ type Executor struct {
 
 type InputExecutor interface {
 	Run(context.Context, *inputaction.Package, map[string]any, string) (json.RawMessage, error)
+	PressDirect(context.Context, inputaction.DirectPressRequest) (inputaction.DirectPressResult, error)
+}
+
+func (e *Executor) RunDirectKey(ctx context.Context, request inputaction.DirectPressRequest) (inputaction.DirectPressResult, error) {
+	if e == nil || e.input == nil {
+		return inputaction.DirectPressResult{}, errors.New("Action executor and input controller are required")
+	}
+	return e.input.PressDirect(ctx, request)
 }
 
 type PointerExecutor interface {

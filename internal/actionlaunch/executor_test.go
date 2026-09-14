@@ -48,6 +48,10 @@ func (fakeInputExecutor) Run(context.Context, *inputaction.Package, map[string]a
 	return json.RawMessage(`{"schemaVersion":1,"selection":"fixture","control":"Fixture","key":"Key_X"}`), nil
 }
 
+func (fakeInputExecutor) PressDirect(_ context.Context, request inputaction.DirectPressRequest) (inputaction.DirectPressResult, error) {
+	return inputaction.DirectPressResult{SchemaVersion: 1, Operation: "press", Key: request.Key, HoldMS: int64(request.HoldMS)}, nil
+}
+
 type fakePointerExecutor struct{}
 
 func (fakePointerExecutor) Run(context.Context, *pointeraction.Package, map[string]any, string) (json.RawMessage, error) {

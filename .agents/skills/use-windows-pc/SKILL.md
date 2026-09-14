@@ -48,7 +48,13 @@ Use only the capability needed for the requested outcome:
   interactive session but becomes unmanaged by the invocation after creation.
 - **PowerShell file:** transfer an absolute `.ps1` with SFTP, then use
   `windows-exec ps1`. Do not put the script into an SSH or PowerShell
-  `-Command` string.
+  `-Command` string. Do not use a PowerShell P/Invoke or `SendInput` script as
+  a fallback input provider.
+- **One literal key press:** after a fresh capture, use `windows-key press`
+  with the exact captured process ID, executable name, and executable path.
+  This is the game-neutral `windows-key-action-v1` adapter for an explicit
+  operator-selected key; it is not a substitute for domain behavior owned by
+  a Rule Action.
 - **General multi-step Windows automation:** use one ephemeral
   `windows-starlark-action-v1` package when the workflow can be described and
   preflighted deterministically. Local execution performs package, syntax,
@@ -105,10 +111,10 @@ For SFTP, verify the live Ed25519 host fingerprint against
 Authentication must be SSH `none` with the configured fixed protocol username;
 do not try local keys or passwords as an alternate path.
 
-For `run`, `ps1`, Starlark, and Actions, preserve the invocation ID, durable
-terminal state, output or typed error, and event cursor when present. An HTTP
-2xx, process creation, key injection, or uploaded file is not proof of an
-external application goal.
+For `run`, `ps1`, direct key input, Starlark, and Actions, preserve the
+invocation ID, durable terminal state, output or typed error, and event cursor
+when present. An HTTP 2xx, process creation, key injection, or uploaded file is
+not proof of an external application goal.
 
 For delegated Pi work, preserve the task ID, latest durable sequence, task
 state, PI WEB session link, terminal event, and relevant artifacts. Treat

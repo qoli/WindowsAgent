@@ -47,6 +47,10 @@ output_dir="$(cd "${output_dir}" && pwd)"
     -o "${output_dir}/windows-exec.exe" \
     ./cmd/windows-exec
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath \
+    -o "${output_dir}/windows-key.exe" \
+    ./cmd/windows-key
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -trimpath -ldflags "-H=windowsgui" \
     -o "${output_dir}/windows-agent-pi.exe" \
     ./cmd/windows-agent-pi
@@ -110,6 +114,8 @@ python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-starlark-invoke.exe" --expect console
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-exec.exe" --expect console
+python3 "${script_dir}/verify-windows-pe-subsystem.py" \
+  "${output_dir}/windows-key.exe" --expect console
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-agent-pi.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \

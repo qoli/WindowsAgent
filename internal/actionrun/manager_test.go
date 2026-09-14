@@ -17,6 +17,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
@@ -71,6 +72,33 @@ type fakeExecutor struct {
 	mu               sync.Mutex
 	calls            []string
 	validationErrors map[string]error
+	directResult     inputaction.DirectPressResult
+	directErr        error
+	directRequest    inputaction.DirectPressRequest
+	directStarted    chan struct{}
+	directRelease    chan struct{}
+	directOnce       sync.Once
+}
+
+func (f *fakeExecutor) RunDirectKey(ctx context.Context, request inputaction.DirectPressRequest) (inputaction.DirectPressResult, error) {
+	f.directRequest = request
+	if f.directStarted != nil {
+		f.directOnce.Do(func() { close(f.directStarted) })
+	}
+	if f.directRelease != nil {
+		select {
+		case <-ctx.Done():
+			return inputaction.DirectPressResult{}, errors.Join(ctx.Err(), f.directErr)
+		case <-f.directRelease:
+		}
+	}
+	if f.directResult.SchemaVersion == 0 {
+		f.directResult = inputaction.DirectPressResult{
+			SchemaVersion: 1, Operation: "press", Foreground: request.ExpectedForeground,
+			Key: request.Key, Backend: "sendinput-scancode", ScanCode: 71, Extended: true, HoldMS: int64(request.HoldMS),
+		}
+	}
+	return f.directResult, f.directErr
 }
 
 type fakeAutomationExecutor struct {
@@ -273,6 +301,94 @@ func TestEphemeralStarlarkPreservesTypedRuntimeFailure(t *testing.T) {
 	status, err := manager.Get(response.InvocationID)
 	if err != nil || status.State != StateFailed || status.ErrorCode != "PROCESS_START_FAILED" || status.ErrorStage != "starting-process" {
 		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestDirectKeyInputUsesDurableHostOwnedLifecycle(t *testing.T) {
+	executor := &fakeExecutor{}
+	manager, _ := newTestManager(t, executor)
+	request := inputaction.DirectPressRequest{
+		SchemaVersion: inputaction.DirectSchemaVersion,
+		ExpectedForeground: inputaction.ExpectedForeground{
+			ProcessID: 42, ExecutableName: "Game.exe", ExecutablePath: `C:\Games\Game.exe`,
+		},
+		Key: "Key_Home", HoldMS: 180,
+	}
+	response, err := manager.InvokeDirectKey(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.ActionID != DirectKeyInputActionID || response.RuleID != "" || response.Runtime != rules.WindowsKeyActionRuntimeV1 ||
+		response.State != StateRunning || response.Watch == nil || response.Stop == nil {
+		t.Fatalf("response = %+v", response)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.completed" {
+		t.Fatalf("event types = %s", got)
+	}
+	if events[0].Source.ModuleID != DirectKeyInputActionID || !strings.Contains(string(events[0].Payload), `"key":"Key_Home"`) ||
+		!strings.Contains(string(events[0].Payload), `"requestDigest":"`) {
+		t.Fatalf("start event = %+v", events[0])
+	}
+	if executor.directRequest.Key != "Key_Home" || executor.directRequest.HoldMS != 180 {
+		t.Fatalf("direct request = %+v", executor.directRequest)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCompleted || status.RuleID != "" || !strings.Contains(string(status.Output), `"operation":"press"`) {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestDirectKeyInputPreservesTypedFailure(t *testing.T) {
+	executor := &fakeExecutor{directErr: &inputaction.Error{
+		Code: "INPUT_FOREGROUND_CHANGED", Stage: "revalidating-foreground", Cause: errors.New("foreground changed"),
+	}}
+	manager, _ := newTestManager(t, executor)
+	response, err := manager.InvokeDirectKey(context.Background(), testDirectKeyRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if !strings.Contains(string(events[len(events)-1].Payload), `"errorCode":"INPUT_FOREGROUND_CHANGED"`) {
+		t.Fatalf("terminal event = %+v", events[len(events)-1])
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || status.ErrorCode != "INPUT_FOREGROUND_CHANGED" || status.ErrorStage != "revalidating-foreground" {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestDirectKeyInputReleaseFailureOverridesCancellation(t *testing.T) {
+	executor := &fakeExecutor{
+		directStarted: make(chan struct{}), directRelease: make(chan struct{}),
+		directErr: &inputaction.Error{Code: "INPUT_RELEASE_FAILED", Stage: "releasing-input", Cause: errors.New("key up failed")},
+	}
+	manager, _ := newTestManager(t, executor)
+	response, err := manager.InvokeDirectKey(context.Background(), testDirectKeyRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-executor.directStarted
+	if _, err := manager.Stop(response.InvocationID); err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if events[len(events)-1].Type != "action.failed" || !strings.Contains(string(events[len(events)-1].Payload), `"errorCode":"INPUT_RELEASE_FAILED"`) {
+		t.Fatalf("terminal event = %+v", events[len(events)-1])
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || status.ErrorCode != "INPUT_RELEASE_FAILED" {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func testDirectKeyRequest() inputaction.DirectPressRequest {
+	return inputaction.DirectPressRequest{
+		SchemaVersion: inputaction.DirectSchemaVersion,
+		ExpectedForeground: inputaction.ExpectedForeground{
+			ProcessID: 42, ExecutableName: "Game.exe", ExecutablePath: `C:\Games\Game.exe`,
+		},
+		Key: "Key_Home", HoldMS: 180,
 	}
 }
 
