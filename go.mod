@@ -3,6 +3,7 @@ module github.com/qoli/WindowsAgent
 go 1.23.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e
 	github.com/pkg/sftp v1.13.10
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2

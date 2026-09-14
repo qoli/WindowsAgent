@@ -137,6 +137,44 @@ and terminal-result contract. Owned `run` and `powershell-file` invocations
 also expose stop; detached `start` becomes unmanaged after creation. See the
 [Windows execution design](docs/design/windows-execution-runtime.md).
 
+The independent `windows-agent-pi` delegated-agent runtime is partially
+landed. A macOS host can create a task, replay or live-stream durable progress,
+steer or follow up, cancel it, and open the owning PI WEB session. PI WEB owns
+the persistent Pi SDK session, while the pinned `pi-computer-use` package owns
+Windows UI observation and input in the signed-in user's desktop. This is a
+separate authenticated loopback control plane, not a Rule Action or an internal
+capture-agent capability. PI WEB also remains the sole owner of interactive
+questions: the host stream reports only that attention is required or resolved
+and links to the PI WEB session. The native current-user installer and macOS
+SSH-tunnel client are source-landed. Signed-in Windows acceptance has verified
+model authorization, durable streaming, cancellation/restart recovery, and
+computer-use observation and input against an existing Calculator window. See the
+[delegated runtime design](docs/design/delegated-pi-agent-runtime.md).
+
+Prepare the pinned Node bundle and dedicated Pi profile on Windows before
+running the installer; the exact commands and required environment are in
+[`runtimes/windows-agent-pi/README.md`](runtimes/windows-agent-pi/README.md).
+After the normal repository build, install the prepared runtime with:
+
+```powershell
+.\scripts\install-windows-agent-pi.ps1 `
+  -ExecutablePath (Resolve-Path .\.build\windows-agent-pi.exe) `
+  -ComponentExecutablePath (Resolve-Path .\.build\windows-agent-pi-component.exe) `
+  -RuntimeBundlePath (Resolve-Path .\runtimes\windows-agent-pi) `
+  -PiWebConfigPath "C:\absolute\pi-web-config.json"
+```
+
+The macOS host then uses the SSH-only client surface, for example:
+
+```bash
+scripts/windows-agent-pi-client.sh --ssh-host <user@host> submit \
+  --cwd 'C:\absolute\workspace' --prompt 'Complete the delegated task.'
+scripts/windows-agent-pi-client.sh --ssh-host <user@host> watch \
+  --task-id <task_id>
+scripts/windows-agent-pi-client.sh --ssh-host <user@host> web \
+  --task-id <task_id>
+```
+
 The Action runtime and registration refactor is partially landed:
 
 - Rule schema version 6 declares executable Actions, an explicit ephemeral
@@ -1121,6 +1159,8 @@ cmd/windows-capture-agent/       screenshot capability executable
 cmd/windows-starlark-check/      local Starlark automation package preflight
 cmd/windows-starlark-invoke/     local Starlark automation upload client
 cmd/windows-exec/                direct run, detached-start, and PS1 client
+cmd/windows-agent-pi/            authenticated delegated PI WEB task control plane
+cmd/windows-agent-pi-component/  GUI Job Object owner for one PI WEB process tree
 cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
@@ -1148,6 +1188,9 @@ internal/windowsautomation/      ephemeral general Windows Starlark runtime
 internal/windowsexec/            structured Windows process and PowerShell-file runtime
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
+internal/delegatedtask/          durable delegated-task lifecycle and PI WEB event normalization
+internal/delegatedhttp/          authenticated host-facing delegated-task API
+internal/piweb/                  loopback PI WEB session HTTP and WebSocket adapter
 internal/eventstream/            strict durable event journal
 internal/eventweb/               authenticated Web UI, replay, stream, and OSD projection
 internal/sftpruntime/            SSH none-auth, SFTP-only server, host identity, and health
@@ -1170,6 +1213,7 @@ internal/streamaction/            bounded streaming Starlark orchestration runti
 internal/wgc/                    Request and persistent WGC / Direct3D 11 implementations
 internal/wgcworker/              Versioned worker protocol and Agent-side generation owner
 Rules/<Executable.exe>/          distributable Rule v6 runtimes, Actions, registrations, and guidance
+runtimes/windows-agent-pi/       pinned Pi, PI WEB, and pi-computer-use Node environment
 runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
 runtimes/ppocr-directml/          resident PP-OCR text-line and text-regions workers
 tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter
