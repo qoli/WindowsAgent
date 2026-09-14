@@ -26,6 +26,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
+	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/windowsautomation"
@@ -72,6 +73,17 @@ type fakeActionService struct {
 	execution       windowsexec.Request
 	executionResult actionrun.Invocation
 	executionErr    error
+}
+
+type fakeProcessCollector struct {
+	result processinventory.Snapshot
+	err    error
+	calls  int
+}
+
+func (f *fakeProcessCollector) Snapshot(context.Context) (processinventory.Snapshot, error) {
+	f.calls++
+	return f.result, f.err
 }
 
 func (f *fakeActionService) Invoke(_ context.Context, invocation scriptlaunch.Invocation) (actionrun.Invocation, error) {
@@ -145,6 +157,87 @@ func (f *fakeCapturer) Capture(ctx context.Context, request capture.Request) (ca
 	result := f.result
 	result.IncludeCursor = request.IncludeCursor
 	return result, nil
+}
+
+func TestProcessInventoryReturnsOsqueryShapedSnapshot(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	path := `C:\Windows\System32\svchost.exe`
+	cmdline := `C:\Windows\System32\svchost.exe -k netsvcs -p`
+	state := "STILL_ACTIVE"
+	startTime := int64(1789400000)
+	sessionID := uint32(0)
+	collector := &fakeProcessCollector{result: processinventory.Snapshot{
+		SchemaVersion: processinventory.SchemaVersion,
+		Runtime:       processinventory.RuntimeID,
+		ObservedAt:    time.Date(2026, 9, 15, 2, 0, 0, 0, time.UTC),
+		Processes: []processinventory.Process{{
+			PID: 1200, Parent: 800, Name: "svchost.exe", Path: &path, Cmdline: &cmdline,
+			State: &state, StartTime: &startTime, SessionID: &sessionID, Threads: 12,
+		}},
+		Services: []processinventory.Service{{
+			PID: 1200, Name: "BITS", DisplayName: "Background Intelligent Transfer Service",
+			Status: "RUNNING", ServiceType: "SHARE_PROCESS",
+		}, {
+			PID: 0, Name: "stopped-service", DisplayName: "Stopped Service",
+			Status: "STOPPED", ServiceType: "OWN_PROCESS",
+		}},
+	}}
+	server.processes = collector
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/processes", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control = %q", response.Header().Get("Cache-Control"))
+	}
+	var snapshot processinventory.Snapshot
+	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if collector.calls != 1 || snapshot.Runtime != processinventory.RuntimeID || len(snapshot.Processes) != 1 || len(snapshot.Services) != 2 {
+		t.Fatalf("snapshot = %+v, calls = %d", snapshot, collector.calls)
+	}
+	if snapshot.Processes[0].PID != snapshot.Services[0].PID || snapshot.Processes[0].Cmdline == nil || *snapshot.Processes[0].Cmdline != cmdline {
+		t.Fatalf("process/service PID relation = %+v / %+v", snapshot.Processes[0], snapshot.Services[0])
+	}
+	if snapshot.Services[1].PID != 0 || snapshot.Services[1].Status != "STOPPED" {
+		t.Fatalf("non-hosted service = %+v", snapshot.Services[1])
+	}
+}
+
+func TestProcessInventoryRejectsNonGetMethod(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/processes", nil))
+	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
+		t.Fatalf("status = %d, Allow = %q", response.Code, response.Header().Get("Allow"))
+	}
+	assertErrorCode(t, response.Body.Bytes(), "method_not_allowed")
+}
+
+func TestProcessInventoryRejectsQueryParameters(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/processes?pid=1200", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	assertErrorCode(t, response.Body.Bytes(), "invalid_process_inventory_request")
+}
+
+func TestProcessInventoryReturnsStableCollectorError(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	server.processes = &fakeProcessCollector{err: &processinventory.Error{
+		Code: "process_inventory_service_list_failed", Stage: "enumerating-services", Cause: errors.New("SCM unavailable"),
+	}}
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/processes", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	assertErrorCode(t, response.Body.Bytes(), "process_inventory_service_list_failed")
 }
 
 func TestCaptureAndDownload(t *testing.T) {
@@ -959,6 +1052,13 @@ func newTestServerAndRuleRootWithServices(
 		ruleStore,
 		executor,
 		actions,
+		&fakeProcessCollector{result: processinventory.Snapshot{
+			SchemaVersion: processinventory.SchemaVersion,
+			Runtime:       processinventory.RuntimeID,
+			ObservedAt:    time.Date(2026, 9, 15, 1, 2, 3, 0, time.UTC),
+			Processes:     []processinventory.Process{},
+			Services:      []processinventory.Service{},
+		}},
 		timeout,
 		"test",
 		logger,

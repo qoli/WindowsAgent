@@ -137,6 +137,18 @@ and terminal-result contract. Owned `run` and `powershell-file` invocations
 also expose stop; detached `start` becomes unmanaged after creation. See the
 [Windows execution design](docs/design/windows-execution-runtime.md).
 
+The read-only `windows-process-inventory-v1` runtime is partially landed. One
+parameter-free `GET /v1/processes` request returns current osquery-shaped
+`processes` and `services` tables; callers relate them with matching nonzero
+PIDs.
+Process rows include the executable name, parent PID, thread count, and, when
+the installed Agent identity may read them, path, full command line, state,
+start time, and Windows session. Service rows come directly from the Service
+Control Manager and retain service type, state, start type, executable or DLL
+path, account, description, and exit codes. The runtime does not special-case
+`svchost.exe`, interpret application roles, persist command lines, or control a
+process or service. See the [process inventory design](docs/design/windows-process-inventory.md).
+
 The independent `windows-agent-pi` delegated-agent runtime is partially
 landed. A macOS host can create a task, replay or live-stream durable progress,
 steer or follow up, cancel it, and open the owning PI WEB session. PI WEB owns
@@ -909,6 +921,7 @@ capability, not the broader project.
 ```text
 GET  /healthz
 GET  /v1/status
+GET  /v1/processes
 POST /v1/captures
 GET  /v1/captures/latest
 GET  /v1/captures/latest/content
@@ -929,6 +942,18 @@ GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
 POST /v1/action-invocations/{invocation-id}/stop
 ```
+
+Read the current process and service tables without parameters:
+
+```powershell
+curl.exe http://127.0.0.1:8787/v1/processes
+```
+
+The response is generated on demand and is never cached or written to the
+event journal. A nonzero `services.pid` identifies the corresponding
+`processes.pid`; zero means the service has no current hosting process and is
+not joined to the PID 0 process row. Unavailable process enrichment fields are
+`null` rather than guessed from a different provider.
 
 Create a capture:
 
@@ -1186,6 +1211,7 @@ internal/actionsequence/         bounded ephemeral sequence and strict model sch
 internal/actioncheck/            offline Action package and dependency validation
 internal/windowsautomation/      ephemeral general Windows Starlark runtime
 internal/windowsexec/            structured Windows process and PowerShell-file runtime
+internal/processinventory/       read-only osquery-shaped process and service snapshots
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/delegatedtask/          durable delegated-task lifecycle and PI WEB event normalization

@@ -28,6 +28,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/ocrworker"
 	"github.com/qoli/WindowsAgent/internal/pointeraction"
+	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/wgcworker"
@@ -184,6 +185,7 @@ func run() (runErr error) {
 		ruleStore,
 		actionExecutor,
 		actionManager,
+		processinventory.NewOSCollector(),
 		cfg.CaptureTimeout,
 		version,
 		logger,
@@ -217,6 +219,7 @@ func run() (runErr error) {
 		"script_api_auth", "none",
 		"starlark_automation_api_auth", "none",
 		"windows_execution_api_auth", "none",
+		"process_inventory_api_auth", "none",
 		"event_api_url", cfg.EventAPIURL,
 		"frontier_bindings_root", cfg.FrontierBindingsRoot,
 		"runtime_stderr_log", cfg.RuntimeLogFile,

@@ -21,6 +21,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/artifact"
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
@@ -44,6 +45,7 @@ type Server struct {
 	rules      *rules.Store
 	scripts    scriptlaunch.Executor
 	actions    ActionService
+	processes  processinventory.Collector
 	timeout    time.Duration
 	version    string
 	logger     *slog.Logger
@@ -129,6 +131,7 @@ func New(
 	ruleStore *rules.Store,
 	scriptExecutor scriptlaunch.Executor,
 	actionService ActionService,
+	processCollector processinventory.Collector,
 	timeout time.Duration,
 	version string,
 	logger *slog.Logger,
@@ -148,6 +151,9 @@ func New(
 	if actionService == nil {
 		return nil, errors.New("Action service is required")
 	}
+	if processCollector == nil {
+		return nil, errors.New("process inventory collector is required")
+	}
 	if timeout <= 0 {
 		return nil, errors.New("capture timeout must be positive")
 	}
@@ -163,6 +169,7 @@ func New(
 		rules:      ruleStore,
 		scripts:    scriptExecutor,
 		actions:    actionService,
+		processes:  processCollector,
 		timeout:    timeout,
 		version:    version,
 		logger:     logger,
@@ -195,6 +202,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodGet, s.handleHealth)
 	case r.URL.Path == "/v1/status":
 		s.requireMethod(recorder, r, requestID, http.MethodGet, s.handleStatus)
+	case r.URL.Path == "/v1/processes":
+		s.requireMethod(recorder, r, requestID, http.MethodGet, s.handleProcessInventory)
 	case r.URL.Path == "/v1/captures":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleCapture)
 	case r.URL.Path == "/v1/captures/latest":
@@ -224,6 +233,32 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(recorder, requestID, http.StatusNotFound, "route_not_found", "route not found")
 	}
+}
+
+func (s *Server) handleProcessInventory(w http.ResponseWriter, r *http.Request, requestID string) {
+	if r.URL.RawQuery != "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_process_inventory_request", "process inventory does not accept query parameters")
+		return
+	}
+	snapshot, err := s.processes.Snapshot(r.Context())
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			writeError(w, requestID, http.StatusRequestTimeout, "request_canceled", "request was canceled")
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, requestID, http.StatusGatewayTimeout, "process_inventory_timeout", "process inventory timed out")
+			return
+		}
+		var inventoryError *processinventory.Error
+		if errors.As(err, &inventoryError) {
+			writeError(w, requestID, http.StatusServiceUnavailable, inventoryError.Code, inventoryError.Error())
+			return
+		}
+		writeError(w, requestID, http.StatusServiceUnavailable, "process_inventory_unavailable", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *Server) handleRuntimeResource(w http.ResponseWriter, r *http.Request, requestID string) {
