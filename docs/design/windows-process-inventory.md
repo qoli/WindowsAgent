@@ -2,11 +2,10 @@
 
 ## Status
 
-**Partially landed as `windows-process-inventory-v1`.** The native Windows
-collector, osquery-shaped process and service tables, `GET /v1/processes`,
-HTTP contract tests, and standalone Windows collector acceptance are
-implemented. Installed-Agent HTTP acceptance remains required before this
-design can be classified as Landed.
+**Landed as `windows-process-inventory-v1`.** The native Windows collector,
+osquery-shaped process and service tables, `GET /v1/processes`, HTTP contract
+tests, standalone Windows collector acceptance, and installed-Agent HTTP
+acceptance are implemented.
 
 ## Responsibility
 
@@ -86,7 +85,6 @@ public Internet.
 
 ## Deferred
 
-- installed-Agent HTTP acceptance with current process and service PID joins;
 - fields outside the v1 table subset, including CPU, memory, I/O, user-token,
   signature, open-handle, window, and network inventories;
 - any process or service mutation, monitoring, history, grouping, or semantic

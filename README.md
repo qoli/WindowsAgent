@@ -137,7 +137,7 @@ and terminal-result contract. Owned `run` and `powershell-file` invocations
 also expose stop; detached `start` becomes unmanaged after creation. See the
 [Windows execution design](docs/design/windows-execution-runtime.md).
 
-The read-only `windows-process-inventory-v1` runtime is partially landed. One
+The read-only `windows-process-inventory-v1` runtime is landed. One
 parameter-free `GET /v1/processes` request returns current osquery-shaped
 `processes` and `services` tables; callers relate them with matching nonzero
 PIDs.
