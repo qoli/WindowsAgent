@@ -23,6 +23,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Streaming Action runtime](streaming-action-runtime.md) | Landed | Invoke one Action through return or durable stream completion; the shipped Elite departure workflow demonstrates supervised linear orchestration. |
 | [Ephemeral Action Sequence](ephemeral-action-sequence.md) | Landed | Preflight and immediately execute an immutable Rule-allowlisted sequence of at most twenty existing Actions without persisting a workflow definition. |
 | [Action OSD](action-osd.md) | Landed | Project recent capture activity, Evidence recording presence, and the current Streaming Action or active Ephemeral Action Sequence child into a non-activating Windows overlay. |
+| [Controller-to-pointer runtime](controller-to-pointer-runtime.md) | Draft | Map one explicitly selected controller to relative pointer movement through a cancellable, evidence-bearing Windows runtime. |
 | [Game module registry v2](game-module-registry-v2.md) | Retired | Historical classified-module model, replaced by Action declarations and explicit registrations. |
 | [ScreenParser Action](screenparser-action.md) | Partially landed | Run the pinned ScreenParser v2 detector Action once for an explicitly supplied, hash-pinned RGB24 frame. |
 | [PP-OCR DirectML runtime](ppocr-directml-runtime.md) | Landed | Keep a Rule-declared DirectML worker resident while its game is active and expose one finite raw-text Action for a fixed-aspect native-density ROI. |
