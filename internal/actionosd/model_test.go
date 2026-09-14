@@ -33,6 +33,30 @@ func TestModelShowsCurrentActionAndLatestThreeDistinctActivities(t *testing.T) {
 	}
 }
 
+func TestModelAcceptsDeclaredEphemeralStartProvenance(t *testing.T) {
+	tests := []struct {
+		actionID string
+		payload  string
+	}{
+		{
+			actionID: actionrun.EphemeralStarlarkActionID,
+			payload:  `{"state":"RUNNING","actionId":"windows/ephemeral-starlark","lifecycle":"linear","interruptible":true,"packageDigest":"abc123","packageVersion":1}`,
+		},
+		{
+			actionID: actionrun.EphemeralExecutionActionID,
+			payload:  `{"state":"RUNNING","actionId":"windows/ephemeral-execution","lifecycle":"linear","interruptible":true,"operation":"run","requestDigest":"def456","foregroundAvailable":false}`,
+		},
+	}
+	for _, test := range tests {
+		model := &Model{}
+		event := testEvent("action.started", time.Now().UTC(), test.payload)
+		event.Source.ModuleID = test.actionID
+		if err := model.Apply(event); err != nil {
+			t.Fatalf("action %s: %v", test.actionID, err)
+		}
+	}
+}
+
 func TestModelTerminalVisibilityExpires(t *testing.T) {
 	model := &Model{}
 	start := time.Now().UTC()

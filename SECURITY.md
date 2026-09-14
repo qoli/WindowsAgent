@@ -27,6 +27,12 @@ observation permissions and receive its bounded result. Network reachability
 is therefore the deployment trust boundary for screenshots and Script
 execution alike.
 
+`POST /v1/executions/invoke` is also unauthenticated and can run an arbitrary
+executable, start a detached process, or execute an absolute PowerShell script
+path with the Capture Agent's installed token and interactive session. The
+structured request avoids a command-string shell but is not a security
+restriction. Keep this endpoint inside the same trusted network boundary.
+
 `POST /v1/actions/invoke` is also unauthenticated. Reachable clients can start
 declared finite or streaming Actions. For the Elite Dangerous Rule this now
 includes foreground-bound keyboard input through `ui-control`, `set-throttle`,

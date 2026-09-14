@@ -2,11 +2,10 @@
 
 ## Status
 
-**Partially landed as `windows-sftp-v1`.** The dedicated runtime, persistent
-host-key initialization, SFTP-only SSH surface, loopback health contract,
-installer, Watchdog target handoff, build, and transactional binary inventory
-are implemented. Signed-in Windows installation and end-to-end SFTP acceptance
-remain required before this design can be classified as Landed.
+**Landed as `windows-sftp-v1`.** The dedicated runtime, persistent host-key
+initialization, SFTP-only SSH surface, loopback health contract, installer,
+Watchdog lifecycle, build, and transactional binary inventory are implemented
+and accepted in a signed-in Windows installation.
 
 ## Responsibility
 
@@ -16,7 +15,7 @@ from the Starlark execution plane:
 
 ```text
 macOS agent -- SFTP :2022 --> windows-sftp.exe --> Windows filesystem
-macOS agent -- HTTP :8787 --> windows-capture-agent.exe --> Starlark/actions
+macOS agent -- HTTP :8787 --> windows-capture-agent.exe --> executions/Starlark/actions
 ```
 
 SFTP filesystem access does not require an interactive desktop. The installed
@@ -80,11 +79,12 @@ mapping, missing host key, listener collision, invalid health response, or
 binary/hash mismatch is terminal; no OpenSSH, SMB, password-authentication, or
 filesystem-runtime fallback is selected.
 
-## Remaining acceptance
+## Live acceptance
 
-Live Windows acceptance must prove the installed binary hash and GUI PE
-subsystem, `Highest` task principal, persistent host-key fingerprint across a
-restart, SFTP `none` login as `windowsagent`, root drive enumeration, upload,
-download, stat, rename, and deletion, plus rejection of a different username,
-shell, exec, PTY, and forwarding requests. Acceptance should also verify that
-the HTTP/Starlark plane remains healthy while transferring a large file.
+Signed-in Windows acceptance proved the installed binary hash and GUI PE
+subsystem, `Highest` interactive task principal, Watchdog recovery, persistent
+host-key fingerprint across a process restart, SFTP `none` login as
+`windowsagent`, root drive enumeration, upload, download, stat, rename, and
+deletion. A different username, shell, exec, PTY, and TCP forwarding were
+rejected. A 64 MiB upload and download preserved the exact SHA-256 digest while
+the Agent HTTP and Event Web health surfaces remained available.

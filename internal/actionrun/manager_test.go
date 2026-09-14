@@ -21,6 +21,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
 	"github.com/qoli/WindowsAgent/internal/windowsautomation"
+	"github.com/qoli/WindowsAgent/internal/windowsexec"
 )
 
 var errTerminalSeen = errors.New("terminal event seen")
@@ -78,6 +79,36 @@ type fakeAutomationExecutor struct {
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
+}
+
+type fakeExecutionExecutor struct {
+	result               windowsexec.Result
+	err                  error
+	started              chan struct{}
+	release              chan struct{}
+	once                 sync.Once
+	cancelErr            error
+	returnResultOnCancel bool
+}
+
+func (f *fakeExecutionExecutor) Execute(ctx context.Context, _ windowsexec.Request) (windowsexec.Result, error) {
+	if f.started != nil {
+		f.once.Do(func() { close(f.started) })
+	}
+	if f.release != nil {
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			if f.returnResultOnCancel {
+				return f.result, nil
+			}
+			if f.cancelErr != nil {
+				return windowsexec.Result{}, f.cancelErr
+			}
+			return windowsexec.Result{}, ctx.Err()
+		}
+	}
+	return f.result, f.err
 }
 
 func (f *fakeAutomationExecutor) Run(ctx context.Context, _ *windowsautomation.Package, _ map[string]any, _ windowsautomation.Reporter) (json.RawMessage, error) {
@@ -245,6 +276,165 @@ func TestEphemeralStarlarkPreservesTypedRuntimeFailure(t *testing.T) {
 	}
 }
 
+func TestEphemeralWindowsExecutionUsesDurableLifecycle(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	exitCode := 0
+	manager.execution = &fakeExecutionExecutor{result: windowsexec.Result{
+		Runtime: windowsexec.RuntimeID, Operation: windowsexec.OperationRun,
+		PID: 73, Executable: `C:\Windows\System32\whoami.exe`, ExitCode: &exitCode,
+	}}
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun,
+		Executable: `C:\Windows\System32\whoami.exe`, Argv: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.ActionID != EphemeralExecutionActionID || response.RuleID != "" || response.Runtime != windowsexec.RuntimeID ||
+		response.State != StateRunning || response.Watch == nil || response.Stop == nil {
+		t.Fatalf("response = %+v", response)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.completed" {
+		t.Fatalf("event types = %s", got)
+	}
+	if !strings.Contains(string(events[0].Payload), `"operation":"run"`) || !strings.Contains(string(events[0].Payload), `"requestDigest":"`) {
+		t.Fatalf("start event = %+v", events[0])
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCompleted || !strings.Contains(string(status.Output), `"pid":73`) {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestEphemeralWindowsExecutionPreservesTypedFailure(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	manager.execution = &fakeExecutionExecutor{err: &windowsexec.Error{
+		Code: "PROCESS_START_FAILED", Stage: "starting-process", Cause: errors.New("missing executable"),
+	}}
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun,
+		Executable: "missing.exe", Argv: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	terminal := events[len(events)-1]
+	if !strings.Contains(string(terminal.Payload), `"errorCode":"PROCESS_START_FAILED"`) ||
+		!strings.Contains(string(terminal.Payload), `"errorStage":"starting-process"`) {
+		t.Fatalf("terminal event = %+v", terminal)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || status.ErrorCode != "PROCESS_START_FAILED" || status.ErrorStage != "starting-process" {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestEphemeralWindowsExecutionStopCancelsOwnedRun(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	execution := &fakeExecutionExecutor{started: make(chan struct{}), release: make(chan struct{})}
+	manager.execution = execution
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun,
+		Executable: "wait.exe", Argv: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-execution.started:
+	case <-time.After(time.Second):
+		t.Fatal("execution did not start")
+	}
+	stopping, err := manager.Stop(response.InvocationID)
+	if err != nil || stopping.State != StateCancelling {
+		t.Fatalf("stop = %+v, err = %v", stopping, err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := eventTypes(events); got[len(got)-1] != "action.cancelled" {
+		t.Fatalf("event types = %v", got)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCancelled || status.Stop != nil {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestEphemeralWindowsExecutionCancellationFailureIsTerminalFailure(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	execution := &fakeExecutionExecutor{
+		started: make(chan struct{}), release: make(chan struct{}),
+		cancelErr: &windowsexec.Error{Code: "EXEC_CANCEL_FAILED", Stage: "cancelling-process-tree", Cause: errors.New("terminate denied")},
+	}
+	manager.execution = execution
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun,
+		Executable: "wait.exe", Argv: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-execution.started
+	if _, err := manager.Stop(response.InvocationID); err != nil {
+		t.Fatal(err)
+	}
+	collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || status.ErrorCode != "EXEC_CANCEL_FAILED" || status.ErrorStage != "cancelling-process-tree" {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestEphemeralDetachedStartIsNonInterruptibleAndSuccessfulReceiptWinsShutdownRace(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	execution := &fakeExecutionExecutor{
+		started: make(chan struct{}), release: make(chan struct{}), returnResultOnCancel: true,
+		result: windowsexec.Result{Runtime: windowsexec.RuntimeID, Operation: windowsexec.OperationStart, PID: 91},
+	}
+	manager.execution = execution
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationStart, Executable: "app.exe",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Execution.Interruptible || response.Stop != nil {
+		t.Fatalf("detached start response = %+v", response)
+	}
+	if _, err := manager.Stop(response.InvocationID); !errors.Is(err, ErrNotInterruptible) {
+		t.Fatalf("stop error = %v", err)
+	}
+	<-execution.started
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCompleted || !strings.Contains(string(status.Output), `"pid":91`) {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestEphemeralWindowsExecutionDoesNotRequireForegroundWindow(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	manager.foreground = func() (foreground.Info, error) { return foreground.Info{}, errors.New("no foreground window") }
+	manager.execution = &fakeExecutionExecutor{result: windowsexec.Result{Runtime: windowsexec.RuntimeID, Operation: windowsexec.OperationRun, PID: 92}}
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun, Executable: "tool.exe",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if events[0].Foreground.Available == nil || *events[0].Foreground.Available || events[0].Foreground.ExecutableName != "" {
+		t.Fatalf("foreground = %+v", events[0].Foreground)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateCompleted {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
 func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
 	executor := &fakeExecutor{}
 	previous, store := newTestManager(t, executor)
@@ -262,7 +452,7 @@ func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager, err := NewManager(previous.rules, executor, &fakeAutomationExecutor{}, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	manager, err := NewManager(previous.rules, executor, &fakeAutomationExecutor{}, &fakeExecutionExecutor{}, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +478,7 @@ func TestManagerTerminalizesInterruptedInvocationDuringStartup(t *testing.T) {
 	if err := manager.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewManager(previous.rules, executor, &fakeAutomationExecutor{}, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	restarted, err := NewManager(previous.rules, executor, &fakeAutomationExecutor{}, &fakeExecutionExecutor{}, storeJournal{store: store}, previous.foreground, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +733,7 @@ func newTestManagerWithAutomation(t *testing.T, executor *fakeExecutor, automati
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { store.Close() })
-	manager, err := NewManager(ruleStore, executor, automation, storeJournal{store: store}, func() (foreground.Info, error) {
+	manager, err := NewManager(ruleStore, executor, automation, &fakeExecutionExecutor{}, storeJournal{store: store}, func() (foreground.Info, error) {
 		return foreground.Info{
 			ObservedAt: time.Now().UTC(), ProcessID: 42, ExecutableName: "Game.exe", ExecutablePath: `C:\Games\Game.exe`,
 		}, nil

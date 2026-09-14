@@ -16,8 +16,8 @@ permission, and validation boundary.
 > [!WARNING]
 > The current HTTP server listens on `0.0.0.0:8787` without authentication,
 > TLS, or CORS by default. Anyone who can reach that port can capture the
-> desktop and invoke mutable, full-trust Starlark automation with the Agent's
-> installed Windows token. Use it only on a trusted LAN or private overlay
+> desktop and invoke mutable, full-trust Starlark or direct Windows execution
+> with the Agent's installed Windows token. Use it only on a trusted LAN or private overlay
 > network. The optional SFTP runtime likewise defaults to `0.0.0.0:2022`,
 > accepts SSH `none` authentication, and exposes the filesystem visible to its
 > elevated Windows token. Do not expose either listener to the public Internet.
@@ -115,7 +115,7 @@ transport between the package and Windows. See the
 [runtime design](docs/design/starlark-automation-runtime.md) and
 [minimal package](docs/examples/windows-starlark-hello/).
 
-The separate `windows-sftp-v1` runtime is also partially landed. It is the
+The separate `windows-sftp-v1` runtime is landed. It is the
 filesystem data plane for uploading, downloading, enumerating, renaming, and
 removing Windows files without putting file payloads or path quoting inside a
 PowerShell command. It accepts only the SFTP subsystem, uses the fixed protocol
@@ -124,6 +124,18 @@ drives through virtual `/`. Shell, exec, PTY, and forwarding requests are
 rejected. Its actual filesystem permissions come from the dedicated process's
 Windows token; they do not come from the interactive desktop session. See the
 [SFTP runtime design](docs/design/sftp-filesystem-runtime.md).
+
+The `windows-exec-v1` convenience runtime is partially landed. It removes the
+Starlark package ceremony from one structured process operation: `run` owns a
+process tree until the direct process exits, `start` creates an explicitly
+detached process, and `powershell-file` runs one absolute `.ps1` already
+transferred to Windows.
+Every argument remains a JSON/CLI array element; there is no command-string
+shell interface. All three operations inherit the Capture Agent's installed
+token and interactive session and use the durable invocation status, watch,
+and terminal-result contract. Owned `run` and `powershell-file` invocations
+also expose stop; detached `start` becomes unmanaged after creation. See the
+[Windows execution design](docs/design/windows-execution-runtime.md).
 
 The Action runtime and registration refactor is partially landed:
 
@@ -258,7 +270,8 @@ and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
 validation, and `windows-starlark-check.exe` plus
 `windows-starlark-invoke.exe` as local console clients for automation package
 preflight and upload. The two Starlark clients are not part of the installed
-Agent binary payload. It also emits `windows-action-osd.exe` for the
+Agent binary payload. `windows-exec.exe` is likewise a console client rather
+than an installed Agent payload. It also emits `windows-action-osd.exe` for the
 display-only capture, Action, and
 Evidence-recording overlay, and the optional `windows-watchdog.exe` and independent
 `windows-evidence-recorder.exe`, `windows-visual-log.exe`, and
@@ -872,6 +885,7 @@ GET  /v4/rules/{rule-id}/runtimes
 POST /v1/scripts/run
 POST /v1/actions/invoke
 POST /v1/starlark-actions/invoke
+POST /v1/executions/invoke
 POST /v1/action-sequences/invoke
 GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
@@ -944,6 +958,35 @@ questions about paths, programs, privileges, desktop state, and postconditions.
 The client never falls back to SSH, PowerShell, Windows MCP, or another runtime;
 an Action may still explicitly launch an executable through
 `windows.process.run`.
+
+For a single process or uploaded PowerShell script, use the direct client
+without creating a Starlark package:
+
+```bash
+go run ./cmd/windows-exec run \
+  --url http://Windows-PC:8787 \
+  --executable whoami.exe
+
+go run ./cmd/windows-exec start \
+  --url http://Windows-PC:8787 \
+  --executable 'C:\Program Files\Application\app.exe' \
+  --window normal
+
+go run ./cmd/windows-exec ps1 \
+  --url http://Windows-PC:8787 \
+  --script-path 'C:\AgentStaging\repair.ps1' \
+  --arg -Mode \
+  --arg Repair
+```
+
+Repeat `--arg` and `--env NAME=VALUE` to preserve argument and environment
+boundaries. `run` and `ps1` also accept `--stdin-file`, an optional caller-owned
+`--max-output-bytes`, and `--timeout`; `start` rejects those ownership fields.
+The client waits for and prints the durable terminal JSON. A nonzero child exit
+is result data; transport, runtime failure, cancellation, and invalid requests
+make the client exit nonzero. The `ps1` path is remote: upload the file through
+SFTP first. Neither the client nor Agent inserts the script into `-Command` or
+selects an alternate shell.
 
 The Agent listener is unauthenticated and defaults to `0.0.0.0:8787`. With the
 general mutation surface enabled, anyone who can reach that listener can run
@@ -1077,6 +1120,7 @@ this build with a new, empty data directory; there is no automatic migration.
 cmd/windows-capture-agent/       screenshot capability executable
 cmd/windows-starlark-check/      local Starlark automation package preflight
 cmd/windows-starlark-invoke/     local Starlark automation upload client
+cmd/windows-exec/                direct run, detached-start, and PS1 client
 cmd/windows-observation-job/     generic local windows-observation-v1 launcher
 cmd/windows-observation-script-runner/ isolated Starlark runner
 cmd/windows-observer/            unified read-only memory/file observer
@@ -1101,6 +1145,7 @@ internal/actionrun/              finite and streaming invocation lifecycle
 internal/actionsequence/         bounded ephemeral sequence and strict model schema
 internal/actioncheck/            offline Action package and dependency validation
 internal/windowsautomation/      ephemeral general Windows Starlark runtime
+internal/windowsexec/            structured Windows process and PowerShell-file runtime
 internal/eventclient/            authenticated Agent-to-journal client
 internal/eventhttp/              authenticated event append/replay HTTP API
 internal/eventstream/            strict durable event journal

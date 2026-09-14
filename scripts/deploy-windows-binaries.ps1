@@ -40,6 +40,30 @@ function Wait-PathStopped {
     throw "process did not stop before binary update: $ExecutablePath"
 }
 
+function Copy-VerifiedBinary {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha256,
+        [Parameter(Mandatory = $true)][string]$Operation
+    )
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastError = $null
+    do {
+        try {
+            Copy-Item -LiteralPath $Source -Destination $Destination -Force
+            if ((Get-Sha256 -Path $Destination) -cne $ExpectedSha256) {
+                throw "$Operation hash mismatch: $Destination"
+            }
+            return
+        } catch {
+            $lastError = $_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "$Operation did not complete before binary file-release deadline: $Destination`: $lastError"
+}
+
 function Get-TaskSnapshot {
     param(
         [Parameter(Mandatory = $true)][string]$TaskName,
@@ -415,8 +439,8 @@ try {
 
         $receipt.phase = "replace_binaries"
         foreach ($name in $expectedNames) {
-            Copy-Item -LiteralPath (Join-Path $payload $name) -Destination $destinations[$name] -Force
-            if ((Get-Sha256 -Path $destinations[$name]) -cne $hashes[$name]) { throw "installed hash mismatch: $name" }
+            Copy-VerifiedBinary -Source (Join-Path $payload $name) -Destination $destinations[$name] `
+                -ExpectedSha256 $hashes[$name] -Operation "install $name"
         }
 
         $receipt.phase = "configure_crash_dumps"
@@ -470,8 +494,8 @@ try {
                         $receipt.failed_snapshot_errors += "snapshot ${name}: $($_.Exception.Message)"
                     }
                 }
-                Copy-Item -LiteralPath (Join-Path $backupRoot $name) -Destination $destinations[$name] -Force
-                if ((Get-Sha256 -Path $destinations[$name]) -cne $previousHashes[$name]) { throw "rollback hash mismatch: $name" }
+                Copy-VerifiedBinary -Source (Join-Path $backupRoot $name) -Destination $destinations[$name] `
+                    -ExpectedSha256 $previousHashes[$name] -Operation "rollback $name"
             }
             Start-ScheduledTask -TaskName $watchdogTaskName -ErrorAction Stop
             $runtimeStopped = $false

@@ -41,6 +41,7 @@ type Source struct {
 type Foreground struct {
 	ExecutableName string `json:"executableName"`
 	Revision       uint64 `json:"revision"`
+	Available      *bool  `json:"available,omitempty"`
 }
 
 type Artifact struct {
@@ -632,6 +633,12 @@ func validateSource(source Source) error {
 }
 
 func validateForeground(foreground Foreground) error {
+	if foreground.Available != nil && !*foreground.Available {
+		if foreground.ExecutableName != "" || foreground.Revision != 0 {
+			return errors.New("unavailable foreground must omit executableName and revision")
+		}
+		return nil
+	}
 	if foreground.ExecutableName == "" || strings.ContainsAny(foreground.ExecutableName, `/\`) ||
 		!strings.HasSuffix(strings.ToLower(foreground.ExecutableName), ".exe") {
 		return errors.New("foreground.executableName must be a single executable name ending in .exe")

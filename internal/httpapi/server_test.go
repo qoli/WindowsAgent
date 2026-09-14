@@ -29,6 +29,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/windowsautomation"
+	"github.com/qoli/WindowsAgent/internal/windowsexec"
 )
 
 type fakeCapturer struct {
@@ -68,6 +69,9 @@ type fakeActionService struct {
 	starlarkInputs  map[string]any
 	starlarkResult  actionrun.Invocation
 	starlarkErr     error
+	execution       windowsexec.Request
+	executionResult actionrun.Invocation
+	executionErr    error
 }
 
 func (f *fakeActionService) Invoke(_ context.Context, invocation scriptlaunch.Invocation) (actionrun.Invocation, error) {
@@ -84,6 +88,11 @@ func (f *fakeActionService) InvokeStarlark(_ context.Context, pkg *windowsautoma
 	f.starlarkPackage = pkg
 	f.starlarkInputs = inputs
 	return f.starlarkResult, f.starlarkErr
+}
+
+func (f *fakeActionService) InvokeExecution(_ context.Context, request windowsexec.Request) (actionrun.Invocation, error) {
+	f.execution = request
+	return f.executionResult, f.executionErr
 }
 
 func (f *fakeActionService) SequenceToolSchema(string) (actionsequence.ToolSchema, error) {
@@ -578,6 +587,41 @@ func TestEphemeralStarlarkActionUploadAndStrictRequest(t *testing.T) {
 			t.Fatalf("invalid request %q status = %d, body = %s", invalid, failed.Code, failed.Body.String())
 		}
 		assertErrorCode(t, failed.Body.Bytes(), "invalid_starlark_action")
+	}
+}
+
+func TestWindowsExecutionInvokeStrictRequest(t *testing.T) {
+	service := &fakeActionService{executionResult: actionrun.Invocation{
+		InvocationID: "act_exec", ActionID: actionrun.EphemeralExecutionActionID,
+		Runtime: windowsexec.RuntimeID, State: actionrun.StateRunning,
+		Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: true},
+		Watch:     &actionrun.WatchTarget{URL: "/v1/action-invocations/act_exec/events?after=8", ContentType: "application/x-ndjson", AfterCursor: 8},
+		Stop:      &actionrun.StopTarget{Method: http.MethodPost, URL: "/v1/action-invocations/act_exec/stop"},
+	}}
+	server, _ := newTestServerWithActionService(t, service)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(
+		http.MethodPost, "/v1/executions/invoke",
+		strings.NewReader(`{"schemaVersion":1,"operation":"run","executable":"whoami.exe","argv":[]}`),
+	))
+	if response.Code != http.StatusAccepted || response.Header().Get("Location") != "/v1/action-invocations/act_exec" {
+		t.Fatalf("status = %d, location = %q, body = %s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if service.execution.Operation != windowsexec.OperationRun || service.execution.Executable != "whoami.exe" || service.execution.Argv == nil {
+		t.Fatalf("execution request = %+v", service.execution)
+	}
+	for _, invalid := range []string{
+		`{"schemaVersion":1,"schemaVersion":1,"operation":"run","executable":"whoami.exe","argv":[]}`,
+		`{"schemaVersion":2,"operation":"run","executable":"whoami.exe","argv":[]}`,
+		`{"schemaVersion":1,"operation":"shell","executable":"whoami.exe","argv":[]}`,
+		`{"schemaVersion":1,"operation":"run","executable":"whoami.exe","argv":[],"command":"whoami"}`,
+	} {
+		failed := httptest.NewRecorder()
+		server.Handler().ServeHTTP(failed, httptest.NewRequest(http.MethodPost, "/v1/executions/invoke", strings.NewReader(invalid)))
+		if failed.Code != http.StatusBadRequest {
+			t.Fatalf("invalid request %q status = %d, body = %s", invalid, failed.Code, failed.Body.String())
+		}
+		assertErrorCode(t, failed.Body.Bytes(), "invalid_execution_request")
 	}
 }
 

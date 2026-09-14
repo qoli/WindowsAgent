@@ -26,6 +26,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptpackage"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 	"github.com/qoli/WindowsAgent/internal/windowsautomation"
+	"github.com/qoli/WindowsAgent/internal/windowsexec"
 )
 
 const (
@@ -33,6 +34,7 @@ const (
 	maxScriptRequestBody  = scriptlaunch.MaxRequestBytes + 4<<10
 	maxSequenceBody       = 64 << 10
 	maxStarlarkActionBody = 32 << 20
+	maxExecutionBody      = 32 << 20
 	scriptRequestTimeout  = 80 * time.Second
 )
 
@@ -54,6 +56,7 @@ type ActionService interface {
 	Invoke(context.Context, scriptlaunch.Invocation) (actionrun.Invocation, error)
 	InvokeSequence(context.Context, actionsequence.Request) (actionrun.Invocation, error)
 	InvokeStarlark(context.Context, *windowsautomation.Package, map[string]any) (actionrun.Invocation, error)
+	InvokeExecution(context.Context, windowsexec.Request) (actionrun.Invocation, error)
 	SequenceToolSchema(string) (actionsequence.ToolSchema, error)
 	Get(string) (actionrun.Invocation, error)
 	Stop(string) (actionrun.Invocation, error)
@@ -214,6 +217,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleActionSequenceInvoke)
 	case r.URL.Path == "/v1/starlark-actions/invoke":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleStarlarkActionInvoke)
+	case r.URL.Path == "/v1/executions/invoke":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleExecutionInvoke)
 	case strings.HasPrefix(r.URL.Path, "/v1/action-invocations/"):
 		s.handleActionInvocationResource(recorder, r, requestID)
 	default:
@@ -422,6 +427,49 @@ func (s *Server) handleStarlarkActionInvoke(w http.ResponseWriter, r *http.Reque
 		"state", result.State,
 	)
 	writeJSON(w, http.StatusAccepted, result)
+}
+
+func (s *Server) handleExecutionInvoke(w http.ResponseWriter, r *http.Request, requestID string) {
+	request, err := decodeExecutionInvocation(w, r)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_execution_request", err.Error())
+		return
+	}
+	result, err := s.actions.InvokeExecution(r.Context(), request)
+	if err != nil {
+		s.writeActionError(w, requestID, err)
+		return
+	}
+	w.Header().Set("Location", "/v1/action-invocations/"+result.InvocationID)
+	s.logger.InfoContext(r.Context(), "windows_execution_invoked",
+		"request_id", requestID,
+		"invocation_id", result.InvocationID,
+		"operation", request.Operation,
+		"state", result.State,
+	)
+	writeJSON(w, http.StatusAccepted, result)
+}
+
+func decodeExecutionInvocation(w http.ResponseWriter, r *http.Request) (windowsexec.Request, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxExecutionBody)
+	defer r.Body.Close()
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return windowsexec.Request{}, fmt.Errorf("read JSON body: %w", err)
+	}
+	if err := strictjson.Validate(data); err != nil {
+		return windowsexec.Request{}, fmt.Errorf("validate JSON body: %w", err)
+	}
+	var request windowsexec.Request
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return windowsexec.Request{}, fmt.Errorf("decode JSON body: %w", err)
+	}
+	if err := request.Validate(); err != nil {
+		return windowsexec.Request{}, err
+	}
+	return request, nil
 }
 
 func decodeStarlarkActionInvocation(w http.ResponseWriter, r *http.Request) (*windowsautomation.Package, map[string]any, error) {

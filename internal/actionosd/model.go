@@ -78,10 +78,15 @@ func (m *Model) Apply(event eventstream.Event) error {
 	switch event.Type {
 	case "action.started":
 		var payload struct {
-			State         string `json:"state"`
-			ActionID      string `json:"actionId"`
-			Lifecycle     string `json:"lifecycle"`
-			Interruptible bool   `json:"interruptible"`
+			State               string `json:"state"`
+			ActionID            string `json:"actionId"`
+			Lifecycle           string `json:"lifecycle"`
+			Interruptible       bool   `json:"interruptible"`
+			PackageDigest       string `json:"packageDigest,omitempty"`
+			PackageVersion      uint32 `json:"packageVersion,omitempty"`
+			Operation           string `json:"operation,omitempty"`
+			RequestDigest       string `json:"requestDigest,omitempty"`
+			ForegroundAvailable *bool  `json:"foregroundAvailable,omitempty"`
 		}
 		if err := decodeStrict(event.Payload, &payload); err != nil {
 			return fmt.Errorf("decode action.started payload: %w", err)

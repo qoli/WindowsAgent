@@ -63,7 +63,7 @@ class DeployWindowsBinariesContractTests(unittest.TestCase):
         transaction = self.powershell.index('$transactionRoot = Join-Path $root')
         stop_watchdog = self.powershell.index("Stop-ScheduledTask -TaskName $watchdogTaskName")
         replace_binary = self.powershell.index(
-            "Copy-Item -LiteralPath (Join-Path $payload $name) -Destination $destinations[$name] -Force"
+            "Copy-VerifiedBinary -Source (Join-Path $payload $name)"
         )
         self.assertLess(validate_branch, transaction)
         self.assertLess(validate_branch, stop_watchdog)
@@ -76,12 +76,24 @@ class DeployWindowsBinariesContractTests(unittest.TestCase):
             'throw "backup hash mismatch: $name"',
             'throw "installed binary escaped the bounded data directory: $destination"',
             'throw "installed binary must not be a reparse point: $destination"',
-            'throw "rollback hash mismatch: $name"',
+            '-ExpectedSha256 $previousHashes[$name] -Operation "rollback $name"',
             'throw "previous runtime did not recover before rollback deadline"',
             '$receipt.failed_snapshot_errors += "snapshot ${name}:',
             '$receipt.rollback_verified = $true',
         ):
             self.assertIn(contract, self.powershell)
+
+    def test_binary_copy_retries_the_observed_windows_file_release_race(self):
+        self.assertIn("function Copy-VerifiedBinary", self.powershell)
+        self.assertIn("binary file-release deadline", self.powershell)
+        self.assertIn(
+            'Copy-VerifiedBinary -Source (Join-Path $payload $name)',
+            self.powershell,
+        )
+        self.assertIn(
+            'Copy-VerifiedBinary -Source (Join-Path $backupRoot $name)',
+            self.powershell,
+        )
 
     def test_receipt_contains_identity_hash_tasks_probes_and_errors(self):
         for field in (

@@ -47,9 +47,9 @@ func TestTargetObserverRequiresEveryConfiguredProbe(t *testing.T) {
 	}
 }
 
-func TestTargetObserverDoesNotAcceptLooseHealthPayload(t *testing.T) {
+func TestTargetObserverProjectsStatusFromProducerHealthMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"status":"ok","extra":true}`))
+		_, _ = w.Write([]byte(`{"status":"ok","runtime":"windows-sftp-v1","hostKeyFingerprint":"SHA256:test"}`))
 	}))
 	defer server.Close()
 	observer, err := NewTargetObserver(server.Client(), &fakeProcessInspector{})
@@ -59,7 +59,24 @@ func TestTargetObserverDoesNotAcceptLooseHealthPayload(t *testing.T) {
 	observation, err := observer.observeHTTP(context.Background(), ProbeConfig{
 		Type: "http-json", URL: server.URL, TimeoutMS: 1000, ExpectedStatusCode: 200, ExpectedJSONStatus: "ok",
 	})
-	if err != nil || observation.Healthy || !strings.Contains(observation.Detail, "strict status contract") {
+	if err != nil || !observation.Healthy {
+		t.Fatalf("observation=%+v error=%v", observation, err)
+	}
+}
+
+func TestTargetObserverRejectsDuplicateHealthStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ok","status":"failed"}`))
+	}))
+	defer server.Close()
+	observer, err := NewTargetObserver(server.Client(), &fakeProcessInspector{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := observer.observeHTTP(context.Background(), ProbeConfig{
+		Type: "http-json", URL: server.URL, TimeoutMS: 1000, ExpectedStatusCode: 200, ExpectedJSONStatus: "ok",
+	})
+	if err != nil || observation.Healthy || !strings.Contains(observation.Detail, "not strict JSON") {
 		t.Fatalf("observation=%+v error=%v", observation, err)
 	}
 }

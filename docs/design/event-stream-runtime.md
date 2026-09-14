@@ -29,9 +29,12 @@ the only unauthenticated endpoint.
 ## Current contract
 
 `POST /v1/events` accepts one strict `AppendRequest`. The journal rejects
-unknown fields, duplicate JSON keys, invalid identifiers, missing foreground
-revision, non-UTC observation time, invalid payload JSON, and oversized
-records. It assigns `schemaVersion`, `sequence`, `eventId`, and `committedAt`.
+unknown fields, duplicate JSON keys, invalid identifiers, inconsistent
+foreground evidence, non-UTC observation time, invalid payload JSON, and
+oversized records. Foreground-bound producers must provide an executable and
+positive revision. A host capability that does not require a foreground window
+may instead record `available: false` with no executable or revision. The
+journal assigns `schemaVersion`, `sequence`, `eventId`, and `committedAt`.
 
 `GET /v1/events?after=<sequence>&limit=<count>` returns ordered events plus the
 next cursor and current last sequence. A cursor ahead of the journal is an

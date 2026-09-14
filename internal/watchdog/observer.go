@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
 const maxHealthResponseBytes = 4 << 10
@@ -107,10 +109,13 @@ func (o *TargetObserver) observeHTTP(ctx context.Context, probe ProbeConfig) (Ob
 	var payload struct {
 		Status string `json:"status"`
 	}
+	if err := strictjson.Validate(body); err != nil {
+		return Observation{Healthy: false, Detail: "configured HTTP health response is not strict JSON",
+			Data: map[string]any{"url": probe.URL, "statusCode": response.StatusCode, "error": err.Error()}}, nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&payload); err != nil {
-		return Observation{Healthy: false, Detail: "configured HTTP health response is not the strict status contract",
+		return Observation{Healthy: false, Detail: "configured HTTP health response does not contain the status contract",
 			Data: map[string]any{"url": probe.URL, "statusCode": response.StatusCode, "error": err.Error()}}, nil
 	}
 	var trailing any

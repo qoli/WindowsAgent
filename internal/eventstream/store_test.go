@@ -314,3 +314,21 @@ func testAppendRequest() AppendRequest {
 		Payload: json.RawMessage(`{"elements":[]}`),
 	}
 }
+
+func TestAppendAcceptsExplicitlyUnavailableForeground(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	request := testAppendRequest()
+	available := false
+	request.Foreground = Foreground{Available: &available}
+	event, err := store.Append(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Foreground.Available == nil || *event.Foreground.Available || event.Foreground.ExecutableName != "" || event.Foreground.Revision != 0 {
+		t.Fatalf("foreground = %+v", event.Foreground)
+	}
+}

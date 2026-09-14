@@ -99,6 +99,12 @@ jobs:
             -o .build/windows-starlark-check.exe ./cmd/windows-starlark-check
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
             -o .build/windows-starlark-invoke.exe ./cmd/windows-starlark-invoke
+      - name: Build Windows execution client
+        run: >-
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0
+          go build -trimpath
+          -o .build/windows-exec.exe
+          ./cmd/windows-exec
       - name: Build SFTP filesystem service
         run: >-
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0
@@ -114,6 +120,8 @@ jobs:
         run: |
           python3 scripts/verify-windows-pe-subsystem.py .build/windows-starlark-check.exe --expect console
           python3 scripts/verify-windows-pe-subsystem.py .build/windows-starlark-invoke.exe --expect console
+      - name: Verify Windows execution client PE subsystem
+        run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-exec.exe --expect console
       - name: Verify SFTP filesystem service PE subsystem
         run: python3 scripts/verify-windows-pe-subsystem.py .build/windows-sftp.exe --expect gui
       - name: Publish ScreenParser DirectML runtime

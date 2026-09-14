@@ -32,6 +32,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/wgcworker"
 	"github.com/qoli/WindowsAgent/internal/windowsautomation"
+	"github.com/qoli/WindowsAgent/internal/windowsexec"
 	"github.com/qoli/WindowsAgent/internal/windowsinput"
 )
 
@@ -73,7 +74,7 @@ func run() (runErr error) {
 	}()
 	logger.Warn("unauthenticated_lan_listener",
 		"listen", cfg.Listen,
-		"warning", "any device that can reach this address can capture the desktop and execute full-trust Starlark automation in the Agent's Windows session",
+		"warning", "any device that can reach this address can capture the desktop and execute full-trust Starlark or direct Windows operations in the Agent's Windows session",
 	)
 
 	store, err := artifact.New(filepath.Join(cfg.DataDir, "captures"), cfg.Retention)
@@ -172,7 +173,7 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("require event journal service: %w", err)
 	}
-	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, automationExecutor, eventJournal, foreground.Snapshot, logger)
+	actionManager, err := actionrun.NewManager(ruleStore, actionExecutor, automationExecutor, windowsexec.OSExecutor{}, eventJournal, foreground.Snapshot, logger)
 	if err != nil {
 		return fmt.Errorf("initialize Action invocation manager: %w", err)
 	}
@@ -215,6 +216,7 @@ func run() (runErr error) {
 		"rules_root", ruleStore.Root(),
 		"script_api_auth", "none",
 		"starlark_automation_api_auth", "none",
+		"windows_execution_api_auth", "none",
 		"event_api_url", cfg.EventAPIURL,
 		"frontier_bindings_root", cfg.FrontierBindingsRoot,
 		"runtime_stderr_log", cfg.RuntimeLogFile,

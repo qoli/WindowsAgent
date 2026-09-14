@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,11 +25,13 @@ import (
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
 	"github.com/qoli/WindowsAgent/internal/windowsautomation"
+	"github.com/qoli/WindowsAgent/internal/windowsexec"
 )
 
 const StreamName = "action.runs"
 
 const EphemeralStarlarkActionID = "windows/ephemeral-starlark"
+const EphemeralExecutionActionID = "windows/ephemeral-execution"
 
 var (
 	ErrInvocationNotFound = errors.New("Action invocation not found")
@@ -92,6 +95,7 @@ type Manager struct {
 	rules      *rules.Store
 	executor   Executor
 	automation AutomationExecutor
+	execution  windowsexec.Executor
 	journal    Journal
 	foreground func() (foreground.Info, error)
 	now        func() time.Time
@@ -107,13 +111,14 @@ type Manager struct {
 }
 
 type run struct {
-	manager    *Manager
-	action     rules.Action
-	invocation scriptlaunch.Invocation
-	identity   string
-	foreground foreground.Info
-	ctx        context.Context
-	cancel     context.CancelFunc
+	manager               *Manager
+	action                rules.Action
+	invocation            scriptlaunch.Invocation
+	identity              string
+	foreground            foreground.Info
+	foregroundUnavailable bool
+	ctx                   context.Context
+	cancel                context.CancelFunc
 
 	mu                sync.Mutex
 	eventMu           sync.Mutex
@@ -125,16 +130,17 @@ type run struct {
 	sequence          *actionsequence.Request
 	automationPackage *windowsautomation.Package
 	automationInputs  map[string]any
+	executionRequest  *windowsexec.Request
 	errorCode         string
 	errorStage        string
 }
 
-func NewManager(ruleStore *rules.Store, executor Executor, automation AutomationExecutor, journal Journal, foregroundSnapshot func() (foreground.Info, error), logger *slog.Logger) (*Manager, error) {
-	if ruleStore == nil || executor == nil || automation == nil || journal == nil || foregroundSnapshot == nil || logger == nil {
-		return nil, errors.New("Rule store, Action executor, Starlark automation executor, event journal, foreground resolver, and logger are required")
+func NewManager(ruleStore *rules.Store, executor Executor, automation AutomationExecutor, execution windowsexec.Executor, journal Journal, foregroundSnapshot func() (foreground.Info, error), logger *slog.Logger) (*Manager, error) {
+	if ruleStore == nil || executor == nil || automation == nil || execution == nil || journal == nil || foregroundSnapshot == nil || logger == nil {
+		return nil, errors.New("Rule store, Action executor, Starlark automation executor, Windows execution executor, event journal, foreground resolver, and logger are required")
 	}
 	manager := &Manager{
-		rules: ruleStore, executor: executor, automation: automation, journal: journal, foreground: foregroundSnapshot,
+		rules: ruleStore, executor: executor, automation: automation, execution: execution, journal: journal, foreground: foregroundSnapshot,
 		now: time.Now, random: rand.Reader, logger: logger, runs: map[string]*run{},
 		sequenceByRule: map[string]string{}, activeExternal: map[string]uint32{},
 	}
@@ -178,14 +184,15 @@ func (m *Manager) recoverInterrupted(ctx context.Context) error {
 					ID: event.Source.ModuleID, Runtime: event.Source.Runtime,
 					Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: payload.Lifecycle, Interruptible: payload.Interruptible},
 				}
-				if event.Source.ModuleID != EphemeralStarlarkActionID {
+				if event.Source.ModuleID != EphemeralStarlarkActionID && event.Source.ModuleID != EphemeralExecutionActionID {
 					action.RuleID = event.Foreground.ExecutableName
 				}
 				instance := &run{
 					manager: m, action: action, identity: event.CorrelationID, state: StateFailed,
 					ctx: context.Background(), cancel: func() {},
-					foreground:  foreground.Info{ExecutableName: event.Foreground.ExecutableName},
-					afterCursor: event.Sequence - 1, lastEventID: event.EventID,
+					foreground:            foreground.Info{ExecutableName: event.Foreground.ExecutableName},
+					foregroundUnavailable: event.Foreground.Available != nil && !*event.Foreground.Available,
+					afterCursor:           event.Sequence - 1, lastEventID: event.EventID,
 				}
 				pending[event.CorrelationID] = interruptedRun{instance: instance, started: event, last: event}
 			case "action.completed", "action.failed", "action.cancelled":
@@ -348,6 +355,82 @@ func (m *Manager) InvokeStarlark(ctx context.Context, pkg *windowsautomation.Pac
 		Watch: &WatchTarget{URL: "/v1/action-invocations/" + identity + "/events?after=" + fmt.Sprint(started.Sequence-1), ContentType: "application/x-ndjson", AfterCursor: started.Sequence - 1},
 		Stop:  &StopTarget{Method: "POST", URL: "/v1/action-invocations/" + identity + "/stop"},
 	}, nil
+}
+
+// InvokeExecution starts one host-owned ephemeral Windows execution. It runs
+// in the WindowsAgent process context and is independent of Rule resolution.
+func (m *Manager) InvokeExecution(ctx context.Context, request windowsexec.Request) (Invocation, error) {
+	if m == nil {
+		return Invocation{}, errors.New("Action invocation manager is required")
+	}
+	if ctx == nil {
+		return Invocation{}, errors.New("context is required")
+	}
+	if err := request.Validate(); err != nil {
+		return Invocation{}, fmt.Errorf("validate Windows execution request: %w", err)
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return Invocation{}, fmt.Errorf("encode Windows execution request: %w", err)
+	}
+	var cloned windowsexec.Request
+	if err := json.Unmarshal(encoded, &cloned); err != nil {
+		return Invocation{}, fmt.Errorf("clone Windows execution request: %w", err)
+	}
+	identity, err := newInvocationID(m.random)
+	if err != nil {
+		return Invocation{}, fmt.Errorf("create ephemeral Windows execution invocation ID: %w", err)
+	}
+	observed, foregroundErr := m.foreground()
+	foregroundUnavailable := foregroundErr != nil
+	if foregroundErr != nil {
+		m.logger.Warn("windows_execution_foreground_unavailable", "error", foregroundErr)
+	}
+	interruptible := request.Operation != windowsexec.OperationStart
+	action := rules.Action{
+		ID: EphemeralExecutionActionID, Runtime: windowsexec.RuntimeID,
+		Execution: rules.ActionExecution{Completion: rules.CompletionStream, Lifecycle: rules.LifecycleLinear, Interruptible: interruptible},
+	}
+	runContext, cancel := context.WithCancel(context.Background())
+	instance := &run{
+		manager: m, action: action, identity: identity, foreground: observed, foregroundUnavailable: foregroundUnavailable,
+		ctx: runContext, cancel: cancel, state: StateRunning, executionRequest: &cloned,
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		cancel()
+		return Invocation{}, errors.New("Action invocation manager is closed")
+	}
+	m.runs[identity] = instance
+	m.mu.Unlock()
+	digest := sha256.Sum256(encoded)
+	started, err := instance.appendEvent(context.Background(), "action.started", map[string]any{
+		"state": StateRunning, "actionId": action.ID, "lifecycle": action.Execution.Lifecycle,
+		"interruptible": interruptible, "operation": request.Operation, "requestDigest": hex.EncodeToString(digest[:]),
+		"foregroundAvailable": !foregroundUnavailable,
+	})
+	if err != nil {
+		cancel()
+		m.mu.Lock()
+		delete(m.runs, identity)
+		m.mu.Unlock()
+		return Invocation{}, fmt.Errorf("commit ephemeral Windows execution start event: %w", err)
+	}
+	instance.mu.Lock()
+	instance.afterCursor = started.Sequence - 1
+	instance.mu.Unlock()
+	m.wg.Add(1)
+	go instance.execute()
+	response := Invocation{
+		InvocationID: identity, ActionID: action.ID, Runtime: action.Runtime,
+		State: StateRunning, Execution: action.Execution,
+		Watch: &WatchTarget{URL: "/v1/action-invocations/" + identity + "/events?after=" + fmt.Sprint(started.Sequence-1), ContentType: "application/x-ndjson", AfterCursor: started.Sequence - 1},
+	}
+	if interruptible {
+		response.Stop = &StopTarget{Method: "POST", URL: "/v1/action-invocations/" + identity + "/stop"}
+	}
+	return response, nil
 }
 
 func cloneInputs(inputs map[string]any) (map[string]any, error) {
@@ -705,6 +788,7 @@ func (r *run) execute() {
 	defer r.recoverPanic()
 	isSequence := r.sequence != nil
 	isAutomation := r.automationPackage != nil
+	isExecution := r.executionRequest != nil
 	if isSequence {
 		defer r.manager.releaseSequence(r.action.RuleID, r.identity)
 	}
@@ -714,6 +798,14 @@ func (r *run) execute() {
 		output, err := r.manager.automation.Run(r.ctx, r.automationPackage, r.automationInputs, r)
 		result = actionlaunch.Result{ActionID: r.action.ID, Runtime: r.action.Runtime, Output: output}
 		runErr = err
+	} else if isExecution {
+		executionResult, err := r.manager.execution.Execute(r.ctx, *r.executionRequest)
+		if err == nil {
+			var output []byte
+			output, err = json.Marshal(executionResult)
+			result = actionlaunch.Result{ActionID: r.action.ID, Runtime: r.action.Runtime, Output: output}
+		}
+		runErr = err
 	} else if isSequence {
 		result, runErr = r.executeSequence()
 	} else {
@@ -722,13 +814,27 @@ func (r *run) execute() {
 	r.mu.Lock()
 	cancelled := r.ctx.Err() != nil
 	r.mu.Unlock()
+	if isExecution && r.executionRequest.Operation == windowsexec.OperationStart && runErr == nil {
+		// Once the breakaway process has resumed, its receipt is authoritative:
+		// later manager cancellation cannot recall or own that process.
+		cancelled = false
+	}
 	var state, eventType string
 	var payload map[string]any
 	var terminalErrorCode, terminalErrorStage string
+	var executionError *windowsexec.Error
+	_ = errors.As(runErr, &executionError)
 	switch {
 	case cancelled && isSequence && runErr != nil && !errors.Is(runErr, context.Canceled):
 		state, eventType = StateFailed, "action.failed"
 		payload = map[string]any{"state": state, "error": runErr.Error()}
+	case cancelled && isExecution && executionError != nil && executionError.Code == "EXEC_CANCEL_FAILED":
+		state, eventType = StateFailed, "action.failed"
+		terminalErrorCode, terminalErrorStage = executionError.Code, executionError.Stage
+		payload = map[string]any{
+			"state": state, "error": runErr.Error(),
+			"errorCode": terminalErrorCode, "errorStage": terminalErrorStage,
+		}
 	case cancelled:
 		state, eventType = StateCancelled, "action.cancelled"
 		payload = map[string]any{"state": state}
@@ -741,6 +847,12 @@ func (r *run) execute() {
 			payload["errorStage"] = automationError.Stage
 			terminalErrorCode = automationError.Code
 			terminalErrorStage = automationError.Stage
+		}
+		if errors.As(runErr, &executionError) {
+			payload["errorCode"] = executionError.Code
+			payload["errorStage"] = executionError.Stage
+			terminalErrorCode = executionError.Code
+			terminalErrorStage = executionError.Stage
 		}
 	case r.action.Execution.Lifecycle == rules.LifecycleLoop:
 		state, eventType = StateFailed, "action.failed"
@@ -762,6 +874,9 @@ func (r *run) execute() {
 	if isAutomation {
 		r.automationPackage = nil
 		r.automationInputs = nil
+	}
+	if isExecution {
+		r.executionRequest = nil
 	}
 	r.state = state
 	if state == StateCompleted {
@@ -931,17 +1046,24 @@ func (r *run) recoverPanic() {
 	if r.action.Runtime == windowsautomation.RuntimeID {
 		payload["errorCode"] = "AUTOMATION_RUNTIME_PANICKED"
 		payload["errorStage"] = "executing-action"
+	} else if r.action.Runtime == windowsexec.RuntimeID {
+		payload["errorCode"] = "WINDOWS_EXECUTION_RUNTIME_PANICKED"
+		payload["errorStage"] = "executing-execution"
 	}
 	_, appendErr := r.appendEvent(context.Background(), "action.failed", payload)
 	r.mu.Lock()
 	r.sequence = nil
 	r.automationPackage = nil
 	r.automationInputs = nil
+	r.executionRequest = nil
 	r.state = StateFailed
 	r.errorText = errorText
 	if r.action.Runtime == windowsautomation.RuntimeID {
 		r.errorCode = "AUTOMATION_RUNTIME_PANICKED"
 		r.errorStage = "executing-action"
+	} else if r.action.Runtime == windowsexec.RuntimeID {
+		r.errorCode = "WINDOWS_EXECUTION_RUNTIME_PANICKED"
+		r.errorStage = "executing-execution"
 	}
 	if appendErr != nil {
 		r.errorText += "; commit terminal Action event: " + appendErr.Error()
@@ -974,11 +1096,16 @@ func (r *run) appendEvent(ctx context.Context, eventType string, payload any) (e
 	r.mu.Lock()
 	causationID := r.lastEventID
 	r.mu.Unlock()
+	eventForeground := eventstream.Foreground{ExecutableName: r.foreground.ExecutableName, Revision: 1}
+	if r.foregroundUnavailable {
+		available := false
+		eventForeground = eventstream.Foreground{Available: &available}
+	}
 	event, err := r.manager.journal.Append(ctx, eventstream.AppendRequest{
 		SessionID: r.identity, Stream: StreamName, Type: eventType,
 		ObservedAt:    r.manager.now().UTC(),
 		Source:        eventstream.Source{ModuleID: r.action.ID, InstanceID: r.identity, Runtime: r.action.Runtime},
-		Foreground:    eventstream.Foreground{ExecutableName: r.foreground.ExecutableName, Revision: 1},
+		Foreground:    eventForeground,
 		CorrelationID: r.identity, CausationID: causationID, Payload: encoded,
 	})
 	if err != nil {
