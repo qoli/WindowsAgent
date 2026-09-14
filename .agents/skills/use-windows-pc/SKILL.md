@@ -1,6 +1,6 @@
 ---
 name: use-windows-pc
-description: "Operate the user-configured Windows PC through WindowsAgent capture, SFTP, direct process or PowerShell-file execution, Starlark automation, and Rule-owned Actions. Use when Codex must inspect or manipulate the live PC, transfer files, launch a process, run a command or uploaded PS1, automate a general Windows workflow, or invoke an application capability. Read PC identity and endpoints from the private user env file; do not use this skill to develop WindowsAgent Core or a Rule package."
+description: "Operate the user-configured Windows PC through WindowsAgent capture, SFTP, process execution, Starlark, Rule-owned Actions, or the independent Pi/pi-ai delegated agent with PI WEB and computer-use. Use for live PC inspection or manipulation, file transfer, commands, deterministic automation, application capabilities, and general work that should run as a supervised Windows sub-agent. Read PC identity and endpoints from the private user env file; do not use this skill to develop WindowsAgent Core or a Rule package."
 ---
 
 # Use Windows PC
@@ -50,19 +50,29 @@ Use only the capability needed for the requested outcome:
   `windows-exec ps1`. Do not put the script into an SSH or PowerShell
   `-Command` string.
 - **General multi-step Windows automation:** use one ephemeral
-  `windows-starlark-action-v1` package. Local execution performs package,
-  syntax, schema, and input preflight only; Windows owns all real execution and
-  runtime errors.
+  `windows-starlark-action-v1` package when the workflow can be described and
+  preflighted deterministically. Local execution performs package, syntax,
+  schema, and input preflight only; Windows owns all real execution and runtime
+  errors.
+- **Independent delegated work:** use `windows-agent-pi` when the Windows-side
+  worker should plan, inspect, iterate, use its own workspace and computer-use,
+  and stream durable progress back to the supervising host. Pi SDK/pi-ai owns
+  model execution, PI WEB owns the session and human interaction surface, and
+  `windows-agent-pi` owns the normalized delegated-task lifecycle. This is not
+  a WindowsAgent Action or a fallback for another failed capability.
 - **Game- or application-owned behavior:** start from a fresh matched capture,
   read the live Rule guidance and Action catalog, and invoke the highest-level
   Action whose postcondition owns the goal.
 
-SSH is not a fallback execution or file plane. Use an environment-declared
-administrative SSH target only when deployment or diagnosis explicitly
-requires it.
+SSH is not a fallback execution or file plane. The declared Pi SSH target is
+the intended transport for tunnelling the loopback-only delegated API and PI
+WEB; the administrative SSH target remains limited to explicitly authorized
+deployment or diagnosis.
 
-Read [references/operations.md](references/operations.md) for concrete command
-forms after selecting a capability.
+Read [references/operations.md](references/operations.md) for conventional
+WindowsAgent command forms. Read
+[references/pi-agent.md](references/pi-agent.md) before submitting, following,
+steering, cancelling, or opening a delegated Pi task.
 
 ## Establish live state
 
@@ -77,6 +87,12 @@ Before a state-dependent operation:
 A fresh capture is not required for a filesystem-only operation because SFTP
 does not depend on the interactive desktop. It is required before visible UI,
 foreground-bound automation, or Rule Action work.
+
+A delegated Pi task has its own live-state boundary: the client establishes the
+authenticated tunnel and the task status or event stream reports Pi runtime
+state. A WindowsAgent capture is not a prerequisite for submission, but use a
+fresh capture when current desktop state affects the prompt or when independent
+before/after visual evidence is needed.
 
 ## Preserve structured boundaries
 
@@ -94,6 +110,11 @@ terminal state, output or typed error, and event cursor when present. An HTTP
 2xx, process creation, key injection, or uploaded file is not proof of an
 external application goal.
 
+For delegated Pi work, preserve the task ID, latest durable sequence, task
+state, PI WEB session link, terminal event, and relevant artifacts. Treat
+`WAITING_INPUT` as a handoff to PI WEB; do not invent an answer endpoint or
+flatten Pi's interaction schemas into the host protocol.
+
 ## Respect authorization and ownership
 
 PC configuration identifies a target; it does not authorize every mutation.
@@ -101,6 +122,11 @@ Read-only inspection may proceed when relevant. Require the user's task to
 include installation, deployment, process termination, file deletion,
 firewall changes, Rule synchronization, or application-side mutation before
 performing that category of change.
+
+Delegation does not broaden authorization. Give Pi a bounded prompt and working
+directory consistent with the user's request, follow its progress, and stop or
+steer it if it begins materially different work. Do not delegate a mutation
+that this skill would not perform directly under the same request.
 
 Do not modify Windows Firewall through this skill. Do not expose the default
 unauthenticated HTTP or SFTP listeners to the public Internet.
@@ -116,8 +142,10 @@ When a Rule or Action is missing or defective, switch to
 Separate these claims whenever they apply:
 
 1. **Transport:** the configured PC endpoint received the request.
-2. **Runtime:** SFTP or the invocation reached its declared result.
-3. **Execution:** the process, script, or Action returned the expected output.
+2. **Runtime:** SFTP, the invocation, or the delegated Pi task reached its
+   declared state.
+3. **Execution:** the process, script, Action, or Pi session returned the
+   expected output.
 4. **Desktop/domain:** fresh evidence shows the signed-in session or application
    accepted the effect.
 5. **Goal:** the user's full requested outcome is independently confirmed.

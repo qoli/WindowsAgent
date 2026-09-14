@@ -48,11 +48,15 @@ owns this mapping because it depends on the configured Windows identity.
 ```text
 WINDOWS_AGENT_EVENT_WEB_ORIGIN
 WINDOWS_AGENT_ADMIN_SSH_HOST
+WINDOWS_AGENT_PI_SSH_HOST
 ```
 
 Use Event Web only when its health or UI is relevant. Use administrative SSH
 only for an explicitly authorized deployment or diagnostic workflow; it is not
-an execution fallback.
+an execution fallback. `WINDOWS_AGENT_PI_SSH_HOST` is the OpenSSH destination
+used only to tunnel the loopback delegated Pi API and PI WEB. Do not infer it
+from the administrative target when it is absent, even if one deployment uses
+the same Windows account.
 
 No password, private key, bearer token, or host-key private material belongs in
 this file. Capability-specific tokens may remain in their existing private
