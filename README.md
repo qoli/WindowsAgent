@@ -1,825 +1,216 @@
 # WindowsAgent
 
-**[Website](https://qoli.github.io/WindowsAgent/)** · [Design docs](docs/design/README.md) · [Contributing](CONTRIBUTING.md)
+**[Website](https://qoli.github.io/WindowsAgent/)** · [Design registry](docs/design/README.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
-WindowsAgent is an extensible Go agent for capabilities that must run inside a
-signed-in Windows user's interactive session.
+WindowsAgent is a Go runtime for capabilities that must execute inside a
+signed-in Windows user's interactive desktop session. It provides
+foreground-aware screen capture, bounded observation and decision runtimes,
+Rule-owned finite and streaming Actions, durable Action lifecycles, and
+independent companion processes for events, evidence, inference, file transfer,
+and delegated UI work.
 
-Its first capability is primary-monitor still capture through Windows Graphics
-Capture (WGC). It also includes a finite, read-only observation-job runtime
-that brokers locally distributed Starlark Script Packages to a
-unified memory/file/screen-region observer process. Script Packages may carry
-manifest-declared native DLLs and call them through the Script Runner's generic
-Windows amd64 FFI. Every capability remains behind an explicit package, API,
-permission, and validation boundary.
+WindowsAgent is not a general remote-memory API or an unrestricted desktop
+control server. Generic Core code owns execution, isolation, validation, and
+lifecycle. Executable-scoped Rules own game or application semantics,
+coordinates, bindings, classifiers, and postconditions.
 
 > [!WARNING]
-> The current HTTP server listens on `0.0.0.0:8787` without authentication,
-> TLS, or CORS by default. Anyone who can reach that port can capture the
-> desktop and invoke mutable, full-trust Starlark or direct Windows execution
-> with the Agent's installed Windows token. Use it only on a trusted LAN or private overlay
-> network. The optional SFTP runtime likewise defaults to `0.0.0.0:2022`,
-> accepts SSH `none` authentication, and exposes the filesystem visible to its
-> elevated Windows token. Do not expose either listener to the public Internet.
+> The Capture Agent listens on `0.0.0.0:8787` without authentication or TLS by
+> default. Any client that can reach it can capture the desktop and invoke
+> enabled Script, Action, process-execution, and input surfaces with the
+> Agent's installed Windows token. The optional SFTP runtime similarly defaults
+> to `0.0.0.0:2022` with SSH `none` authentication. Keep both listeners on a
+> trusted LAN or private overlay network, and never expose them directly to the
+> public Internet. See [Security boundaries](#security-boundaries).
 
-## Status
+## Contents
 
-The screenshot capability is available today:
+- [Current status](#current-status)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [Build and validation](#build-and-validation)
+- [Install and operate](#install-and-operate)
+- [Deploy from macOS](#deploy-from-macos)
+- [HTTP API](#http-api)
+- [Rules and Actions](#rules-and-actions)
+- [Security boundaries](#security-boundaries)
+- [Project map](#project-map)
 
-- Windows 10 1903+ amd64
-- primary-monitor capture using WGC and Direct3D 11
-- native-resolution JPEG Q90 4:4:4 output by default
-- explicit `1080p-jpeg` and lossless `native-png` request profiles
-- HDR scRGB capture tone-mapped to an SDR image before encoding
-- cursor inclusion selected per request
-- foreground process ID, executable name/path, window title, and observation time
-  recorded with each capture
-- capture-time foreground rule resolution with a navigable Codex `AGENTS.md`
-- SHA-256 verified artifacts and bounded retention
-- strict JSON errors with no GDI or hidden provider fallback; one
-  crash-isolated worker generation keeps its WGC session, D3D11
-  device/context, frame pool, and region shader resident across requests
-- a transient region readback failure retires that worker generation and gets
-  one fresh-generation retry using the same backend and request; transport EOF
-  retains its five-attempt bound, while full-capture provider failures and
-  exhausted or non-transient failures remain explicit
-- optional hidden startup through an interactive-user Scheduled Task
+## Current status
 
-The generic Starlark launcher and finite Script capabilities are available
-today:
+The current public capability surface is summarized below. The
+[design registry](docs/design/README.md) remains the canonical maturity view
+for individual design documents; implementation and tests take precedence when
+prose drifts.
 
-- a read-only `windows-observation-v1` Action whose `screen.readRegion` fails
-  with `SCREEN_CAPTURE_FAILED`, or whose Observer transport exits with the
-  exact screen broker EOF signature, is silently relaunched as a complete
-  package for up to five total attempts with a bounded delay; structured
-  runtime logs retain every scheduled retry, recovery, and exhaustion while
-  unrelated and exhausted failures remain explicit and terminal
+| Capability | Current public state | Primary boundary |
+| --- | --- | --- |
+| WGC capture and foreground Rule resolution | Available | Capture Agent on `:8787` |
+| Finite `windows-observation-v1` packages | Available | Isolated Job, Script Runner, and read-only Observer |
+| `windows-pure-decision-v1` | Available | Permission-free in-process Starlark JSON mapping |
+| Finite and streaming Rule Actions | Available | Rule v6 packages and durable invocation lifecycle |
+| Ephemeral Action Sequences | Available | One preflighted sequence of 1–20 allowlisted Actions |
+| Process and service inventory | Available | Parameter-free `GET /v1/processes` snapshot |
+| Resident PP-OCR DirectML profiles | Available | Rule-declared residency while the Rule is active |
+| Event Web and Action OSD | Available, optional | Independent read-only event projections |
+| SFTP filesystem runtime | Available, optional | Separate SFTP-only process and Windows token |
+| General Starlark automation | Partially available | Ephemeral `windows-starlark-action-v1` package |
+| Direct process execution | Partially available | Structured `windows-exec-v1` operations |
+| Direct and Rule-owned input | Partially available | Foreground-bound key and pointer runtimes |
+| Event Stream | Partially available | Authenticated loopback append/replay journal |
+| Evidence Recorder and Visual Log | Partially available | Independent finite recorder and passive inference producer |
+| Delegated Pi agent | Partially available | Separate authenticated PI WEB control plane |
+| ScreenParser Action | Partially available | One hash-pinned frame per DirectML invocation |
+| Monitor and Reaction registration | Declaration and read-only catalog only | No scheduler or dispatcher is shipped |
+| Mini reaction runtime | Draft only | No end-to-end runtime is shipped |
 
-- `crimson-desert/inventory` performs a finite memory attempt and, only when
-  that attempt cannot produce a valid inventory, discovers and decodes the
-  newest unambiguous save file inside its package-declared LocalAppData root
-- `elite-dangerous/compass` reads one fixed 96x96 reference-density region in
-  the centered 1920x1080 coordinate space and returns the cyan target marker's
-  reference-coordinate offset, clockwise screen angle, Euclidean center
-  distance, and circular center-zone membership
-- `elite-dangerous/ship-status` composes a reference-density PP-OCR boxes
-  Action with a pure game classifier; it confirms only `MASS`, `LANDING`, and
-  `CARGO`, then independently reports the three same-frame indicators as
-  `ON`, `OFF`, or evidence-preserving `UNKNOWN`
-- `elite-dangerous/ship-speed` reads the fixed visual HUD speed-number region
-  and classifies qualified evidence as `STOPPED` (`0`), `LOW_SPEED` (`1-9`),
-  or `MOVING` (`>=10`). Only `MOVING` exposes its non-zero `displayValue`;
-  covered or ambiguous values remain `UNKNOWN` without consulting journal,
-  status-file, or throttle-command state
-- `elite-dangerous/flight-status` takes no inputs, captures fresh prompt OCR
-  through `elite-dangerous/flight-prompt-text`, and returns one reviewed flight
-  state or `UNKNOWN`. The child performs one same-capture, explicitly
-  provenance-bearing performance cascade while the Rule-internal classifier
-  remains the only owner of phrase and confidence semantics,
-  including the explicit `SUPERCRUISE_ASSIST_LINE_OF_SIGHT_REQUIRED` Gate for
-  `MOVE TO OBTAIN LINE OF SIGHT TO TARGET`
-- the Go launcher resolves any registered `windows-observation-v1` capability
-  from its owning Rule, validates its input schema and package resource
-  declarations,
-  and never contains a capability allowlist
-- `windows-pure-decision-v1` runs only internal, permission-free Starlark JSON
-  mappings in-process; it cannot access the Observer, native libraries, input,
-  pointer, Actions, or streams, and it does not replace isolated observation
-- the job returns one schema-validated JSON result with per-call provenance
-- the Go host launches only the runner and observer directly under one bounded
-  Windows Job Object; it does not use PowerShell or a polling loop
-- `windows-observer.exe` remains game-neutral and never loads DLLs
-- the generic screen observer captures once without a cursor, maps a 1920x1080
-  reference rectangle through the centered 16:9 viewport, performs bounded
-  `reference` or `native` GPU region sampling, and leaves UI interpretation to
-  the owning package
-- screen-region sampling requires D3D11 compute shader model 5.0 and the
-  Windows `d3dcompiler_47.dll`; missing shader support fails the Action and
-  never falls back to a full-frame CPU path
-- the save file becomes a job-scoped opaque blob; the Script Runner resolves
-  that blob and loads only the package-declared DLL alias
+No Monitor or Reaction registration is active in the shipped Rules. A catalog
+entry or `registrableAs` declaration is eligibility, not a running scheduler.
+Retired module-registry, autonomous ScreenParser-loop, and scene-reducer designs
+are historical references and are not current runtime paths.
 
-This is not a general remote memory API. HTTP exposes a live read-only Script
-catalog; the unauthenticated run endpoint delegates one strictly validated
-request to the local launcher inside the signed-in Windows session.
+### Capture guarantees
 
-The general `windows-starlark-action-v1` automation runtime is partially
-landed. It accepts an ephemeral Starlark package, runs it inside the
-WindowsAgent process in the signed-in interactive desktop session, and exposes
-structured `windows.process.run`, `windows.fs.*`, and `task.*` operations. The
-Agent installer's `-AgentRunLevel Limited|Highest` choice owns the runtime
-privilege; a package cannot elevate itself. Invocation, activity, cancellation,
-and terminal results use the durable Action lifecycle. The runtime does not
-internally insert a PowerShell command string, SSH, Windows MCP, or fallback
-transport between the package and Windows. See the
-[runtime design](docs/design/starlark-automation-runtime.md) and
-[minimal package](docs/examples/windows-starlark-hello/).
+- Windows 10 1903+ amd64, primary-monitor WGC, and Direct3D 11.
+- `native-jpeg` by default, with explicit `1080p-jpeg` and `native-png`
+  profiles.
+- HDR scRGB is tone-mapped to SDR before encoding.
+- Cursor inclusion is selected per request.
+- Each committed artifact includes a SHA-256 verified image, foreground process
+  identity, capture time, and resolved Rule navigation.
+- Capture failures remain explicit. There is no hidden GDI or alternate-provider
+  fallback.
+- The WGC worker is crash-isolated and keeps its capture resources resident
+  across requests.
 
-The separate `windows-sftp-v1` runtime is landed. It is the
-filesystem data plane for uploading, downloading, enumerating, renaming, and
-removing Windows files without putting file payloads or path quoting inside a
-PowerShell command. It accepts only the SFTP subsystem, uses the fixed protocol
-username `windowsagent` with SSH `none` authentication, and exposes Windows
-drives through virtual `/`. Shell, exec, PTY, and forwarding requests are
-rejected. Its actual filesystem permissions come from the dedicated process's
-Windows token; they do not come from the interactive desktop session. See the
-[SFTP runtime design](docs/design/sftp-filesystem-runtime.md).
+### Execution guarantees
 
-The `windows-exec-v1` convenience runtime is partially landed. It removes the
-Starlark package ceremony from one structured process operation: `run` owns a
-process tree until the direct process exits, `start` creates an explicitly
-detached process, and `powershell-file` runs one absolute `.ps1` already
-transferred to Windows.
-Every argument remains a JSON/CLI array element; there is no command-string
-shell interface. All three operations inherit the Capture Agent's installed
-token and interactive session and use the durable invocation status, watch,
-and terminal-result contract. Owned `run` and `powershell-file` invocations
-also expose stop; detached `start` becomes unmanaged after creation. See the
-[Windows execution design](docs/design/windows-execution-runtime.md).
+- Observation packages are finite, schema-validated, permission-bounded, and
+  isolated under one Windows Job Object.
+- `windows-observer.exe` remains read-only and game-neutral.
+- Pure decisions cannot access Observer, filesystem, native libraries, input,
+  pointer, Action, or stream APIs.
+- Finite Actions return one terminal result. Streaming Actions own their
+  repeated observation, workflow state, cancellation, cleanup, compensation,
+  durable events, and domain postconditions.
+- Action Sequences compose existing Actions only. They have no variables,
+  branches, loops, retries, nesting, persistence, or hidden provider changes.
+- A completed input operation proves the bounded input event, not the
+  application's later visual or domain state.
 
-The read-only `windows-process-inventory-v1` runtime is landed. One
-parameter-free `GET /v1/processes` request returns current osquery-shaped
-`processes` and `services` tables; callers relate them with matching nonzero
-PIDs.
-Process rows include the executable name, parent PID, thread count, and, when
-the installed Agent identity may read them, path, full command line, state,
-start time, and Windows session. Service rows come directly from the Service
-Control Manager and retain service type, state, start type, executable or DLL
-path, account, description, and exit codes. The runtime does not special-case
-`svchost.exe`, interpret application roles, persist command lines, or control a
-process or service. See the [process inventory design](docs/design/windows-process-inventory.md).
+## Architecture
 
-The independent `windows-agent-pi` delegated-agent runtime is partially
-landed. A macOS host can create a task, replay or live-stream durable progress,
-steer or follow up, cancel it, and open the owning PI WEB session. PI WEB owns
-the persistent Pi SDK session, while the pinned `pi-computer-use` package owns
-Windows UI observation and input in the signed-in user's desktop. This is a
-separate authenticated loopback control plane, not a Rule Action or an internal
-capture-agent capability. PI WEB also remains the sole owner of interactive
-questions: the host stream reports only that attention is required or resolved
-and links to the PI WEB session. The native current-user installer and macOS
-SSH-tunnel client are source-landed. Signed-in Windows acceptance has verified
-model authorization, durable streaming, cancellation/restart recovery, and
-computer-use observation and input against an existing Calculator window. See the
-[delegated runtime design](docs/design/delegated-pi-agent-runtime.md).
+WindowsAgent separates capability ownership into six layers:
 
-Prepare the pinned Node bundle and dedicated Pi profile on Windows before
-running the installer; the exact commands and required environment are in
-[`runtimes/windows-agent-pi/README.md`](runtimes/windows-agent-pi/README.md).
-After the normal repository build, install the prepared runtime with:
+1. **Capture and foreground identity** — WGC captures the primary monitor,
+   records the current foreground executable, resolves its Rule, and commits a
+   verified artifact.
+2. **Finite observation** — `windows-observation-v1` runs one declared Starlark
+   package through the Script Runner and read-only Observer. Memory, file,
+   screen-region, and native-library access are package-declared.
+3. **Pure decisions** — `windows-pure-decision-v1` performs bounded internal
+   JSON-to-JSON decisions without permissions or external access.
+4. **Actions** — Rule v6 Action packages own executable application semantics.
+   They declare finite return or durable stream completion.
+5. **Ephemeral composition** — an allowlisted Action Sequence runs an immutable
+   set of already-correct Actions after complete preflight.
+6. **Independent processes** — Event Stream, Event Web, OSD, Evidence Recorder,
+   Visual Log, SFTP, Watchdog, and delegated Pi retain their own process and
+   lifecycle boundaries.
 
-```powershell
-.\scripts\install-windows-agent-pi.ps1 `
-  -ExecutablePath (Resolve-Path .\.build\windows-agent-pi.exe) `
-  -ComponentExecutablePath (Resolve-Path .\.build\windows-agent-pi-component.exe) `
-  -RuntimeBundlePath (Resolve-Path .\runtimes\windows-agent-pi) `
-  -PiWebConfigPath "C:\absolute\pi-web-config.json"
-```
+The Capture Agent may manage a resident inference worker while its owning Rule
+is active, but worker residency is lifecycle configuration rather than an
+Action, Monitor, or registration. The Watchdog is an external one-way lifecycle
+owner; monitored modules do not depend on it and it does not recover itself.
 
-The macOS host then uses the SSH-only client surface, for example:
+## Quick start
 
-```bash
-scripts/windows-agent-pi-client.sh --ssh-host <user@host> submit \
-  --cwd 'C:\absolute\workspace' --prompt 'Complete the delegated task.'
-scripts/windows-agent-pi-client.sh --ssh-host <user@host> watch \
-  --task-id <task_id>
-scripts/windows-agent-pi-client.sh --ssh-host <user@host> web \
-  --task-id <task_id>
-```
-
-The Action runtime and registration refactor is partially landed:
-
-- Rule schema version 6 declares executable Actions, an explicit ephemeral
-  sequence allowlist, explicit return or stream
-  completion, optional resident runtime
-  profiles, and separately registers selected Actions as timer-driven Monitors
-  or event-driven Reactions;
-- `windows-event-stream.exe` owns a strict append-only JSONL journal and an
-  authenticated loopback append/replay/time-range API;
-- `windows-event-web.exe` is an optional independent, windowless Web projection
-  of that journal and the exact Action OSD state. It accepts only an explicit
-  loopback or private-LAN listener and uses a browser-facing token distinct from
-  the loopback journal credential;
-- `windows-visual-log.exe` is an optional independent passive producer that warms one
-  exactly configured oMLX model, reads the newest frame from the Evidence
-  recorder's PC-local shared-memory tap on its own loop tick, and appends an
-  untrusted timestamped scene description. Invalid model output
-  drops only that sample; it never controls evidence recording or substitutes
-  another model, capture profile, or prior description;
-- `POST /v1/actions/invoke` gives every call an invocation ID. Finite Actions
-  return terminal output directly; streaming Actions first commit a durable
-  start event and immediately return a callback URL, optional stop URL, and
-  their declared linear or loop lifecycle;
-- `run_action_sequence` is generated per Rule as a strict JSON function schema.
-  It preflights and immediately runs one immutable sequence of 1–20 allowlisted
-  Actions in order, with no variables, branches, loops, nesting, or persisted
-  executable definition;
-- streaming Starlark exposes strict `action.call`, explicit `action.try_call`,
-  and bounded failure compensation registration. `action.try_call` returns
-  `{ok, output, error, errorCode}` so a workflow may
-  emit and bound a failed observation sample without changing providers or
-  silently converting an execution failure into domain `UNKNOWN`.
-  `action.on_failure` registers child Actions that run only when the streaming
-  Action fails. Optional `critical=True` compensations run before ordinary
-  compensations, and every registration has its own bounded
-  `timeout_milliseconds` budget; reverse registration order is preserved within
-  each class. `action.clear_on_failure` removes them after the protected state
-  has been restored. On Agent startup, durable invocations missing a terminal
-  event are failed explicitly with `ABORTED_BY_AGENT_RESTART` and remain
-  queryable/watchable rather than being resumed against unknown game state;
-- Crimson Desert inventory remains a finite Action using the landed v1
-  observation runtime;
-- `screenparser/ui-elements` is a Palworld-configured on-demand Action
-  that transforms one caller-supplied, hash-pinned RGB24 frame through the
-  verified FP16 ScreenParser v2 ONNX model and then exits;
-- Elite Dangerous declares a Rule-resident `ocr/w480` DirectML worker and the
-  finite `elite-dangerous/flight-prompt-text` Action. The Action captures one
-  reviewed local region, derives only the manifest-selected 400x40 reference
-  routes from that same frame, and returns selected raw OCR text plus route,
-  Gate, provenance, model identity, and timing evidence;
-- its composite `elite-dangerous/flight-status` Action owns the complete fresh
-  OCR-to-semantic boundary. Its Rule-internal pure classifier is also the
-  cascade decision Action and accepts a finite status only when confidence,
-  phrase-similarity, and best-candidate-margin thresholds pass; unresolved
-  content remains `UNKNOWN`;
-- Elite Dangerous also declares `ocr/text-regions`, a resident PP-OCRv6 small
-  detection-plus-recognition profile. The generic raw Action returns text
-  quadrilaterals, recognition evidence, and bounded same-frame left context;
-  the composite `elite-dangerous/ship-status` Action alone owns its three
-  lower-right indicator semantics;
-- the composite `elite-dangerous/ship-speed` Action uses that same resident
-  text-regions profile over a separate reference ROI. It is eligible for
-  opt-in Monitor or Reaction registration, but no speed loop is active by
-  default;
-- `windows-key-action-v1` is a game-neutral finite runtime for a serialized,
-  foreground-bound scan-code press or one leased non-blocking hold. Hold
-  packages expose explicit `START`, `RENEW`, and `STOP`; expiry, failure
-  compensation, and Agent shutdown release the exact resolved key. A Rule
-  package may declare literal canonical keys directly or select a game-specific
-  binding source; callers still choose only schema-valid logical selections.
-  The host-owned `POST /v1/key-inputs/invoke` adapter accepts one canonical key
-  and bounded hold only when the caller pins the exact PID, executable name,
-  and absolute path from a fresh foreground observation. It shares the same
-  controller, serialization, lease conflicts, key release, and durable Action
-  lifecycle without requiring a matched Rule;
-- `windows-pointer-action-v1` is a game-neutral finite runtime for one
-  foreground-bound left click. A package explicitly selects either a centered
-  1920x1080 reference point or the current primary-screen pointer position;
-  the current-position operation does not move the pointer and reports the
-  exact position used;
-- Cyberpunk 2077 exposes both pointer operations. Its
-  `cyberpunk-2077/click-current-pointer` Action accepts no inputs and emits one
-  fixed 40 ms left click at the already-positioned pointer;
-- `elite-dangerous/ui-control` performs exactly one model-selected logical UI
-  movement or selection. It is intentionally a slow screenshot/one-key
-  interaction surface for tasks such as arranging `AUTO LAUNCH`;
-- `elite-dangerous/set-throttle` resolves `SetSpeedMinus100`, `SetSpeedZero`, `SetSpeed75`, or `SetSpeed100` from
-  the game's currently active `.binds` preset on every invocation, reports the
-  resolved preset/file/key, rechecks the foreground game, and sends one
-  scan-code key-down/key-up pair with backend and timing evidence;
-- `elite-dangerous/supercruise-control` resolves only the dedicated Frontier
-  `Supercruise` binding, and the linear
-  `elite-dangerous/supercruise-to-destination` workflow requires current
-  preflight, Compass, `SUPERCRUISE`, two-frame `SAFE_DISENGAGE_READY`, and
-  three-frame visual `STOPPED` evidence around its 75% approach and safe exit;
-- `elite-dangerous/supercruise-assist-to-destination` retains that manual
-  workflow as an alternative while adding a `DROP` lifecycle owned by the
-  in-game Assist computer: it enters Supercruise, visually selects the locked
-  target's non-orbit Assist action, requires two
-  `SUPERCRUISE_ASSIST_ACTIVE` frames, then normally sends no flight input while
-  waiting for the game's automatic drop and three-frame visual stop. Two
-  line-of-sight-required frames activate a bounded focus-frame-directed bypass,
-  Compass plus visible-target realignment, and fresh Assist ownership Gate;
-- `elite-dangerous/leave-station` is the first shipped linear Streaming Action.
-  It immediately returns a durable watch URL, asks the supervising model to
-  arrange Auto Launch, and requires empty prompt text plus positive `KNOWN`
-  visual speed while Mass Lock remains ON before commanding 100% throttle. The
-  handover accepts either two strict low-speed frames or four consecutive
-  matching low-confidence `0` through `10` OCR frames under the narrower
-  workflow-local confidence and margin contract. Its
-  events keep observed speed separate from commanded throttle, and it commands
-  0% only after the Mass Lock OFF gate, then requires three consecutive
-  workflow-local zero-speed OCR confirmations before reporting completion;
-- all shipped Rules have no active Monitor or Reaction registrations by
-  default; no scheduler or reaction dispatcher is shipped yet.
-
-## Build
-
-Go 1.23 or newer is required. .NET 8 SDK is required only to build the
+Go 1.23 or newer is required. The .NET 8 SDK is required only for building the
 self-contained ScreenParser and PP-OCR DirectML runtimes; it is not required on
 the target Windows machine.
+
+Build the repository-owned executables and copy the Rules beside them:
 
 ```bash
 mkdir -p .build
 go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
-go run ./cmd/windows-starlark-check --package docs/examples/windows-starlark-hello
 ./scripts/build-windows-capture-agent.sh
 cp -R Rules .build/
 ```
 
-`windows-capture-agent.exe` is always the installable GUI-subsystem artifact.
-The build script also emits `windows-capture-agent-console.exe` for interactive
-terminal diagnostics, `windows-wgc-worker.exe` for the Agent-owned persistent
-and crash-isolated WGC runtime, `windows-action-check.exe` for offline Rule
-validation, and `windows-starlark-check.exe` plus
-`windows-starlark-invoke.exe` as local console clients for automation package
-preflight and upload. The two Starlark clients are not part of the installed
-Agent binary payload. `windows-exec.exe` and `windows-key.exe` are likewise
-console clients rather than installed Agent payloads. It also emits
-`windows-action-osd.exe` for the
-display-only capture, Action, and
-Evidence-recording overlay, and the optional `windows-watchdog.exe` and independent
-`windows-evidence-recorder.exe`, `windows-visual-log.exe`, and
-`windows-event-web.exe`. It also emits the
-Event Stream and all three observation runtimes required by the persistent
-installer, plus the dedicated GUI-subsystem `windows-sftp.exe`. It verifies the
-expected PE subsystem for every emitted executable.
-
-## Deploy from macOS
-
-`scripts/deploy-windows-agent.sh` is the single macOS interface for a complete
-binary update. It validates source, builds and hashes all twelve deployed
-executables, uploads one ZIP over SSH, stops the installed Watchdog and its
-currently configured targets, replaces only their binaries, maintains bounded
-process-scoped crash dumps for the Agent and WGC worker, then restarts the
-Watchdog and waits for its existing target set to become healthy. Before the
-first replacement it copies and verifies every installed binary under one
-deployment-ID transaction. A replacement or health failure restores those
-exact hashes, restarts the previous runtime, and verifies every configured
-process/session and HTTP probe again.
-
-It reads the installed Watchdog configuration and Scheduled Task actions as the
-only deployment map. It does not ship a Watchdog configuration, register or
-change Tasks, choose triggers or restart policy, or start an Evidence or Visual
-Log run. After replacement it verifies that every target Task's description,
-executable, and complete argument string are byte-for-byte unchanged; this
-includes the Visual Log model endpoint.
-
-```bash
-./scripts/deploy-windows-agent.sh --host Ronnie-PC
-./scripts/deploy-windows-agent.sh --host Ronnie-PC --validate-only
-```
-
-`Ronnie-PC` is the default host, so `--host` may be omitted. A dirty worktree is
-rejected unless `--allow-dirty` is explicitly supplied. `--validate-only`
-builds and transfers the candidate, verifies its hashes, resolves the existing
-Watchdog-owned deployment map, and records Task actions, Task results,
-process/session identity, and HTTP probe results without stopping a process or
-replacing a binary. Successful remote staging is removed; failed staging and
-all binary transaction directories are retained for diagnosis or recovery.
-Both successful and failed runs write a JSON receipt under
-`.build/binary-deployments/`; publishing runs also persist the Windows-side
-receipt and the verified previous binaries under the installed data directory.
-Neither mode changes Scheduled Task actions or the Watchdog configuration.
-
-### Deploy the complete Rules tree from macOS
-
-`scripts/deploy-windows-rules.py` is the single macOS interface for publishing
-the repository-owned `Rules/` tree without rebuilding or restarting the Agent.
-It explicitly excludes known platform metadata such as AppleDouble and records
-every exclusion, rejects symlinks, runs the canonical Action checker, creates a
-per-file byte-length and SHA-256 manifest, and uploads one ZIP over SSH. The
-Windows executor verifies the staged inventory and runs the same checker before
-it discovers the live `--rules-dir` from the owned capture Scheduled Task.
-
-Publication replaces the complete Rules root as one transaction. The previous
-tree is restored if installed hash or live catalog validation fails. A
-successful deployment retains the previous tree in its transaction directory
-as a recoverable backup and writes matching local and remote JSON receipts.
-Installed Rule directories absent from the source cause an explicit failure;
-removing them requires `--prune-unknown`.
-
-```bash
-python3 scripts/deploy-windows-rules.py --host <ssh-host>
-```
-
-`WINDOWS_AGENT_SSH_HOST` may supply the host instead. A dirty worktree is
-rejected unless `--allow-dirty` is explicitly supplied. On failure the remote
-staging directory and any transactional failed tree are retained for
-diagnosis. Success proves local validation, transport integrity, staged and
-installed tree hashes, Agent health, and request-time Actions, registrations,
-runtimes, Action Sequence tool, and `AGENTS.md` catalogs for every Rule. It does
-not invoke an Action or claim a game-domain result.
-
-Use `--validate-only` to exercise packaging, transfer, staged Windows hashes,
-the Windows checker, installed task discovery, process identity, and Agent
-health without publishing or changing the installed Rules tree.
-
-### Offline Action dependency check
-
-`windows-action-check` is an independent development and release tool. The
-capture Agent does not invoke it, load its dependency graph, or validate Rule
-dependencies at startup.
-
-Run it against a Rule plugin directory before packaging or publishing:
-
-```bash
-go run ./cmd/windows-action-check --rules-dir Rules
-go run ./cmd/windows-action-check --rules-dir Rules --json
-```
-
-The checker loads Core-owned Action packages, compiles composite and streaming
-Starlark entrypoints, and extracts static `action.call`, `action.try_call`, and
-`action.on_failure` references. It rejects missing, cross-Rule, streaming-child,
-self, dynamic-ID, and cyclic dependencies. Human-readable failures include the
-source location and dependency chain. Indirect aliases of the `action` module
-or its call primitives are rejected so every runtime dependency remains
-statically visible. Exit code `0` means valid, `1` means the report contains
-validation issues, and `2` means the check could not run or its report could
-not be written. Runtime-specific packages owned outside Core are left to their
-own validators.
-
-## Run
-
-Run the diagnostic console build inside the signed-in Windows user's session:
+Run the diagnostic console build from the signed-in Windows user's session:
 
 ```powershell
 .\.build\windows-capture-agent-console.exe `
   --rules-dir (Resolve-Path .\.build\Rules)
 ```
 
-Available options:
-
-```text
---listen              HTTP listen address (default 0.0.0.0:8787)
---data-dir            artifact and log root
---rules-dir           external Rule plugin directory (default <data-dir>/Rules)
---capture-timeout     per-request timeout (default 5s)
---retention           number of artifacts to retain (default 100)
---log-level           debug, info, warn, or error
---log-file            optional JSON log file
---runtime-log-file    optional Go runtime and fatal stderr log file
---wgc-trace           emit every WGC operation lifecycle at info level
---frontier-bindings-root  Elite Dangerous bindings directory (default under LOCALAPPDATA)
-```
-
-The process must not run as a traditional Session 0 Windows service because WGC
-requires access to the interactive desktop.
-
-Install the optional Action OSD after the loopback event stream is healthy:
+Confirm health and create a capture:
 
 ```powershell
-.\scripts\install-windows-action-osd.ps1 `
-  -ExecutablePath .\.build\windows-action-osd.exe
+curl.exe http://127.0.0.1:8787/healthz
+
+curl.exe `
+  -H "Content-Type: application/json" `
+  --data-binary '{"include_cursor":true}' `
+  http://127.0.0.1:8787/v1/captures
 ```
 
-For an explicit event-contract migration, pass `-MinimumEventCursor` with the
-last durable cursor owned by the retired contract. The installed OSD skips only
-history at or before that boundary; later events remain subject to normal
-startup replay and strict validation.
+The Capture Agent must run in an interactive user session. Do not install it as
+a traditional Session 0 Windows service; WGC cannot capture the signed-in
+desktop from that context.
 
-The independent interactive-user task shows a fixed cyan dot for at least
-500 ms after the Capture Agent accepts a full or region capture request.
-Consecutive captures extend the same pulse; it is an activity disclosure, not
-a claim that capture succeeded. It also shows a fixed yellow dot while an
-Evidence Recorder holds the session-local
-`Local\WindowsAgent.Evidence.Recording.v1` signal; the dot disappears within
-one polling interval after the finite run stops or the recorder exits. While an Action is
-running, the compact background-free top-left viewfinder additionally shows a
-blinking red dot, the short Action name, and at most the latest three explicit
-`stream.activity` records. Terminal Action states disappear automatically.
-The OSD is excluded from screen capture by default; `-AllowCapture` is intended
-only for visual acceptance evidence.
+## Build and validation
 
-Run the partially landed event-stream service independently on loopback:
-
-```powershell
-$tokenBytes = New-Object byte[] 32
-$tokenRng = [Security.Cryptography.RandomNumberGenerator]::Create()
-$tokenRng.GetBytes($tokenBytes)
-[IO.File]::WriteAllText(
-  (Join-Path $PWD "event-stream.token"),
-  [Convert]::ToBase64String($tokenBytes)
-)
-.\.build\windows-event-stream.exe `
-  --listen 127.0.0.1:8788 `
-  --data-dir (Join-Path $PWD "event-data") `
-  --token-file (Join-Path $PWD "event-stream.token") `
-  --log-file (Join-Path $PWD "event-stream.jsonl")
-```
-
-Install the optional browser projection after the Event Stream is healthy:
-
-```powershell
-.\scripts\install-windows-event-web.ps1 `
-  -ExecutablePath .\.build\windows-event-web.exe
-```
-
-The installer creates a distinct local Web bearer token, starts a hidden
-interactive-user Scheduled Task, and verifies that the executable has no main
-window. By default the Task has no trigger or task-level restart policy; add an
-exact `event-web` target depending on healthy `event-stream` to the Watchdog
-configuration for persistent startup and recovery. Pass `-StartupMode
-Standalone` only for an explicit development installation without the
-Watchdog. The default page is `http://127.0.0.1:8790/`. An operator may explicitly
-pass a private address such as `-WebListen <PC-LAN-IP>:8790` for trusted-LAN
-access; wildcard and public listeners are rejected and the installer does not
-alter Windows Firewall. Private-LAN HTTP is not transport encrypted. The page
-prompts for the Web token; do not put either token in a URL. The event journal
-remains on authenticated loopback `127.0.0.1:8788` and is never exposed to the
-browser.
-
-Install the SFTP filesystem data plane as a separate elevated current-user
-Scheduled Task:
-
-```powershell
-.\scripts\install-windows-sftp.ps1 `
-  -ExecutablePath .\.build\windows-sftp.exe
-```
-
-The default listener is `0.0.0.0:2022`; the unauthenticated loopback health
-surface is `http://127.0.0.1:8793/healthz`. The installer creates a persistent
-Ed25519 host key only when it is absent, never replaces an existing key, does
-not alter Windows Firewall, and returns the exact `sftp` Watchdog target for the
-operator-owned configuration. It does not rewrite that configuration. After
-the host key has been verified out of band, a client connects without an
-account credential:
+Run checks proportional to the layer being changed. The full ordinary Go and
+Rule validation is:
 
 ```bash
-sftp -P 2022 windowsagent@Windows-PC
+gofmt -w <touched-go-files>
+git diff --check
+go test ./...
+go run ./cmd/windows-action-check --rules-dir Rules
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
+mkdir -p .build
+./scripts/build-windows-capture-agent.sh
 ```
 
-The username is only a fixed SSH protocol label; it does not select or
-impersonate a Windows account. The installer must itself run from an elevated
-Administrator session, and the server process uses that Windows identity with
-the registered `Highest` run level.
+The build script emits and verifies the expected Windows PE subsystem for:
 
-Run the partially landed Elite Dangerous visual log as its own process after
-the Evidence recorder and event stream are healthy. The Visual Log process
-immediately waits for fresh PC-local Evidence frames; before requesting a
-finite Evidence run, require its process and read-only status surface to be
-healthy. The model key file is local operator configuration and must not be
-stored in the Rule:
+- the GUI Capture Agent and console diagnostic build;
+- the persistent WGC worker;
+- Action checker and local Starlark, exec, and key clients;
+- observation Job, Script Runner, and Observer;
+- Event Stream, Event Web, Action OSD, Watchdog, Evidence Recorder, Visual Log,
+  and SFTP;
+- the delegated Pi control and component executables.
 
-```powershell
-.\.build\windows-visual-log.exe `
-  --config (Resolve-Path .\Rules\EliteDangerous64.exe\VisualLog\config.json) `
-  --model-base-url http://<oMLX-LAN-IP>:8001/v1 `
-  --model-api-key-file (Resolve-Path .\omlx-api.key) `
-  --event-base-url http://127.0.0.1:8788 `
-  --event-token-file (Resolve-Path .\event-stream.token) `
-  --status-listen 127.0.0.1:8789 `
-  --status-token-file (Resolve-Path .\visual-log-control.token) `
-  --log-file (Join-Path $PWD "visual-log.jsonl") `
-  --status-file (Join-Path $PWD "visual-log-status.json")
-```
+`windows-capture-agent.exe` is the installable GUI artifact.
+`windows-capture-agent-console.exe` is for interactive diagnostics and must not
+replace the installed GUI build. Local clients such as `windows-exec.exe`,
+`windows-key.exe`, `windows-starlark-check.exe`, and
+`windows-starlark-invoke.exe` are not installed Agent payloads.
 
-The independent process owns one passive producer loop for its full process
-lifetime. Its loopback interface is read-only:
+### Validate Action dependencies
 
-```text
-GET    http://127.0.0.1:8789/v1/visual-log/status
-```
-
-The high-level model cannot start or stop Visual Log. A fresh matching Evidence
-frame triggers configured warm-up and later description attempts; no new frame
-is a normal wait state. Model, output-validation, or journal failures drop only
-that sample and the next fresh frame is attempted with the same configured
-provider. No old frame, prior description, alternate model, or substitute
-journal is used. Evidence remains finite and explicitly requested through its
-own interface; Visual Log has no path to start, extend, pause, or stop it.
-
-Run the evidence recorder as a separate on-demand PC process. The process stays
-idle until an authenticated finite recording run is accepted. The token is
-local operator configuration and the data directory contains private video:
-
-```powershell
-.\.build\windows-evidence-recorder.exe `
-  --config (Resolve-Path .\Rules\EliteDangerous64.exe\Evidence\config.json) `
-  --listen 127.0.0.1:8792 `
-  --data-dir (Join-Path $PWD "evidence-data") `
-  --token-file (Resolve-Path .\evidence.token)
-```
-
-Process startup does not open WGC or show the recording indicator. A finite run
-obtains Windows borderless-capture consent, owns one persistent WGC session
-with `IsBorderRequired=false`, samples its newest frame at 1 FPS, and records
-1080p H.264 MP4 segments. Denied or unsupported borderless access fails that
-run; it never silently records with the Windows capture border still visible.
-Each second is a video sample or an explicit gap; Visual Log and Gemma failures
-do not terminate the run. Its loopback API is:
-
-```text
-GET http://127.0.0.1:8792/healthz
-GET http://127.0.0.1:8792/v1/evidence/status
-POST http://127.0.0.1:8792/v1/evidence/runs
-GET http://127.0.0.1:8792/v1/evidence/runs/<runId>
-GET http://127.0.0.1:8792/v1/evidence/range?from=<UTC>&to=<UTC>
-POST http://127.0.0.1:8792/v1/evidence/contact-sheet
-```
-
-Start a default 20-minute run with `{}`, or request a different duration with
-strict JSON such as `{"durationSeconds":300}`. `durationSeconds` is optional
-but, when present, must be an integer from 1 through 3600. Twenty minutes is
-the default; one hour is the hard maximum. A successful start returns HTTP 202 with
-`finite:true`, `runId`, `durationSeconds`, `requestedAt`, and `endsAt`; the
-deadline starts when the request is accepted. State advances from `starting`
-to `recording` only after WGC and the recording indicator have started, then to
-`completed` after the deadline and final segment commit. There is no extension,
-manual stop, pause, or delete route. Starting while another run is active
-returns HTTP 409 `EVIDENCE_RUN_ACTIVE` with that run's finite deadline.
-
-Every evidence route except health requires the Evidence Bearer token. A
-successful half-open UTC
-range returns a ZIP with `manifest.json`, explicit committed gaps,
-`missingSlots` for recorder downtime, and integrity-checked overlapping MP4
-segments. Visual Log reads only the configured PC-local frame tap; it cannot
-implicitly start or extend Evidence, or download individual Evidence frames
-over HTTP.
-
-The authenticated contact-sheet route accepts strict JSON containing `from`,
-`columns`, `rows`, and `intervalSeconds`. The PC decodes exact timestamps from
-committed Evidence MP4 segments and returns one timestamped JPEG grid. It never
-captures the screen again or substitutes a nearby frame. Explicit Evidence
-gaps and missing slots appear as labelled cells. The grid is a bandwidth-light
-locator; retrieve the selected MP4 range before making an authoritative claim.
-
-The persistent installer launches the event service as an independent,
-interactive-user Scheduled Task. It creates the token only when absent and
-rejects an existing malformed token instead of replacing it. Append, replay,
-and NDJSON live-stream requests require the exact token; `/healthz` is the only
-unauthenticated route.
-
-Install the Evidence Recorder control process and passive Visual Log producer independently.
-The installer creates independent interactive-user Tasks without their own
-trigger or restart policy and starts each resident process for health
-acceptance. The Watchdog keeps those processes available. Evidence remains
-idle until a finite run is requested; Visual Log waits passively for fresh
-Evidence frames and therefore performs no inference while Evidence is idle:
-
-```powershell
-.\scripts\install-windows-observation-processes.ps1 `
-  -EvidenceExecutablePath .\.build\windows-evidence-recorder.exe `
-  -VisualLogExecutablePath .\.build\windows-visual-log.exe `
-  -VisualLogModelBaseURL http://model-host:8001/v1
-```
-
-The first installation requires `VisualLogModelBaseURL` and verifies
-`/models` from the Windows host before changing either Task. Later
-reinstallations preserve the URL from the owned Visual Log Task when the
-parameter is omitted. Changing an installed endpoint requires both an explicit
-new value and `-AllowVisualLogModelBaseURLChange`; the replacement endpoint is
-verified before the resident processes are stopped.
-
-Add exact `event-web`, `evidence-recorder`, `visual-log`, and `sftp` targets to
-the Watchdog configuration. Event Web depends on healthy `event-stream`; Visual
-Log depends on healthy `event-stream` and `evidence-recorder`; SFTP has no
-runtime dependency. The executables remain independent processes, while the
-Watchdog owns only process availability.
-Evidence Recorder exposes authenticated finite-run control. Visual Log exposes
-authenticated read-only status and owns no externally controllable run.
-
-After all module installers have created their watchdog-managed Tasks, author
-an exact local configuration containing all seven targets and install the
-external Watchdog:
-
-```powershell
-.\scripts\install-windows-watchdog.ps1 `
-  -ExecutablePath .\.build\windows-watchdog.exe `
-  -ConfigPath .\watchdog-config.json
-```
-
-The watchdog has [one-way coupling and no automatic self-recovery](docs/design/windows-watchdog.md).
-Monitored modules do not register with or depend on it. Its AtLogOn Scheduled
-Task has a zero restart count; if the watchdog crashes, other modules continue
-and the watchdog remains stopped for explicit operator diagnosis. It is the
-AtLogOn entrypoint for watchdog-managed resident processes and bootstraps their
-Tasks in the dependency order declared by its own configuration.
-
-Follow the installed stream from macOS through an SSH tunnel without exposing
-the loopback-only event API on the Windows network interface:
+`windows-action-check` is an offline development and release tool. It compiles
+composite and streaming Starlark entrypoints, extracts static Action
+dependencies, and rejects missing, cross-Rule, streaming-child, self, dynamic,
+or cyclic calls.
 
 ```bash
-./scripts/watch-windows-event-stream.sh \
-  --ssh-host user@Windows-PC
+go run ./cmd/windows-action-check --rules-dir Rules
+go run ./cmd/windows-action-check --rules-dir Rules --json
 ```
 
-The watcher retrieves the installed token through the same SSH connection,
-replays the latest 10 events, and then follows new NDJSON records until
-`Control-C`. Use `--tail 0` to follow only newly committed events or `--after`
-to provide an exact durable cursor. Connection messages go to stderr; stdout
-contains only event records and can be piped to another reader.
+Exit code `0` means valid, `1` means validation issues were found, and `2`
+means the check could not run or write its report. The Capture Agent does not
+run this checker at startup.
 
-Create one strict launcher request outside the Rule plugin:
+### Build DirectML runtime bundles
 
-```json
-{
-  "inputs": {}
-}
-```
-
-Run the registered capability through the generic launcher from the signed-in
-session:
-
-```powershell
-.\.build\windows-observation-job.exe `
-  --capability crimson-desert/inventory `
-  --install-root (Resolve-Path .\.build) `
-  --rules-dir (Resolve-Path .\.build\Rules) `
-  --request-file (Resolve-Path .\inventory-request.json)
-```
-
-`inputSchema` belongs to the Script Package. File roots are also package
-declarations: the Host resolves only supported Windows known folders and never
-accepts absolute roots from the caller. The inventory Starlark owns its bounded
-account, slot, and newest-save selection. The launcher derives the expected
-foreground executable from the capability's owning Rule folder. The
-`--process-id` and `--process-path` flags exist only for a trusted local host
-that already resolved that same owning-Rule process; the observer still
-revalidates its path, creation time, and executable SHA-256.
-
-The package declares native-library alias `save-decoder`, its
-`windows-amd64` artifact, call limit, and native-memory limit. Starlark
-loads only that alias through `native.load_library("save-decoder")`; it owns the
-crimson-rs export signatures, record layout, return codes, and JSON conversion.
-`load_library` is used because `load` is a reserved Starlark keyword.
-
-## Persistent watchdog-managed startup
-
-From the repository root in PowerShell:
-
-```powershell
-.\scripts\install-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent.exe `
-  -RulesPath .\.build\Rules `
-  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
-  -AgentRunLevel Limited
-```
-
-The installer copies the capture executable, generic Starlark launcher,
-Script Runner, Observer, event-stream executable, external Rule plugins, and
-any Rule-declared resident runtime bundle under the current user's
-`%LOCALAPPDATA%`. By default it registers separate interactive-token on-demand
-Scheduled Tasks for capture and event streaming with no triggers and zero
-restart count, starts them once for installation acceptance, and verifies both
-`/healthz` endpoints. The Watchdog becomes their only persistent AtLogOn
-launcher. All five executables must
-be present beside the selected capture build artifact before installation.
-The installer does not create an SCM service or modify Windows Firewall.
-It validates that both persistent executables use PE subsystem `Windows GUI`
-before stopping any existing task. A console build is rejected because Task
-Scheduler's `Hidden` setting cannot suppress its console window.
-
-Select `-AgentRunLevel Highest` when this trusted-device installation must run
-automation with the installing user's elevated token. The default `Limited`
-keeps the ordinary interactive token. This is an installation choice shared by
-all Starlark invocations, not a per-package elevation mechanism.
-
-For an explicit development environment without the Watchdog, request the
-standalone task policy rather than relying on an automatic compatibility path:
-
-```powershell
-.\scripts\install-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent.exe `
-  -RulesPath .\.build\Rules `
-  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
-  -StartupMode Standalone
-```
-
-The Action OSD and Event Web installers follow the same explicit
-`WatchdogManaged` default and `Standalone` override.
-
-The persistent installation enables bounded crash diagnostics for the capture
-process and its WGC worker. Structured WGC lifecycle records are written to
-`logs/agent.jsonl`; Go runtime and fatal stderr output is appended to
-`logs/runtime-stderr.log`. The current user's Windows Error Reporting
-`LocalDumps` entries are scoped to `windows-capture-agent.exe` and
-`windows-wgc-worker.exe`; each retains at most five full dumps under `dumps/`.
-These dumps can contain private process memory and must never be published or
-committed. Pass `-WGCTrace $false` when reinstalling to keep only retry and
-failure records after an incident has been bounded.
-
-For a code-only update of an existing installation, use the transactional
-updater. It checks the GUI subsystem and SHA-256 before stopping the task,
-keeps prior Agent and worker binaries as timestamped backups when present,
-verifies the interactive listener and `/healthz`, and restores the complete
-previous binary set if the new process fails:
-
-```powershell
-.\scripts\update-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent.exe
-```
-
-Builds that stored `rule.agents.sha256`, or matched Rule metadata without
-`rule.scripts`, `rule.actions`, `rule.registrations`, or `rule.runtimes`, use an
-incompatible capture metadata contract. The installer detects those captures
-before stopping the current task and refuses the migration unless explicitly
-asked to preserve them:
-
-```powershell
-.\scripts\install-windows-capture-agent.ps1 `
-  -ExecutablePath .\.build\windows-capture-agent.exe `
-  -RulesPath .\.build\Rules `
-  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
-  -ArchiveIncompatibleCaptures
-```
-
-The switch renames the existing `captures` directory to a timestamped
-`captures.pre-external-rules-*` archive. It does not reinterpret or delete the
-old artifacts.
-
-Build the self-contained Windows runtime bundle:
+Build the ScreenParser runtime:
 
 ```bash
 python3 tools/screenparser-runtime/publish.py \
@@ -827,9 +218,7 @@ python3 tools/screenparser-runtime/publish.py \
   --output-dir "$PWD/.build/screenparser-directml"
 ```
 
-Prepare the official PP-OCRv6 small detection and recognition ONNX artifacts,
-generate the character dictionary, and specialize recognition to the reviewed
-text-line width. The output directory must be empty:
+Prepare the pinned PP-OCRv6 small artifacts and runtime:
 
 ```bash
 python3 -m pip install -r tools/ppocr-model/requirements-build.in
@@ -841,88 +230,188 @@ python3 tools/ppocr-runtime/publish.py \
   --output-dir "$PWD/.build/ppocr-directml"
 ```
 
-The PP-OCR executable implements two separately declared framed pipelines:
-aspect-preserved, right-padded text-line recognition and region detection plus
-w480 recognition. Recognition requests explicitly choose unrestricted or
-digit-only CTC decoding; digit-only responses retain the unrestricted candidate
-and confidence margin as evidence.
-The latter returns quadrilateral boxes rather than game state. Both disable
-ONNX Runtime CPU-provider fallback and validate pinned artifacts exactly.
-WindowsAgent starts either worker only while the owning Rule is active, as
-declared by `runtimeProfiles`; residency is not a Monitor and emits no event.
-The developer benchmark tool remains a separate bounded diagnostic.
+Production PP-OCR and ScreenParser paths validate pinned model/runtime
+artifacts and disable CPU execution-provider fallback. See the
+[PP-OCR design](docs/design/ppocr-directml-runtime.md) and
+[ScreenParser design](docs/design/screenparser-action.md).
 
-For bounded precision or provider diagnostics, publish the separate one-shot
-console tool. It reads one hash-pinned RGB24 frame, performs a bounded number
-of DirectML inferences, prints one JSON result, and never captures the desktop,
-starts a loop, or appends to the event stream:
+## Install and operate
 
-```bash
-dotnet publish \
-  tools/screenparser-directml-one-shot/ScreenParser.DirectML.OneShot/ScreenParser.DirectML.OneShot.csproj \
-  --configuration Release \
-  --runtime win-x64 \
-  --self-contained true \
-  -p:PublishSingleFile=true \
-  -p:IncludeNativeLibrariesForSelfExtract=true \
-  --output "$PWD/.build/screenparser-directml-one-shot"
-```
+### Capture Agent
 
-Run it only with an absolute strict-JSON diagnostic spec. The spec pins the
-model and RGB24 frame by SHA-256, declares the frame dimensions, model I/O,
-labels, precision, thresholds, and a maximum of three warmups and ten measured
-runs:
+Install the persistent GUI build and external Rules tree:
 
 ```powershell
-.\ScreenParser.DirectML.OneShot.exe --spec C:\absolute\path\to\one-shot.json
+.\scripts\install-windows-capture-agent.ps1 `
+  -ExecutablePath .\.build\windows-capture-agent.exe `
+  -RulesPath .\.build\Rules `
+  -OCRRuntimeBundlePath .\.build\ppocr-w480-bundle `
+  -AgentRunLevel Limited
 ```
 
-This tool accepts `fp32`, `fp16`, and `int8` only for isolated measurement. It
-does not widen the production Action manifest, installer, or runtime contract.
+The installer creates interactive-user Scheduled Tasks, copies required
+observation processes and Rule-declared runtime assets, verifies GUI PE
+subsystems, and checks the Capture Agent and Event Stream health endpoints. It
+does not create an SCM service or change Windows Firewall.
 
-The pinned `.pt` checkpoint is a build-time input only. The ONNX exporter
-requires at least one real validation image and emits both the model and its
-verified `artifact.json`:
+Use `-AgentRunLevel Highest` only when the installation intentionally requires
+the installing user's elevated token. Packages cannot elevate themselves. For
+an explicit development installation without Watchdog ownership, pass
+`-StartupMode Standalone`.
+
+Update only the installed Capture Agent binary set with the transactional
+updater:
+
+```powershell
+.\scripts\update-windows-capture-agent.ps1 `
+  -ExecutablePath .\.build\windows-capture-agent.exe
+```
+
+The updater verifies subsystem and hashes before replacement, retains the
+previous binaries, probes the interactive listener, and restores the previous
+set if the new runtime does not become healthy.
+
+### Companion processes
+
+Install the Action OSD after Event Stream is healthy:
+
+```powershell
+.\scripts\install-windows-action-osd.ps1 `
+  -ExecutablePath .\.build\windows-action-osd.exe
+```
+
+The OSD is display-only, click-through, non-activating, and excluded from
+capture by default. Its capture, recording, and Action indicators disclose
+activity; they do not prove success.
+
+Install the browser projection:
+
+```powershell
+.\scripts\install-windows-event-web.ps1 `
+  -ExecutablePath .\.build\windows-event-web.exe
+```
+
+Event Web defaults to `http://127.0.0.1:8790/`, uses a browser token distinct
+from the Event Stream token, and accepts only an explicit loopback or private
+LAN IPv4 listener. It does not expose the loopback journal directly or alter
+Windows Firewall.
+
+Install the elevated SFTP-only filesystem process:
+
+```powershell
+.\scripts\install-windows-sftp.ps1 `
+  -ExecutablePath .\.build\windows-sftp.exe
+```
+
+After verifying the generated Ed25519 host key out of band, connect with the
+fixed protocol username:
 
 ```bash
-python3 tools/screenparser-model/export_onnx.py \
-  --source-model /absolute/path/to/best.pt \
-  --validation-image /absolute/path/to/real-screen.png \
-  --output-dir /absolute/empty/output
+sftp -P 2022 windowsagent@<windows-host>
 ```
 
-Install the finite ScreenParser Action with the ONNX artifact declared by
-`Rules/Palworld-Win64-Shipping.exe/Actions/screenparser/manifest.json` and the published runtime
-bundle:
+The username does not select or impersonate a Windows account. Filesystem
+permissions come from the dedicated Scheduled Task's Windows token. Shell,
+exec, PTY, and forwarding requests are rejected.
+
+Install the Evidence Recorder and Visual Log as independent resident control
+processes:
+
+```powershell
+.\scripts\install-windows-observation-processes.ps1 `
+  -EvidenceExecutablePath .\.build\windows-evidence-recorder.exe `
+  -VisualLogExecutablePath .\.build\windows-visual-log.exe `
+  -VisualLogModelBaseURL http://<model-host>:8001/v1
+```
+
+Evidence remains idle until an authenticated finite run is requested. A run
+records 1080p H.264 at 1 FPS, defaults to 20 minutes, and accepts an explicit
+duration from 1 through 3600 seconds. It has no extend, pause, manual stop, or
+delete route. Visual Log passively consumes fresh PC-local Evidence frames and
+appends untrusted descriptions; it cannot start, extend, or stop Evidence.
+
+After installing all managed components, install an operator-authored Watchdog
+configuration:
+
+```powershell
+.\scripts\install-windows-watchdog.ps1 `
+  -ExecutablePath .\.build\windows-watchdog.exe `
+  -ConfigPath .\watchdog-config.json
+```
+
+The Watchdog owns process availability and dependency order only. Its own
+Scheduled Task has no automatic restart. A Watchdog crash leaves other modules
+running and requires explicit diagnosis.
+
+### Delegated Pi runtime
+
+The delegated Pi runtime is a separate authenticated loopback control plane.
+PI WEB owns its persistent SDK session and interactive questions; the Capture
+Agent does not absorb that agent loop. Prepare its pinned Node environment and
+install it using the commands in
+[`runtimes/windows-agent-pi/README.md`](runtimes/windows-agent-pi/README.md).
+
+### ScreenParser Action
+
+Install the finite ScreenParser runtime and pinned model for the owning Rule:
 
 ```powershell
 .\scripts\install-windows-screenparser.ps1 `
   -RulePath .\Rules\Palworld-Win64-Shipping.exe `
-  -ModelPath C:\absolute\path\to\screenparser-v2-f029e565-opset20-fp16-1280.onnx `
+  -ModelPath C:\absolute\path\to\screenparser-v2.onnx `
   -RuntimeBundlePath C:\absolute\path\to\screenparser-directml
 ```
 
-The installer verifies both artifact manifests and SHA-256 values, installs one
-shared runtime/model copy, and creates no task or background process. It removes
-only the exact owned legacy ScreenParser loop and scene-reducer tasks. It
-installs no Python, PyTorch, CUDA Toolkit, or .NET SDK. A trusted VLM host invokes
-the installed runtime with `--request`, `--frame-root`, and `--response`; each
-invocation processes one exact frame, writes no streaming event, and exits.
+Each invocation processes one caller-supplied, hash-pinned RGB24 frame and
+exits. It is not the retired autonomous ScreenParser loop.
 
-Publish one updated Rule plugin without rebuilding the executable or restarting
-the task:
+## Deploy from macOS
 
-```powershell
-.\scripts\sync-windows-agent-rule.ps1 `
-  -SourceRulePath .\Rules\CrimsonDesert.exe `
-  -DestinationRulesDir "$env:LOCALAPPDATA\gameGuide\windows-capture-agent\Rules"
+### Deploy binaries
+
+`scripts/deploy-windows-agent.sh` is the transactional macOS interface for the
+twelve installed WindowsAgent binaries. It builds and hashes the payload,
+reads the installed Scheduled Tasks and Watchdog configuration as the deployment
+map, preserves their exact actions, replaces only mapped binaries, and restores
+the previous verified set if replacement or health validation fails.
+
+Always provide the intended SSH host explicitly in public or shared commands:
+
+```bash
+./scripts/deploy-windows-agent.sh --host <ssh-host>
+./scripts/deploy-windows-agent.sh --host <ssh-host> --validate-only
 ```
 
-For deployment compatibility, the current executable, task, and data directory
-retain their established `windows-capture-agent` names. They identify the first
-capability, not the broader project.
+`--validate-only` builds and transfers the candidate, verifies hashes, resolves
+the installed map, and checks task, process, session, and HTTP health without
+stopping or replacing the runtime. Both validation and publication write a JSON
+receipt under `.build/binary-deployments/`. A dirty worktree is rejected unless
+`--allow-dirty` is explicitly supplied.
+
+The deployment script does not register Tasks, change triggers, rewrite the
+Watchdog configuration, alter model endpoints, or start an Evidence or Visual
+Log run.
+
+### Deploy Rules
+
+Publish the complete repository-owned Rules tree without rebuilding or
+restarting the Agent:
+
+```bash
+python3 scripts/deploy-windows-rules.py --host <ssh-host>
+python3 scripts/deploy-windows-rules.py --host <ssh-host> --validate-only
+```
+
+The deployer rejects symlinks, excludes known platform metadata, runs the
+Action checker locally and on Windows, verifies a per-file hash manifest, and
+publishes the complete tree transactionally. Unknown installed Rule directories
+fail publication unless `--prune-unknown` is explicitly requested. Success
+proves transport, hashes, installed catalogs, and Agent health; it does not
+invoke an Action or prove a game-domain result.
 
 ## HTTP API
+
+The Capture Agent surface on port `8787` is:
 
 ```text
 GET  /healthz
@@ -933,137 +422,121 @@ GET  /v1/captures/latest
 GET  /v1/captures/latest/content
 GET  /v1/captures/{id}
 GET  /v1/captures/{id}/content
+
 GET  /v1/rules/{rule-id}/AGENTS.md
 GET  /v1/rules/{rule-id}/scripts
 GET  /v3/rules/{rule-id}/actions
 GET  /v3/rules/{rule-id}/registrations
 GET  /v3/rules/{rule-id}/action-sequence-tool
 GET  /v4/rules/{rule-id}/runtimes
+
 POST /v1/scripts/run
 POST /v1/actions/invoke
+POST /v1/action-sequences/invoke
 POST /v1/starlark-actions/invoke
 POST /v1/executions/invoke
 POST /v1/key-inputs/invoke
-POST /v1/action-sequences/invoke
 GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
 POST /v1/action-invocations/{invocation-id}/stop
 ```
 
-Read the current process and service tables without parameters:
+### Process inventory
+
+Read the current process and Service Control Manager snapshots without
+parameters:
 
 ```powershell
 curl.exe http://127.0.0.1:8787/v1/processes
 ```
 
-The response is generated on demand and is never cached or written to the
-event journal. A nonzero `services.pid` identifies the corresponding
-`processes.pid`; zero means the service has no current hosting process and is
-not joined to the PID 0 process row. Unavailable process enrichment fields are
-`null` rather than guessed from a different provider.
+Rows are generated on demand and are not cached or written to the event
+journal. Services relate to processes only through matching nonzero PIDs. Zero
+means that the service has no current hosting process; it is not joined to a
+PID 0 process row. Unavailable enrichment fields are `null`, not guessed from
+another provider.
 
-Create a capture:
+### Capture and Rule discovery
+
+Create a lossless capture and download its content:
 
 ```powershell
 curl.exe `
   -H "Content-Type: application/json" `
-  --data-binary '{"include_cursor":true}' `
+  --data-binary '{"profile":"native-png","include_cursor":false}' `
   http://127.0.0.1:8787/v1/captures
-```
 
-Omitting `profile` selects `native-jpeg`. The complete supported request
-profiles are `native-jpeg` (Q90, 4:4:4), `1080p-jpeg` (fit inside 1920x1080,
-Q90, 4:4:4), and `native-png` (lossless, PNG BestSpeed). Unknown profiles and
-encoding failures are returned explicitly; the agent does not change formats
-or fall back to PNG.
-
-Download the latest image using the extension reported by its metadata:
-
-```powershell
 curl.exe `
-  -o capture.jpg `
+  -o capture.png `
   http://127.0.0.1:8787/v1/captures/latest/content
 ```
 
-Discover the current Script contracts for a matched Rule:
+Every capture samples foreground identity after WGC produces the frame and
+resolves the current executable against `Rules/`. A matched response links to
+the Rule's guidance, Script catalog, Action catalog, registrations, sequence
+schema, and runtime profiles. An unmatched executable remains explicitly
+unmatched. Missing foreground process identity fails the request; the Agent
+does not guess it or commit a partial artifact.
+
+Only one capture may run at a time. A concurrent request receives
+`409 capture_busy`.
+
+### Invoke Actions
+
+Discover the current Action catalog from the matched Rule, then invoke one
+schema-valid Action:
 
 ```powershell
-curl.exe http://127.0.0.1:8787/v1/rules/CrimsonDesert.exe/scripts
-```
+curl.exe http://127.0.0.1:8787/v3/rules/CrimsonDesert.exe/actions
 
-The catalog returns each capability's ID, declared runtime, title, package
-version, input schema, output schema, and launcher endpoint. It
-is read-only and does not execute a Script.
-
-Run one registered Script from the signed-in agent session:
-
-```powershell
 curl.exe `
   -H "Content-Type: application/json" `
-  --data-binary "@inventory-invocation.json" `
-  http://127.0.0.1:8787/v1/scripts/run
+  --data-binary '{"actionId":"crimson-desert/inventory","inputs":{}}' `
+  http://127.0.0.1:8787/v1/actions/invoke
 ```
 
-The invocation body contains only `capability` and package-defined `inputs`;
-Host filesystem roots are never caller input. No bearer token or other HTTP
-credential is required. Script execution is serialized and does not upload,
-rewrite, or reload a Rule plugin.
+A finite Action returns HTTP `200` with terminal output. A streaming Action
+returns HTTP `202`, a durable invocation ID, and watch information. Follow the
+returned NDJSON event URL until completion, failure, or cancellation. A stop
+target is present only when the Action declares itself interruptible.
 
-Invoke an ephemeral general Windows Starlark Action from macOS or Linux after
-creating a strict inputs JSON object:
+For an ephemeral plan, fetch
+`/v3/rules/{rule-id}/action-sequence-tool` and send its schema-valid arguments
+to `/v1/action-sequences/invoke`. All steps are preflighted before the first
+Action starts.
+
+### Invoke general Windows operations
+
+Upload and invoke one ephemeral Starlark package:
 
 ```bash
 go run ./cmd/windows-starlark-invoke \
-  --url http://Windows-PC:8787 \
+  --url http://<windows-host>:8787 \
   --package docs/examples/windows-starlark-hello \
   --inputs /absolute/path/to/inputs.json
 ```
 
-The client performs local package, syntax, schema, and inputs preflight, builds
-the deterministic ZIP, and posts it to `POST /v1/starlark-actions/invoke`. It
-fails on a non-2xx response and otherwise prints the remote JSON unchanged.
-The accepted response is normally HTTP `202` with `watch` and `stop` targets;
-it is not proof that the remote runtime completed. Only Windows can answer
-questions about paths, programs, privileges, desktop state, and postconditions.
-The client never falls back to SSH, PowerShell, Windows MCP, or another runtime;
-an Action may still explicitly launch an executable through
-`windows.process.run`.
+The local client validates and packages the request, then prints the remote
+JSON unchanged. An accepted HTTP `202` proves only that Windows accepted the
+invocation; inspect the durable terminal result and declared postconditions.
 
-For a single process or uploaded PowerShell script, use the direct client
-without creating a Starlark package:
+Run one structured process operation without a Starlark package:
 
 ```bash
 go run ./cmd/windows-exec run \
-  --url http://Windows-PC:8787 \
+  --url http://<windows-host>:8787 \
   --executable whoami.exe
-
-go run ./cmd/windows-exec start \
-  --url http://Windows-PC:8787 \
-  --executable 'C:\Program Files\Application\app.exe' \
-  --window normal
-
-go run ./cmd/windows-exec ps1 \
-  --url http://Windows-PC:8787 \
-  --script-path 'C:\AgentStaging\repair.ps1' \
-  --arg -Mode \
-  --arg Repair
 ```
 
-Repeat `--arg` and `--env NAME=VALUE` to preserve argument and environment
-boundaries. `run` and `ps1` also accept `--stdin-file`, an optional caller-owned
-`--max-output-bytes`, and `--timeout`; `start` rejects those ownership fields.
-The client waits for and prints the durable terminal JSON. A nonzero child exit
-is result data; transport, runtime failure, cancellation, and invalid requests
-make the client exit nonzero. The `ps1` path is remote: upload the file through
-SFTP first. Neither the client nor Agent inserts the script into `-Command` or
-selects an alternate shell.
+Arguments remain individual CLI and JSON array elements. The client does not
+insert a command string, switch to SSH or another runtime, or interpret a
+nonzero child exit as transport failure.
 
-For one explicit foreground-pinned key press, use the direct key client with
-identity copied from a fresh capture:
+Send one foreground-pinned scan-code press using identity from a fresh capture:
 
 ```bash
 go run ./cmd/windows-key press \
-  --url http://Windows-PC:8787 \
+  --url http://<windows-host>:8787 \
   --key Key_Home \
   --hold 180ms \
   --expected-process-id 1234 \
@@ -1071,232 +544,118 @@ go run ./cmd/windows-key press \
   --expected-executable-path 'C:\Games\Game.exe'
 ```
 
-The client posts `POST /v1/key-inputs/invoke`, follows the existing durable
-invocation status, and prints the terminal JSON. Foreground mismatch or drift,
-key conflict, injection failure, and release failure are explicit `INPUT_*`
-failures. There is no PowerShell, SSH, virtual-key, or window-message fallback.
-Completion proves the bounded scan-code operation, not the application's visual
-or domain postcondition.
+Foreground mismatch or drift, key conflicts, injection failure, and release
+failure remain explicit `INPUT_*` errors. Completion is evidence of the key
+operation only.
 
-The Agent listener is unauthenticated and defaults to `0.0.0.0:8787`. With the
-general mutation and direct input surfaces enabled, anyone who can reach that
-listener can run operations and inject a foreground-pinned key with the Agent's
-installed run level. Keep it on a trusted LAN or private overlay network and
-never expose it directly to the public Internet.
+### Companion APIs
 
-Invoke any Action through the unified surface:
+These independent processes do not extend the unauthenticated Capture Agent
+listener:
 
-```powershell
-curl.exe `
-  -H "Content-Type: application/json" `
-  --data-binary '{"actionId":"elite-dangerous/ship-status","inputs":{}}' `
-  http://127.0.0.1:8787/v1/actions/invoke
-```
+| Process | Default listener | Authentication | Surface |
+| --- | --- | --- | --- |
+| Event Stream | `127.0.0.1:8788` | Bearer token except health | append, replay, time range, NDJSON stream |
+| Event Web | `127.0.0.1:8790` | distinct browser bearer token | browser timeline and exact OSD projection |
+| Visual Log | `127.0.0.1:8789` | bearer token except health | read-only status |
+| Evidence Recorder | `127.0.0.1:8792` | bearer token except health | finite runs, status, UTC range ZIP, contact sheet |
+| SFTP health | `127.0.0.1:8793` | none | health only |
+| SFTP | `0.0.0.0:2022` | SSH `none`; pinned host identity | filesystem operations only |
 
-Use `"actionId":"elite-dangerous/ship-speed"` on the same endpoint to read
-visual speed evidence. `MOVING` makes the concrete `speed.displayValue`
-available, while `LOW_SPEED` deliberately withholds the unreliable exact
-single digit and retains it only as `rawCandidate`. `UNKNOWN` is a valid
-observation and must not be replaced with the last requested throttle setting.
+Event and Evidence token files, journals, captures, video, OCR results, model
+keys, delegated-task data, and logs are private operator state. Do not commit
+or publish them.
 
-A finite Action returns HTTP `200`, `state: COMPLETED`, and `output`. A
-streaming Action returns HTTP `202`, `state: RUNNING`, and a `watch` object.
-Follow its returned URL with `curl.exe -N`; the NDJSON connection replays the
-durable invocation events and closes when the Action completes, fails, or is
-cancelled. The `stop` object appears only when that Action explicitly declares
-itself interruptible.
+## Rules and Actions
 
-For a disposable multi-Action plan, first fetch the strict model tool schema
-from `/v3/rules/{rule-id}/action-sequence-tool`, then submit its arguments to
-`POST /v1/action-sequences/invoke`. The response is HTTP `202` and uses the
-same watch, status, and stop endpoints. All steps are validated before the
-first Action runs; child outputs and streaming events are forwarded on one
-parent correlation chain with step, Action, and child-execution provenance.
-The Action OSD displays the active child Action, `Step n/total`, and wrapped
-child activity while keeping the Sequence as the only display session.
+`Rules/<Executable.exe>/rule.json` is the source of truth for that executable's
+current Actions, runtime profiles, sequence allowlist, and registration
+declarations. Each Action package owns its `TASK.md`, schemas, manifest,
+implementation, coordinates, binding source, classifier, and postcondition.
 
-Start the supervised Elite Dangerous departure only after the higher model has
-confirmed the ship is inside a station:
+The repository currently ships Rules for:
 
-```powershell
-curl.exe `
-  -H "Content-Type: application/json" `
-  --data-binary '{"actionId":"elite-dangerous/leave-station","inputs":{"stationConfirmed":true}}' `
-  http://127.0.0.1:8787/v1/actions/invoke
-```
+| Executable | Responsibility |
+| --- | --- |
+| `CrimsonDesert.exe` | finite inventory observation |
+| `Cyberpunk2077.exe` | foreground-bound pointer operations |
+| `EliteDangerous64.exe` | finite observations, resident OCR, binding-resolved input, and supervised streaming workflows |
+| `Palworld-Win64-Shipping.exe` | finite ScreenParser UI-element inference |
 
-The initial stream event is `AWAITING_AUTO_LAUNCH`. During that phase the
-supervising model captures the screen and invokes `elite-dangerous/ui-control`
-one logical key at a time. The Streaming Action does not guess a fixed Auto
-Launch key sequence. Once the prompt pipeline observes Auto Launch, the
-workflow requires a `MOVING` observation, five samples without a classified
-Auto Launch prompt, Mass Lock ON, and two `STOPPED` or `LOW_SPEED` observations. It then
-continues autonomously through the 100% command and Mass Lock OFF gates. After
-the 0% command it enters `VERIFYING_STOP`; three consecutive current frames
-must be classified `STOPPED` by the dedicated slashed-zero pixel topology
-before `COMPLETED`. This final phase calls only the resident speed path and marks flight prompt and Mass Lock as
-unobserved instead of repeating their slower pipelines or retaining stale
-values. Stream fields named `observedSpeed*` are visual evidence;
-`commandedThrottle` is input-command state, and inability to confirm the stop
-fails explicitly.
+Do not treat this table as an Action catalog. Read the files on disk during
+development or the live Rule endpoints while operating an installed Agent.
+Request-time Rule loading means a valid Rule-tree publication does not require
+an Agent restart.
 
-Only one capture can run at a time. A concurrent request receives
-`409 capture_busy`. Each completed artifact contains `capture.jpg` or
-`capture.png` plus `metadata.json`. Metadata records `profile`, `format`,
-`content_type`, and, for JPEG, `quality` and `chroma_subsampling`. The response
-and metadata also include a required `foreground`
-object:
+New or changed observation packages must follow the
+[Script Package development contract](docs/script-development-contract.md).
+New or changed Actions require loader, behavior, negative-path, schema,
+manifest, and dependency validation. Agent-facing Rule guidance must also pass
+the [OpenCode black-box acceptance contract](docs/testing/opencode-black-box-acceptance-contract.md).
 
-```json
-{
-  "foreground": {
-    "observed_at": "2026-07-27T01:02:03.000000004Z",
-    "process_id": 4242,
-    "executable_name": "Game.exe",
-    "executable_path": "C:\\Games\\Game.exe",
-    "window_title": "Game"
-  },
-  "rule": {
-    "status": "matched",
-    "description": "The executing agent must read the Rule navigation documents before taking any rule-specific action.",
-    "id": "Game.exe",
-    "agents": {
-      "url": "/v1/rules/Game.exe/AGENTS.md",
-      "content_type": "text/markdown; charset=utf-8"
-    },
-    "scripts": {
-      "url": "/v1/rules/Game.exe/scripts",
-      "content_type": "application/json; charset=utf-8"
-    },
-    "actions": {
-      "url": "/v3/rules/Game.exe/actions",
-      "content_type": "application/json; charset=utf-8"
-    },
-    "registrations": {
-      "url": "/v3/rules/Game.exe/registrations",
-      "content_type": "application/json; charset=utf-8"
-    }
-  }
-}
-```
+## Security boundaries
 
-The foreground window is sampled immediately after WGC produces the captured
-frame. The same response resolves its executable name against the current
-external folders under `Rules/`; this keeps the capture JSON as Codex's single
-Windows perception entry point. Each request reloads `rule.json` and
-`AGENTS.md`, so a completed Rule plugin replacement requires no agent reload or
-task restart. Codex follows `rule.agents.url` for policy,
-`rule.actions.url` for executable capabilities,
-`rule.registrations.url` for explicitly configured Monitor and Reaction
-instances, and `rule.scripts.url` for the current observation compatibility
-projection. Script package validation occurs only when that catalog
-or capability is requested; capture remains independent from Script package
-health. An executable without a rule reports
-`rule.status=unmatched` with a description that no rule guidance is available,
-without inventing a substitute.
+- Network reachability is the trust boundary for port `8787`. Structured
+  requests and foreground validation improve correctness; they do not provide
+  authentication or authorization.
+- SFTP accepts no client credential. Verify its persistent host key out of band
+  and restrict network reachability independently.
+- Event, Web, Visual Log, Evidence, and delegated Pi processes use separate
+  authenticated control planes. Do not reuse their tokens or expose loopback
+  listeners through the Capture Agent.
+- The installers do not alter Windows Firewall.
+- Do not run the Capture Agent as a traditional Windows service.
+- Captures and logs may disclose process paths, usernames, window titles,
+  visible documents, game state, or account information.
+- Crash dumps can contain process memory. Keep them local and bounded.
+- Rules are trusted local packages. The public repository must not contain
+  credentials, private hosts, screenshots, save files, memory dumps, OCR
+  results, event journals, or operator configuration.
+- There is no silent fallback to another capture backend, execution provider,
+  model, precision, Rule, Action, decoder, binding, or algorithm.
 
-If Windows does not expose the foreground process or its executable
-path, the request fails explicitly with `503 foreground_process_unavailable`;
-the agent does not guess process identity or commit a partial artifact.
+Read [SECURITY.md](SECURITY.md) before deployment or vulnerability reporting.
 
-Foreground and rule metadata are required for every artifact under this
-contract. Artifact directories created by older builds do not contain the full
-contract and fail the strict startup scan rather than being presented as
-complete captures. Preserve or archive those directories before installing
-this build with a new, empty data directory; there is no automatic migration.
+## Project map
 
-## Project layout
+This is an ownership map rather than an exhaustive directory inventory:
 
 ```text
-cmd/windows-capture-agent/       screenshot capability executable
-cmd/windows-starlark-check/      local Starlark automation package preflight
-cmd/windows-starlark-invoke/     local Starlark automation upload client
-cmd/windows-exec/                direct run, detached-start, and PS1 client
-cmd/windows-key/                 direct foreground-pinned key press client
-cmd/windows-agent-pi/            authenticated delegated PI WEB task control plane
-cmd/windows-agent-pi-component/  GUI Job Object owner for one PI WEB process tree
-cmd/windows-observation-job/     generic local windows-observation-v1 launcher
-cmd/windows-observation-script-runner/ isolated Starlark runner
-cmd/windows-observer/            unified read-only memory/file observer
-cmd/windows-event-stream/        authenticated local event journal service
-cmd/windows-event-web/           windowless read-only browser projection
-cmd/windows-sftp/                SFTP-only Windows filesystem data plane
-cmd/windows-visual-log/          optional independent oMLX scene-description producer
-cmd/windows-watchdog/            external one-way process observer and recovery
-cmd/windows-screen-scene-reducer/ retired raw-screen reducer reference
-docs/design/                     maintained design registry
-docs/protocol/                   runtime protocol usage
-docs/testing/                    external black-box acceptance contracts
-internal/observationjob/         finite broker and Windows Job Object limits
-internal/observationlauncher/    native child-process isolation
-internal/observer/               permission-bounded memory/file backends
-internal/scriptrunner/           Starlark runtime and generic Windows native FFI
-internal/artifact/               artifact transactions and retention
-internal/capture/                screenshot capability contracts
-internal/captureindicator/       session-local recent-capture activity signal
-internal/config/                 process configuration
-internal/actionrun/              finite and streaming invocation lifecycle
-internal/actionsequence/         bounded ephemeral sequence and strict model schema
-internal/actioncheck/            offline Action package and dependency validation
-internal/windowsautomation/      ephemeral general Windows Starlark runtime
-internal/windowsexec/            structured Windows process and PowerShell-file runtime
-internal/processinventory/       read-only osquery-shaped process and service snapshots
-internal/eventclient/            authenticated Agent-to-journal client
-internal/eventhttp/              authenticated event append/replay HTTP API
-internal/delegatedtask/          durable delegated-task lifecycle and PI WEB event normalization
-internal/delegatedhttp/          authenticated host-facing delegated-task API
-internal/piweb/                  loopback PI WEB session HTTP and WebSocket adapter
-internal/eventstream/            strict durable event journal
-internal/eventweb/               authenticated Web UI, replay, stream, and OSD projection
-internal/sftpruntime/            SSH none-auth, SFTP-only server, host identity, and health
-internal/evidence/               finite recording lifecycle, authoritative video store, range archive, and contact sheets
-internal/evidencehttp/           authenticated Evidence run-control and read interface
-internal/mfvideo/                native Media Foundation Evidence encoder and decoder
-internal/recordingindicator/      session-local Evidence recording-presence signal
-internal/visuallog/              strict Game config, evidence/model adapters, and producer loop
-internal/visualloghttp/          authenticated read-only visual-log status adapter
-internal/watchdog/               target probes, bounded recovery, atomic status
-internal/scenereducer/            cursor, scene delta, and append recovery
-internal/foreground/             foreground process observation
-internal/httpapi/                current HTTP surface
-internal/pixels/                 SDR and HDR pixel conversion
-internal/rules/                  live Rule plugin loading and navigation
-internal/scriptlaunch/           strict generic launcher request contract
-internal/puredecision/           bounded permission-free in-process Starlark decisions
-internal/ocraction/              fixed-region raw OCR and same-capture route contracts
-internal/streamaction/            bounded streaming Starlark orchestration runtime
-internal/wgc/                    Request and persistent WGC / Direct3D 11 implementations
-internal/wgcworker/              Versioned worker protocol and Agent-side generation owner
-Rules/<Executable.exe>/          distributable Rule v6 runtimes, Actions, registrations, and guidance
-runtimes/windows-agent-pi/       pinned Pi, PI WEB, and pi-computer-use Node environment
-runtimes/screenparser-directml/   finite self-contained DirectML Action runtime
-runtimes/ppocr-directml/          resident PP-OCR text-line and text-regions workers
-tools/screenparser-model/         build-only pinned .pt to verified ONNX exporter
-tools/screenparser-runtime/       reproducible Windows runtime publisher
-tools/ppocr-model/                official PP-OCR artifacts and shape specialization
-tools/ppocr-runtime/              PP-OCR publisher and bounded benchmark tool
-scripts/                         Windows installation helpers
+cmd/                          thin executable composition and client entrypoints
+internal/capture*/            capture contracts, artifacts, and activity signal
+internal/wgc*/                persistent WGC worker and versioned worker protocol
+internal/foreground/          foreground process observation
+internal/rules/               Rule loading and live navigation
+internal/observation*/        finite observation Job, launcher, and protocols
+internal/scriptrunner/        isolated Starlark and generic native-library FFI
+internal/puredecision/        permission-free JSON decision runtime
+internal/action*/             Action loading, lifecycle, checks, and sequences
+internal/*input*/             foreground-bound keyboard input ownership
+internal/*pointer*/           foreground-bound pointer operations
+internal/ocr*/                raw OCR Action and resident-worker contracts
+internal/event*/              event journal clients, HTTP API, and Web projection
+internal/evidence*/           finite recording lifecycle and authenticated API
+internal/visuallog*/          passive visual-log producer and status API
+internal/delegated*/          delegated-task lifecycle and host-facing API
+internal/piweb/               PI WEB HTTP and WebSocket adapter
+internal/sftpruntime/         SFTP-only server, host identity, and health
+internal/watchdog/            external process probes and bounded recovery
+internal/windowsautomation/   ephemeral general Windows Starlark runtime
+internal/windowsexec/         structured process and PowerShell-file runtime
+Rules/<Executable.exe>/       distributable Rule v6 packages and guidance
+runtimes/                     self-contained external inference and Pi runtimes
+tools/                        model preparation, publishing, and diagnostics
+scripts/                      install, update, deploy, and operator helpers
+docs/design/                  maintained maturity registry and design documents
+docs/protocol/                runtime protocol usage
+docs/testing/                 black-box and external acceptance contracts
 ```
 
-New or changed Script packages must follow the
-[`Script Package development contract`](docs/script-development-contract.md).
-It defines package ownership, source-transition rules, manifest validation,
-native ABI responsibility, privacy boundaries, and required validation.
+Core capabilities belong in distinct `internal` packages with explicit API and
+runtime contracts. Game or application semantics remain in the owning Rule.
 
-OpenCode model validation must follow the
-[`OpenCode black-box acceptance contract`](docs/testing/opencode-black-box-acceptance-contract.md).
-It evaluates only externally visible OpenCode inputs, tool events, request
-counts, and final-answer consistency.
+## Contributing and license
 
-New capabilities should receive their own internal package and API contract
-instead of being folded into the screenshot packages.
-
-## Security and contributions
-
-See [SECURITY.md](SECURITY.md) before exposing the listener or reporting a
-vulnerability. Contributions are described in
-[CONTRIBUTING.md](CONTRIBUTING.md).
-
-## License
-
-WindowsAgent is available under the [MIT License](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and validation rules and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting. WindowsAgent is
+available under the [MIT License](LICENSE).
