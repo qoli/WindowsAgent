@@ -3,17 +3,26 @@
 package windowsexec
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
 
 const RuntimeID = "windows-exec-v1"
 const SchemaVersion uint32 = 1
+
+// Inline process output is carried inside one durable event whose encoded
+// record is capped at 1 MiB. The 64 KiB per-stream limit leaves room for both
+// the byte-safe base64 representation and worst-case JSON escaping of valid
+// UTF-8 text from stdout and stderr, plus the invocation event envelope.
+const DefaultMaxOutputBytes uint64 = 64 << 10
+const MaxOutputBytes uint64 = DefaultMaxOutputBytes
 
 type Operation string
 
@@ -73,9 +82,14 @@ type Executor interface {
 type OSExecutor struct{}
 
 type Error struct {
-	Code  string
-	Stage string
-	Cause error
+	Code             string
+	Stage            string
+	Cause            error
+	PID              uint32
+	DurationMS       int64
+	StdoutBytes      uint64
+	StderrBytes      uint64
+	OutputLimitBytes uint64
 }
 
 func (e *Error) Error() string {
@@ -173,6 +187,13 @@ func validateRequest(request Request) (Request, error) {
 		if request.TimeoutMilliseconds != 0 {
 			return Request{}, requestError("EXEC_INVALID_TIMEOUT", "validating-request", "start does not accept a timeout")
 		}
+	} else {
+		if request.MaxOutputBytes == 0 {
+			request.MaxOutputBytes = DefaultMaxOutputBytes
+		}
+		if request.MaxOutputBytes > MaxOutputBytes {
+			return Request{}, requestError("EXEC_INVALID_OUTPUT_LIMIT", "validating-request", fmt.Sprintf("maxOutputBytes must not exceed %d", MaxOutputBytes))
+		}
 	}
 	if request.TimeoutMilliseconds > uint64((1<<63-1)/int64(time.Millisecond)) {
 		return Request{}, requestError("EXEC_INVALID_TIMEOUT", "validating-request", "timeoutMilliseconds exceeds the supported duration")
@@ -227,4 +248,67 @@ func encodeOutput(data []byte) Output {
 		result.Text = &text
 	}
 	return result
+}
+
+type outputLimitSignal struct {
+	once     sync.Once
+	exceeded chan struct{}
+}
+
+func newOutputLimitSignal() *outputLimitSignal {
+	return &outputLimitSignal{exceeded: make(chan struct{})}
+}
+
+func (s *outputLimitSignal) trigger() {
+	if s == nil {
+		return
+	}
+	s.once.Do(func() { close(s.exceeded) })
+}
+
+type captureBuffer struct {
+	mu       sync.Mutex
+	data     bytes.Buffer
+	limit    uint64
+	observed uint64
+	exceeded bool
+	signal   *outputLimitSignal
+}
+
+func (b *captureBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	b.observed += uint64(len(data))
+	current := uint64(b.data.Len())
+	remaining := uint64(0)
+	if current < b.limit {
+		remaining = b.limit - current
+	}
+	writeLength := uint64(len(data))
+	if writeLength > remaining {
+		writeLength = remaining
+	}
+	if writeLength > 0 {
+		_, _ = b.data.Write(data[:int(writeLength)])
+	}
+	if uint64(len(data)) > remaining {
+		b.exceeded = true
+	}
+	exceeded := b.exceeded
+	b.mu.Unlock()
+	if exceeded {
+		b.signal.trigger()
+	}
+	return len(data), nil
+}
+
+func (b *captureBuffer) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Clone(b.data.Bytes())
+}
+
+func (b *captureBuffer) stats() (observed uint64, exceeded bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.observed, b.exceeded
 }

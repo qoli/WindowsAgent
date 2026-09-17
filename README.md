@@ -530,7 +530,12 @@ go run ./cmd/windows-exec run \
 
 Arguments remain individual CLI and JSON array elements. The client does not
 insert a command string, switch to SSH or another runtime, or interpret a
-nonzero child exit as transport failure.
+nonzero child exit as transport failure. Captured stdout and stderr are each
+limited to 65,536 bytes by default and may only be configured lower; exceeding
+the limit terminates the owned process tree with an explicit
+`EXEC_OUTPUT_LIMIT_EXCEEDED` failure. Large logs belong in an explicitly named
+Windows file retrieved through the separate SFTP data plane, while the process
+result returns only bounded metadata.
 
 Send one foreground-pinned scan-code press using identity from a fresh capture:
 

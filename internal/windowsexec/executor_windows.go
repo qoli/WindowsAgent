@@ -3,7 +3,6 @@
 package windowsexec
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf16"
 	"unsafe"
@@ -193,8 +191,9 @@ func executeOwned(ctx context.Context, request Request, executable string, argv 
 		return Result{}, &Error{Code: "EXEC_PROCESS_RESUME_FAILED", Stage: "resuming-process", Cause: err}
 	}
 
-	stdout := &captureBuffer{limit: request.MaxOutputBytes}
-	stderr := &captureBuffer{limit: request.MaxOutputBytes}
+	outputLimit := newOutputLimitSignal()
+	stdout := &captureBuffer{limit: request.MaxOutputBytes, signal: outputLimit}
+	stderr := &captureBuffer{limit: request.MaxOutputBytes, signal: outputLimit}
 	type copyResult struct {
 		stream string
 		err    error
@@ -229,15 +228,23 @@ func executeOwned(ctx context.Context, request Request, executable string, argv 
 	}()
 
 	var waitErr error
+	stopReason := ""
 	select {
 	case waitErr = <-waitResult:
+	case <-outputLimit.exceeded:
+		stopReason = "output-limit"
 	case <-ctx.Done():
+		select {
+		case <-outputLimit.exceeded:
+			stopReason = "output-limit"
+		default:
+			stopReason = "context"
+		}
+	}
+	if stopReason != "" {
 		terminateErr, closeErr := terminateAndCloseJob(job)
 		if closeErr == nil {
 			jobOpen = false
-		}
-		if terminateErr != nil && closeErr != nil {
-			return Result{}, &Error{Code: "EXEC_CANCEL_FAILED", Stage: "cancelling-process-tree", Cause: errors.Join(ctx.Err(), terminateErr, closeErr)}
 		}
 		waitErr = <-waitResult
 		for range 2 {
@@ -245,9 +252,26 @@ func executeOwned(ctx context.Context, request Request, executable string, argv 
 		}
 		<-stdinResult
 		if terminateErr != nil || closeErr != nil {
-			return Result{}, &Error{Code: "EXEC_CANCEL_FAILED", Stage: "cancelling-process-tree", Cause: errors.Join(ctx.Err(), terminateErr, closeErr)}
+			stage := "cancelling-process-tree"
+			cause := ctx.Err()
+			limit := uint64(0)
+			if stopReason == "output-limit" {
+				stage = "enforcing-output-limit"
+				cause = errors.New("stdout or stderr exceeded maxOutputBytes")
+				limit = request.MaxOutputBytes
+			}
+			stdoutBytes, _ := stdout.stats()
+			stderrBytes, _ := stderr.stats()
+			return Result{}, &Error{
+				Code: "EXEC_CANCEL_FAILED", Stage: stage, Cause: errors.Join(cause, terminateErr, closeErr),
+				PID: receipt.pid, DurationMS: time.Since(receipt.startedAt).Milliseconds(),
+				StdoutBytes: stdoutBytes, StderrBytes: stderrBytes, OutputLimitBytes: limit,
+			}
 		}
-		return Result{}, contextExecutionError("waiting-for-process", ctx.Err())
+		if stopReason == "output-limit" {
+			return Result{}, outputLimitError(receipt, stdout, stderr, request.MaxOutputBytes)
+		}
+		return Result{}, processContextError("waiting-for-process", ctx.Err(), receipt, stdout, stderr)
 	}
 	if waitErr != nil {
 		return Result{}, &Error{Code: "EXEC_PROCESS_WAIT_FAILED", Stage: "waiting-for-process", Cause: waitErr}
@@ -266,8 +290,10 @@ func executeOwned(ctx context.Context, request Request, executable string, argv 
 			return Result{}, &Error{Code: "EXEC_OUTPUT_READ_FAILED", Stage: "reading-process-" + copyResult.stream, Cause: copyResult.err}
 		}
 	}
-	if stdout.exceeded || stderr.exceeded {
-		return Result{}, &Error{Code: "EXEC_OUTPUT_LIMIT_EXCEEDED", Stage: "capturing-process-output", Cause: errors.New("stdout or stderr exceeded maxOutputBytes")}
+	_, stdoutExceeded := stdout.stats()
+	_, stderrExceeded := stderr.stats()
+	if stdoutExceeded || stderrExceeded {
+		return Result{}, outputLimitError(receipt, stdout, stderr, request.MaxOutputBytes)
 	}
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(process.Process, &exitCode); err != nil {
@@ -481,7 +507,7 @@ func splitEnvironmentItem(item string) (string, string, bool) {
 	return item[:separator], item[separator+1:], true
 }
 
-func contextExecutionError(stage string, err error) error {
+func contextExecutionError(stage string, err error) *Error {
 	code := "EXEC_CANCELLED"
 	if errors.Is(err, context.DeadlineExceeded) {
 		code = "EXEC_DEADLINE_EXCEEDED"
@@ -489,40 +515,22 @@ func contextExecutionError(stage string, err error) error {
 	return &Error{Code: code, Stage: stage, Cause: err}
 }
 
-type captureBuffer struct {
-	mu       sync.Mutex
-	data     bytes.Buffer
-	limit    uint64
-	exceeded bool
+func processContextError(stage string, err error, receipt processReceipt, stdout, stderr *captureBuffer) error {
+	result := contextExecutionError(stage, err)
+	result.PID = receipt.pid
+	result.DurationMS = time.Since(receipt.startedAt).Milliseconds()
+	result.StdoutBytes, _ = stdout.stats()
+	result.StderrBytes, _ = stderr.stats()
+	return result
 }
 
-func (b *captureBuffer) Write(data []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.limit == 0 {
-		_, _ = b.data.Write(data)
-		return len(data), nil
+func outputLimitError(receipt processReceipt, stdout, stderr *captureBuffer, limit uint64) error {
+	stdoutBytes, _ := stdout.stats()
+	stderrBytes, _ := stderr.stats()
+	return &Error{
+		Code: "EXEC_OUTPUT_LIMIT_EXCEEDED", Stage: "capturing-process-output",
+		Cause: fmt.Errorf("stdout or stderr exceeded maxOutputBytes=%d: stdoutBytes=%d stderrBytes=%d", limit, stdoutBytes, stderrBytes),
+		PID:   receipt.pid, DurationMS: time.Since(receipt.startedAt).Milliseconds(),
+		StdoutBytes: stdoutBytes, StderrBytes: stderrBytes, OutputLimitBytes: limit,
 	}
-	current := uint64(b.data.Len())
-	remaining := uint64(0)
-	if current < b.limit {
-		remaining = b.limit - current
-	}
-	writeLength := uint64(len(data))
-	if writeLength > remaining {
-		writeLength = remaining
-	}
-	if writeLength > 0 {
-		_, _ = b.data.Write(data[:int(writeLength)])
-	}
-	if uint64(len(data)) > remaining {
-		b.exceeded = true
-	}
-	return len(data), nil
-}
-
-func (b *captureBuffer) Bytes() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return bytes.Clone(b.data.Bytes())
 }

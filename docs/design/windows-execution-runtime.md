@@ -34,7 +34,10 @@ Common optional fields are `argv`, absolute `cwd`, `env`, base64-encoded
 `stdin`, `window`, `maxOutputBytes`, and `timeoutMilliseconds`. `window` is
 `normal` or `hidden`; omission means hidden for `run` and `powershell-file`, and
 normal for `start`. Zero `maxOutputBytes` means that the caller did not request
-an output cap. A positive value makes an exceeded stream a terminal error.
+an override and resolves to the 65,536-byte per-stream inline-output limit. A
+positive value may lower that limit but cannot exceed 65,536 bytes. The first
+stdout or stderr byte beyond the effective limit terminates the owned Job and
+returns `EXEC_OUTPUT_LIMIT_EXCEEDED`; output is never silently truncated.
 Zero `timeoutMilliseconds` means that the caller did not request an execution
 deadline; the durable stop operation remains available.
 
@@ -64,7 +67,11 @@ Watchdog target instead.
 
 Output is byte-safe. Every stdout and stderr value reports base64 bytes and byte
 length; valid UTF-8 additionally exposes `text`. Non-UTF-8 output is not
-discarded, guessed, or decoded using an implicit code page.
+discarded, guessed, or decoded using an implicit code page. This inline result
+is not a bulk-log data plane. A caller that needs larger output must write it to
+an explicit Windows file, return only bounded metadata such as path, byte count,
+and digest, and retrieve the file separately through the documented SFTP data
+plane.
 
 ## PowerShell file adapter
 
@@ -107,6 +114,12 @@ environment entries, process lookup/creation, Job assignment, resume, wait,
 timeout, output-limit, and PowerShell discovery failures are terminal. There is
 no fallback to Starlark, an alternate shell, another PowerShell edition, SSH,
 MCP, or a detached launch when owned execution fails.
+
+Before a terminal result is sent to the event journal, the complete append
+request and a worst-case committed event envelope are size-checked against the
+journal's 1 MiB record contract. A result that cannot be represented becomes a
+small durable `action.failed` event with `EXEC_RESULT_TOO_LARGE`; it is never
+reported as completed and never sent as an oversized HTTP request.
 
 ## Remaining acceptance
 

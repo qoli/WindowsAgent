@@ -250,6 +250,19 @@ func TestWriteFailurePoisonsStoreAndWakesWaiter(t *testing.T) {
 	}
 }
 
+func TestValidateAppendRequestRejectsEventThatCannotFitJournal(t *testing.T) {
+	request := testAppendRequest()
+	payload, err := json.Marshal(map[string]string{"output": strings.Repeat("x", MaxEventBytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Payload = payload
+	err = ValidateAppendRequest(request)
+	if !errors.Is(err, ErrEventTooLarge) {
+		t.Fatalf("error = %v, want ErrEventTooLarge", err)
+	}
+}
+
 func TestOpenRejectsUnterminatedRecord(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, JournalFilename), []byte(`{"schemaVersion":1}`), 0o600); err != nil {

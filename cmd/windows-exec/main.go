@@ -146,7 +146,7 @@ func parseRequest(subcommand string, args []string, stderr io.Writer) (windowsex
 	flags.Var(&environment, "env", "environment NAME=VALUE (repeatable)")
 	flags.StringVar(&window, "window", "", "window mode: normal or hidden")
 	flags.StringVar(&stdinFile, "stdin-file", "", "local file used as process stdin")
-	flags.Uint64Var(&maxOutputBytes, "max-output-bytes", 0, "maximum captured output bytes")
+	flags.Uint64Var(&maxOutputBytes, "max-output-bytes", 0, "per-stream captured output limit; 0 uses 65536 bytes, larger values are rejected")
 	flags.DurationVar(&timeout, "timeout", 0, "remote execution timeout, for example 30s")
 	if err := flags.Parse(args); err != nil {
 		return windowsexec.Request{}, "", err

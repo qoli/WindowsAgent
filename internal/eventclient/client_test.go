@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +115,33 @@ func TestClientRejectsNonLoopbackAndMalformedToken(t *testing.T) {
 	}
 	if _, err := New("http://127.0.0.1:8788", tokenFile, client); err == nil {
 		t.Fatal("short event token was accepted")
+	}
+}
+
+func TestClientRejectsOversizedEventBeforeHTTP(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	tokenFile := filepath.Join(t.TempDir(), "event.token")
+	if err := os.WriteFile(tokenFile, []byte("0123456789abcdef0123456789abcdef"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client, err := New(server.URL, tokenFile, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := eventstream.AppendRequest{
+		SessionID: "act_1", Stream: "action.runs", Type: "action.completed", ObservedAt: time.Now().UTC(),
+		Source:     eventstream.Source{ModuleID: "windows/ephemeral-execution", InstanceID: "act_1", Runtime: "windows-exec-v1"},
+		Foreground: eventstream.Foreground{ExecutableName: "Game.exe", Revision: 1}, CorrelationID: "act_1",
+		Payload: json.RawMessage(`{"output":"` + strings.Repeat("x", eventstream.MaxEventBytes) + `"}`),
+	}
+	_, err = client.Append(context.Background(), request)
+	if !errors.Is(err, eventstream.ErrEventTooLarge) {
+		t.Fatalf("error = %v, want ErrEventTooLarge", err)
+	}
+	if requests != 0 {
+		t.Fatalf("oversized append reached HTTP server %d times", requests)
 	}
 }
 

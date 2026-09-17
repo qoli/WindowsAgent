@@ -31,6 +31,7 @@ const (
 )
 
 var ErrCursorAhead = errors.New("event cursor is ahead of the journal")
+var ErrEventTooLarge = errors.New("event exceeds maximum encoded size")
 
 type Source struct {
 	ModuleID   string `json:"moduleId"`
@@ -179,7 +180,7 @@ func (s *Store) Append(ctx context.Context, request AppendRequest) (Event, error
 	if err := ctx.Err(); err != nil {
 		return Event{}, err
 	}
-	if err := validateAppendRequest(request); err != nil {
+	if err := ValidateAppendRequest(request); err != nil {
 		return Event{}, fmt.Errorf("validate event append request: %w", err)
 	}
 
@@ -219,7 +220,7 @@ func (s *Store) Append(ctx context.Context, request AppendRequest) (Event, error
 		return Event{}, fmt.Errorf("encode event: %w", err)
 	}
 	if len(encoded)+1 > MaxEventBytes {
-		return Event{}, fmt.Errorf("event exceeds %d bytes", MaxEventBytes)
+		return Event{}, fmt.Errorf("%w: event requires %d bytes, limit is %d", ErrEventTooLarge, len(encoded)+1, MaxEventBytes)
 	}
 	encoded = append(encoded, '\n')
 	offset, err := s.file.Seek(0, io.SeekEnd)
@@ -544,6 +545,45 @@ func decodeJournalRecord(line []byte, expectedSequence uint64) (Event, error) {
 		return Event{}, fmt.Errorf("event sequence is %d, expected %d", event.Sequence, expectedSequence)
 	}
 	return event, nil
+}
+
+// ValidateAppendRequest verifies both the append interface and the largest
+// committed event envelope that the request can produce.
+func ValidateAppendRequest(request AppendRequest) error {
+	if err := validateAppendRequest(request); err != nil {
+		return err
+	}
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("encode event append request: %w", err)
+	}
+	if len(requestBody) > MaxEventBytes {
+		return fmt.Errorf("%w: append request requires %d bytes, limit is %d", ErrEventTooLarge, len(requestBody), MaxEventBytes)
+	}
+	upperBound := Event{
+		SchemaVersion: SchemaVersion,
+		Sequence:      ^uint64(0),
+		EventID:       "evt_ffffffffffffffffffffffffffffffff",
+		SessionID:     request.SessionID,
+		Stream:        request.Stream,
+		Type:          request.Type,
+		ObservedAt:    request.ObservedAt,
+		CommittedAt:   time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC),
+		Source:        request.Source,
+		Foreground:    request.Foreground,
+		CorrelationID: request.CorrelationID,
+		CausationID:   request.CausationID,
+		Payload:       request.Payload,
+		Artifacts:     request.Artifacts,
+	}
+	encodedEvent, err := json.Marshal(upperBound)
+	if err != nil {
+		return fmt.Errorf("encode event size upper bound: %w", err)
+	}
+	if len(encodedEvent)+1 > MaxEventBytes {
+		return fmt.Errorf("%w: committed event requires at most %d bytes, limit is %d", ErrEventTooLarge, len(encodedEvent)+1, MaxEventBytes)
+	}
+	return nil
 }
 
 func validateAppendRequest(request AppendRequest) error {

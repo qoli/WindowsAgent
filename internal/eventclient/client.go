@@ -98,6 +98,9 @@ func (c *Client) Append(ctx context.Context, request eventstream.AppendRequest) 
 	if c == nil || ctx == nil {
 		return eventstream.Event{}, errors.New("event client and context are required")
 	}
+	if err := eventstream.ValidateAppendRequest(request); err != nil {
+		return eventstream.Event{}, fmt.Errorf("validate event append: %w", err)
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return eventstream.Event{}, fmt.Errorf("encode event append: %w", err)

@@ -2,6 +2,7 @@ package actionrun
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -444,6 +445,79 @@ func TestEphemeralWindowsExecutionPreservesTypedFailure(t *testing.T) {
 	status, err := manager.Get(response.InvocationID)
 	if err != nil || status.State != StateFailed || status.ErrorCode != "PROCESS_START_FAILED" || status.ErrorStage != "starting-process" {
 		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestEphemeralWindowsExecutionPreservesOutputLimitEvidence(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	manager.execution = &fakeExecutionExecutor{err: &windowsexec.Error{
+		Code: "EXEC_OUTPUT_LIMIT_EXCEEDED", Stage: "capturing-process-output", Cause: errors.New("output exceeded limit"),
+		PID: 73, DurationMS: 125, StdoutBytes: 70000, StderrBytes: 12, OutputLimitBytes: windowsexec.MaxOutputBytes,
+	}}
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun, Executable: "tool.exe",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	terminal := events[len(events)-1]
+	text := string(terminal.Payload)
+	for _, fragment := range []string{
+		`"errorCode":"EXEC_OUTPUT_LIMIT_EXCEEDED"`, `"pid":73`, `"durationMs":125`,
+		`"stdoutBytes":70000`, `"stderrBytes":12`, `"maxOutputBytes":65536`,
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("terminal payload missing %s: %s", fragment, text)
+		}
+	}
+}
+
+func TestEphemeralWindowsExecutionConvertsOversizedResultToDurableFailure(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	exitCode := 0
+	manager.execution = &fakeExecutionExecutor{result: windowsexec.Result{
+		SchemaVersion: windowsexec.SchemaVersion, Runtime: windowsexec.RuntimeID, Operation: windowsexec.OperationRun,
+		PID: 73, ExitCode: &exitCode,
+		Stdout: windowsexec.Output{BytesBase64: strings.Repeat("a", eventstream.MaxEventBytes), ByteLength: eventstream.MaxEventBytes},
+		Stderr: windowsexec.Output{BytesBase64: "", ByteLength: 0},
+	}}
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun, Executable: "tool.exe",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.failed" {
+		t.Fatalf("event types = %s", got)
+	}
+	status, err := manager.Get(response.InvocationID)
+	if err != nil || status.State != StateFailed || status.ErrorCode != "EXEC_RESULT_TOO_LARGE" || status.ErrorStage != "committing-terminal-event" {
+		t.Fatalf("status = %+v, err = %v", status, err)
+	}
+}
+
+func TestMaximumInlineExecutionOutputFitsDurableTerminalEvent(t *testing.T) {
+	manager, _ := newTestManager(t, &fakeExecutor{})
+	exitCode := 0
+	text := strings.Repeat("\x00", int(windowsexec.MaxOutputBytes))
+	encoded := base64.StdEncoding.EncodeToString([]byte(text))
+	manager.execution = &fakeExecutionExecutor{result: windowsexec.Result{
+		SchemaVersion: windowsexec.SchemaVersion, Runtime: windowsexec.RuntimeID, Operation: windowsexec.OperationRun,
+		PID: 73, ExitCode: &exitCode,
+		Stdout: windowsexec.Output{BytesBase64: encoded, Text: &text, ByteLength: len(text)},
+		Stderr: windowsexec.Output{BytesBase64: encoded, Text: &text, ByteLength: len(text)},
+	}}
+	response, err := manager.InvokeExecution(context.Background(), windowsexec.Request{
+		SchemaVersion: windowsexec.SchemaVersion, Operation: windowsexec.OperationRun, Executable: "tool.exe",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectUntilTerminal(t, manager, response.InvocationID, response.Watch.AfterCursor)
+	if got := strings.Join(eventTypes(events), ","); got != "action.started,action.completed" {
+		t.Fatalf("event types = %s", got)
 	}
 }
 

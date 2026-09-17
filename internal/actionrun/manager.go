@@ -952,6 +952,7 @@ func (r *run) execute() {
 			payload["errorStage"] = executionError.Stage
 			terminalErrorCode = executionError.Code
 			terminalErrorStage = executionError.Stage
+			addExecutionFailureDetails(payload, executionError)
 		}
 		if errors.As(runErr, &inputError) {
 			payload["errorCode"] = inputError.Code
@@ -972,6 +973,20 @@ func (r *run) execute() {
 		payload = map[string]any{"state": state, "output": json.RawMessage(result.Output)}
 	}
 	_, appendErr := r.appendEvent(context.Background(), eventType, payload)
+	if appendErr != nil && errors.Is(appendErr, eventstream.ErrEventTooLarge) {
+		terminalErrorCode = "ACTION_TERMINAL_EVENT_TOO_LARGE"
+		terminalErrorStage = "committing-terminal-event"
+		if isExecution && state == StateCompleted {
+			terminalErrorCode = "EXEC_RESULT_TOO_LARGE"
+		}
+		runErr = fmt.Errorf("%s at %s: %w", terminalErrorCode, terminalErrorStage, appendErr)
+		state = StateFailed
+		payload = map[string]any{
+			"state": StateFailed, "error": runErr.Error(),
+			"errorCode": terminalErrorCode, "errorStage": terminalErrorStage,
+		}
+		_, appendErr = r.appendEvent(context.Background(), "action.failed", payload)
+	}
 	r.mu.Lock()
 	if isSequence {
 		r.sequence = nil
@@ -1000,6 +1015,20 @@ func (r *run) execute() {
 		r.errorText = "commit terminal Action event: " + appendErr.Error()
 	}
 	r.mu.Unlock()
+}
+
+func addExecutionFailureDetails(payload map[string]any, failure *windowsexec.Error) {
+	if payload == nil || failure == nil || failure.PID == 0 {
+		return
+	}
+	details := map[string]any{
+		"pid": failure.PID, "durationMs": failure.DurationMS,
+		"stdoutBytes": failure.StdoutBytes, "stderrBytes": failure.StderrBytes,
+	}
+	if failure.OutputLimitBytes != 0 {
+		details["maxOutputBytes"] = failure.OutputLimitBytes
+	}
+	payload["execution"] = details
 }
 
 func (r *run) executeSequence() (actionlaunch.Result, error) {

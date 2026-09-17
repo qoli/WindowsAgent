@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,50 @@ func TestValidateRequestDefaultsWindowByOperation(t *testing.T) {
 	}
 }
 
+func TestValidateRequestDefaultsAndBoundsInlineOutput(t *testing.T) {
+	normalized, err := validateRequest(Request{SchemaVersion: 1, Operation: OperationRun, Executable: "tool.exe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.MaxOutputBytes != DefaultMaxOutputBytes {
+		t.Fatalf("maxOutputBytes = %d, want %d", normalized.MaxOutputBytes, DefaultMaxOutputBytes)
+	}
+	_, err = validateRequest(Request{
+		SchemaVersion: 1, Operation: OperationRun, Executable: "tool.exe", MaxOutputBytes: MaxOutputBytes + 1,
+	})
+	var execErr *Error
+	if !errors.As(err, &execErr) || execErr.Code != "EXEC_INVALID_OUTPUT_LIMIT" {
+		t.Fatalf("error = %v, want EXEC_INVALID_OUTPUT_LIMIT", err)
+	}
+}
+
+func TestCaptureBufferSignalsAndPreservesObservedByteCount(t *testing.T) {
+	signal := newOutputLimitSignal()
+	buffer := &captureBuffer{limit: 4, signal: signal}
+	if written, err := buffer.Write([]byte("abcdef")); err != nil || written != 6 {
+		t.Fatalf("written = %d, err = %v", written, err)
+	}
+	select {
+	case <-signal.exceeded:
+	default:
+		t.Fatal("output-limit signal was not closed")
+	}
+	if got := string(buffer.Bytes()); got != "abcd" {
+		t.Fatalf("captured = %q", got)
+	}
+	observed, exceeded := buffer.stats()
+	if observed != 6 || !exceeded {
+		t.Fatalf("observed = %d, exceeded = %t", observed, exceeded)
+	}
+	if _, err := buffer.Write([]byte(strings.Repeat("x", 3))); err != nil {
+		t.Fatal(err)
+	}
+	observed, _ = buffer.stats()
+	if observed != 9 {
+		t.Fatalf("observed after second write = %d", observed)
+	}
+}
+
 func TestValidateRequestRejectsInvalidOperationFields(t *testing.T) {
 	tests := []struct {
 		name string
@@ -44,6 +89,7 @@ func TestValidateRequestRejectsInvalidOperationFields(t *testing.T) {
 		{"start stdin", Request{SchemaVersion: 1, Operation: OperationStart, Executable: "tool.exe", Stdin: []byte("input")}, "EXEC_INVALID_STDIN"},
 		{"start output limit", Request{SchemaVersion: 1, Operation: OperationStart, Executable: "tool.exe", MaxOutputBytes: 1}, "EXEC_INVALID_OUTPUT_LIMIT"},
 		{"start timeout", Request{SchemaVersion: 1, Operation: OperationStart, Executable: "tool.exe", TimeoutMilliseconds: 1}, "EXEC_INVALID_TIMEOUT"},
+		{"run output above hard maximum", Request{SchemaVersion: 1, Operation: OperationRun, Executable: "tool.exe", MaxOutputBytes: MaxOutputBytes + 1}, "EXEC_INVALID_OUTPUT_LIMIT"},
 		{"relative cwd", Request{SchemaVersion: 1, Operation: OperationRun, Executable: "tool.exe", Cwd: "work"}, "EXEC_INVALID_CWD"},
 		{"invalid window", Request{SchemaVersion: 1, Operation: OperationRun, Executable: "tool.exe", Window: "minimized"}, "EXEC_INVALID_WINDOW"},
 		{"nul argument", Request{SchemaVersion: 1, Operation: OperationRun, Executable: "tool.exe", Argv: []string{"bad\x00arg"}}, "EXEC_INVALID_ARGUMENT"},
