@@ -46,6 +46,10 @@ func TestModelAcceptsDeclaredEphemeralStartProvenance(t *testing.T) {
 			actionID: actionrun.EphemeralExecutionActionID,
 			payload:  `{"state":"RUNNING","actionId":"windows/ephemeral-execution","lifecycle":"linear","interruptible":true,"operation":"run","requestDigest":"def456","foregroundAvailable":false}`,
 		},
+		{
+			actionID: actionrun.DirectKeyInputActionID,
+			payload:  `{"state":"RUNNING","actionId":"windows/direct-key-input","lifecycle":"linear","interruptible":true,"key":"Key_Home","holdMs":180,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"requestDigest":"789abc"}`,
+		},
 	}
 	for _, test := range tests {
 		model := &Model{}
@@ -54,6 +58,14 @@ func TestModelAcceptsDeclaredEphemeralStartProvenance(t *testing.T) {
 		if err := model.Apply(event); err != nil {
 			t.Fatalf("action %s: %v", test.actionID, err)
 		}
+	}
+}
+
+func TestModelStillRejectsUnknownActionStartFields(t *testing.T) {
+	model := &Model{}
+	err := model.Apply(testEvent("action.started", time.Now().UTC(), `{"state":"RUNNING","actionId":"game/leave","lifecycle":"linear","interruptible":true,"invented":true}`))
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

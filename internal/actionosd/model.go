@@ -16,6 +16,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/actionrun"
 	"github.com/qoli/WindowsAgent/internal/actionsequence"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/inputaction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
 	"github.com/qoli/WindowsAgent/internal/strictjson"
@@ -78,15 +79,18 @@ func (m *Model) Apply(event eventstream.Event) error {
 	switch event.Type {
 	case "action.started":
 		var payload struct {
-			State               string `json:"state"`
-			ActionID            string `json:"actionId"`
-			Lifecycle           string `json:"lifecycle"`
-			Interruptible       bool   `json:"interruptible"`
-			PackageDigest       string `json:"packageDigest,omitempty"`
-			PackageVersion      uint32 `json:"packageVersion,omitempty"`
-			Operation           string `json:"operation,omitempty"`
-			RequestDigest       string `json:"requestDigest,omitempty"`
-			ForegroundAvailable *bool  `json:"foregroundAvailable,omitempty"`
+			State               string                          `json:"state"`
+			ActionID            string                          `json:"actionId"`
+			Lifecycle           string                          `json:"lifecycle"`
+			Interruptible       bool                            `json:"interruptible"`
+			PackageDigest       string                          `json:"packageDigest,omitempty"`
+			PackageVersion      uint32                          `json:"packageVersion,omitempty"`
+			Operation           string                          `json:"operation,omitempty"`
+			RequestDigest       string                          `json:"requestDigest,omitempty"`
+			ForegroundAvailable *bool                           `json:"foregroundAvailable,omitempty"`
+			ExpectedForeground  *inputaction.ExpectedForeground `json:"expectedForeground,omitempty"`
+			Key                 string                          `json:"key,omitempty"`
+			HoldMS              uint32                          `json:"holdMs,omitempty"`
 		}
 		if err := decodeStrict(event.Payload, &payload); err != nil {
 			return fmt.Errorf("decode action.started payload: %w", err)
