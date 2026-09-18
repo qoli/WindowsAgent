@@ -87,6 +87,15 @@ func TestWriteSHA256SumsUsesCatalogOrder(t *testing.T) {
 	}
 }
 
+func TestInstallArtifactExcludesOnlyOperatorAndDiagnosticExecutables(t *testing.T) {
+	for _, artifact := range testCatalog().Artifacts {
+		want := artifact.Class != ClassOperatorTool && artifact.Class != ClassDiagnostic
+		if InstallArtifact(artifact) != want {
+			t.Fatalf("InstallArtifact(%s) = %t, want %t", artifact.Name, InstallArtifact(artifact), want)
+		}
+	}
+}
+
 func testCatalog() Catalog {
 	specs := Specs()
 	artifacts := make([]Artifact, 0, len(specs))

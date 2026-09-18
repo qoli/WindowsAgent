@@ -12,6 +12,7 @@ import (
 func TestRunInstallerPropagatesPowerShellFailure(t *testing.T) {
 	root := t.TempDir()
 	err := runInstaller(context.Background(), Request{
+		Operation:   OperationRepair,
 		StageDir:    filepath.Join(root, "stage"),
 		CatalogPath: filepath.Join(root, "stage", "windowsagent-release.json"),
 		DataDir:     filepath.Join(root, "data"),

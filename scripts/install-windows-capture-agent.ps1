@@ -7,6 +7,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$RulesPath,
 
+    [switch]$AllowEmptyRules,
+
     [string]$OCRRuntimeBundlePath,
 
     [switch]$ArchiveIncompatibleCaptures,
@@ -104,7 +106,7 @@ if (-not (Test-Path -LiteralPath $sourceRules -PathType Container)) {
     throw "Rules directory does not exist: $sourceRules"
 }
 $sourceRuleDirectories = @(Get-ChildItem -LiteralPath $sourceRules -Directory)
-if ($sourceRuleDirectories.Count -eq 0) {
+if ($sourceRuleDirectories.Count -eq 0 -and -not $AllowEmptyRules) {
     throw "Rules directory must contain at least one executable Rule plugin"
 }
 $requiresOCRRuntime = $false

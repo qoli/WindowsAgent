@@ -201,11 +201,16 @@ Setup package or archive of the complete multi-process system.
 replace the installed GUI build. Local clients such as `windows-exec.exe`,
 `windows-key.exe`, `windows-starlark-check.exe`, and
 `windows-starlark-invoke.exe` are not installed Agent payloads.
-`windows-assist-gui.exe` is the public bootstrap and access-information UI. Its
-Install / Update action stages a checksum- and PE-verified base runtime set,
-hands self-update to the staged AssistGUI, and applies a rollback-capable
-current-user Scheduled Task transaction. This path still requires signed-in
-Windows acceptance before it is considered fully available; consult the
+`windows-assist-gui.exe` is the public setup and access-information UI. It
+provides Install, Update, Repair, and Uninstall; deploys the complete
+repository-defined WindowsAgent runtime executable set; and wraps the existing
+Capture Agent and Watchdog installers rather than defining a second Scheduled
+Task contract. Setup also controls whether Watchdog starts at sign-in. The GUI
+reports Installed/Not installed, Capture Agent and Watchdog Running/Stopped,
+version, LAN endpoints, and Tailscale status/IP. TailscaleAdapter is installed
+with the runtime but starts only after a non-empty auth key is supplied. This
+path still requires signed-in Windows acceptance before it is considered fully
+available; consult the
 [Assist GUI design](docs/design/assist-gui-release-distribution.md) for the
 current boundary.
 

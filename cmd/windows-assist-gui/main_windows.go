@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,6 +34,10 @@ const (
 	refreshButtonID   = 1001
 	tailscaleToggleID = 1002
 	installButtonID   = 1003
+	updateButtonID    = 1004
+	repairButtonID    = 1005
+	uninstallButtonID = 1006
+	watchdogToggleID  = 1007
 	refreshMessage    = win.WM_APP + 1
 	latestCatalogURL  = "https://github.com/qoli/WindowsAgent/releases/latest/download/windowsagent-release.json"
 )
@@ -42,6 +49,10 @@ var (
 	tailscaleLabel  win.HWND
 	refreshButton   win.HWND
 	installButton   win.HWND
+	updateButton    win.HWND
+	repairButton    win.HWND
+	uninstallButton win.HWND
+	watchdogToggle  win.HWND
 	tailscaleToggle win.HWND
 	authKeyEdit     win.HWND
 	textMu          sync.Mutex
@@ -57,19 +68,28 @@ type windowText struct {
 
 func main() {
 	if err := runMain(); err != nil {
-		title, _ := windows.UTF16PtrFromString("WindowsAgent Assist")
-		message, _ := windows.UTF16PtrFromString(err.Error())
-		win.MessageBox(0, message, title, win.MB_OK|win.MB_ICONERROR)
+		if os.Getenv("WINDOWSAGENT_ASSIST_HEADLESS") == "1" {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+		} else {
+			title, _ := windows.UTF16PtrFromString("WindowsAgent Assist")
+			message, _ := windows.UTF16PtrFromString(err.Error())
+			win.MessageBox(0, message, title, win.MB_OK|win.MB_ICONERROR)
+		}
 		os.Exit(1)
 	}
 }
 
 func runMain() error {
 	if len(os.Args) > 1 && os.Args[1] == "--apply-release" {
-		if len(os.Args) != 6 {
-			return fmt.Errorf("--apply-release requires stage, catalog, data directory, and parent process arguments")
+		if len(os.Args) != 8 {
+			return fmt.Errorf("--apply-release requires operation, stage, catalog, data directory, Watchdog startup setting, and parent process arguments")
 		}
-		parentPID, err := parsePID(os.Args[5])
+		operation := assistinstall.Operation(os.Args[2])
+		watchdogStartAtLogon, err := strconv.ParseBool(os.Args[6])
+		if err != nil {
+			return fmt.Errorf("invalid Watchdog startup setting %q", os.Args[6])
+		}
+		parentPID, err := parsePID(os.Args[7])
 		if err != nil {
 			return err
 		}
@@ -78,12 +98,57 @@ func runMain() error {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		if err := assistinstall.Apply(ctx, assistinstall.Request{StageDir: os.Args[2], CatalogPath: os.Args[3], DataDir: os.Args[4]}); err != nil {
+		if err := assistinstall.Apply(ctx, assistinstall.Request{Operation: operation, StageDir: os.Args[3], CatalogPath: os.Args[4], DataDir: os.Args[5], WatchdogStartAtLogon: watchdogStartAtLogon}); err != nil {
 			return err
 		}
-		title, _ := windows.UTF16PtrFromString("WindowsAgent Assist")
-		message, _ := windows.UTF16PtrFromString("WindowsAgent installation completed and passed local health checks.")
-		win.MessageBox(0, message, title, win.MB_OK|win.MB_ICONINFORMATION)
+		if os.Getenv("WINDOWSAGENT_ASSIST_HEADLESS") != "1" {
+			title, _ := windows.UTF16PtrFromString("WindowsAgent Assist")
+			message, _ := windows.UTF16PtrFromString("WindowsAgent " + string(operation) + " completed and passed local health checks.")
+			win.MessageBox(0, message, title, win.MB_OK|win.MB_ICONINFORMATION)
+		}
+		return nil
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--uninstall" {
+		if len(os.Args) != 4 {
+			return fmt.Errorf("--uninstall requires data directory and parent process arguments")
+		}
+		parentPID, err := parsePID(os.Args[3])
+		if err != nil {
+			return err
+		}
+		if err := waitForProcessExit(parentPID, 45*time.Second); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if err := assistinstall.Uninstall(ctx, os.Args[2]); err != nil {
+			return err
+		}
+		if os.Getenv("WINDOWSAGENT_ASSIST_HEADLESS") != "1" {
+			title, _ := windows.UTF16PtrFromString("WindowsAgent Assist")
+			message, _ := windows.UTF16PtrFromString("WindowsAgent was uninstalled. User data was preserved.")
+			win.MessageBox(0, message, title, win.MB_OK|win.MB_ICONINFORMATION)
+		}
+		return nil
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--configure-watchdog" {
+		if len(os.Args) != 4 {
+			return fmt.Errorf("--configure-watchdog requires startup setting and data directory arguments")
+		}
+		startAtLogon, err := strconv.ParseBool(os.Args[2])
+		if err != nil {
+			return fmt.Errorf("invalid Watchdog startup setting %q", os.Args[2])
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := assistinstall.ConfigureWatchdog(ctx, os.Args[3], startAtLogon); err != nil {
+			return err
+		}
+		if os.Getenv("WINDOWSAGENT_ASSIST_HEADLESS") != "1" {
+			title, _ := windows.UTF16PtrFromString("WindowsAgent Assist")
+			message, _ := windows.UTF16PtrFromString("Watchdog start-at-sign-in setting was updated.")
+			win.MessageBox(0, message, title, win.MB_OK|win.MB_ICONINFORMATION)
+		}
 		return nil
 	}
 	if len(os.Args) != 1 {
@@ -122,7 +187,7 @@ func run() error {
 		return fmt.Errorf("register Assist GUI window class: %w", windows.GetLastError())
 	}
 	windowHandle = win.CreateWindowEx(0, className, title, win.WS_OVERLAPPEDWINDOW,
-		win.CW_USEDEFAULT, win.CW_USEDEFAULT, 680, 520, 0, 0, instance, nil)
+		win.CW_USEDEFAULT, win.CW_USEDEFAULT, 680, 620, 0, 0, instance, nil)
 	if windowHandle == 0 {
 		return fmt.Errorf("create Assist GUI window: %w", windows.GetLastError())
 	}
@@ -149,13 +214,18 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 		instance := win.GetModuleHandle(nil)
 		statusLabel = createControl("STATIC", "Checking WindowsAgent...", win.WS_CHILD|win.WS_VISIBLE|win.SS_LEFT, 24, 24, 610, 54, hwnd, 0, instance)
 		accessLabel = createControl("STATIC", "LAN endpoints: checking...", win.WS_CHILD|win.WS_VISIBLE|win.SS_LEFT, 24, 92, 610, 150, hwnd, 0, instance)
-		tailscaleLabel = createControl("STATIC", "Tailscale: checking...", win.WS_CHILD|win.WS_VISIBLE|win.SS_LEFT, 24, 252, 610, 50, hwnd, 0, instance)
-		createControl("STATIC", "One-off ephemeral auth key:", win.WS_CHILD|win.WS_VISIBLE|win.SS_LEFT, 24, 315, 220, 24, hwnd, 0, instance)
-		authKeyEdit = createControl("EDIT", "", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.WS_BORDER|win.ES_PASSWORD|win.ES_AUTOHSCROLL, 244, 310, 390, 28, hwnd, 0, instance)
-		tailscaleToggle = createControl("BUTTON", "Enable Tailscale access", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_AUTOCHECKBOX, 24, 356, 250, 32, hwnd, win.HMENU(tailscaleToggleID), instance)
-		installButton = createControl("BUTTON", "Install / Update", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 344, 356, 156, 34, hwnd, win.HMENU(installButtonID), instance)
-		refreshButton = createControl("BUTTON", "Refresh", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 522, 356, 112, 34, hwnd, win.HMENU(refreshButtonID), instance)
-		if statusLabel == 0 || accessLabel == 0 || tailscaleLabel == 0 || authKeyEdit == 0 || tailscaleToggle == 0 || installButton == 0 || refreshButton == 0 {
+		tailscaleLabel = createControl("STATIC", "Tailscale: checking...", win.WS_CHILD|win.WS_VISIBLE|win.SS_LEFT, 24, 252, 610, 80, hwnd, 0, instance)
+		createControl("STATIC", "One-off ephemeral auth key:", win.WS_CHILD|win.WS_VISIBLE|win.SS_LEFT, 24, 345, 220, 24, hwnd, 0, instance)
+		authKeyEdit = createControl("EDIT", "", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.WS_BORDER|win.ES_PASSWORD|win.ES_AUTOHSCROLL, 244, 340, 390, 28, hwnd, 0, instance)
+		tailscaleToggle = createControl("BUTTON", "Enable Tailscale access", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_AUTOCHECKBOX, 24, 386, 250, 32, hwnd, win.HMENU(tailscaleToggleID), instance)
+		watchdogToggle = createControl("BUTTON", "Start Watchdog at sign-in", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_AUTOCHECKBOX, 344, 386, 288, 32, hwnd, win.HMENU(watchdogToggleID), instance)
+		win.SendMessage(watchdogToggle, win.BM_SETCHECK, win.BST_CHECKED, 0)
+		installButton = createControl("BUTTON", "Install", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 24, 440, 140, 34, hwnd, win.HMENU(installButtonID), instance)
+		updateButton = createControl("BUTTON", "Update", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 180, 440, 140, 34, hwnd, win.HMENU(updateButtonID), instance)
+		repairButton = createControl("BUTTON", "Repair", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 336, 440, 140, 34, hwnd, win.HMENU(repairButtonID), instance)
+		uninstallButton = createControl("BUTTON", "Uninstall", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 492, 440, 140, 34, hwnd, win.HMENU(uninstallButtonID), instance)
+		refreshButton = createControl("BUTTON", "Refresh", win.WS_CHILD|win.WS_VISIBLE|win.WS_TABSTOP|win.BS_PUSHBUTTON, 522, 496, 112, 34, hwnd, win.HMENU(refreshButtonID), instance)
+		if statusLabel == 0 || accessLabel == 0 || tailscaleLabel == 0 || authKeyEdit == 0 || tailscaleToggle == 0 || watchdogToggle == 0 || installButton == 0 || updateButton == 0 || repairButton == 0 || uninstallButton == 0 || refreshButton == 0 {
 			return ^uintptr(0)
 		}
 		return 0
@@ -181,7 +251,19 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 			refreshAsync()
 			return 0
 		case installButtonID:
-			installAsync()
+			installAsync(assistinstall.OperationInstall)
+			return 0
+		case updateButtonID:
+			installAsync(assistinstall.OperationUpdate)
+			return 0
+		case repairButtonID:
+			installAsync(assistinstall.OperationRepair)
+			return 0
+		case uninstallButtonID:
+			uninstallAsync()
+			return 0
+		case watchdogToggleID:
+			configureWatchdogAsync(win.SendMessage(watchdogToggle, win.BM_GETCHECK, 0, 0) == win.BST_CHECKED)
 			return 0
 		}
 	case refreshMessage:
@@ -193,17 +275,6 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 		setText(tailscaleLabel, text.tailscale)
 		return 0
 	case win.WM_CLOSE:
-		if dataDir, err := assistDataDir(); err == nil {
-			status := assistgui.LoadTailscaleStatus(dataDir)
-			if status.State == assistgui.TailscaleFailed && verifyAdapterProcess(status) != nil {
-				win.DestroyWindow(hwnd)
-				return 0
-			}
-		}
-		if err := stopTailscaleAdapter(); err != nil {
-			showError(err)
-			return 0
-		}
 		win.DestroyWindow(hwnd)
 		return 0
 	case win.WM_DESTROY:
@@ -213,20 +284,27 @@ func windowProc(hwnd win.HWND, message uint32, wParam, lParam uintptr) uintptr {
 	return win.DefWindowProc(hwnd, message, wParam, lParam)
 }
 
-func installAsync() {
-	win.EnableWindow(installButton, false)
-	setText(statusLabel, "WindowsAgent: downloading and verifying release...")
+func installAsync(operation assistinstall.Operation) {
+	watchdogStartAtLogon := win.SendMessage(watchdogToggle, win.BM_GETCHECK, 0, 0) == win.BST_CHECKED
+	setOperationButtonsEnabled(false)
+	setText(statusLabel, "WindowsAgent: preparing "+string(operation)+"...")
 	go func() {
 		handedOff := false
 		defer func() {
 			if !handedOff {
-				win.EnableWindow(installButton, true)
+				setOperationButtonsEnabled(true)
 			}
 		}()
 		dataDir, err := assistDataDir()
 		if err != nil {
 			showError(err)
 			return
+		}
+		if status := assistgui.LoadTailscaleStatus(dataDir); status.Enabled {
+			if err := stopTailscaleAdapter(); err != nil {
+				showError(fmt.Errorf("stop TailscaleAdapter before %s: %w", operation, err))
+				return
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
@@ -238,7 +316,7 @@ func installAsync() {
 			return
 		}
 		stage := filepath.Join(dataDir, "release-staging", catalog.Version+"-"+fmt.Sprint(time.Now().UTC().UnixNano()))
-		if err := downloader.Stage(ctx, base, catalog, stage, releasecatalog.BaseInstallArtifact); err != nil {
+		if err := downloader.Stage(ctx, base, catalog, stage, releasecatalog.InstallArtifact); err != nil {
 			showError(err)
 			refreshAsync()
 			return
@@ -253,7 +331,7 @@ func installAsync() {
 		verb, _ := windows.UTF16PtrFromString("runas")
 		file, _ := windows.UTF16PtrFromString(helper)
 		parameters, _ := windows.UTF16PtrFromString(strings.Join([]string{
-			"--apply-release", syscall.EscapeArg(stage), syscall.EscapeArg(catalogPath), syscall.EscapeArg(dataDir), fmt.Sprint(os.Getpid()),
+			"--apply-release", string(operation), syscall.EscapeArg(stage), syscall.EscapeArg(catalogPath), syscall.EscapeArg(dataDir), strconv.FormatBool(watchdogStartAtLogon), fmt.Sprint(os.Getpid()),
 		}, " "))
 		cwd, _ := windows.UTF16PtrFromString(stage)
 		if err := windows.ShellExecute(windows.Handle(windowHandle), verb, file, parameters, cwd, win.SW_SHOWNORMAL); err != nil {
@@ -261,9 +339,119 @@ func installAsync() {
 			return
 		}
 		handedOff = true
-		setText(statusLabel, "WindowsAgent: elevated installation started; approve the Windows prompt")
+		setText(statusLabel, "WindowsAgent: elevated "+string(operation)+" started; approve the Windows prompt")
 		win.PostMessage(windowHandle, win.WM_CLOSE, 0, 0)
 	}()
+}
+
+func uninstallAsync() {
+	setOperationButtonsEnabled(false)
+	setText(statusLabel, "WindowsAgent: preparing uninstall...")
+	go func() {
+		handedOff := false
+		defer func() {
+			if !handedOff {
+				setOperationButtonsEnabled(true)
+			}
+		}()
+		dataDir, err := assistDataDir()
+		if err != nil {
+			showError(err)
+			return
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			showError(fmt.Errorf("resolve AssistGUI executable: %w", err))
+			return
+		}
+		stage := filepath.Join(dataDir, "release-staging", "uninstall-"+fmt.Sprint(time.Now().UTC().UnixNano()))
+		if err := os.MkdirAll(stage, 0o700); err != nil {
+			showError(fmt.Errorf("create uninstall staging directory: %w", err))
+			return
+		}
+		helper := filepath.Join(stage, "windows-assist-gui.exe")
+		if err := copyVerified(executable, helper); err != nil {
+			showError(err)
+			return
+		}
+		verb, _ := windows.UTF16PtrFromString("runas")
+		file, _ := windows.UTF16PtrFromString(helper)
+		parameters, _ := windows.UTF16PtrFromString(strings.Join([]string{
+			"--uninstall", syscall.EscapeArg(dataDir), fmt.Sprint(os.Getpid()),
+		}, " "))
+		cwd, _ := windows.UTF16PtrFromString(stage)
+		if err := windows.ShellExecute(windows.Handle(windowHandle), verb, file, parameters, cwd, win.SW_SHOWNORMAL); err != nil {
+			showError(fmt.Errorf("start elevated WindowsAgent uninstaller: %w", err))
+			return
+		}
+		handedOff = true
+		setText(statusLabel, "WindowsAgent: elevated uninstall started; approve the Windows prompt")
+		win.PostMessage(windowHandle, win.WM_CLOSE, 0, 0)
+	}()
+}
+
+func configureWatchdogAsync(startAtLogon bool) {
+	dataDir, err := assistDataDir()
+	if err != nil {
+		showError(err)
+		return
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "bin", "windows-capture-agent.exe")); err != nil {
+		return
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		showError(fmt.Errorf("resolve AssistGUI executable: %w", err))
+		return
+	}
+	verb, _ := windows.UTF16PtrFromString("runas")
+	file, _ := windows.UTF16PtrFromString(executable)
+	parameters, _ := windows.UTF16PtrFromString(strings.Join([]string{
+		"--configure-watchdog", strconv.FormatBool(startAtLogon), syscall.EscapeArg(dataDir),
+	}, " "))
+	cwd, _ := windows.UTF16PtrFromString(filepath.Dir(executable))
+	if err := windows.ShellExecute(windows.Handle(windowHandle), verb, file, parameters, cwd, win.SW_SHOWNORMAL); err != nil {
+		showError(fmt.Errorf("start elevated Watchdog configurator: %w", err))
+		return
+	}
+	setText(statusLabel, "Watchdog: elevated setting update started; approve the Windows prompt")
+	go func() {
+		time.Sleep(3 * time.Second)
+		refreshAsync()
+	}()
+}
+
+func copyVerified(source, destination string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return fmt.Errorf("read AssistGUI for staging: %w", err)
+	}
+	if err := os.WriteFile(destination, data, 0o700); err != nil {
+		return fmt.Errorf("write staged AssistGUI: %w", err)
+	}
+	written, err := os.ReadFile(destination)
+	if err != nil {
+		return fmt.Errorf("read staged AssistGUI: %w", err)
+	}
+	if sha256.Sum256(written) != sha256.Sum256(data) {
+		return fmt.Errorf("staged AssistGUI SHA-256 mismatch")
+	}
+	return nil
+}
+
+func setOperationButtonsEnabled(enabled bool) {
+	for _, button := range []win.HWND{installButton, updateButton, repairButton, uninstallButton} {
+		if button != 0 {
+			win.EnableWindow(button, enabled)
+		}
+	}
+}
+
+func setOperationAvailability(installed bool) {
+	win.EnableWindow(installButton, !installed)
+	for _, button := range []win.HWND{updateButton, repairButton, uninstallButton, tailscaleToggle} {
+		win.EnableWindow(button, installed)
+	}
 }
 
 func parsePID(value string) (uint32, error) {
@@ -374,17 +562,35 @@ func refreshAsync() {
 				snapshot.Tailscale.Error = "stale adapter status: " + err.Error()
 			}
 		}
-		status := "WindowsAgent: not installed"
+		status := "WindowsAgent: Not installed"
 		if snapshot.Installed {
-			status = "WindowsAgent: installed, not healthy"
+			status = "WindowsAgent: Installed\r\nCapture Agent: Stopped"
+			if snapshot.InstalledVersion != "" {
+				status = "WindowsAgent: Installed (" + snapshot.InstalledVersion + ")\r\nCapture Agent: Stopped"
+			}
 		}
 		if snapshot.AgentHealthy {
-			status = "WindowsAgent: ready"
+			status = "WindowsAgent: Installed\r\nCapture Agent: Running"
 			if snapshot.AgentVersion != "" {
 				status += " (" + snapshot.AgentVersion + ")"
 			}
 		} else if snapshot.AgentHealthError != "" {
 			status += "\r\n" + snapshot.AgentHealthError
+		}
+		watchdog, watchdogErr := inspectWatchdog()
+		if watchdogErr != nil {
+			status += "\r\nWatchdog: inspection failed: " + watchdogErr.Error()
+		} else if watchdog.Installed {
+			state := "Stopped"
+			if watchdog.Running {
+				state = "Running"
+			}
+			start := "No"
+			if watchdog.StartAtLogon {
+				start = "Yes"
+			}
+			status += "\r\nWatchdog: " + state + "; starts at sign-in: " + start
+			win.SendMessage(watchdogToggle, win.BM_SETCHECK, mapCheck(watchdog.StartAtLogon), 0)
 		}
 		var endpoints []string
 		for _, endpoint := range snapshot.LANEndpoints {
@@ -399,7 +605,10 @@ func refreshAsync() {
 			win.SendMessage(tailscaleToggle, win.BM_SETCHECK, win.BST_CHECKED, 0)
 			tailscale = "Tailscale: " + snapshot.Tailscale.State
 			if snapshot.Tailscale.IPv4 != "" {
-				tailscale += "  " + snapshot.Tailscale.IPv4
+				tailscale += "\r\nIPv4: " + snapshot.Tailscale.IPv4
+			}
+			if snapshot.Tailscale.IPv6 != "" {
+				tailscale += "\r\nIPv6: " + snapshot.Tailscale.IPv6
 			}
 			if snapshot.Tailscale.Error != "" {
 				tailscale += "\r\n" + snapshot.Tailscale.Error
@@ -407,8 +616,35 @@ func refreshAsync() {
 		} else {
 			win.SendMessage(tailscaleToggle, win.BM_SETCHECK, win.BST_UNCHECKED, 0)
 		}
+		setOperationAvailability(snapshot.Installed)
 		publish(windowText{status: status, access: access, tailscale: tailscale})
 	}()
+}
+
+type watchdogFacts struct {
+	Installed    bool `json:"installed"`
+	Running      bool `json:"running"`
+	StartAtLogon bool `json:"startAtLogon"`
+}
+
+func inspectWatchdog() (watchdogFacts, error) {
+	const script = `$task = Get-ScheduledTask -TaskName 'gameGuide Windows Watchdog' -ErrorAction SilentlyContinue; if (-not $task) { @{installed=$false;running=$false;startAtLogon=$false} | ConvertTo-Json -Compress; exit 0 }; if ($task.Description -cne 'gameGuide external process watchdog; no automatic self-recovery') { throw 'Watchdog Scheduled Task ownership mismatch' }; @{installed=$true;running=($task.State.ToString() -ceq 'Running');startAtLogon=(@($task.Triggers | Where-Object { $_.CimClass.CimClassName -ceq 'MSFT_TaskLogonTrigger' }).Count -gt 0)} | ConvertTo-Json -Compress`
+	output, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
+	if err != nil {
+		return watchdogFacts{}, fmt.Errorf("query Scheduled Task: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	var facts watchdogFacts
+	if err := json.Unmarshal(output, &facts); err != nil {
+		return watchdogFacts{}, fmt.Errorf("decode Scheduled Task state: %w", err)
+	}
+	return facts, nil
+}
+
+func mapCheck(checked bool) uintptr {
+	if checked {
+		return win.BST_CHECKED
+	}
+	return win.BST_UNCHECKED
 }
 
 func startTailscaleAdapter(authKey []byte) error {
@@ -421,16 +657,13 @@ func startTailscaleAdapter(authKey []byte) error {
 	if adapterCommand != nil && adapterCommand.Process != nil {
 		return fmt.Errorf("TailscaleAdapter is already running")
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve AssistGUI executable: %w", err)
-	}
-	adapterPath := filepath.Join(filepath.Dir(executable), "windows-tailscale-adapter.exe")
-	if err := verifyAdjacentAdapter(filepath.Dir(executable)); err != nil {
-		return err
-	}
 	dataDir, err := assistDataDir()
 	if err != nil {
+		return err
+	}
+	binDir := filepath.Join(dataDir, "bin")
+	adapterPath := filepath.Join(binDir, "windows-tailscale-adapter.exe")
+	if err := verifyAdjacentAdapter(binDir); err != nil {
 		return err
 	}
 	existing := assistgui.LoadTailscaleStatus(dataDir)
@@ -526,11 +759,11 @@ func verifyAdapterProcess(status assistgui.TailscaleSnapshot) error {
 	if err := windows.QueryFullProcessImageName(handle, 0, &buffer[0], &size); err != nil {
 		return fmt.Errorf("read process image: %w", err)
 	}
-	executable, err := os.Executable()
+	dataDir, err := assistDataDir()
 	if err != nil {
 		return err
 	}
-	expected := filepath.Join(filepath.Dir(executable), "windows-tailscale-adapter.exe")
+	expected := filepath.Join(dataDir, "bin", "windows-tailscale-adapter.exe")
 	actual := windows.UTF16ToString(buffer[:size])
 	if !strings.EqualFold(actual, expected) {
 		return fmt.Errorf("process image is %q, expected %q", actual, expected)

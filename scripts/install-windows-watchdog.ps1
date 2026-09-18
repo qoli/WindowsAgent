@@ -9,6 +9,7 @@ param(
 
     [string]$DataDir = (Join-Path $env:LOCALAPPDATA "gameGuide\windows-capture-agent"),
     [string]$TaskName = "gameGuide Windows Watchdog",
+    [bool]$StartAtLogon = $true,
     [timespan]$Timeout = ([timespan]::FromSeconds(20))
 )
 
@@ -97,8 +98,12 @@ if ($running.Count -ne 0) {
     throw "existing watchdog process did not stop"
 }
 
-Copy-Item -LiteralPath $sourceExecutable -Destination $installedExecutable -Force
-Copy-Item -LiteralPath $sourceConfig -Destination $installedConfig -Force
+if ($sourceExecutable -cne $installedExecutable) {
+    Copy-Item -LiteralPath $sourceExecutable -Destination $installedExecutable -Force
+}
+if ($sourceConfig -cne $installedConfig) {
+    Copy-Item -LiteralPath $sourceConfig -Destination $installedConfig -Force
+}
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceExecutable).Hash -ne `
     (Get-FileHash -Algorithm SHA256 -LiteralPath $installedExecutable).Hash) {
     throw "installed watchdog hash differs from source"
@@ -128,7 +133,16 @@ $settings = New-ScheduledTaskSettingsSet `
     -Hidden `
     -ExecutionTimeLimit ([timespan]::Zero) `
     -MultipleInstances IgnoreNew
-$task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description $taskDescription
+$taskArguments = @{
+    Action = $action
+    Principal = $principal
+    Settings = $settings
+    Description = $taskDescription
+}
+if ($StartAtLogon) {
+    $taskArguments.Trigger = $trigger
+}
+$task = New-ScheduledTask @taskArguments
 Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-Null
 if (Test-Path -LiteralPath $statusFile -PathType Leaf) {
     Remove-Item -LiteralPath $statusFile -Force
@@ -167,4 +181,5 @@ if ([int]$registeredTask.Settings.RestartCount -ne 0) {
     process_id = $process.Id
     session_id = $process.SessionId
     self_recovery = $false
+    start_at_logon = $StartAtLogon
 } | ConvertTo-Json

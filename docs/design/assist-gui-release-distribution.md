@@ -12,13 +12,14 @@ state. It can start an ephemeral adapter from a one-off auth key and request a
 graceful logout through a local stop file.
 
 The GUI can download the latest public catalog and checksum list over an
-HTTP/1.1-only client, stage and verify the base executable set, and hand the
-transaction to a verified staged AssistGUI copy running elevated. The
-transaction installs or updates current-user Scheduled Tasks, preserves owned
-task definitions and installed files for rollback, then requires health,
-listener-owner, executable-path, and interactive-session read-back before it
-reports success. The v0.1.1 release was published for initial validation. No
-release has been live-installed by this work.
+HTTP/1.1-only client, stage and verify the repository-defined installable
+executable set, and hand the transaction to a verified staged AssistGUI copy
+running elevated. Install, Update, and Repair invoke the repository-owned
+Capture Agent and Watchdog PowerShell installers with setup-owned inputs;
+Uninstall removes their owned Scheduled Tasks and runtime executables while
+preserving user data. The transaction preserves owned task definitions and
+installed files for rollback, then requires existing installer health and
+process-owner read-back before it reports success.
 
 ## Problem
 
@@ -40,7 +41,7 @@ This design owns:
 - the AssistGUI bootstrap, information, and settings surface;
 - verified HTTP/1.1 release downloads;
 - the optional ephemeral Tailscale transport process; and
-- the future whole-release installation and update transaction.
+- the whole-release Install, Update, Repair, and Uninstall transaction.
 
 It does not redefine Capture Agent, Event Stream, delegated Pi, Rule, Action,
 Watchdog, or inference-runtime semantics. It does not make Tailscale mandatory
@@ -72,7 +73,7 @@ The catalog is a coherent release set. AssistGUI must stage and validate the
 complete selected set before mutating an installation; it must not report a
 partially updated process graph as a successful release update.
 
-## AssistGUI model
+## AssistGUI setup surface
 
 TailscaleAdapter is disabled by default. AssistGUI always reports Agent health
 and active private-LAN IPv4 endpoints. When the adapter is enabled it also
@@ -83,19 +84,37 @@ The auth key is accepted through a password edit control, passed to the adapter
 on standard input, cleared from the control after process start, and never
 placed in command-line arguments or status JSON.
 
-The Install / Update action selects the bootstrap artifact, every
-`runtime-required` artifact, and TailscaleAdapter. It downloads every selected
-file into a fresh staging transaction and writes the verified catalog and
-checksum receipt beside them. A staged AssistGUI copy waits for the original
-GUI to exit before applying the update, so the installed AssistGUI can replace
-itself without overwriting a running executable.
+AssistGUI has no capability selector or optional-capability installation
+model. Install, Update, and Repair stage every executable that the release
+catalog marks as an installable WindowsAgent runtime artifact. Release classes
+remain artifact metadata; they are not presented as product choices. Operator
+tools and the console diagnostic remain release assets but are not installed
+runtime processes.
+
+The GUI exposes the concrete operations Install, Update, Repair, and Uninstall.
+It reports Installed/Not installed, Capture Agent Running/Stopped, installed
+version, Watchdog Running/Stopped and start-at-sign-in state, LAN endpoints,
+and Tailscale status and assigned IPs. A staged AssistGUI copy waits for the
+original GUI to exit before applying a mutation, so AssistGUI can replace its
+installed copy without overwriting a running executable.
 
 The elevated mutation is restricted to the current user's fixed WindowsAgent
-data directory and two WindowsAgent-owned Scheduled Tasks. An existing task
-with the same name but a different ownership description is a terminal error.
-Rollback restores both task XML and all selected executables and release
-metadata. Tailscale remains disabled after installation until the user enables
-it and supplies a one-off key.
+data directory and the repository-owned Capture Agent, Event Stream, and
+Watchdog Scheduled Tasks. AssistGUI embeds and invokes the existing
+`install-windows-capture-agent.ps1`, `sync-windows-agent-rule.ps1`, and
+`install-windows-watchdog.ps1` sources. It generates only the concrete glue
+inputs those installers require for an unfamiliar machine: a canonical data
+directory, an initially empty Rules directory, and a two-target Watchdog
+configuration for Event Stream then Capture Agent. Existing Rules and user
+data are preserved. An existing task with the same name but a different
+ownership description is a terminal error. Rollback restores task XML,
+executables, release metadata, and Watchdog configuration.
+
+Watchdog is installed and started as part of setup. The user-facing checkbox
+controls whether its Scheduled Task has an at-sign-in trigger; it does not
+create a second lifecycle mechanism. TailscaleAdapter is always deployed with
+the runtime, remains stopped when the auth-key field is empty, and starts only
+after a non-empty one-off key is supplied.
 
 ## TailscaleAdapter model
 
@@ -130,11 +149,10 @@ it does not absorb their implementations into AssistGUI.
 
 - Decide whether Authenticode is warranted after the bootstrap distribution
   and Defender false-positive behavior are validated independently.
-- Decide whether optional companion processes need separately selectable
-  install controls beyond the current base executable set.
 - Validate adapter enrollment, tailnet listener reachability, GUI state, logout,
-  node removal, fresh installation, rollback, and self-update in a signed-in
-  Windows session.
+  node removal, fresh installation, Update, Repair, Uninstall, rollback,
+  Watchdog startup configuration, and self-update in a signed-in Windows
+  session.
 
 ## Suggested Next Steps
 

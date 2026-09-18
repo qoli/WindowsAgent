@@ -29,6 +29,7 @@ type Snapshot struct {
 	Installed        bool
 	AgentHealthy     bool
 	AgentVersion     string
+	InstalledVersion string
 	AgentListen      string
 	LANEndpoints     []Endpoint
 	Tailscale        TailscaleSnapshot
@@ -80,6 +81,9 @@ func (i Inspector) Snapshot(ctx context.Context) (Snapshot, error) {
 		interfaces = net.Interfaces
 	}
 	snapshot := Snapshot{Installed: installed(i.DataDir), Tailscale: LoadTailscaleStatus(i.DataDir)}
+	if snapshot.Installed {
+		snapshot.InstalledVersion = installedVersion(i.DataDir)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, i.AgentURL, nil)
 	if err != nil {
 		return Snapshot{}, err
@@ -137,8 +141,28 @@ func (i Inspector) Snapshot(ctx context.Context) (Snapshot, error) {
 }
 
 func installed(dataDir string) bool {
-	info, err := os.Stat(filepath.Join(dataDir, "bin", "windows-capture-agent.exe"))
-	return err == nil && info.Mode().IsRegular()
+	for _, name := range []string{"windows-capture-agent.exe", "windowsagent-release.json"} {
+		info, err := os.Stat(filepath.Join(dataDir, "bin", name))
+		if err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+func installedVersion(dataDir string) string {
+	file, err := os.Open(filepath.Join(dataDir, "bin", "windowsagent-release.json"))
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	var metadata struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(file).Decode(&metadata); err != nil {
+		return ""
+	}
+	return metadata.Version
 }
 
 func LoadTailscaleStatus(dataDir string) TailscaleSnapshot {

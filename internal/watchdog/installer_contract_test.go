@@ -26,6 +26,44 @@ func TestInstallerExplicitlyForbidsWatchdogSelfRecovery(t *testing.T) {
 	}
 }
 
+func TestWatchdogInstallerMakesOnlyTheLogonTriggerConfigurable(t *testing.T) {
+	data, err := os.ReadFile("../../scripts/install-windows-watchdog.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`[bool]$StartAtLogon = $true`,
+		`if ($StartAtLogon)`,
+		`$taskArguments.Trigger = $trigger`,
+		`Start-ScheduledTask -TaskName $TaskName`,
+		`start_at_logon = $StartAtLogon`,
+		`if ($sourceExecutable -cne $installedExecutable)`,
+		`if ($sourceConfig -cne $installedConfig)`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("watchdog installer is missing start-at-logon contract %q", required)
+		}
+	}
+}
+
+func TestCaptureInstallerAllowsEmptyRulesOnlyWhenExplicitlyRequested(t *testing.T) {
+	data, err := os.ReadFile("../../scripts/install-windows-capture-agent.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, required := range []string{
+		`[switch]$AllowEmptyRules`,
+		`$sourceRuleDirectories.Count -eq 0 -and -not $AllowEmptyRules`,
+		`Rules directory must contain at least one executable Rule plugin`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("capture installer is missing empty-Rules setup contract %q", required)
+		}
+	}
+}
+
 func TestModuleInstallersDefaultToWatchdogManagedTasks(t *testing.T) {
 	for _, name := range []string{
 		"../../scripts/install-windows-capture-agent.ps1",

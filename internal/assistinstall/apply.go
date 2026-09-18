@@ -1,4 +1,5 @@
-// Package assistinstall applies one verified base WindowsAgent release set.
+// Package assistinstall wraps the repository-owned Windows installers for one
+// verified WindowsAgent release set.
 package assistinstall
 
 import (
@@ -15,13 +16,34 @@ import (
 //go:embed install.ps1
 var installerScript string
 
+//go:embed uninstall.ps1
+var uninstallerScript string
+
+//go:embed configure_watchdog.ps1
+var configureWatchdogScript string
+
 type Request struct {
-	StageDir    string
-	CatalogPath string
-	DataDir     string
+	Operation            Operation
+	StageDir             string
+	CatalogPath          string
+	DataDir              string
+	WatchdogStartAtLogon bool
 }
 
+type Operation string
+
+const (
+	OperationInstall Operation = "install"
+	OperationUpdate  Operation = "update"
+	OperationRepair  Operation = "repair"
+)
+
 func Apply(ctx context.Context, request Request) error {
+	switch request.Operation {
+	case OperationInstall, OperationUpdate, OperationRepair:
+	default:
+		return fmt.Errorf("unsupported setup operation %q", request.Operation)
+	}
 	if request.StageDir == "" || !filepath.IsAbs(request.StageDir) {
 		return errors.New("release stage directory must be absolute")
 	}
@@ -44,8 +66,8 @@ func Apply(ctx context.Context, request Request) error {
 	if err != nil {
 		return err
 	}
-	if err := releasecatalog.VerifySelected(request.StageDir, catalog, releasecatalog.BaseInstallArtifact); err != nil {
-		return fmt.Errorf("verify staged base release: %w", err)
+	if err := releasecatalog.VerifySelected(request.StageDir, catalog, releasecatalog.InstallArtifact); err != nil {
+		return fmt.Errorf("verify staged runtime release: %w", err)
 	}
 	sums, err := os.Open(filepath.Join(request.StageDir, "SHA256SUMS"))
 	if err != nil {
@@ -60,4 +82,18 @@ func Apply(ctx context.Context, request Request) error {
 		return fmt.Errorf("close staged SHA256SUMS: %w", closeErr)
 	}
 	return runInstaller(ctx, request, installerScript)
+}
+
+func Uninstall(ctx context.Context, dataDir string) error {
+	if dataDir == "" || !filepath.IsAbs(dataDir) {
+		return errors.New("uninstall data directory must be absolute")
+	}
+	return runUninstaller(ctx, dataDir, uninstallerScript)
+}
+
+func ConfigureWatchdog(ctx context.Context, dataDir string, startAtLogon bool) error {
+	if dataDir == "" || !filepath.IsAbs(dataDir) {
+		return errors.New("Watchdog data directory must be absolute")
+	}
+	return runWatchdogConfigurator(ctx, dataDir, startAtLogon, configureWatchdogScript)
 }

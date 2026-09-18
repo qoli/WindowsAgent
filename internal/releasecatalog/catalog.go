@@ -94,6 +94,13 @@ func BaseInstallArtifact(artifact Artifact) bool {
 	return artifact.Class == ClassBootstrap || artifact.Class == ClassRuntimeRequired || artifact.Role == "tailscale-adapter"
 }
 
+// InstallArtifact selects every executable deployed by AssistGUI. Operator
+// tools and the console diagnostic remain release assets but are not installed
+// into the Windows runtime.
+func InstallArtifact(artifact Artifact) bool {
+	return artifact.Class == ClassBootstrap || artifact.Class == ClassRuntimeRequired || artifact.Class == ClassRuntimeOptional
+}
+
 func Load(r io.Reader) (Catalog, error) {
 	limited := io.LimitReader(r, maxCatalogBytes+1)
 	data, err := io.ReadAll(limited)

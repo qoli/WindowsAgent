@@ -63,6 +63,24 @@ func TestSnapshotPreservesHealthFailure(t *testing.T) {
 	}
 }
 
+func TestSnapshotRecognizesRepairableReleaseMetadataAndVersion(t *testing.T) {
+	dataDir := t.TempDir()
+	binDir := filepath.Join(dataDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "windowsagent-release.json"), []byte(`{"version":"v9.8.7"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := (Inspector{DataDir: dataDir, AgentURL: "http://127.0.0.1:1/healthz", Port: "8787", Interfaces: func() ([]net.Interface, error) { return nil, nil }}).Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Installed || snapshot.InstalledVersion != "v9.8.7" || snapshot.AgentHealthy {
+		t.Fatalf("unexpected repairable snapshot: %#v", snapshot)
+	}
+}
+
 func TestLoadTailscaleRejectsMalformedState(t *testing.T) {
 	dataDir := t.TempDir()
 	directory := filepath.Join(dataDir, "tailscale")
