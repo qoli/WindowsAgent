@@ -25,6 +25,8 @@ type Client struct {
 	HTTP *http.Client
 }
 
+const transportAttempts = 3
+
 func NewHTTP1Client() *http.Client {
 	transport := &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
@@ -55,7 +57,7 @@ func (c Client) FetchCatalog(ctx context.Context, catalogURL string) (releasecat
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return releasecatalog.Catalog{}, nil, fmt.Errorf("catalog URL must be absolute HTTPS: %q", catalogURL)
 	}
-	response, err := c.http().Do(request(ctx, parsed.String()))
+	response, err := c.do(ctx, parsed.String())
 	if err != nil {
 		return releasecatalog.Catalog{}, nil, fmt.Errorf("download release catalog: %w", err)
 	}
@@ -84,7 +86,7 @@ func (c Client) FetchCatalog(ctx context.Context, catalogURL string) (releasecat
 
 func (c Client) validateSums(ctx context.Context, base *url.URL, catalog releasecatalog.Catalog) error {
 	target := base.ResolveReference(&url.URL{Path: "SHA256SUMS"})
-	response, err := c.http().Do(request(ctx, target.String()))
+	response, err := c.do(ctx, target.String())
 	if err != nil {
 		return fmt.Errorf("download SHA256SUMS: %w", err)
 	}
@@ -152,7 +154,7 @@ func (c Client) Stage(ctx context.Context, base *url.URL, catalog releasecatalog
 }
 
 func (c Client) stageOne(ctx context.Context, assetURL, directory string, artifact releasecatalog.Artifact) error {
-	response, err := c.http().Do(request(ctx, assetURL))
+	response, err := c.do(ctx, assetURL)
 	if err != nil {
 		return fmt.Errorf("download %s: %w", artifact.Name, err)
 	}
@@ -214,6 +216,32 @@ func (c Client) http() *http.Client {
 		return c.HTTP
 	}
 	return NewHTTP1Client()
+}
+
+func (c Client) do(ctx context.Context, target string) (*http.Response, error) {
+	var lastErr error
+	for attempt := 1; attempt <= transportAttempts; attempt++ {
+		response, err := c.http().Do(request(ctx, target))
+		if err == nil {
+			return response, nil
+		}
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		lastErr = err
+		if ctx.Err() != nil || !retryableTransportError(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("release download transport failed after %d attempts: %w", transportAttempts, lastErr)
+}
+
+func retryableTransportError(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var networkError net.Error
+	return errors.As(err, &networkError)
 }
 
 func request(ctx context.Context, target string) *http.Request {

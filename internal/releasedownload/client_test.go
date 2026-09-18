@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,37 @@ import (
 
 	"github.com/qoli/WindowsAgent/internal/releasecatalog"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
+
+func TestDoRetriesEOFTransportFailure(t *testing.T) {
+	attempts := 0
+	client := Client{HTTP: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts < transportAttempts {
+			return nil, io.EOF
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			ProtoMajor: 1,
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Header:     make(http.Header),
+			Request:    request,
+		}, nil
+	})}}
+	response, err := client.do(context.Background(), "https://example.test/release.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if attempts != transportAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, transportAttempts)
+	}
+}
 
 func TestFetchCatalogForcesHTTP1(t *testing.T) {
 	catalog := validCatalog()
