@@ -69,6 +69,9 @@ inventories:
 - `.agents/skills/maintain-windowsagent-runtime/SKILL.md` owns the workflow for
   generic runtime diagnosis, development, deployment, and acceptance without
   taking ownership of Rule semantics;
+- `.agents/skills/publish-windowsagent-release/SKILL.md` owns validation,
+  tag-driven GitHub Release publication, and public asset read-back without
+  implying live Windows installation or acceptance;
 - `.agents/skills/use-visual-log/SKILL.md` owns the supervising-model workflow
   for operating the on-demand visual log and using it to locate evidence time
   ranges.
