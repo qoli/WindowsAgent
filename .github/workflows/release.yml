@@ -38,12 +38,18 @@ jobs:
           ./scripts/build-windows-capture-agent.sh
           --output-dir "$PWD/.release"
           --version "${{ steps.version.outputs.value }}"
+      - name: Package only the AssistGUI bootstrap
+        shell: bash
+        run: |
+          (cd .release && zip -9 windows-assist-gui.zip windows-assist-gui.exe)
+          [[ "$(unzip -Z1 .release/windows-assist-gui.zip)" == "windows-assist-gui.exe" ]]
       - name: Publish individual release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release create "$GITHUB_REF_NAME"
           .release/*.exe
+          .release/windows-assist-gui.zip
           .release/windowsagent-release.json
           .release/SHA256SUMS
           --verify-tag

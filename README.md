@@ -192,8 +192,9 @@ The build also emits `windowsagent-release.json` and `SHA256SUMS`. The catalog
 classifies every published executable as bootstrap, required runtime, optional
 runtime, operator tool, or diagnostic and rejects missing or unexpected EXEs.
 Tagged releases upload each EXE and both metadata files as separate GitHub
-Release assets; no traditional Setup package or combined executable archive is
-produced.
+Release assets. They also provide `windows-assist-gui.zip`, containing only
+`windows-assist-gui.exe`, as the bootstrap download. There is no traditional
+Setup package or archive of the complete multi-process system.
 
 `windows-capture-agent.exe` is the installable GUI artifact.
 `windows-capture-agent-console.exe` is for interactive diagnostics and must not

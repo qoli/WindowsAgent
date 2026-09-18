@@ -17,8 +17,8 @@ transaction to a verified staged AssistGUI copy running elevated. The
 transaction installs or updates current-user Scheduled Tasks, preserves owned
 task definitions and installed files for rollback, then requires health,
 listener-owner, executable-path, and interactive-session read-back before it
-reports success. No GitHub Release has been published or live-installed by
-this work.
+reports success. The v0.1.1 release was published for initial validation. No
+release has been live-installed by this work.
 
 ## Problem
 
@@ -62,6 +62,11 @@ The generator fails on missing or unexpected executables, duplicate names,
 unsafe paths, metadata drift, invalid PE subsystem, or noncanonical digest.
 GitHub Release uploads the individual `.exe` files together with
 `windowsagent-release.json` and `SHA256SUMS`.
+
+The release additionally provides `windows-assist-gui.zip` as a narrow
+bootstrap transport. That archive contains exactly `windows-assist-gui.exe`;
+it does not duplicate the release catalog, checksums, or any other executable,
+and it does not hide the multi-process release inside a combined archive.
 
 The catalog is a coherent release set. AssistGUI must stage and validate the
 complete selected set before mutating an installation; it must not report a
@@ -123,7 +128,8 @@ it does not absorb their implementations into AssistGUI.
 
 ## Open Questions
 
-- Add Authenticode verification in addition to catalog SHA-256 consistency.
+- Decide whether Authenticode is warranted after the bootstrap distribution
+  and Defender false-positive behavior are validated independently.
 - Decide whether optional companion processes need separately selectable
   install controls beyond the current base executable set.
 - Validate adapter enrollment, tailnet listener reachability, GUI state, logout,
@@ -132,6 +138,6 @@ it does not absorb their implementations into AssistGUI.
 
 ## Suggested Next Steps
 
-Perform live Windows acceptance for fresh install, update, rollback, LAN access,
-and ephemeral Tailscale lifecycle before moving this design beyond Partially
-landed.
+Perform live Windows acceptance for the bootstrap archive, fresh install,
+update, rollback, LAN access, and ephemeral Tailscale lifecycle before moving
+this design beyond Partially landed.
