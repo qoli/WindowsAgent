@@ -54,6 +54,7 @@ prose drifts.
 | Resident PP-OCR DirectML profiles | Available | Rule-declared residency while the Rule is active |
 | Event Web and Action OSD | Available, optional | Independent read-only event projections |
 | SFTP filesystem runtime | Available, optional | Separate SFTP-only process and Windows token |
+| Assist GUI and executable release catalog | Partially available | Native access status, strict multi-EXE catalog, and optional ephemeral TailscaleAdapter |
 | General Starlark automation | Partially available | Ephemeral `windows-starlark-action-v1` package |
 | Direct process execution | Partially available | Structured `windows-exec-v1` operations |
 | Direct and Rule-owned input | Partially available | Foreground-bound key and pointer runtimes |
@@ -185,12 +186,27 @@ The build script emits and verifies the expected Windows PE subsystem for:
 - Event Stream, Event Web, Action OSD, Watchdog, Evidence Recorder, Visual Log,
   and SFTP;
 - the delegated Pi control and component executables.
+- AssistGUI and the independent TailscaleAdapter.
+
+The build also emits `windowsagent-release.json` and `SHA256SUMS`. The catalog
+classifies every published executable as bootstrap, required runtime, optional
+runtime, operator tool, or diagnostic and rejects missing or unexpected EXEs.
+Tagged releases upload each EXE and both metadata files as separate GitHub
+Release assets; no traditional Setup package or combined executable archive is
+produced.
 
 `windows-capture-agent.exe` is the installable GUI artifact.
 `windows-capture-agent-console.exe` is for interactive diagnostics and must not
 replace the installed GUI build. Local clients such as `windows-exec.exe`,
 `windows-key.exe`, `windows-starlark-check.exe`, and
 `windows-starlark-invoke.exe` are not installed Agent payloads.
+`windows-assist-gui.exe` is the public bootstrap and access-information UI. Its
+Install / Update action stages a checksum- and PE-verified base runtime set,
+hands self-update to the staged AssistGUI, and applies a rollback-capable
+current-user Scheduled Task transaction. This path still requires signed-in
+Windows acceptance before it is considered fully available; consult the
+[Assist GUI design](docs/design/assist-gui-release-distribution.md) for the
+current boundary.
 
 ### Validate Action dependencies
 
@@ -647,8 +663,10 @@ internal/sftpruntime/         SFTP-only server, host identity, and health
 internal/watchdog/            external process probes and bounded recovery
 internal/windowsautomation/   ephemeral general Windows Starlark runtime
 internal/windowsexec/         structured process and PowerShell-file runtime
+internal/release*/            executable catalog and HTTP/1.1 verified downloads
+internal/assistgui/           AssistGUI access-information model
 Rules/<Executable.exe>/       distributable Rule v6 packages and guidance
-runtimes/                     self-contained external inference and Pi runtimes
+runtimes/                     self-contained external inference, Pi, and Tailscale runtimes
 tools/                        model preparation, publishing, and diagnostics
 scripts/                      install, update, deploy, and operator helpers
 docs/design/                  maintained maturity registry and design documents

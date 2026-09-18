@@ -168,6 +168,22 @@ func (f *fakeCapturer) Capture(ctx context.Context, request capture.Request) (ca
 	return result, nil
 }
 
+func TestHealthReportsReleaseAndListenerIdentity(t *testing.T) {
+	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var health map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	if health["status"] != "ok" || health["service"] != "windows-capture-agent" || health["version"] != "test" || health["listen"] != "127.0.0.1:8787" {
+		t.Fatalf("health = %#v", health)
+	}
+}
+
 func TestProcessInventoryReturnsOsqueryShapedSnapshot(t *testing.T) {
 	server, _ := newTestServer(t, &fakeCapturer{status: testStatus(), result: testResult()})
 	path := `C:\Windows\System32\svchost.exe`
@@ -1104,6 +1120,7 @@ func newTestServerAndRuleRootWithServices(
 		}},
 		timeout,
 		"test",
+		"127.0.0.1:8787",
 		logger,
 	)
 	if err != nil {

@@ -188,6 +188,7 @@ func run() (runErr error) {
 		processinventory.NewOSCollector(),
 		cfg.CaptureTimeout,
 		version,
+		cfg.Listen,
 		logger,
 	)
 	if err != nil {

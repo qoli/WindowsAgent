@@ -50,6 +50,7 @@ type Server struct {
 	processes  processinventory.Collector
 	timeout    time.Duration
 	version    string
+	listen     string
 	logger     *slog.Logger
 	gate       chan struct{}
 	scriptGate chan struct{}
@@ -137,6 +138,7 @@ func New(
 	processCollector processinventory.Collector,
 	timeout time.Duration,
 	version string,
+	listen string,
 	logger *slog.Logger,
 ) (*Server, error) {
 	if capturer == nil {
@@ -163,6 +165,9 @@ func New(
 	if version == "" {
 		return nil, errors.New("service version is required")
 	}
+	if listen == "" {
+		return nil, errors.New("listen address is required")
+	}
 	if logger == nil {
 		return nil, errors.New("logger is required")
 	}
@@ -175,6 +180,7 @@ func New(
 		processes:  processCollector,
 		timeout:    timeout,
 		version:    version,
+		listen:     listen,
 		logger:     logger,
 		gate:       make(chan struct{}, 1),
 		scriptGate: make(chan struct{}, 1),
@@ -753,7 +759,9 @@ func (s *Server) requireMethod(w http.ResponseWriter, r *http.Request, requestID
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request, _ string) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "ok", "service": "windows-capture-agent", "version": s.version, "listen": s.listen,
+	})
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request, requestID string) {
