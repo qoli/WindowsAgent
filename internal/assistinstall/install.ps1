@@ -35,8 +35,10 @@ foreach ($metadataName in @("windowsagent-release.json", "SHA256SUMS")) {
 
 $agentTask = "gameGuide Windows Capture Agent"
 $eventTask = "gameGuide Windows Event Stream"
+$watchdogTask = "gameGuide Windows Watchdog"
 $agentDescription = "gameGuide Go WGC screenshot agent; interactive-user session required"
 $eventDescription = "gameGuide durable local event stream; interactive-user session required"
+$watchdogDescription = "gameGuide external process watchdog; no automatic self-recovery"
 $previousTaskXML = @{}
 foreach ($entry in @(@($agentTask, $agentDescription), @($eventTask, $eventDescription))) {
     $task = Get-ScheduledTask -TaskName $entry[0] -ErrorAction SilentlyContinue
@@ -44,6 +46,12 @@ foreach ($entry in @(@($agentTask, $agentDescription), @($eventTask, $eventDescr
         if ($task.Description -cne $entry[1]) { throw "scheduled task '$($entry[0])' is not owned by WindowsAgent" }
         $previousTaskXML[$entry[0]] = Export-ScheduledTask -TaskName $entry[0]
     }
+}
+$watchdog = Get-ScheduledTask -TaskName $watchdogTask -ErrorAction SilentlyContinue
+$watchdogWasRunning = $false
+if ($null -ne $watchdog) {
+    if ($watchdog.Description -cne $watchdogDescription) { throw "scheduled task '$watchdogTask' is not owned by WindowsAgent" }
+    $watchdogWasRunning = $watchdog.State -ceq 'Running'
 }
 
 $binDir = Join-Path $dataDir "bin"
@@ -124,6 +132,10 @@ function Wait-ExecutableExit([string]$expectedPath) {
 }
 
 try {
+    if ($null -ne $watchdog) {
+        Stop-ScheduledTask -TaskName $watchdogTask -ErrorAction SilentlyContinue
+        Wait-ExecutableExit (Join-Path $binDir "windows-watchdog.exe")
+    }
     foreach ($taskName in @($agentTask, $eventTask)) {
         if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
             Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -187,11 +199,22 @@ try {
     Start-ScheduledTask -TaskName $agentTask
     Wait-Health "http://127.0.0.1:8787/healthz" "Capture Agent"
     Confirm-ListenerOwner 8787 $agentExe "Capture Agent"
+    if ($watchdogWasRunning) {
+        Start-ScheduledTask -TaskName $watchdogTask
+    }
     Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue
     [ordered]@{status="INSTALLED"; version=[string]$catalog.version; transaction=$transaction; dataDir=$dataDir} | ConvertTo-Json -Compress
 } catch {
     $failure = $_
     $rollbackErrors = [Collections.Generic.List[string]]::new()
+    if ($null -ne $watchdog) {
+        try {
+            Stop-ScheduledTask -TaskName $watchdogTask -ErrorAction SilentlyContinue
+            Wait-ExecutableExit (Join-Path $binDir "windows-watchdog.exe")
+        } catch {
+            $rollbackErrors.Add("stop watchdog before rollback: $($_.Exception.Message)")
+        }
+    }
     foreach ($taskName in @($agentTask, $eventTask)) {
         try {
             if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
@@ -229,6 +252,11 @@ try {
     foreach ($taskName in $previousTaskXML.Keys) {
         try { Start-ScheduledTask -TaskName $taskName -ErrorAction Stop } catch {
             $rollbackErrors.Add("restart task ${taskName}: $($_.Exception.Message)")
+        }
+    }
+    if ($watchdogWasRunning) {
+        try { Start-ScheduledTask -TaskName $watchdogTask -ErrorAction Stop } catch {
+            $rollbackErrors.Add("restart task ${watchdogTask}: $($_.Exception.Message)")
         }
     }
     if ($rollbackErrors.Count -eq 0) {

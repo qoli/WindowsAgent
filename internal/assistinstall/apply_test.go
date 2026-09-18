@@ -35,6 +35,11 @@ func TestEmbeddedInstallerPreservesTaskOwnershipAndRollback(t *testing.T) {
 		"Wait-Health",
 		"Confirm-ListenerOwner",
 		"previousTaskXML",
+		`$watchdogTask = "gameGuide Windows Watchdog"`,
+		`$watchdogDescription = "gameGuide external process watchdog; no automatic self-recovery"`,
+		"Stop-ScheduledTask -TaskName $watchdogTask",
+		"Wait-ExecutableExit (Join-Path $binDir \"windows-watchdog.exe\")",
+		"if ($watchdogWasRunning)",
 		"windowsagent-release.json",
 		"SHA256SUMS",
 	} {
