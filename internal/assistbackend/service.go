@@ -165,6 +165,7 @@ func inspect(ctx context.Context, dataDir string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	agent.Tailscale = assisttailscale.Inspect(ctx, dataDir)
 	lifecycle, err := assistlifecycle.Inspect(ctx, dataDir)
 	if err != nil {
 		lifecycle = assistlifecycle.Facts{Installed: agent.Installed}

@@ -146,12 +146,23 @@ func stop(ctx context.Context, dataDir string) (assistgui.TailscaleSnapshot, err
 	}
 }
 
+func inspect(ctx context.Context, dataDir string) assistgui.TailscaleSnapshot {
+	status := assistgui.LoadTailscaleStatus(dataDir)
+	adapterPath := filepath.Join(dataDir, "bin", "windows-tailscale-adapter.exe")
+	processes, err := (watchdog.WindowsProcessInspector{}).FindByExecutablePath(ctx, adapterPath)
+	identities := make([]adapterProcess, 0, len(processes))
+	for _, process := range processes {
+		identities = append(identities, adapterProcess{PID: int(process.PID), SessionID: process.SessionID})
+	}
+	return reconcileStatus(status, identities, err)
+}
+
 func verifyAdapterArtifact(binDir string) error {
 	file, err := os.Open(filepath.Join(binDir, "windowsagent-release.json"))
 	if err != nil {
 		return fmt.Errorf("open installed release catalog: %w", err)
 	}
-	catalog, loadErr := releasecatalog.Load(file)
+	catalog, loadErr := releasecatalog.LoadInstalled(file)
 	closeErr := file.Close()
 	if loadErr != nil {
 		return loadErr
@@ -159,9 +170,7 @@ func verifyAdapterArtifact(binDir string) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err := releasecatalog.VerifySelected(binDir, catalog, func(artifact releasecatalog.Artifact) bool {
-		return artifact.Role == "tailscale-adapter"
-	}); err != nil {
+	if err := releasecatalog.VerifyInstalledArtifact(binDir, catalog, "windows-tailscale-adapter.exe"); err != nil {
 		return fmt.Errorf("verify installed TailscaleAdapter: %w", err)
 	}
 	return nil

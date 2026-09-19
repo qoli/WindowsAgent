@@ -15,3 +15,7 @@ func start(context.Context, string, []byte) (assistgui.TailscaleSnapshot, error)
 func stop(context.Context, string) (assistgui.TailscaleSnapshot, error) {
 	return assistgui.TailscaleSnapshot{}, ErrUnsupported
 }
+
+func inspect(_ context.Context, dataDir string) assistgui.TailscaleSnapshot {
+	return assistgui.LoadTailscaleStatus(dataDir)
+}

@@ -99,6 +99,15 @@ The catalog is a coherent release set. AssistGUI must stage and validate the
 complete selected set before mutating an installation; it must not report a
 partially updated process graph as a successful release update.
 
+An Assist bootstrap may operate against a runtime installed by another release
+generation. Download and staging continue to require the current catalog's
+complete executable set. When starting an already-installed executable,
+AssistGUI instead validates the installed catalog's schema and structure, then
+requires the selected executable's name, role, class, subsystem, byte count,
+and digest to match its current contract. Adding an unrelated release artifact
+must not prevent a newer bootstrap from starting a verified older
+TailscaleAdapter.
+
 Bootstrap artifacts are distribution processes, not installed WindowsAgent
 runtime artifacts. Install, Update, and Repair deploy only `runtime-required`
 and `runtime-optional` executables. The currently running backend copies itself
@@ -106,6 +115,36 @@ to the private transaction stage for the elevated handoff; the framework-
 dependent GUI payload remains in the user-extracted bootstrap directory.
 
 ## AssistGUI setup surface
+
+The Microsoft WinUI 3 Gallery `SettingsPage.xaml` at commit
+`abb8cb4cef04a5080f5c0396f67a7ec502b36179` is the AssistGUI visual reference,
+not its product or runtime authority. AssistGUI adopts that page's single-column
+scrolling structure, title and section typography, four-effective-pixel card
+rhythm, SettingsCard header/description/action anatomy, Mica window surface,
+TitleBar, and 641-effective-pixel responsive boundary. It does not adopt the
+Gallery's NavigationView, search, sample catalog, automation helpers, multiple
+page destinations, experimental Windows App SDK version, or .NET target.
+
+The frontend pins the stable
+`CommunityToolkit.WinUI.Controls.SettingsControls` package needed for the
+SettingsCard surface. This is a visual dependency only: release, installation,
+process, Watchdog, and Tailscale behavior continue to belong to the existing
+WindowsAgent backend contracts. The normal layout remains a single column at
+every width. Below 641 effective pixels, page gutters and input widths reflow;
+larger windows add whitespace instead of turning the setup surface back into a
+two-column dashboard.
+
+The visible sections are WindowsAgent, Access, Maintenance, and an Operation
+section that exists only while a backend request is active. The UI shows one
+state-appropriate Install, Start, or Stop action instead of presenting every
+backend command with equal weight. The Watchdog start-at-sign-in setting is a
+ToggleSwitch: before installation it is the pending Install setting, and after
+installation it applies immediately through the existing
+`configure-watchdog` command. Tailscale enrollment is shown while the installed
+adapter is disabled or failed; an active `STARTING`, `ONLINE`, or `STOPPING`
+adapter instead shows its status, addresses, and Disconnect action.
+Implementation details such as the sibling backend executable are not
+user-facing footer content.
 
 TailscaleAdapter is disabled by default. AssistGUI always reports Agent health
 and active private-LAN IPv4 endpoints. When the adapter is enabled it also

@@ -11,13 +11,16 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<string> _progress = [];
     private AgentSnapshot? _snapshot;
     private bool _operationActive;
+    private bool _updatingStartupToggle;
     private bool _loaded;
     private bool _allowClose;
 
     public MainWindow()
     {
         InitializeComponent();
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(980, 760));
+        ExtendsContentIntoTitleBar = true;
+        SetTitleBar(AppTitleBar);
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(840, 760));
         AppWindow.Closing += (_, args) =>
         {
             if (_operationActive && !_allowClose)
@@ -86,11 +89,23 @@ public sealed partial class MainWindow : Window
         await RunCommandAsync(BackendCommands.Stop, null, "Stopping WindowsAgent");
     }
 
-    private async void ApplyWatchdogButton_Click(object sender, RoutedEventArgs e) =>
+    private async void StartAtSignInToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_updatingStartupToggle || _operationActive || _snapshot is null || !_snapshot.Installed)
+        {
+            return;
+        }
+
         await RunCommandAsync(
             BackendCommands.ConfigureWatchdog,
-            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInCheckBox.IsChecked == true),
+            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInToggle.IsOn),
             "Updating Watchdog startup setting");
+
+        if (_snapshot is not null)
+        {
+            SetStartAtSignIn(_snapshot.Watchdog.StartAtSignIn);
+        }
+    }
 
     private async void ConnectTailscaleButton_Click(object sender, RoutedEventArgs e)
     {
@@ -118,7 +133,7 @@ public sealed partial class MainWindow : Window
     private Task RunConfiguredCommandAsync(string command, string title) =>
         RunCommandAsync(
             command,
-            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInCheckBox.IsChecked == true),
+            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInToggle.IsOn),
             title);
 
     private async Task RunCommandAsync(string command, BackendSettings? settings, string title)
@@ -133,6 +148,8 @@ public sealed partial class MainWindow : Window
         _progress.Clear();
         OperationTitle.Text = title;
         OperationProgress.IsActive = true;
+        OperationSectionHeader.Visibility = Visibility.Visible;
+        OperationPanel.Visibility = Visibility.Visible;
         RefreshControls();
 
         try
@@ -181,7 +198,8 @@ public sealed partial class MainWindow : Window
         {
             _operationActive = false;
             OperationProgress.IsActive = false;
-            OperationTitle.Text = "No operation in progress";
+            OperationSectionHeader.Visibility = Visibility.Collapsed;
+            OperationPanel.Visibility = Visibility.Collapsed;
             RefreshControls();
         }
     }
@@ -211,9 +229,9 @@ public sealed partial class MainWindow : Window
         WatchdogValue.Text = snapshot.Watchdog.Installed
             ? snapshot.Watchdog.Running ? "Running" : "Stopped"
             : "Not installed";
-        if (snapshot.Watchdog.Installed)
+        if (snapshot.Installed)
         {
-            StartAtSignInCheckBox.IsChecked = snapshot.Watchdog.StartAtSignIn;
+            SetStartAtSignIn(snapshot.Watchdog.StartAtSignIn);
         }
         LanEndpointsValue.Text = snapshot.LanEndpoints.Count == 0
             ? "None detected"
@@ -232,21 +250,43 @@ public sealed partial class MainWindow : Window
         var installed = _snapshot?.Installed == true;
         var watchdogRunning = _snapshot?.Watchdog.Running == true;
         var captureRunning = _snapshot?.Capture.Running == true;
-        var tailscaleRunning = _snapshot is not null && _snapshot.Tailscale.Status != "disabled";
+        var tailscaleRunning = _snapshot is not null && _snapshot.Tailscale.Status is "starting" or "online" or "stopping";
+        var anyRuntimeRunning = watchdogRunning || captureRunning || tailscaleRunning;
         var enabled = !_operationActive;
+        var installedVisibility = installed ? Visibility.Visible : Visibility.Collapsed;
 
         InstallButton.IsEnabled = enabled && _snapshot is not null && !installed;
+        InstallButton.Visibility = _snapshot is not null && !installed ? Visibility.Visible : Visibility.Collapsed;
         UpdateButton.IsEnabled = enabled && installed;
         RepairButton.IsEnabled = enabled && installed;
         UninstallButton.IsEnabled = enabled && installed;
-        StartButton.IsEnabled = enabled && installed && !watchdogRunning;
-        StopButton.IsEnabled = enabled && installed && (watchdogRunning || captureRunning || tailscaleRunning);
-        StartAtSignInCheckBox.IsEnabled = enabled && _snapshot is not null;
-        ApplyWatchdogButton.IsEnabled = enabled && installed;
+        StartButton.IsEnabled = enabled && installed && !anyRuntimeRunning;
+        StartButton.Visibility = installed && !anyRuntimeRunning ? Visibility.Visible : Visibility.Collapsed;
+        StopButton.IsEnabled = enabled && installed && anyRuntimeRunning;
+        StopButton.Visibility = installed && anyRuntimeRunning ? Visibility.Visible : Visibility.Collapsed;
+        StartAtSignInToggle.IsEnabled = enabled && _snapshot is not null;
         AuthKeyBox.IsEnabled = enabled && installed;
         ConnectTailscaleButton.IsEnabled = enabled && installed && !string.IsNullOrWhiteSpace(AuthKeyBox.Password);
         DisconnectTailscaleButton.IsEnabled = enabled && installed && tailscaleRunning;
+        DisconnectTailscaleButton.Visibility = installed && tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
         RefreshButton.IsEnabled = enabled;
+
+        VersionCard.Visibility = installedVisibility;
+        CaptureCard.Visibility = installedVisibility;
+        WatchdogCard.Visibility = installedVisibility;
+        RuntimeActionCard.Visibility = installedVisibility;
+        TailscaleConnectCard.Visibility = installed && !tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
+        MaintenanceSectionHeader.Visibility = installedVisibility;
+        UpdateCard.Visibility = installedVisibility;
+        RepairCard.Visibility = installedVisibility;
+        UninstallCard.Visibility = installedVisibility;
+    }
+
+    private void SetStartAtSignIn(bool value)
+    {
+        _updatingStartupToggle = true;
+        StartAtSignInToggle.IsOn = value;
+        _updatingStartupToggle = false;
     }
 
     private async Task<bool> ConfirmAsync(string title, string content, string primaryText)

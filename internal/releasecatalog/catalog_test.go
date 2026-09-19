@@ -2,6 +2,7 @@ package releasecatalog
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -59,6 +60,44 @@ func TestLoadRejectsUnknownAndMultipleJSON(t *testing.T) {
 	}
 	if _, err := Load(strings.NewReader(encoded.String() + `{}`)); err == nil || !strings.Contains(err.Error(), "multiple JSON") {
 		t.Fatalf("Load(multiple) error = %v", err)
+	}
+}
+
+func TestLoadInstalledAcceptsCatalogFromDifferentExecutableSet(t *testing.T) {
+	catalog := testCatalog()
+	for index, artifact := range catalog.Artifacts {
+		if artifact.Name == "windows-assist-backend.exe" {
+			catalog.Artifacts = append(catalog.Artifacts[:index], catalog.Artifacts[index+1:]...)
+			break
+		}
+	}
+	encoded, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(bytes.NewReader(encoded)); err == nil || !strings.Contains(err.Error(), "exactly") {
+		t.Fatalf("Load(older catalog) error = %v, want current complete-set rejection", err)
+	}
+	loaded, err := LoadInstalled(bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatalf("LoadInstalled(older catalog) error = %v", err)
+	}
+	if len(loaded.Artifacts) != len(catalog.Artifacts) {
+		t.Fatalf("LoadInstalled() has %d artifacts, want %d", len(loaded.Artifacts), len(catalog.Artifacts))
+	}
+}
+
+func TestVerifyInstalledArtifactRequiresCurrentSelectedMetadata(t *testing.T) {
+	catalog := testCatalog()
+	for index := range catalog.Artifacts {
+		if catalog.Artifacts[index].Name == "windows-tailscale-adapter.exe" {
+			catalog.Artifacts[index].Role = "wrong"
+			break
+		}
+	}
+	err := VerifyInstalledArtifact(t.TempDir(), catalog, "windows-tailscale-adapter.exe")
+	if err == nil || !strings.Contains(err.Error(), "metadata does not match") {
+		t.Fatalf("VerifyInstalledArtifact(metadata drift) error = %v", err)
 	}
 }
 

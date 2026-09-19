@@ -103,6 +103,33 @@ func InstallArtifact(artifact Artifact) bool {
 }
 
 func Load(r io.Reader) (Catalog, error) {
+	catalog, err := decode(r)
+	if err != nil {
+		return Catalog{}, err
+	}
+	if err := catalog.Validate(); err != nil {
+		return Catalog{}, err
+	}
+	return catalog, nil
+}
+
+// LoadInstalled accepts a structurally valid catalog written by an earlier or
+// later release. Installed runtime verification must not require unrelated
+// artifacts to match the executable set compiled into the current Assist
+// bootstrap; the exact artifact being used is checked separately by
+// VerifyInstalledArtifact.
+func LoadInstalled(r io.Reader) (Catalog, error) {
+	catalog, err := decode(r)
+	if err != nil {
+		return Catalog{}, err
+	}
+	if err := catalog.validateInstalled(); err != nil {
+		return Catalog{}, err
+	}
+	return catalog, nil
+}
+
+func decode(r io.Reader) (Catalog, error) {
 	limited := io.LimitReader(r, maxCatalogBytes+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
@@ -120,9 +147,6 @@ func Load(r io.Reader) (Catalog, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return Catalog{}, err
 	}
-	if err := catalog.Validate(); err != nil {
-		return Catalog{}, err
-	}
 	return catalog, nil
 }
 
@@ -138,6 +162,39 @@ func requireJSONEOF(decoder *json.Decoder) error {
 }
 
 func (c Catalog) Validate() error {
+	if err := c.validateIdentity(); err != nil {
+		return err
+	}
+	expected := specMap()
+	if len(c.Artifacts) != len(expected) {
+		return fmt.Errorf("release catalog must contain exactly %d artifacts, got %d", len(expected), len(c.Artifacts))
+	}
+	if err := c.validateArtifactStructure(); err != nil {
+		return err
+	}
+	for _, artifact := range c.Artifacts {
+		spec, ok := expected[artifact.Name]
+		if !ok {
+			return fmt.Errorf("unexpected release artifact %q", artifact.Name)
+		}
+		if !artifactMatchesSpec(artifact, spec) {
+			return fmt.Errorf("artifact metadata does not match release specification: %s", artifact.Name)
+		}
+	}
+	return nil
+}
+
+func (c Catalog) validateInstalled() error {
+	if err := c.validateIdentity(); err != nil {
+		return err
+	}
+	if len(c.Artifacts) == 0 {
+		return errors.New("installed release catalog contains no artifacts")
+	}
+	return c.validateArtifactStructure()
+}
+
+func (c Catalog) validateIdentity() error {
 	if c.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("schemaVersion must equal %d", SchemaVersion)
 	}
@@ -147,10 +204,10 @@ func (c Catalog) Validate() error {
 	if c.Target != TargetWindowsAMD64 {
 		return fmt.Errorf("target must equal %q", TargetWindowsAMD64)
 	}
-	expected := specMap()
-	if len(c.Artifacts) != len(expected) {
-		return fmt.Errorf("release catalog must contain exactly %d artifacts, got %d", len(expected), len(c.Artifacts))
-	}
+	return nil
+}
+
+func (c Catalog) validateArtifactStructure() error {
 	seen := make(map[string]struct{}, len(c.Artifacts))
 	lastName := ""
 	for index, artifact := range c.Artifacts {
@@ -165,12 +222,11 @@ func (c Catalog) Validate() error {
 			return fmt.Errorf("duplicate artifact name %q", artifact.Name)
 		}
 		seen[artifact.Name] = struct{}{}
-		spec, ok := expected[artifact.Name]
-		if !ok {
-			return fmt.Errorf("unexpected release artifact %q", artifact.Name)
+		if strings.TrimSpace(artifact.Role) == "" || strings.TrimSpace(artifact.Class) == "" {
+			return fmt.Errorf("artifact role and class must be non-empty: %s", artifact.Name)
 		}
-		if artifact.Role != spec.Role || artifact.Class != spec.Class || artifact.Subsystem != spec.Subsystem {
-			return fmt.Errorf("artifact metadata does not match release specification: %s", artifact.Name)
+		if artifact.Subsystem != SubsystemGUI && artifact.Subsystem != SubsystemConsole {
+			return fmt.Errorf("artifact subsystem must be gui or console: %s", artifact.Name)
 		}
 		if artifact.Bytes <= 0 {
 			return fmt.Errorf("artifact bytes must be positive: %s", artifact.Name)
@@ -180,6 +236,10 @@ func (c Catalog) Validate() error {
 		}
 	}
 	return nil
+}
+
+func artifactMatchesSpec(artifact Artifact, spec Spec) bool {
+	return artifact.Name == spec.Name && artifact.Role == spec.Role && artifact.Class == spec.Class && artifact.Subsystem == spec.Subsystem
 }
 
 func Generate(directory, version string) (Catalog, error) {
@@ -310,31 +370,62 @@ func VerifySelected(directory string, catalog Catalog, include func(Artifact) bo
 			continue
 		}
 		selected++
-		path := filepath.Join(directory, artifact.Name)
-		info, err := os.Stat(path)
-		if err != nil {
-			return fmt.Errorf("stat release artifact %s: %w", artifact.Name, err)
-		}
-		if !info.Mode().IsRegular() || info.Size() != artifact.Bytes {
-			return fmt.Errorf("release artifact size mismatch: %s", artifact.Name)
-		}
-		digest, err := fileSHA256(path)
-		if err != nil {
+		if err := verifyArtifact(directory, artifact); err != nil {
 			return err
-		}
-		if digest != artifact.SHA256 {
-			return fmt.Errorf("release artifact sha256 mismatch: %s", artifact.Name)
-		}
-		subsystem, err := ReadPESubsystem(path)
-		if err != nil {
-			return err
-		}
-		if subsystem != artifact.Subsystem {
-			return fmt.Errorf("release artifact subsystem mismatch: %s", artifact.Name)
 		}
 	}
 	if selected == 0 {
 		return errors.New("release artifact selector matched no artifacts")
+	}
+	return nil
+}
+
+// VerifyInstalledArtifact verifies one currently known executable against the
+// catalog that installed it. Unrelated catalog entries may come from a
+// different release generation, but the selected artifact must retain its
+// current name, role, class, subsystem, byte count, and digest contract.
+func VerifyInstalledArtifact(directory string, catalog Catalog, name string) error {
+	if err := catalog.validateInstalled(); err != nil {
+		return err
+	}
+	spec, ok := specMap()[name]
+	if !ok {
+		return fmt.Errorf("unknown installed release artifact %q", name)
+	}
+	for _, artifact := range catalog.Artifacts {
+		if artifact.Name != name {
+			continue
+		}
+		if !artifactMatchesSpec(artifact, spec) {
+			return fmt.Errorf("installed artifact metadata does not match release specification: %s", artifact.Name)
+		}
+		return verifyArtifact(directory, artifact)
+	}
+	return fmt.Errorf("installed release catalog does not contain %s", name)
+}
+
+func verifyArtifact(directory string, artifact Artifact) error {
+	path := filepath.Join(directory, artifact.Name)
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat release artifact %s: %w", artifact.Name, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != artifact.Bytes {
+		return fmt.Errorf("release artifact size mismatch: %s", artifact.Name)
+	}
+	digest, err := fileSHA256(path)
+	if err != nil {
+		return err
+	}
+	if digest != artifact.SHA256 {
+		return fmt.Errorf("release artifact sha256 mismatch: %s", artifact.Name)
+	}
+	subsystem, err := ReadPESubsystem(path)
+	if err != nil {
+		return err
+	}
+	if subsystem != artifact.Subsystem {
+		return fmt.Errorf("release artifact subsystem mismatch: %s", artifact.Name)
 	}
 	return nil
 }

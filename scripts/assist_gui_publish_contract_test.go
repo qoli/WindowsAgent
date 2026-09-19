@@ -77,6 +77,55 @@ func TestAssistGUIIsFrameworkDependentAndUsesOfficialPrerequisiteUX(t *testing.T
 	}
 }
 
+func TestAssistGUIUsesTheWinUIGallerySettingsPageVisualContract(t *testing.T) {
+	project := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "WindowsAssistGUI.csproj"))
+	if !strings.Contains(project, `<PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />`) {
+		t.Fatal("AssistGUI must pin the stable WinUI SettingsControls package used by its settings-page visual contract")
+	}
+
+	xaml := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml"))
+	for _, required := range []string{
+		`xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"`,
+		`<MicaBackdrop />`,
+		`<TitleBar x:Name="AppTitleBar"`,
+		`<ScrollView x:Name="PageScroll"`,
+		`<x:Double x:Key="SettingsCardSpacing">4</x:Double>`,
+		`<x:Double x:Key="Breakpoint640Plus">641</x:Double>`,
+		`BasedOn="{StaticResource BodyStrongTextBlockStyle}"`,
+		`AutomationProperties.HeadingLevel="Level1"`,
+		`<toolkit:SettingsCard Header="Installation"`,
+		`<toolkit:SettingsCard Header="LAN endpoint"`,
+		`<toolkit:SettingsCard Header="Tailscale"`,
+		`<ToggleSwitch x:Name="StartAtSignInToggle"`,
+		`<Border x:Name="OperationPanel"`,
+		`Visibility="Collapsed"`,
+	} {
+		if !strings.Contains(xaml, required) {
+			t.Fatalf("AssistGUI XAML is missing settings-page visual contract %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"<NavigationView",
+		"ApplicationPageBackgroundThemeBrush",
+		"StartAtSignInCheckBox",
+		"Apply startup setting",
+		"No operation in progress",
+		"Setup operations are performed by the sibling",
+	} {
+		if strings.Contains(xaml, forbidden) {
+			t.Fatalf("AssistGUI XAML regressed to the retired dashboard pattern %q", forbidden)
+		}
+	}
+
+	codeBehind := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml.cs"))
+	if !strings.Contains(codeBehind, `_snapshot.Tailscale.Status is "starting" or "online" or "stopping"`) {
+		t.Fatal("AssistGUI must treat only active Tailscale states as a running adapter")
+	}
+	if strings.Contains(codeBehind, `_snapshot.Tailscale.Status != "disabled"`) {
+		t.Fatal("AssistGUI must not hide reconnect behind a stale or failed Tailscale state")
+	}
+}
+
 func readContractFile(t *testing.T, path string) string {
 	t.Helper()
 	contents, err := os.ReadFile(path)
