@@ -126,9 +126,9 @@ owner; monitored modules do not depend on it and it does not recover itself.
 
 ## Quick start
 
-Go 1.23 or newer is required. The .NET 8 SDK is required only for building the
-self-contained ScreenParser and PP-OCR DirectML runtimes; it is not required on
-the target Windows machine.
+Go 1.23 or newer is required. The .NET 8 SDK on Windows is required for the
+self-contained WinUI 3 AssistGUI and for the ScreenParser and PP-OCR DirectML
+runtimes; it is not required on the target Windows machine.
 
 Build the repository-owned executables and copy the Rules beside them:
 
@@ -136,7 +136,7 @@ Build the repository-owned executables and copy the Rules beside them:
 mkdir -p .build
 go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
-./scripts/build-windows-capture-agent.sh
+./scripts/build-windows-capture-agent.sh --skip-assist-gui --skip-catalog
 cp -R Rules .build/
 ```
 
@@ -174,7 +174,24 @@ go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
 mkdir -p .build
-./scripts/build-windows-capture-agent.sh
+./scripts/build-windows-capture-agent.sh --skip-assist-gui --skip-catalog
+```
+
+That command cross-builds and verifies the Go executable set. The unpackaged,
+self-contained WinUI 3 frontend must be published on Windows:
+
+```powershell
+.\scripts\build-windows-assist-gui.ps1 -OutputDir .build -Version dev
+```
+
+To generate a complete local release catalog after both builds, pass the
+prebuilt frontend back to the executable-set builder from a Bash environment:
+
+```bash
+./scripts/build-windows-capture-agent.sh \
+  --output-dir .build \
+  --version dev \
+  --assist-gui-exe .build/windows-assist-gui.exe
 ```
 
 The build script emits and verifies the expected Windows PE subsystem for:
@@ -186,31 +203,37 @@ The build script emits and verifies the expected Windows PE subsystem for:
 - Event Stream, Event Web, Action OSD, Watchdog, Evidence Recorder, Visual Log,
   and SFTP;
 - the delegated Pi control and component executables.
-- AssistGUI and the independent TailscaleAdapter.
+- the Go Assist backend, WinUI AssistGUI, and independent TailscaleAdapter.
 
 The build also emits `windowsagent-release.json` and `SHA256SUMS`. The catalog
 classifies every published executable as bootstrap, required runtime, optional
 runtime, operator tool, or diagnostic and rejects missing or unexpected EXEs.
 Tagged releases upload each EXE and both metadata files as separate GitHub
-Release assets. They also provide `windows-assist-gui.zip`, containing only
-`windows-assist-gui.exe`, as the bootstrap download. There is no traditional
-Setup package or archive of the complete multi-process system.
+Release assets. They also provide `windows-assist-gui.zip`, containing exactly
+`windows-assist-gui.exe` and `windows-assist-backend.exe`, as the bootstrap
+pair. There is no traditional Setup package or archive of the complete
+multi-process system.
 
 `windows-capture-agent.exe` is the installable GUI artifact.
 `windows-capture-agent-console.exe` is for interactive diagnostics and must not
 replace the installed GUI build. Local clients such as `windows-exec.exe`,
 `windows-key.exe`, `windows-starlark-check.exe`, and
 `windows-starlark-invoke.exe` are not installed Agent payloads.
-`windows-assist-gui.exe` is the public setup and access-information UI. It
-provides Install, Update, Repair, and Uninstall; deploys the complete
-repository-defined WindowsAgent runtime executable set; and wraps the existing
-Capture Agent and Watchdog installers rather than defining a second Scheduled
-Task contract. Setup also controls whether Watchdog starts at sign-in. The GUI
-reports Installed/Not installed, Capture Agent and Watchdog Running/Stopped,
-version, LAN endpoints, and Tailscale status/IP. TailscaleAdapter is installed
-with the runtime but starts only after a non-empty auth key is supplied. This
-path still requires signed-in Windows acceptance before it is considered fully
-available; consult the
+`windows-assist-gui.exe` is the public C# WinUI 3 setup and
+access-information interface. Its sibling `windows-assist-backend.exe` is the
+Go implementation behind one strict JSON-lines process interface. The backend
+provides Install, Update, Repair, Uninstall, Start, and Stop; deploys the
+complete repository-defined WindowsAgent runtime executable set; and wraps the
+existing Capture Agent and Watchdog installers rather than defining a second
+Scheduled Task contract. Start launches the existing Watchdog as the sole
+lifecycle owner. Stop halts the Watchdog before its verified owned targets and
+performs Tailscale logout without removing the installation. Setup also
+controls whether Watchdog starts at sign-in. The GUI reports Installed/Not
+installed, Capture Agent and Watchdog Running/Stopped, version, LAN endpoints,
+and Tailscale status/IP. TailscaleAdapter is installed with the runtime but
+starts only after a non-empty auth key is supplied. This path still requires
+signed-in Windows acceptance before it is considered fully available; consult
+the
 [Assist GUI design](docs/design/assist-gui-release-distribution.md) for the
 current boundary.
 
@@ -671,6 +694,8 @@ internal/windowsautomation/   ephemeral general Windows Starlark runtime
 internal/windowsexec/         structured process and PowerShell-file runtime
 internal/release*/            executable catalog and HTTP/1.1 verified downloads
 internal/assistgui/           AssistGUI access-information model
+internal/assistlifecycle/     verified installed Watchdog start/stop lifecycle
+ui/windows-assist-gui/        unpackaged self-contained C# WinUI 3 frontend
 Rules/<Executable.exe>/       distributable Rule v6 packages and guidance
 runtimes/                     self-contained external inference, Pi, and Tailscale runtimes
 tools/                        model preparation, publishing, and diagnostics

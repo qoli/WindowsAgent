@@ -7,7 +7,8 @@ Issues and focused pull requests are welcome.
 - Go 1.23 or newer
 - macOS, Linux, or Windows for platform-independent tests
 - Windows 10 1903+ amd64 for WGC runtime validation
-- .NET 8 SDK for ScreenParser or PP-OCR DirectML runtime changes
+- .NET 8 SDK on Windows for WinUI AssistGUI, ScreenParser, or PP-OCR DirectML
+  changes
 
 Run before submitting a change:
 
@@ -16,7 +17,7 @@ gofmt -w $(find cmd internal -name '*.go')
 go test ./...
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
 mkdir -p .build
-./scripts/build-windows-capture-agent.sh
+./scripts/build-windows-capture-agent.sh --skip-assist-gui --skip-catalog
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -o .build/windows-observer.exe \
   ./cmd/windows-observer
@@ -27,6 +28,16 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -o .build/windows-observation-job.exe \
   ./cmd/windows-observation-job
 ```
+
+AssistGUI changes must additionally publish the WinUI frontend on Windows:
+
+```powershell
+.\scripts\build-windows-assist-gui.ps1 -OutputDir .build -Version dev
+```
+
+Then run the Go builder with
+`--assist-gui-exe .build/windows-assist-gui.exe` to validate the complete
+release catalog.
 
 The canonical `windows-capture-agent.exe` is the persistent GUI-subsystem
 artifact. Do not deploy `windows-capture-agent-console.exe`; the installer and

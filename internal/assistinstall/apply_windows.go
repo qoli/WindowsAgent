@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	installerscripts "github.com/qoli/WindowsAgent/scripts"
 )
@@ -33,6 +34,7 @@ func runInstaller(ctx context.Context, request Request, script string) error {
 	}
 	scriptPath := filepath.Join(scriptDir, "install.ps1")
 	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	command.Env = append(os.Environ(),
 		"WINDOWSAGENT_SETUP_OPERATION="+string(request.Operation),
 		"WINDOWSAGENT_RELEASE_STAGE="+request.StageDir,
@@ -62,6 +64,7 @@ func runUninstaller(ctx context.Context, dataDir, script string) error {
 		return fmt.Errorf("close WindowsAgent uninstaller script: %w", err)
 	}
 	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	command.Env = append(os.Environ(), "WINDOWSAGENT_INSTALL_DATA_DIR="+dataDir)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -85,6 +88,7 @@ func runWatchdogConfigurator(ctx context.Context, dataDir string, startAtLogon b
 		}
 	}
 	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(scriptDir, "configure-watchdog.ps1"))
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	command.Env = append(os.Environ(),
 		"WINDOWSAGENT_INSTALL_DATA_DIR="+dataDir,
 		fmt.Sprintf("WINDOWSAGENT_WATCHDOG_START_AT_LOGON=%t", startAtLogon),

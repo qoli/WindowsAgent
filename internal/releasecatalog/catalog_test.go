@@ -96,6 +96,24 @@ func TestInstallArtifactExcludesOnlyOperatorAndDiagnosticExecutables(t *testing.
 	}
 }
 
+func TestBootstrapArtifactsAreWinUIAndBackendPair(t *testing.T) {
+	var names []string
+	for _, spec := range Specs() {
+		if spec.Class == ClassBootstrap {
+			names = append(names, spec.Name)
+		}
+	}
+	want := []string{"windows-assist-backend.exe", "windows-assist-gui.exe"}
+	if len(names) != len(want) {
+		t.Fatalf("bootstrap artifacts = %v, want %v", names, want)
+	}
+	for index := range want {
+		if names[index] != want[index] {
+			t.Fatalf("bootstrap artifacts = %v, want %v", names, want)
+		}
+	}
+}
+
 func testCatalog() Catalog {
 	specs := Specs()
 	artifacts := make([]Artifact, 0, len(specs))

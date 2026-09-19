@@ -15,7 +15,8 @@ The current authorities are:
 
 - `.github/workflows/release.yml` for remote tests, build, packaging, and
   `gh release create`;
-- `scripts/build-windows-capture-agent.sh` and
+- `scripts/build-windows-capture-agent.sh`,
+  `scripts/build-windows-assist-gui.ps1`, and
   `internal/releasecatalog.Specs` for the executable inventory, PE subsystem,
   catalog, and checksum contract; and
 - `docs/design/assist-gui-release-distribution.md` for the public distribution
@@ -24,8 +25,8 @@ The current authorities are:
 Publish every cataloged executable as an individual asset together with
 `windowsagent-release.json` and `SHA256SUMS`. The only archive is
 `windows-assist-gui.zip`, and it must contain exactly
-`windows-assist-gui.exe`. Do not create a Setup package or a complete-system
-archive.
+`windows-assist-gui.exe` and `windows-assist-backend.exe`. Do not create a
+Setup package or a complete-system archive.
 
 The tag workflow owns release artifact production. Do not replace it with a
 local `gh release create`, manually upload locally built binaries, or modify an
@@ -63,8 +64,7 @@ commit.
 
 ## Validate before publication
 
-Use a temporary output directory and run the same meaningful checks as the
-workflow:
+Run the portable validation locally before publication:
 
 ```bash
 git diff --check
@@ -75,14 +75,19 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
 release_dir="$(mktemp -d)"
 ./scripts/build-windows-capture-agent.sh \
   --output-dir "$release_dir" \
-  --version "${tag#v}"
-(cd "$release_dir" && zip -9 windows-assist-gui.zip windows-assist-gui.exe)
-test "$(unzip -Z1 "$release_dir/windows-assist-gui.zip")" = \
-  "windows-assist-gui.exe"
+  --version "${tag#v}" \
+  --skip-assist-gui \
+  --skip-catalog
 ```
 
-The build script must finish its catalog inventory and PE subsystem checks.
-The Tailscale module test and build retain the repository's explicit
+The tag workflow then builds the unpackaged self-contained WinUI frontend on a
+Windows runner, combines it with the Go artifacts, generates the only complete
+catalog and checksum list, and verifies the two-file bootstrap ZIP. When a
+Windows build host with .NET 8 is available before tagging, additionally run
+`scripts/build-windows-assist-gui.ps1` and then rerun the Go builder with
+`--assist-gui-exe` to validate the complete local catalog. Report clearly when
+that pre-tag Windows build was unavailable; do not substitute the retired Go
+GUI. The Tailscale module test and build retain the repository's explicit
 HTTP/2-disabled compatibility boundary; do not remove `GODEBUG=http2client=0`
 or introduce HTTP/3 during release work.
 
@@ -120,8 +125,9 @@ After the workflow succeeds, read the release back through GitHub and require:
   `windows-assist-gui.zip`, `windowsagent-release.json`, and `SHA256SUMS`;
 - the catalog version and target are correct;
 - `SHA256SUMS` covers the cataloged executables; and
-- the downloaded bootstrap ZIP contains exactly `windows-assist-gui.exe`, whose
-  SHA-256 matches the AssistGUI entry in the downloaded catalog.
+- the downloaded bootstrap ZIP contains exactly `windows-assist-gui.exe` and
+  `windows-assist-backend.exe`, and each SHA-256 matches its downloaded catalog
+  entry.
 
 Use a fresh temporary directory for downloaded verification assets. GitHub
 workflow success alone is not public asset proof.

@@ -49,6 +49,7 @@ type Spec struct {
 // The build and release workflows must not maintain a second executable list.
 func Specs() []Spec {
 	return []Spec{
+		{Name: "windows-assist-backend.exe", Role: "assist-backend", Class: ClassBootstrap, Subsystem: SubsystemGUI},
 		{Name: "windows-assist-gui.exe", Role: "assist-gui", Class: ClassBootstrap, Subsystem: SubsystemGUI},
 		{Name: "windows-capture-agent.exe", Role: "capture-agent", Class: ClassRuntimeRequired, Subsystem: SubsystemGUI},
 		{Name: "windows-wgc-worker.exe", Role: "capture-worker", Class: ClassRuntimeRequired, Subsystem: SubsystemConsole},

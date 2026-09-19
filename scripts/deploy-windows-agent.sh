@@ -80,7 +80,10 @@ release_dir="$(mktemp -d "${TMPDIR:-/tmp}/windowsagent-binaries.XXXXXX")"
 cleanup() { find "$release_dir" -depth -delete 2>/dev/null || true; }
 trap cleanup EXIT
 
-"${script_dir}/build-windows-capture-agent.sh" --output-dir "$release_dir"
+"${script_dir}/build-windows-capture-agent.sh" \
+  --output-dir "$release_dir" \
+  --skip-assist-gui \
+  --skip-catalog
 
 binaries=(
   windows-capture-agent.exe

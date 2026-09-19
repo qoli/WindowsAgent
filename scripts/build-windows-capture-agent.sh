@@ -5,6 +5,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "${script_dir}/.." && pwd)"
 output_dir="${repository_root}/.build"
 release_version="${WINDOWSAGENT_VERSION:-dev}"
+assist_gui_exe=""
+skip_assist_gui=false
+skip_catalog=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -18,22 +21,53 @@ while [[ $# -gt 0 ]]; do
       release_version="$2"
       shift 2
       ;;
+    --assist-gui-exe)
+      [[ $# -ge 2 ]] || { echo "error: --assist-gui-exe requires a value" >&2; exit 2; }
+      assist_gui_exe="$2"
+      shift 2
+      ;;
+    --skip-assist-gui)
+      skip_assist_gui=true
+      shift
+      ;;
+    --skip-catalog)
+      skip_catalog=true
+      shift
+      ;;
     *)
-      echo "usage: $0 [--output-dir <directory>] [--version <version>]" >&2
+      echo "usage: $0 [--output-dir <directory>] [--version <version>] [--assist-gui-exe <path> | --skip-assist-gui] [--skip-catalog]" >&2
       exit 2
       ;;
   esac
 done
 
+if [[ -n "${assist_gui_exe}" && "${skip_assist_gui}" == true ]]; then
+  echo "error: --assist-gui-exe and --skip-assist-gui are mutually exclusive" >&2
+  exit 2
+fi
+if [[ "${skip_assist_gui}" == true && "${skip_catalog}" != true ]]; then
+  echo "error: --skip-assist-gui requires --skip-catalog because the release catalog is a complete-set contract" >&2
+  exit 2
+fi
+
 mkdir -p "${output_dir}"
 output_dir="$(cd "${output_dir}" && pwd)"
+
+# A partial Go-only build must not leave stale files that look like a complete
+# WinUI release set in a reused output directory.
+if [[ "${skip_assist_gui}" == true ]]; then
+  rm -f "${output_dir}/windows-assist-gui.exe"
+fi
+if [[ "${skip_catalog}" == true ]]; then
+  rm -f "${output_dir}/windowsagent-release.json" "${output_dir}/SHA256SUMS"
+fi
 
 (
   cd "${repository_root}"
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -trimpath -ldflags "-H=windowsgui -X main.version=${release_version}" \
-    -o "${output_dir}/windows-assist-gui.exe" \
-    ./cmd/windows-assist-gui
+    go build -trimpath -ldflags "-H=windowsgui" \
+    -o "${output_dir}/windows-assist-backend.exe" \
+    ./cmd/windows-assist-backend
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -trimpath -ldflags "-H=windowsgui -X main.version=${release_version}" \
     -o "${output_dir}/windows-capture-agent.exe" \
@@ -116,6 +150,17 @@ output_dir="$(cd "${output_dir}" && pwd)"
     ./cmd/windows-observer
 )
 
+if [[ -n "${assist_gui_exe}" ]]; then
+  assist_gui_exe="$(cd "$(dirname "${assist_gui_exe}")" && pwd)/$(basename "${assist_gui_exe}")"
+  [[ -f "${assist_gui_exe}" ]] || { echo "error: prebuilt AssistGUI does not exist: ${assist_gui_exe}" >&2; exit 1; }
+  if [[ "${assist_gui_exe}" != "${output_dir}/windows-assist-gui.exe" ]]; then
+    cp "${assist_gui_exe}" "${output_dir}/windows-assist-gui.exe"
+  fi
+elif [[ "${skip_assist_gui}" != true && ! -f "${output_dir}/windows-assist-gui.exe" ]]; then
+  echo "error: WinUI AssistGUI is not built by the Go cross-build; pass --assist-gui-exe or use --skip-assist-gui --skip-catalog" >&2
+  exit 1
+fi
+
 (
   cd "${repository_root}/runtimes/tailscale-adapter"
   GODEBUG=http2client=0 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
@@ -124,7 +169,11 @@ output_dir="$(cd "${output_dir}" && pwd)"
 )
 
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
-  "${output_dir}/windows-assist-gui.exe" --expect gui
+  "${output_dir}/windows-assist-backend.exe" --expect gui
+if [[ "${skip_assist_gui}" != true ]]; then
+  python3 "${script_dir}/verify-windows-pe-subsystem.py" \
+    "${output_dir}/windows-assist-gui.exe" --expect gui
+fi
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-capture-agent.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
@@ -168,11 +217,13 @@ python3 "${script_dir}/verify-windows-pe-subsystem.py" \
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-observer.exe" --expect console
 
-(
-  cd "${repository_root}"
-  go run ./cmd/windows-release-catalog \
-    --input-dir "${output_dir}" \
-    --version "${release_version}" \
-    --output-json "${output_dir}/windowsagent-release.json" \
-    --output-sums "${output_dir}/SHA256SUMS"
-)
+if [[ "${skip_catalog}" != true ]]; then
+  (
+    cd "${repository_root}"
+    go run ./cmd/windows-release-catalog \
+      --input-dir "${output_dir}" \
+      --version "${release_version}" \
+      --output-json "${output_dir}/windowsagent-release.json" \
+      --output-sums "${output_dir}/SHA256SUMS"
+  )
+fi

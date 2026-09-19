@@ -1,0 +1,165 @@
+<Window
+    x:Class="WindowsAgent.AssistGui.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="WindowsAgent Setup">
+
+  <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <Grid MaxWidth="920" Padding="32" HorizontalAlignment="Center">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,24">
+          <TextBlock Text="WindowsAgent Setup" Style="{StaticResource TitleTextBlockStyle}" />
+          <TextBlock Text="Install, maintain, and control WindowsAgent on this PC."
+                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <InfoBar x:Name="NoticeBar" Grid.Row="1" IsOpen="False" IsClosable="True" Margin="0,0,0,16" />
+
+        <Grid Grid.Row="2" ColumnSpacing="16">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <Border Grid.Column="0"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                  BorderThickness="1"
+                  CornerRadius="8"
+                  Padding="20">
+            <StackPanel Spacing="16">
+              <TextBlock Text="Installation" Style="{StaticResource SubtitleTextBlockStyle}" />
+              <Grid ColumnSpacing="20" RowSpacing="10">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="160" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Installation" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="InstalledValue" Grid.Row="0" Grid.Column="1" Text="Checking…" FontWeight="SemiBold" />
+                <TextBlock Grid.Row="1" Text="Version" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="VersionValue" Grid.Row="1" Grid.Column="1" Text="—" />
+                <TextBlock Grid.Row="2" Text="Capture Agent" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="CaptureValue" Grid.Row="2" Grid.Column="1" Text="—" />
+                <TextBlock Grid.Row="3" Text="Watchdog" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="WatchdogValue" Grid.Row="3" Grid.Column="1" Text="—" />
+              </Grid>
+
+              <CheckBox x:Name="StartAtSignInCheckBox" Content="Start Watchdog at sign-in" IsChecked="True" />
+              <Grid ColumnSpacing="8" RowSpacing="8">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Button x:Name="StartButton"
+                        Grid.Row="0"
+                        Grid.Column="0"
+                        HorizontalAlignment="Stretch"
+                        Content="Start WindowsAgent"
+                        Click="StartButton_Click" />
+                <Button x:Name="StopButton"
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        HorizontalAlignment="Stretch"
+                        Content="Stop WindowsAgent"
+                        Click="StopButton_Click" />
+                <Button x:Name="ApplyWatchdogButton"
+                        Grid.Row="1"
+                        Grid.ColumnSpan="2"
+                        HorizontalAlignment="Stretch"
+                        Content="Apply startup setting"
+                        Click="ApplyWatchdogButton_Click" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <Border Grid.Column="1"
+                  Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                  BorderThickness="1"
+                  CornerRadius="8"
+                  Padding="20">
+            <StackPanel Spacing="16">
+              <TextBlock Text="Access" Style="{StaticResource SubtitleTextBlockStyle}" />
+              <StackPanel Spacing="5">
+                <TextBlock Text="LAN endpoints" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="LanEndpointsValue" Text="None detected" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Tailscale" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="TailscaleStatusValue" Text="—" FontWeight="SemiBold" />
+                <TextBlock x:Name="TailscaleAddressesValue" Text="No Tailscale addresses" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+              </StackPanel>
+              <PasswordBox x:Name="AuthKeyBox"
+                           Header="One-off auth key"
+                           PlaceholderText="Enter a Tailscale auth key"
+                           PasswordChanged="AuthKeyBox_PasswordChanged" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="ConnectTailscaleButton" Content="Connect" Click="ConnectTailscaleButton_Click" />
+                <Button x:Name="DisconnectTailscaleButton" Content="Disconnect" Click="DisconnectTailscaleButton_Click" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <Border Grid.Row="3"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="20"
+                Margin="0,16,0,0">
+          <StackPanel Spacing="14">
+            <TextBlock Text="Setup and maintenance" Style="{StaticResource SubtitleTextBlockStyle}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="InstallButton" Content="Install" Click="InstallButton_Click" />
+              <Button x:Name="UpdateButton" Content="Update" Click="UpdateButton_Click" />
+              <Button x:Name="RepairButton" Content="Repair" Click="RepairButton_Click" />
+              <Button x:Name="UninstallButton" Content="Uninstall" Click="UninstallButton_Click" />
+              <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Row="4"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="20"
+                Margin="0,16,0,0">
+          <StackPanel Spacing="12">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <ProgressRing x:Name="OperationProgress" Width="20" Height="20" IsActive="False" />
+              <TextBlock x:Name="OperationTitle" Text="No operation in progress" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+            <ItemsControl x:Name="ProgressItems" />
+          </StackPanel>
+        </Border>
+
+        <TextBlock Grid.Row="5"
+                   Margin="0,14,0,0"
+                   Text="Setup operations are performed by the sibling windows-assist-backend.exe."
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+      </Grid>
+    </ScrollViewer>
+  </Grid>
+</Window>

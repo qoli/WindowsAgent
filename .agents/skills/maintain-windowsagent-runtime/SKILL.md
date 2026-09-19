@@ -162,8 +162,12 @@ go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
 mkdir -p .build
-./scripts/build-windows-capture-agent.sh
+./scripts/build-windows-capture-agent.sh --skip-assist-gui --skip-catalog
 ```
+
+That invocation validates the portable Go artifact set. AssistGUI changes also
+require `scripts/build-windows-assist-gui.ps1` on Windows and a complete catalog
+build with `--assist-gui-exe` before release or live acceptance.
 
 ScreenParser or PP-OCR changes also require their pinned artifact and .NET
 contract checks with forbidden provider or CPU fallback explicitly disabled.

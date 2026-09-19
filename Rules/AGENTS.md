@@ -349,7 +349,7 @@ go test ./...
 go run ./cmd/windows-action-check --rules-dir Rules
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
 mkdir -p .build
-./scripts/build-windows-capture-agent.sh
+./scripts/build-windows-capture-agent.sh --skip-assist-gui --skip-catalog
 ```
 
 Add targeted loader, schema, dependency, behavior, event, cancellation,
