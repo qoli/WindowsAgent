@@ -183,10 +183,11 @@ mkdir -p .build
 
 That portable invocation produces and verifies the Go executable set, including
 the Assist backend, canonical GUI capture Agent, console diagnostic build,
-Action checker, OSD, and optional watchdog. The self-contained WinUI frontend
-is built on Windows with `scripts/build-windows-assist-gui.ps1`; pass that
-prebuilt EXE back through `--assist-gui-exe` when validating the complete
-release catalog. When building another Windows command directly, use the
+Action checker, OSD, and optional watchdog. The framework-dependent WinUI
+frontend is built on Windows with `scripts/build-windows-assist-gui.ps1` into
+its own payload directory; pass that payload's EXE back through
+`--assist-gui-exe` when validating the complete release catalog. When building
+another Windows command directly, use the
 intended GUI/console subsystem and verify it with
 `scripts/verify-windows-pe-subsystem.py` where the artifact contract requires
 it.

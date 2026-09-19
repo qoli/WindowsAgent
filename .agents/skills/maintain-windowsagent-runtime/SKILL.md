@@ -169,6 +169,13 @@ That invocation validates the portable Go artifact set. AssistGUI changes also
 require `scripts/build-windows-assist-gui.ps1` on Windows and a complete catalog
 build with `--assist-gui-exe` before release or live acceptance.
 
+The AssistGUI publish output is a framework-dependent multi-file payload. Do
+not copy or test only its apphost EXE as if it were self-contained, and do not
+add custom .NET or Windows App Runtime prerequisite detection. Missing-runtime
+acceptance belongs to the official .NET apphost and Windows App SDK bootstrap
+UI boundaries. Require the generated `windows-assist-gui.pri` in the publish
+payload; an apphost-only launch can fail-fast before the setup window renders.
+
 ScreenParser or PP-OCR changes also require their pinned artifact and .NET
 contract checks with forbidden provider or CPU fallback explicitly disabled.
 

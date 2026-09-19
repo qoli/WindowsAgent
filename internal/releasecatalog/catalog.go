@@ -99,7 +99,7 @@ func BaseInstallArtifact(artifact Artifact) bool {
 // tools and the console diagnostic remain release assets but are not installed
 // into the Windows runtime.
 func InstallArtifact(artifact Artifact) bool {
-	return artifact.Class == ClassBootstrap || artifact.Class == ClassRuntimeRequired || artifact.Class == ClassRuntimeOptional
+	return artifact.Class == ClassRuntimeRequired || artifact.Class == ClassRuntimeOptional
 }
 
 func Load(r io.Reader) (Catalog, error) {

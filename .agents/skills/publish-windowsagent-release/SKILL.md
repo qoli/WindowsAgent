@@ -24,9 +24,11 @@ The current authorities are:
 
 Publish every cataloged executable as an individual asset together with
 `windowsagent-release.json` and `SHA256SUMS`. The only archive is
-`windows-assist-gui.zip`, and it must contain exactly
-`windows-assist-gui.exe` and `windows-assist-backend.exe`. Do not create a
-Setup package or a complete-system archive.
+`windows-assist-gui.zip`, and it must contain the complete
+framework-dependent WinUI publish payload plus the sibling
+`windows-assist-backend.exe`. Do not create a Setup package or a
+complete-system archive. Do not treat the individually published GUI apphost
+EXE as runnable without its adjacent payload files.
 
 The tag workflow owns release artifact production. Do not replace it with a
 local `gh release create`, manually upload locally built binaries, or modify an
@@ -80,9 +82,10 @@ release_dir="$(mktemp -d)"
   --skip-catalog
 ```
 
-The tag workflow then builds the unpackaged self-contained WinUI frontend on a
-Windows runner, combines it with the Go artifacts, generates the only complete
-catalog and checksum list, and verifies the two-file bootstrap ZIP. When a
+The tag workflow then builds the unpackaged framework-dependent WinUI frontend
+on a Windows runner, combines its complete publish payload with the Go Assist
+backend, generates the only complete executable catalog and checksum list, and
+verifies the bootstrap ZIP against the WinUI publish output plus backend. When a
 Windows build host with .NET 8 is available before tagging, additionally run
 `scripts/build-windows-assist-gui.ps1` and then rerun the Go builder with
 `--assist-gui-exe` to validate the complete local catalog. Report clearly when
@@ -125,9 +128,9 @@ After the workflow succeeds, read the release back through GitHub and require:
   `windows-assist-gui.zip`, `windowsagent-release.json`, and `SHA256SUMS`;
 - the catalog version and target are correct;
 - `SHA256SUMS` covers the cataloged executables; and
-- the downloaded bootstrap ZIP contains exactly `windows-assist-gui.exe` and
-  `windows-assist-backend.exe`, and each SHA-256 matches its downloaded catalog
-  entry.
+- the downloaded bootstrap ZIP contains exactly the framework-dependent WinUI
+  publish payload plus `windows-assist-backend.exe`; and
+- the ZIP's GUI and backend EXEs each match their downloaded catalog entries.
 
 Use a fresh temporary directory for downloaded verification assets. GitHub
 workflow success alone is not public asset proof.

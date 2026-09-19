@@ -126,9 +126,13 @@ owner; monitored modules do not depend on it and it does not recover itself.
 
 ## Quick start
 
-Go 1.23 or newer is required. The .NET 8 SDK on Windows is required for the
-self-contained WinUI 3 AssistGUI and for the ScreenParser and PP-OCR DirectML
-runtimes; it is not required on the target Windows machine.
+Go 1.23 or newer is required. The .NET 8 SDK on Windows is required to build
+the framework-dependent WinUI 3 AssistGUI and the ScreenParser and PP-OCR
+DirectML runtimes. A target running AssistGUI needs the .NET 8 Desktop Runtime
+and the matching Windows App Runtime. AssistGUI relies on the official .NET
+apphost missing-framework UI and the Windows App SDK bootstrap
+`OnNoMatch_ShowUI` acquisition path when either dependency is absent; it does
+not implement its own prerequisite detector or downloader.
 
 Build the repository-owned executables and copy the Rules beside them:
 
@@ -178,10 +182,11 @@ mkdir -p .build
 ```
 
 That command cross-builds and verifies the Go executable set. The unpackaged,
-self-contained WinUI 3 frontend must be published on Windows:
+framework-dependent WinUI 3 frontend must be published on Windows into its own
+payload directory:
 
 ```powershell
-.\scripts\build-windows-assist-gui.ps1 -OutputDir .build -Version dev
+.\scripts\build-windows-assist-gui.ps1 -OutputDir .build\assist-gui -Version dev
 ```
 
 To generate a complete local release catalog after both builds, pass the
@@ -191,7 +196,7 @@ prebuilt frontend back to the executable-set builder from a Bash environment:
 ./scripts/build-windows-capture-agent.sh \
   --output-dir .build \
   --version dev \
-  --assist-gui-exe .build/windows-assist-gui.exe
+  --assist-gui-exe .build/assist-gui/windows-assist-gui.exe
 ```
 
 The build script emits and verifies the expected Windows PE subsystem for:
@@ -209,9 +214,12 @@ The build also emits `windowsagent-release.json` and `SHA256SUMS`. The catalog
 classifies every published executable as bootstrap, required runtime, optional
 runtime, operator tool, or diagnostic and rejects missing or unexpected EXEs.
 Tagged releases upload each EXE and both metadata files as separate GitHub
-Release assets. They also provide `windows-assist-gui.zip`, containing exactly
-`windows-assist-gui.exe` and `windows-assist-backend.exe`, as the bootstrap
-pair. There is no traditional Setup package or archive of the complete
+Release assets. They also provide `windows-assist-gui.zip`, containing the
+complete framework-dependent WinUI publish payload plus its sibling
+`windows-assist-backend.exe`. The ZIP is the runnable AssistGUI distribution;
+the individually published GUI EXE remains an executable catalog artifact but
+cannot run without the adjacent managed payload files and machine-installed
+frameworks. There is no traditional Setup package or archive of the complete
 multi-process system.
 
 `windows-capture-agent.exe` is the installable GUI artifact.
@@ -695,7 +703,7 @@ internal/windowsexec/         structured process and PowerShell-file runtime
 internal/release*/            executable catalog and HTTP/1.1 verified downloads
 internal/assistgui/           AssistGUI access-information model
 internal/assistlifecycle/     verified installed Watchdog start/stop lifecycle
-ui/windows-assist-gui/        unpackaged self-contained C# WinUI 3 frontend
+ui/windows-assist-gui/        unpackaged framework-dependent C# WinUI 3 frontend
 Rules/<Executable.exe>/       distributable Rule v6 packages and guidance
 runtimes/                     self-contained external inference, Pi, and Tailscale runtimes
 tools/                        model preparation, publishing, and diagnostics

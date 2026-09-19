@@ -33,7 +33,7 @@ try {
     & dotnet publish $project `
         --configuration Release `
         --runtime win-x64 `
-        --self-contained true `
+        --self-contained false `
         "-p:Platform=x64" `
         "-p:Version=$managedVersion" `
         "-p:InformationalVersion=$Version" `
@@ -46,8 +46,25 @@ try {
     if (-not (Test-Path -LiteralPath $publishedExecutable -PathType Leaf)) {
         throw "WinUI publish did not produce windows-assist-gui.exe"
     }
+    $publishedPri = Join-Path $publishDir "windows-assist-gui.pri"
+    if (-not (Test-Path -LiteralPath $publishedPri -PathType Leaf)) {
+        throw "framework-dependent WinUI publish did not include windows-assist-gui.pri"
+    }
+    $publishedFiles = @(Get-ChildItem -LiteralPath $publishDir -Recurse -File | Sort-Object FullName)
+    if ($publishedFiles.Count -lt 2) {
+        throw "framework-dependent WinUI publish did not produce its required payload"
+    }
+    if (Test-Path -LiteralPath $resolvedOutput) {
+        $existing = @(Get-ChildItem -LiteralPath $resolvedOutput -Force)
+        if ($existing.Count -ne 0) {
+            throw "AssistGUI output directory must be empty: $resolvedOutput"
+        }
+    }
+    foreach ($item in (Get-ChildItem -LiteralPath $publishDir -Force)) {
+        Copy-Item -LiteralPath $item.FullName -Destination $resolvedOutput -Recurse
+    }
+
     $destination = Join-Path $resolvedOutput "windows-assist-gui.exe"
-    Copy-Item -LiteralPath $publishedExecutable -Destination $destination -Force
 
     & python (Join-Path $PSScriptRoot "verify-windows-pe-subsystem.py") $destination --expect gui
     if ($LASTEXITCODE -ne 0) {
@@ -56,10 +73,14 @@ try {
 
     [ordered]@{
         executable = $destination
+        payloadDirectory = $resolvedOutput
+        files = @($publishedFiles | ForEach-Object {
+            $_.FullName.Substring($publishDir.Length + 1).Replace("\", "/")
+        })
         version = $Version
         runtime = "win-x64"
-        selfContained = $true
-        singleFile = $true
+        selfContained = $false
+        singleFile = $false
     } | ConvertTo-Json -Compress
 } finally {
     Remove-Item -LiteralPath $publishDir -Recurse -Force -ErrorAction SilentlyContinue

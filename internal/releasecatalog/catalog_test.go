@@ -87,9 +87,9 @@ func TestWriteSHA256SumsUsesCatalogOrder(t *testing.T) {
 	}
 }
 
-func TestInstallArtifactExcludesOnlyOperatorAndDiagnosticExecutables(t *testing.T) {
+func TestInstallArtifactSelectsOnlyInstalledRuntimeExecutables(t *testing.T) {
 	for _, artifact := range testCatalog().Artifacts {
-		want := artifact.Class != ClassOperatorTool && artifact.Class != ClassDiagnostic
+		want := artifact.Class == ClassRuntimeRequired || artifact.Class == ClassRuntimeOptional
 		if InstallArtifact(artifact) != want {
 			t.Fatalf("InstallArtifact(%s) = %t, want %t", artifact.Name, InstallArtifact(artifact), want)
 		}

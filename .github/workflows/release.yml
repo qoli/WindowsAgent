@@ -75,12 +75,13 @@ jobs:
             throw "invalid release version: $version"
           }
           "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-      - name: Publish self-contained WinUI AssistGUI
+      - name: Publish framework-dependent WinUI AssistGUI
         shell: pwsh
         run: |
           ./scripts/build-windows-assist-gui.ps1 `
-            -OutputDir .release `
+            -OutputDir .release/assist-gui `
             -Version "${{ steps.version.outputs.value }}"
+          Copy-Item .release/assist-gui/windows-assist-gui.exe .release/windows-assist-gui.exe
       - name: Verify complete release and generate metadata
         shell: pwsh
         run: |
@@ -91,29 +92,34 @@ jobs:
             --version "${{ steps.version.outputs.value }}" `
             --output-json .release/windowsagent-release.json `
             --output-sums .release/SHA256SUMS
-      - name: Package AssistGUI bootstrap pair
+      - name: Package AssistGUI bootstrap payload
         shell: pwsh
         run: |
           $bootstrap = Join-Path $env:RUNNER_TEMP "windows-assist-bootstrap"
           New-Item -ItemType Directory -Path $bootstrap -Force | Out-Null
-          Copy-Item .release/windows-assist-gui.exe $bootstrap
+          Copy-Item -Path .release/assist-gui/* -Destination $bootstrap -Recurse
           Copy-Item .release/windows-assist-backend.exe $bootstrap
           $archive = Join-Path $PWD ".release/windows-assist-gui.zip"
-          $bootstrapFiles = @(
-            (Join-Path $bootstrap "windows-assist-gui.exe")
-            (Join-Path $bootstrap "windows-assist-backend.exe")
-          )
-          Compress-Archive -LiteralPath $bootstrapFiles -DestinationPath $archive -CompressionLevel Optimal
           Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::CreateFromDirectory(
+            $bootstrap,
+            $archive,
+            [IO.Compression.CompressionLevel]::Optimal,
+            $false)
           $zip = [IO.Compression.ZipFile]::OpenRead($archive)
           try {
-            $actual = @($zip.Entries | ForEach-Object FullName | Sort-Object)
+            $actual = @($zip.Entries | Where-Object { -not $_.FullName.EndsWith("/") } | ForEach-Object FullName | Sort-Object)
           } finally {
             $zip.Dispose()
           }
-          $expected = @("windows-assist-backend.exe", "windows-assist-gui.exe")
+          $payloadRoot = (Resolve-Path .release/assist-gui).Path.TrimEnd("\")
+          $expected = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | ForEach-Object {
+            $_.FullName.Substring($payloadRoot.Length + 1).Replace("\", "/")
+          })
+          $expected += "windows-assist-backend.exe"
+          $expected = @($expected | Sort-Object)
           if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) {
-            throw "AssistGUI bootstrap ZIP does not contain exactly the GUI/backend pair"
+            throw "AssistGUI bootstrap ZIP does not match the framework-dependent GUI payload plus backend"
           }
       - name: Publish individual release assets
         shell: pwsh

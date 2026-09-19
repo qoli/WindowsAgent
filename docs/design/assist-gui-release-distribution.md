@@ -5,8 +5,8 @@
 Partially landed.
 
 The repository now has one strict multi-process release catalog, deterministic
-SHA-256 output, a tag-driven GitHub Release workflow, a self-contained C#
-WinUI 3 `windows-assist-gui.exe`, its Go `windows-assist-backend.exe`, and an
+SHA-256 output, a tag-driven GitHub Release workflow, a framework-dependent C#
+WinUI 3 AssistGUI payload, its Go `windows-assist-backend.exe`, and an
 independent `windows-tailscale-adapter.exe`. The GUI reports local Agent
 health, private-LAN endpoints, and TailscaleAdapter state. It can start an
 ephemeral adapter from a one-off auth key and request a graceful logout through
@@ -70,14 +70,40 @@ GitHub Release uploads the individual `.exe` files together with
 `windowsagent-release.json` and `SHA256SUMS`.
 
 The release additionally provides `windows-assist-gui.zip` as a narrow
-bootstrap transport. That archive contains exactly `windows-assist-gui.exe`
-and `windows-assist-backend.exe`; it does not duplicate the release catalog,
-checksums, or any runtime executable, and it does not hide the multi-process
-release inside a combined archive.
+bootstrap transport. That archive contains the complete framework-dependent
+WinUI publish output at its root together with the sibling
+`windows-assist-backend.exe`. It does not duplicate the release catalog,
+checksums, or any installed WindowsAgent runtime executable, and it does not
+hide the multi-process release inside a combined archive. The individually
+published `windows-assist-gui.exe` remains part of the executable catalog for
+identity and PE verification, but the ZIP is the runnable AssistGUI
+distribution because the apphost requires its adjacent managed payload files.
+
+AssistGUI keeps `WindowsPackageType=None` and uses the Windows App SDK's
+default bootstrap auto-initialization. It does not call the bootstrap API,
+override the default `OnNoMatch_ShowUI` option, inspect installed runtime
+packages, show a custom prerequisite MessageBox, maintain runtime download
+URLs, or add a native bootstrapper. A missing .NET Desktop Runtime remains the
+.NET GUI apphost's official missing-framework UX. When .NET is present but a
+matching Windows App Runtime is not, the default Windows App SDK bootstrap
+acquisition UI owns that result.
+
+The framework-dependent publish must also carry the generated
+`windows-assist-gui.pri`. Current Windows App SDK publish targets generate that
+PRI in the build output but omit it from unpackaged publish output; the project
+wires the generated PRI into `ResolvedFileToPublish`, and the build script
+fails if it is absent. This is publish completeness glue, not prerequisite
+detection or a second bootstrap path.
 
 The catalog is a coherent release set. AssistGUI must stage and validate the
 complete selected set before mutating an installation; it must not report a
 partially updated process graph as a successful release update.
+
+Bootstrap artifacts are distribution processes, not installed WindowsAgent
+runtime artifacts. Install, Update, and Repair deploy only `runtime-required`
+and `runtime-optional` executables. The currently running backend copies itself
+to the private transaction stage for the elevated handoff; the framework-
+dependent GUI payload remains in the user-extracted bootstrap directory.
 
 ## AssistGUI setup surface
 
@@ -102,8 +128,8 @@ Start WindowsAgent, and Stop WindowsAgent. It reports Installed/Not installed,
 Capture Agent Running/Stopped, installed version, Watchdog Running/Stopped and
 start-at-sign-in state, LAN endpoints, and Tailscale status and assigned IPs.
 A staged backend copy waits for both the original GUI and original backend to
-exit before applying a mutation, so the bootstrap pair can replace its
-installed copies without overwriting running executables.
+exit before applying a mutation, so setup never overwrites running
+executables.
 
 Start verifies the installed Watchdog and configured target ownership, starts
 only the Watchdog Scheduled Task, and waits for the existing Watchdog status to
@@ -183,12 +209,32 @@ Watchdog, delegated Pi, and other companions retain their independent process
 and control-plane contracts. This design publishes and installs those binaries;
 it does not absorb their implementations into AssistGUI.
 
+## Prerequisite acceptance
+
+The framework-dependent bootstrap behavior was accepted on 2026-09-19 in
+disposable, network-disconnected Windows 11 ARM64 VMs running the published
+x64 payload through Windows emulation:
+
+- On a fresh installation with no .NET Desktop Runtime, launching
+  `windows-assist-gui.exe` displayed the official .NET GUI apphost prompt,
+  including **You must install .NET Desktop Runtime to run this application**
+  and the framework-owned **Download it now** action.
+- After installing only .NET 8 Desktop Runtime 8.0.31 x64, with no matching
+  Windows App Runtime present, the same payload reached Windows App SDK
+  bootstrap auto-initialization and displayed its official acquisition prompt
+  for Windows App Runtime 2.x with MSIX package version 2.4.0 or newer.
+
+Both observations used the same complete framework-dependent publish payload,
+including `windows-assist-gui.pri`, and neither environment had network access
+that could silently satisfy an acquisition request. No repository-owned
+prerequisite detector, MessageBox, runtime URL, or native bootstrapper was
+involved.
+
 ## Open Questions
 
 - Decide whether Authenticode is warranted after the bootstrap distribution
   and Defender false-positive behavior are validated independently.
-- Validate WinUI single-file extraction/startup without a preinstalled Windows
-  App Runtime; backend protocol and error rendering; adapter enrollment,
+- Validate backend protocol and error rendering; adapter enrollment,
   tailnet listener reachability, GUI state, logout, node removal; fresh
   installation, Update, Repair, Uninstall, rollback, Start/Stop/Start,
   Watchdog startup configuration, and two-bootstrap self-update in a signed-in

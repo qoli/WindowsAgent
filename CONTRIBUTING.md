@@ -32,11 +32,11 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
 AssistGUI changes must additionally publish the WinUI frontend on Windows:
 
 ```powershell
-.\scripts\build-windows-assist-gui.ps1 -OutputDir .build -Version dev
+.\scripts\build-windows-assist-gui.ps1 -OutputDir .build\assist-gui -Version dev
 ```
 
 Then run the Go builder with
-`--assist-gui-exe .build/windows-assist-gui.exe` to validate the complete
+`--assist-gui-exe .build/assist-gui/windows-assist-gui.exe` to validate the complete
 release catalog.
 
 The canonical `windows-capture-agent.exe` is the persistent GUI-subsystem

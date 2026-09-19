@@ -18,7 +18,7 @@ if ($dataDir -cne $expectedRoot) { throw "install data directory must equal the 
 $catalog = Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
 if ([int]$catalog.schemaVersion -ne 1 -or [string]$catalog.target -cne "windows-amd64") { throw "release catalog identity is invalid" }
 $selected = @($catalog.artifacts | Where-Object {
-    $_.class -ceq "bootstrap" -or $_.class -ceq "runtime-required" -or $_.class -ceq "runtime-optional"
+    $_.class -ceq "runtime-required" -or $_.class -ceq "runtime-optional"
 })
 if ($selected.Count -eq 0) { throw "release catalog selected no WindowsAgent install artifacts" }
 foreach ($artifact in $selected) {
