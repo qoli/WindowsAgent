@@ -36,40 +36,72 @@
 <section class="hero">
   <div class="hero-inner">
     <div class="hero-copy">
-      <p class="hero-kicker" data-i18n="hero.kicker">Agent-facing game runtime for Windows</p>
-      <h1 data-i18n-html="hero.title">Fast reflexes.<br>Slow reasoning.<br><span class="accent">Your agent plays the game.</span></h1>
-      <p class="hero-sub" data-i18n="hero.sub">WindowsAgent is a runtime where AI agents author and execute actions for Windows games — perception, sandboxed execution, and input control under one strict contract.</p>
+      <p class="hero-kicker" data-i18n="hero.kicker">A structured Windows runtime for AI agents</p>
+      <h1 data-i18n-html="hero.title">Give your AI agent<br><span class="accent">a Windows computer.</span></h1>
+      <p class="hero-sub" data-i18n="hero.sub">Install WindowsAgent with AssistGUI, connect over a trusted LAN or optional Tailscale network, and give your agent one structured runtime for seeing, acting, and verifying.</p>
       <div class="hero-ctas">
-        <a class="btn btn-primary" href="https://github.com/qoli/WindowsAgent" data-i18n="hero.cta1">View on GitHub</a>
-        <a class="btn btn-ghost" href="https://github.com/qoli/WindowsAgent/tree/main/docs" data-i18n="hero.cta2">Read the docs</a>
+        <a class="btn btn-primary" href="https://github.com/qoli/WindowsAgent/releases/latest/download/windows-assist-gui.zip" data-i18n="hero.cta1">Download AssistGUI</a>
+        <a class="btn btn-ghost" href="https://github.com/qoli/WindowsAgent" data-i18n="hero.cta2">View on GitHub</a>
       </div>
       <ul class="hero-badges">
-        <li>Go 1.23+</li>
-        <li>Windows 10 1903+ amd64</li>
+        <li data-i18n="hero.badge1">AssistGUI entry point</li>
+        <li data-i18n="hero.badge2">Windows 10 1903+ · amd64</li>
+        <li data-i18n="hero.badge3">Trusted LAN · Tailscale</li>
         <li>MIT</li>
-        <li>Codex · OpenCode</li>
       </ul>
     </div>
-    <div class="hero-terminal" aria-hidden="true">
-      <div class="term-bar"><span class="term-dot"></span><span class="term-dot"></span><span class="term-dot"></span><span class="term-title">POST /v1/captures</span></div>
-<pre class="term-body">{
-  "foreground": {
-    "executable_name": <em>"EliteDangerous64.exe"</em>,
-    "window_title": "Elite - Dangerous (CLIENT)"
-  },
-  "rule": {
-    "status": <strong>"matched"</strong>,
-    "id": "EliteDangerous64.exe",
-    "actions": { "url": "/v3/rules/.../actions" }
-  }
-}</pre>
-      <div class="term-bar term-bar-alt"><span class="term-title">POST /v1/actions/invoke</span></div>
-<pre class="term-body">{"actionId": <em>"elite-dangerous/leave-station"</em>,
- "inputs": {"stationConfirmed": true}}
-
-→ 202 RUNNING  <strong>watch: /v1/action-invocations/act_9f2e…/events</strong></pre>
+    <div class="setup-path" aria-label="AssistGUI setup path" data-i18n-aria-label="assist.flow.label">
+      <div class="setup-step setup-step-primary">
+        <span class="setup-number">01</span>
+        <div><strong data-i18n="assist.flow.1.t">Open AssistGUI</strong><span data-i18n="assist.flow.1.d">The runnable Windows setup app</span></div>
+      </div>
+      <span class="setup-arrow" aria-hidden="true">↓</span>
+      <div class="setup-step">
+        <span class="setup-number">02</span>
+        <div><strong data-i18n="assist.flow.2.t">Install and start</strong><span data-i18n="assist.flow.2.d">Manage the runtime and Watchdog</span></div>
+      </div>
+      <span class="setup-arrow" aria-hidden="true">↓</span>
+      <div class="setup-step">
+        <span class="setup-number">03</span>
+        <div><strong data-i18n="assist.flow.3.t">Connect your agent</strong><span data-i18n="assist.flow.3.d">Use the reported LAN or Tailscale endpoint</span></div>
+      </div>
     </div>
   </div>
+</section>
+
+<!-- ============ ASSISTGUI ============ -->
+<section id="assistgui" class="section section-alt assist-section">
+  <div class="assist-heading">
+    <div>
+      <p class="section-kicker" data-i18n="assist.kicker">Start here</p>
+      <h2 data-i18n="assist.title">AssistGUI gets WindowsAgent running</h2>
+      <p class="section-sub" data-i18n="assist.sub">Download the release ZIP, launch AssistGUI in your signed-in Windows session, and manage the installed runtime without beginning at a terminal.</p>
+    </div>
+    <a class="btn btn-primary" href="https://github.com/qoli/WindowsAgent/releases/latest/download/windows-assist-gui.zip" data-i18n="assist.download">Download windows-assist-gui.zip</a>
+  </div>
+  <ol class="assist-grid">
+    <li>
+      <span>01</span>
+      <h3 data-i18n="assist.1.t">Download and launch</h3>
+      <p data-i18n="assist.1.d">Extract the runnable AssistGUI distribution from the latest GitHub Release, then open it on Windows.</p>
+    </li>
+    <li>
+      <span>02</span>
+      <h3 data-i18n="assist.2.t">Install and manage</h3>
+      <p data-i18n="assist.2.d">Install, update, repair, uninstall, start, or stop WindowsAgent. Inspect installed version plus Capture Agent and Watchdog state.</p>
+    </li>
+    <li>
+      <span>03</span>
+      <h3 data-i18n="assist.3.t">Choose a trusted route</h3>
+      <p data-i18n="assist.3.d">Use the LAN endpoint AssistGUI reports, or provide your own Tailscale auth key to enable the optional private-overlay connection.</p>
+    </li>
+    <li>
+      <span>04</span>
+      <h3 data-i18n="assist.4.t">Give the endpoint to your agent</h3>
+      <p data-i18n="assist.4.d">AssistGUI reports connection status and address. Share the endpoint only with an agent on the same trusted network.</p>
+    </li>
+  </ol>
+  <p class="assist-note" data-i18n="assist.note">AssistGUI reports Tailscale status and IP, but it does not create credentials. Runtime endpoints are unauthenticated by default: keep them off the public Internet.</p>
 </section>
 
 <!-- ============ THE LOOP ============ -->

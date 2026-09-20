@@ -111,6 +111,52 @@ body {
   border: 1px solid var(--line); border-radius: 99px; padding: 0.2rem 0.75rem;
 }
 
+/* ---------- AssistGUI entry ---------- */
+.setup-path {
+  position: relative;
+  display: flex; flex-direction: column; gap: 0.65rem;
+  padding: 1.3rem;
+  background: linear-gradient(150deg, rgba(56, 225, 255, 0.08), rgba(17, 25, 39, 0.96) 44%);
+  border: 1px solid var(--cyan-dim); border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.setup-step {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 1rem 1.1rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+}
+.setup-step-primary { border-color: var(--cyan-dim); }
+.setup-number { font-family: var(--mono); font-size: 0.75rem; color: var(--cyan); }
+.setup-step div { display: flex; flex-direction: column; }
+.setup-step strong { font-size: 1rem; }
+.setup-step div span { color: var(--muted); font-size: 0.85rem; }
+.setup-arrow { align-self: center; color: var(--cyan-dim); line-height: 0.8; }
+.assist-heading {
+  display: flex; justify-content: space-between; align-items: end; gap: 2rem;
+  margin-bottom: 2rem;
+}
+.assist-heading .section-sub { margin-bottom: 0; }
+.assist-heading .btn { flex: 0 0 auto; }
+.assist-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem;
+  list-style: none; counter-reset: none;
+}
+.assist-grid li {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 1.4rem;
+}
+.assist-grid li > span {
+  display: block; margin-bottom: 0.7rem;
+  color: var(--orange); font-family: var(--mono); font-size: 0.75rem;
+}
+.assist-grid h3 { font-size: 1rem; margin-bottom: 0.55rem; }
+.assist-grid p { color: var(--muted); font-size: 0.88rem; }
+.assist-note {
+  margin-top: 1.2rem; padding: 1rem 1.2rem;
+  color: var(--muted); font-size: 0.9rem;
+  border-left: 3px solid var(--orange); background: rgba(255, 157, 69, 0.06);
+}
+
 /* ---------- terminal ---------- */
 .hero-terminal {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -339,13 +385,15 @@ body {
   .hero-inner { grid-template-columns: 1fr; gap: 2.5rem; }
   .loop-grid { grid-template-columns: repeat(2, 1fr); }
   .pillar-grid, .rules-grid, .qs-grid { grid-template-columns: 1fr; }
+  .assist-grid { grid-template-columns: 1fr 1fr; }
   .game-intro, .game-gallery, .game-video-pair { grid-template-columns: 1fr; }
   .trio { grid-template-columns: 1fr; }
   .nav-links { display: none; }
+  .assist-heading { align-items: start; flex-direction: column; }
 }
 
 @media (max-width: 560px) {
-  .loop-grid { grid-template-columns: 1fr; }
+  .loop-grid, .assist-grid { grid-template-columns: 1fr; }
   .hero { padding-top: 3.5rem; }
 }
 
