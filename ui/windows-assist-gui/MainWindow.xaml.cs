@@ -11,7 +11,7 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<string> _progress = [];
     private AgentSnapshot? _snapshot;
     private bool _operationActive;
-    private bool _updatingStartupToggle;
+    private bool _updatingStartupCheckBox;
     private bool _loaded;
     private bool _allowClose;
 
@@ -20,7 +20,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(840, 760));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 640));
         AppWindow.Closing += (_, args) =>
         {
             if (_operationActive && !_allowClose)
@@ -48,13 +48,13 @@ public sealed partial class MainWindow : Window
     private async void InstallButton_Click(object sender, RoutedEventArgs e) =>
         await RunConfiguredCommandAsync(BackendCommands.Install, "Installing WindowsAgent");
 
-    private async void UpdateButton_Click(object sender, RoutedEventArgs e) =>
+    private async void UpdateMenuItem_Click(object sender, RoutedEventArgs e) =>
         await RunConfiguredCommandAsync(BackendCommands.Update, "Updating WindowsAgent");
 
-    private async void RepairButton_Click(object sender, RoutedEventArgs e) =>
-        await RunConfiguredCommandAsync(BackendCommands.Repair, "Repairing WindowsAgent");
+    private async void ReinstallMenuItem_Click(object sender, RoutedEventArgs e) =>
+        await RunConfiguredCommandAsync(BackendCommands.Repair, "Reinstalling WindowsAgent");
 
-    private async void UninstallButton_Click(object sender, RoutedEventArgs e)
+    private async void UninstallMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmAsync(
                 "Uninstall WindowsAgent?",
@@ -67,7 +67,7 @@ public sealed partial class MainWindow : Window
         await RunCommandAsync(BackendCommands.Uninstall, null, "Uninstalling WindowsAgent");
     }
 
-    private async void StartButton_Click(object sender, RoutedEventArgs e)
+    private async void StartRuntimeMenuItem_Click(object sender, RoutedEventArgs e)
     {
         var authKey = EmptyToNull(AuthKeyBox.Password);
         await RunCommandAsync(
@@ -76,7 +76,7 @@ public sealed partial class MainWindow : Window
             "Starting WindowsAgent");
     }
 
-    private async void StopButton_Click(object sender, RoutedEventArgs e)
+    private async void StopRuntimeMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmAsync(
                 "Stop WindowsAgent?",
@@ -89,17 +89,17 @@ public sealed partial class MainWindow : Window
         await RunCommandAsync(BackendCommands.Stop, null, "Stopping WindowsAgent");
     }
 
-    private async void StartAtSignInToggle_Toggled(object sender, RoutedEventArgs e)
+    private async void StartAtSignInCheckBox_Click(object sender, RoutedEventArgs e)
     {
-        if (_updatingStartupToggle || _operationActive || _snapshot is null || !_snapshot.Installed)
+        if (_updatingStartupCheckBox || _operationActive || _snapshot is null || !_snapshot.Installed)
         {
             return;
         }
 
         await RunCommandAsync(
             BackendCommands.ConfigureWatchdog,
-            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInToggle.IsOn),
-            "Updating Watchdog startup setting");
+            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInCheckBox.IsChecked == true),
+            "Updating startup setting");
 
         if (_snapshot is not null)
         {
@@ -133,7 +133,7 @@ public sealed partial class MainWindow : Window
     private Task RunConfiguredCommandAsync(string command, string title) =>
         RunCommandAsync(
             command,
-            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInToggle.IsOn),
+            new BackendSettings(WatchdogStartAtSignIn: StartAtSignInCheckBox.IsChecked == true),
             title);
 
     private async Task RunCommandAsync(string command, BackendSettings? settings, string title)
@@ -143,13 +143,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var showOperationOverlay = command != BackendCommands.Inspect;
         _operationActive = true;
         NoticeBar.IsOpen = false;
         _progress.Clear();
         OperationTitle.Text = title;
-        OperationProgress.IsActive = true;
-        OperationSectionHeader.Visibility = Visibility.Visible;
-        OperationPanel.Visibility = Visibility.Visible;
+        OperationProgress.IsActive = showOperationOverlay;
+        OperationOverlay.Visibility = showOperationOverlay ? Visibility.Visible : Visibility.Collapsed;
         RefreshControls();
 
         try
@@ -170,7 +170,10 @@ public sealed partial class MainWindow : Window
                 ApplySnapshot(result.Snapshot);
             }
 
-            ShowNotice(InfoBarSeverity.Success, result.Message);
+            if (command != BackendCommands.Inspect)
+            {
+                ShowNotice(InfoBarSeverity.Success, result.Message);
+            }
             if (result.CloseGui)
             {
                 _allowClose = true;
@@ -198,8 +201,7 @@ public sealed partial class MainWindow : Window
         {
             _operationActive = false;
             OperationProgress.IsActive = false;
-            OperationSectionHeader.Visibility = Visibility.Collapsed;
-            OperationPanel.Visibility = Visibility.Collapsed;
+            OperationOverlay.Visibility = Visibility.Collapsed;
             RefreshControls();
         }
     }
@@ -223,12 +225,7 @@ public sealed partial class MainWindow : Window
     private void ApplySnapshot(AgentSnapshot snapshot)
     {
         _snapshot = snapshot;
-        InstalledValue.Text = snapshot.Installed ? "Installed" : "Not installed";
         VersionValue.Text = snapshot.Version ?? "—";
-        CaptureValue.Text = snapshot.Capture.Running ? "Running" : "Stopped";
-        WatchdogValue.Text = snapshot.Watchdog.Installed
-            ? snapshot.Watchdog.Running ? "Running" : "Stopped"
-            : "Not installed";
         if (snapshot.Installed)
         {
             SetStartAtSignIn(snapshot.Watchdog.StartAtSignIn);
@@ -253,40 +250,40 @@ public sealed partial class MainWindow : Window
         var tailscaleRunning = _snapshot is not null && _snapshot.Tailscale.Status is "starting" or "online" or "stopping";
         var anyRuntimeRunning = watchdogRunning || captureRunning || tailscaleRunning;
         var enabled = !_operationActive;
-        var installedVisibility = installed ? Visibility.Visible : Visibility.Collapsed;
 
         InstallButton.IsEnabled = enabled && _snapshot is not null && !installed;
         InstallButton.Visibility = _snapshot is not null && !installed ? Visibility.Visible : Visibility.Collapsed;
-        UpdateButton.IsEnabled = enabled && installed;
-        RepairButton.IsEnabled = enabled && installed;
-        UninstallButton.IsEnabled = enabled && installed;
-        StartButton.IsEnabled = enabled && installed && !anyRuntimeRunning;
-        StartButton.Visibility = installed && !anyRuntimeRunning ? Visibility.Visible : Visibility.Collapsed;
-        StopButton.IsEnabled = enabled && installed && anyRuntimeRunning;
-        StopButton.Visibility = installed && anyRuntimeRunning ? Visibility.Visible : Visibility.Collapsed;
-        StartAtSignInToggle.IsEnabled = enabled && _snapshot is not null;
+        MaintenanceButton.IsEnabled = enabled && installed;
+        MaintenanceButton.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
+        UpdateMenuItem.IsEnabled = enabled && installed;
+        ReinstallMenuItem.IsEnabled = enabled && installed;
+        UninstallMenuItem.IsEnabled = enabled && installed;
+
+        RuntimeStatusValue.Text = _snapshot is null
+            ? "Checking…"
+            : !installed
+                ? "Not installed"
+                : anyRuntimeRunning ? "Running" : "Stopped";
+        RuntimeMenuButton.IsEnabled = enabled && installed;
+        StartRuntimeMenuItem.IsEnabled = enabled && installed && !anyRuntimeRunning;
+        StartRuntimeMenuItem.Visibility = installed && !anyRuntimeRunning ? Visibility.Visible : Visibility.Collapsed;
+        StopRuntimeMenuItem.IsEnabled = enabled && installed && anyRuntimeRunning;
+        StopRuntimeMenuItem.Visibility = installed && anyRuntimeRunning ? Visibility.Visible : Visibility.Collapsed;
+
+        StartAtSignInCheckBox.IsEnabled = enabled && _snapshot is not null;
         AuthKeyBox.IsEnabled = enabled && installed;
         ConnectTailscaleButton.IsEnabled = enabled && installed && !string.IsNullOrWhiteSpace(AuthKeyBox.Password);
         DisconnectTailscaleButton.IsEnabled = enabled && installed && tailscaleRunning;
-        DisconnectTailscaleButton.Visibility = installed && tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
+        TailscaleDisconnectedPanel.Visibility = installed && !tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
+        TailscaleConnectedPanel.Visibility = installed && tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
         RefreshButton.IsEnabled = enabled;
-
-        VersionCard.Visibility = installedVisibility;
-        CaptureCard.Visibility = installedVisibility;
-        WatchdogCard.Visibility = installedVisibility;
-        RuntimeActionCard.Visibility = installedVisibility;
-        TailscaleConnectCard.Visibility = installed && !tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
-        MaintenanceSectionHeader.Visibility = installedVisibility;
-        UpdateCard.Visibility = installedVisibility;
-        RepairCard.Visibility = installedVisibility;
-        UninstallCard.Visibility = installedVisibility;
     }
 
     private void SetStartAtSignIn(bool value)
     {
-        _updatingStartupToggle = true;
-        StartAtSignInToggle.IsOn = value;
-        _updatingStartupToggle = false;
+        _updatingStartupCheckBox = true;
+        StartAtSignInCheckBox.IsChecked = value;
+        _updatingStartupCheckBox = false;
     }
 
     private async Task<bool> ConfirmAsync(string title, string content, string primaryText)

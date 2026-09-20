@@ -77,52 +77,88 @@ func TestAssistGUIIsFrameworkDependentAndUsesOfficialPrerequisiteUX(t *testing.T
 	}
 }
 
-func TestAssistGUIUsesTheWinUIGallerySettingsPageVisualContract(t *testing.T) {
+func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 	project := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "WindowsAssistGUI.csproj"))
-	if !strings.Contains(project, `<PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />`) {
-		t.Fatal("AssistGUI must pin the stable WinUI SettingsControls package used by its settings-page visual contract")
+	if strings.Contains(project, "CommunityToolkit.WinUI.Controls.SettingsControls") {
+		t.Fatal("AssistGUI must not retain the unused SettingsControls dependency after adopting native grouped rows")
 	}
 
 	xaml := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml"))
 	for _, required := range []string{
-		`xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"`,
 		`<MicaBackdrop />`,
 		`<TitleBar x:Name="AppTitleBar"`,
+		`x:Name="RefreshButton"`,
+		`<TextBlock Text="Refresh" />`,
 		`<ScrollView x:Name="PageScroll"`,
-		`<x:Double x:Key="SettingsCardSpacing">4</x:Double>`,
 		`<x:Double x:Key="Breakpoint640Plus">641</x:Double>`,
+		`<Style x:Key="GroupedCardStyle" TargetType="Border">`,
+		`<Style x:Key="SettingsRowStyle" TargetType="Grid">`,
 		`BasedOn="{StaticResource BodyStrongTextBlockStyle}"`,
 		`AutomationProperties.HeadingLevel="Level1"`,
-		`<toolkit:SettingsCard Header="Installation"`,
-		`<toolkit:SettingsCard Header="LAN endpoint"`,
-		`<toolkit:SettingsCard Header="Tailscale"`,
-		`<ToggleSwitch x:Name="StartAtSignInToggle"`,
-		`<Border x:Name="OperationPanel"`,
+		`x:Name="MaintenanceButton"`,
+		`x:Name="UpdateMenuItem"`,
+		`Text="Reinstall"`,
+		`x:Name="UninstallMenuItem"`,
+		`x:Name="RuntimeMenuButton"`,
+		`x:Name="StartRuntimeMenuItem"`,
+		`x:Name="StopRuntimeMenuItem"`,
+		`<CheckBox x:Name="StartAtSignInCheckBox"`,
+		`MinWidth="0"`,
+		`HorizontalAlignment="Right"`,
+		`x:Name="TailscaleDisconnectedPanel"`,
+		`x:Name="TailscaleConnectedPanel"`,
+		`<Grid x:Name="OperationOverlay"`,
+		`Background="{ThemeResource SmokeFillColorDefaultBrush}"`,
+		`<ItemsControl x:Name="ProgressItems" />`,
 		`Visibility="Collapsed"`,
 	} {
 		if !strings.Contains(xaml, required) {
-			t.Fatalf("AssistGUI XAML is missing settings-page visual contract %q", required)
+			t.Fatalf("AssistGUI XAML is missing compact grouped-settings contract %q", required)
 		}
 	}
 	for _, forbidden := range []string{
 		"<NavigationView",
+		"<TitleBar.RightHeader>",
+		"toolkit:SettingsCard",
+		"xmlns:toolkit=",
 		"ApplicationPageBackgroundThemeBrush",
-		"StartAtSignInCheckBox",
+		"StartAtSignInToggle",
 		"Apply startup setting",
+		"Set up WindowsAgent",
+		"Capture Agent",
+		`x:Name="OperationPanel"`,
+		`x:Name="OperationSectionHeader"`,
 		"No operation in progress",
 		"Setup operations are performed by the sibling",
 	} {
 		if strings.Contains(xaml, forbidden) {
-			t.Fatalf("AssistGUI XAML regressed to the retired dashboard pattern %q", forbidden)
+			t.Fatalf("AssistGUI XAML regressed to the retired expanded settings pattern %q", forbidden)
 		}
 	}
 
 	codeBehind := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml.cs"))
-	if !strings.Contains(codeBehind, `_snapshot.Tailscale.Status is "starting" or "online" or "stopping"`) {
-		t.Fatal("AssistGUI must treat only active Tailscale states as a running adapter")
+	for _, required := range []string{
+		`_snapshot.Tailscale.Status is "starting" or "online" or "stopping"`,
+		`var showOperationOverlay = command != BackendCommands.Inspect`,
+		`OperationOverlay.Visibility = showOperationOverlay ? Visibility.Visible : Visibility.Collapsed`,
+		`if (command != BackendCommands.Inspect)`,
+		`OperationOverlay.Visibility = Visibility.Collapsed`,
+		`TailscaleDisconnectedPanel.Visibility = installed && !tailscaleRunning`,
+		`TailscaleConnectedPanel.Visibility = installed && tailscaleRunning`,
+		`StartAtSignInCheckBox.IsChecked == true`,
+	} {
+		if !strings.Contains(codeBehind, required) {
+			t.Fatalf("AssistGUI code-behind is missing compact interaction contract %q", required)
+		}
 	}
-	if strings.Contains(codeBehind, `_snapshot.Tailscale.Status != "disabled"`) {
-		t.Fatal("AssistGUI must not hide reconnect behind a stale or failed Tailscale state")
+	for _, forbidden := range []string{
+		`_snapshot.Tailscale.Status != "disabled"`,
+		"OperationPanel.Visibility",
+		"StartAtSignInToggle",
+	} {
+		if strings.Contains(codeBehind, forbidden) {
+			t.Fatalf("AssistGUI code-behind retains retired interaction %q", forbidden)
+		}
 	}
 }
 

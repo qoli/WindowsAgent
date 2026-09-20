@@ -117,34 +117,37 @@ dependent GUI payload remains in the user-extracted bootstrap directory.
 ## AssistGUI setup surface
 
 The Microsoft WinUI 3 Gallery `SettingsPage.xaml` at commit
-`abb8cb4cef04a5080f5c0396f67a7ec502b36179` is the AssistGUI visual reference,
-not its product or runtime authority. AssistGUI adopts that page's single-column
-scrolling structure, title and section typography, four-effective-pixel card
-rhythm, SettingsCard header/description/action anatomy, Mica window surface,
-TitleBar, and 641-effective-pixel responsive boundary. It does not adopt the
-Gallery's NavigationView, search, sample catalog, automation helpers, multiple
-page destinations, experimental Windows App SDK version, or .NET target.
+`abb8cb4cef04a5080f5c0396f67a7ec502b36179` remains a visual reference, not the
+product or runtime authority. AssistGUI uses a Mica window, TitleBar, section
+typography, single-column scrolling content, grouped setting rows, and a
+641-effective-pixel responsive boundary. It does not adopt the Gallery's
+NavigationView, search, sample catalog, automation helpers, multiple page
+destinations, experimental Windows App SDK version, or .NET target. Native
+WinUI Borders, Grids, MenuFlyouts, Buttons, CheckBox, and PasswordBox implement
+the compact surface; no SettingsControls package is required.
 
-The frontend pins the stable
-`CommunityToolkit.WinUI.Controls.SettingsControls` package needed for the
-SettingsCard surface. This is a visual dependency only: release, installation,
-process, Watchdog, and Tailscale behavior continue to belong to the existing
-WindowsAgent backend contracts. The normal layout remains a single column at
-every width. Below 641 effective pixels, page gutters and input widths reflow;
-larger windows add whitespace instead of turning the setup surface back into a
-two-column dashboard.
+The persistent page has exactly three sections: Maintenance, Status, and
+Access. Maintenance contains one state-appropriate Install button or a menu
+with Update, Reinstall, and Uninstall, plus the installed version. Reinstall is
+the user-facing label for the existing backend `repair` command and does not
+define another installation transaction. Status reduces the concrete Capture
+Agent and Watchdog facts to one WindowsAgent Running or Stopped value with a
+state-appropriate Start or Stop menu action, plus a start-at-sign-in CheckBox.
+Access groups the LAN endpoint and Tailscale controls. The Tailscale action area
+switches between auth-key plus Connect while inactive and Disconnect while
+`STARTING`, `ONLINE`, or `STOPPING`; status and assigned addresses remain in
+the same row.
 
-The visible sections are WindowsAgent, Access, Maintenance, and an Operation
-section that exists only while a backend request is active. The UI shows one
-state-appropriate Install, Start, or Stop action instead of presenting every
-backend command with equal weight. The Watchdog start-at-sign-in setting is a
-ToggleSwitch: before installation it is the pending Install setting, and after
-installation it applies immediately through the existing
-`configure-watchdog` command. Tailscale enrollment is shown while the installed
-adapter is disabled or failed; an active `STARTING`, `ONLINE`, or `STOPPING`
-adapter instead shows its status, addresses, and Disconnect action.
-Implementation details such as the sibling backend executable are not
-user-facing footer content.
+The Status section header owns the explicit Refresh action; page commands do
+not compete with window chrome in the TitleBar. Initial inspection and manual
+Refresh update the snapshot silently: they show neither the operation overlay
+nor a success InfoBar, while inspection failures remain explicit. Mutating
+backend requests present progress events in a blocking smoke-layer operation
+overlay rather than a persistent Log section. The overlay has no dismiss
+action, prevents concurrent page input, and closes automatically on a terminal
+result. Success or error is then reported through the page InfoBar, so failures
+do not disappear with the transient progress surface. Implementation details
+such as the sibling backend executable are not user-facing content.
 
 TailscaleAdapter is disabled by default. AssistGUI always reports Agent health
 and active private-LAN IPv4 endpoints. When the adapter is enabled it also
@@ -162,10 +165,12 @@ remain artifact metadata; they are not presented as product choices. Operator
 tools and the console diagnostic remain release assets but are not installed
 runtime processes.
 
-The GUI exposes the concrete operations Install, Update, Repair, Uninstall,
-Start WindowsAgent, and Stop WindowsAgent. It reports Installed/Not installed,
-Capture Agent Running/Stopped, installed version, Watchdog Running/Stopped and
-start-at-sign-in state, LAN endpoints, and Tailscale status and assigned IPs.
+The GUI exposes the concrete operations Install, Update, Reinstall, Uninstall,
+Start WindowsAgent, and Stop WindowsAgent. Reinstall maps to the existing
+backend Repair command. It reports Not installed or WindowsAgent
+Running/Stopped, installed version, start-at-sign-in state, LAN endpoints, and
+Tailscale status and assigned IPs. Capture Agent and Watchdog remain concrete
+backend snapshot facts but are not presented as separate product concepts.
 A staged backend copy waits for both the original GUI and original backend to
 exit before applying a mutation, so setup never overwrites running
 executables.
