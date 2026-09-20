@@ -246,12 +246,22 @@
   <p class="outcome-note" data-i18n="agent.ladder.note">These are distinct claims. Not every operation supplies every layer of evidence; its own contract defines what can be proven.</p>
 </section>
 
-<!-- ============ THREE-LINE DESIGN ============ -->
-<section id="design" class="section">
-  <p class="section-kicker" data-i18n="ds.kicker">Three-line architecture</p>
-  <h2 data-i18n="ds.title">Three lines, one agent</h2>
-  <p class="section-sub" data-i18n="ds.sub">The fast path never waits for a model. Streaming actions fly the ship; the visual log records and indexes what happened; the high-level agent plans, supervises — and repairs the actions themselves.</p>
-  <p class="ds-problem"><span class="ds-problem-num" data-i18n="ds.problem.num">0 model calls</span><span data-i18n="ds.problem.d">in the fast path. Any model-in-the-loop reaction — local or remote — costs seconds per step, burns tokens on every frame, and can't be verified. Reflexes here are deterministic Starlark: bounded, replayable, exact. The model plans; code reacts.</span></p>
+<!-- ============ ADVANCED GAME CONTROL ============ -->
+<section id="advanced" class="section">
+  <p class="section-kicker" data-i18n="ds.kicker">Advanced game control</p>
+  <h2 data-i18n="ds.title">When one model turn is too slow</h2>
+  <p class="section-sub" data-i18n="ds.sub">For games, an executable-scoped Rule can add finite Actions, streaming workflows, OCR, vision, and game bindings. The agent plans at a high level while a bounded local Action owns the fast feedback loop.</p>
+  <div class="advanced-flow">
+    <div>
+      <span data-i18n="advanced.normal.label">NORMAL WINDOWS CONTROL</span>
+      <strong data-i18n="advanced.normal.flow">agent → WindowsAgent operation</strong>
+    </div>
+    <div class="advanced-flow-emphasis">
+      <span data-i18n="advanced.game.label">ADVANCED GAME CONTROL</span>
+      <strong data-i18n="advanced.game.flow">agent → high-level plan → local Rule / Action → bounded fast loop → game</strong>
+    </div>
+  </div>
+  <p class="ds-problem"><span class="ds-problem-num" data-i18n="ds.problem.num">0 model calls</span><span data-i18n="ds.problem.d">in the shipped fast path. Deterministic Starlark Actions own the bounded feedback loop while the model plans and supervises outside it.</span></p>
   <div class="trio">
     <div class="dual-col dual-fast">
       <h3 data-i18n="ds.fast.t">Fast · The Reflex</h3>
@@ -289,9 +299,9 @@
 
 <!-- ============ SHIPPED RULES ============ -->
 <section id="rules" class="section section-alt">
-  <p class="section-kicker" data-i18n="rules.kicker">Proof, not promise</p>
-  <h2 data-i18n="rules.title">Shipped Rules</h2>
-  <p class="section-sub" data-i18n="rules.sub">Every capability below was built on the same runtime your agent gets.</p>
+  <p class="section-kicker" data-i18n="rules.kicker">Advanced packages · real implementations</p>
+  <h2 data-i18n="rules.title">Shipped game Rules</h2>
+  <p class="section-sub" data-i18n="rules.sub">These executable-scoped packages extend the general runtime with game-owned observation, decisions, bindings, and Actions.</p>
   <div class="rules-grid">
     <article class="rule-card rule-card-featured">
       <header>
@@ -320,13 +330,14 @@
       <ul class="rule-caps"><li>ui-elements</li><li>ONNX · DirectML</li></ul>
     </article>
   </div>
+  <p class="rules-boundary" data-i18n="rules.boundary">Rules may declare Monitor or Reaction eligibility, but WindowsAgent does not ship a scheduler or subscription dispatcher. Catalog eligibility is not a running automation.</p>
 </section>
 
 <!-- ============ THE GAME ============ -->
 <section id="game" class="section">
-  <p class="section-kicker" data-i18n="game.kicker">The proving ground</p>
-  <h2 data-i18n="game.title">Elite Dangerous — the game your agent learns to fly</h2>
-  <p class="section-sub" data-i18n="game.sub">Frontier's 1:1 Milky Way is home turf for the first shipped Rule. Long-haul flight, strict physics, and a HUD that never forgives a guess — exactly the environment the two-speed architecture was built for.</p>
+  <p class="section-kicker" data-i18n="game.kicker">Real game evidence</p>
+  <h2 data-i18n="game.title">Elite Dangerous proves the advanced loop</h2>
+  <p class="section-sub" data-i18n="game.sub">The first shipped Rule uses local deterministic Actions for flight phases where a model-turn control loop is too slow. The media below is real runtime evidence, not a product mockup.</p>
   <div class="game-intro">
     <article class="pillar">
       <h3><span class="pillar-tag">GAME</span><span data-i18n="game.g.t">About the game</span></h3>
@@ -382,44 +393,19 @@
   </div>
 </section>
 
-<!-- ============ META-GAME ============ -->
-<section id="metagame" class="section">
-  <p class="section-kicker" data-i18n="mg.kicker">The meta-game</p>
-  <h2 data-i18n="mg.title">Making a game agent-playable is itself a game</h2>
-  <p class="section-sub" data-i18n="mg.sub">Anyone can contribute a Rule for any game. Each new capability is a cleared level — judged by strict contracts, recorded in replays, and unlocked for every agent.</p>
-  <div class="pillar-grid">
-    <article class="pillar">
-      <h3><span class="pillar-tag">QUEST</span><span data-i18n="mg.q.t">A capability map per game</span></h3>
-      <ul>
-        <li data-i18n="mg.q.1">Level one: read a single HUD value with evidence</li>
-        <li data-i18n="mg.q.2">Mid game: compose classifiers and gate actions</li>
-        <li data-i18n="mg.q.3">Boss fight: a full streaming reflex workflow</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">REFEREE</span><span data-i18n="mg.r.t">Contracts are the scoring system</span></h3>
-      <ul>
-        <li data-i18n="mg.r.1">Strict schemas judge every contribution on every call</li>
-        <li data-i18n="mg.r.2">Black-box acceptance contracts decide what counts as cleared</li>
-        <li data-i18n="mg.r.3">Guessing never passes — UNKNOWN is honest, not a win</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">REPLAY</span><span data-i18n="mg.p.t">Every run is a record</span></h3>
-      <ul>
-        <li data-i18n="mg.p.1">The durable event journal and 1 FPS Evidence capture the whole clear</li>
-        <li data-i18n="mg.p.2">Export, share, and compare your agent's runs</li>
-        <li data-i18n="mg.p.3">A four-minute station departure becomes a time to beat</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">OPEN</span><span data-i18n="mg.o.t">Any game can enter the map</span></h3>
-      <ul>
-        <li data-i18n="mg.o.1">A Rule is one plugin folder: guidance, actions, runtimes</li>
-        <li data-i18n="mg.o.2">Hot-swap plugins with no agent restart or rebuild</li>
-        <li data-i18n="mg.o.3">Your contribution becomes every agent's new ability</li>
-      </ul>
-    </article>
+<!-- ============ EXTEND THE GAME LAYER ============ -->
+<section id="extend" class="section">
+  <div class="extend-callout">
+    <div>
+      <p class="section-kicker" data-i18n="mg.kicker">Extend the advanced layer</p>
+      <h2 data-i18n="mg.title">A Rule keeps game semantics with the game</h2>
+      <p data-i18n="mg.sub">Each executable-scoped Rule owns its guidance, Action packages, schemas, bindings, coordinates, classifiers, and postconditions. Core stays game-neutral.</p>
+    </div>
+    <ul>
+      <li data-i18n="mg.q.1">Start with one evidence-backed observation</li>
+      <li data-i18n="mg.q.2">Add a finite Action for one bounded operation</li>
+      <li data-i18n="mg.q.3">Use a streaming Action only when the workflow must retain state, wait, compensate, or verify over time</li>
+    </ul>
   </div>
 </section>
 

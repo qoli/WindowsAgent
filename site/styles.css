@@ -335,6 +335,20 @@ body {
 }
 
 /* ---------- three-line design ---------- */
+.advanced-flow {
+  display: grid; grid-template-columns: 0.8fr 1.2fr; gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+.advanced-flow > div {
+  display: flex; flex-direction: column; gap: 0.45rem;
+  padding: 1.2rem; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--panel);
+}
+.advanced-flow .advanced-flow-emphasis { border-color: var(--cyan-dim); }
+.advanced-flow span {
+  color: var(--muted); font-family: var(--mono); font-size: 0.67rem; letter-spacing: 0.1em;
+}
+.advanced-flow strong { font-family: var(--mono); font-size: 0.83rem; font-weight: 500; }
 .ds-problem {
   display: flex; align-items: baseline; gap: 1rem;
   border: 1px solid var(--line); border-left: 4px solid var(--orange);
@@ -412,6 +426,23 @@ body {
   background: rgba(56, 225, 255, 0.07); border: 1px solid rgba(56, 225, 255, 0.18);
   border-radius: 6px; padding: 0.2rem 0.55rem;
 }
+.rules-boundary {
+  margin-top: 1.2rem; padding: 0.9rem 1rem;
+  color: var(--muted); font-size: 0.85rem;
+  border-left: 3px solid var(--orange); background: rgba(255, 157, 69, 0.06);
+}
+
+/* ---------- extend advanced layer ---------- */
+.extend-callout {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center;
+  padding: 2rem; border: 1px solid var(--line); border-radius: 16px;
+  background: linear-gradient(135deg, rgba(183, 140, 255, 0.06), var(--panel) 45%);
+}
+.extend-callout h2 { margin-bottom: 0.6rem; }
+.extend-callout p:not(.section-kicker), .extend-callout li { color: var(--muted); }
+.extend-callout ul { list-style: none; }
+.extend-callout li { position: relative; padding-left: 1.25rem; margin-bottom: 0.65rem; }
+.extend-callout li::before { content: "◆"; position: absolute; left: 0; color: var(--violet); font-size: 0.65rem; top: 0.25rem; }
 
 /* ---------- game ---------- */
 .game-intro {
@@ -492,6 +523,7 @@ body {
   .workflow-grid { grid-template-columns: 1fr; }
   .game-intro, .game-gallery, .game-video-pair { grid-template-columns: 1fr; }
   .trio { grid-template-columns: 1fr; }
+  .advanced-flow, .extend-callout { grid-template-columns: 1fr; }
   .nav-links { display: none; }
   .assist-heading { align-items: start; flex-direction: column; }
 }
