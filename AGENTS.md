@@ -75,6 +75,10 @@ inventories:
 - `.agents/skills/use-visual-log/SKILL.md` owns the supervising-model workflow
   for operating the on-demand visual log and using it to locate evidence time
   ranges.
+- `.agents/skills/tailscale-one-off-auth-key/SKILL.md` owns generation of one
+  single-use Tailscale auth key through the signed-in Admin Console in Arc,
+  including its secret-handling boundary. Key generation does not authorize
+  AssistGUI consumption, remote-device enrollment, or enrollment validation.
 
 Do not copy a complete Action catalog into this file. Read the current Rule and
 package on disk, or the live catalog when operating the installed Agent.
