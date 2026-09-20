@@ -104,6 +104,49 @@
   <p class="assist-note" data-i18n="assist.note">AssistGUI reports Tailscale status and IP, but it does not create credentials. Runtime endpoints are unauthenticated by default: keep them off the public Internet.</p>
 </section>
 
+<!-- ============ CAPABILITIES ============ -->
+<section id="capabilities" class="section">
+  <p class="section-kicker" data-i18n="cap.kicker">What WindowsAgent provides</p>
+  <h2 data-i18n="cap.title">One runtime. Six capability groups.</h2>
+  <p class="section-sub" data-i18n="cap.sub">WindowsAgent is more than a screenshot server, shell wrapper, remote desktop, or game bot. It exposes Windows capabilities through explicit, inspectable contracts.</p>
+  <div class="capability-grid">
+    <article class="capability-card">
+      <header><span class="cap-icon" aria-hidden="true">◉</span><span class="status status-available" data-i18n="status.available">Available</span></header>
+      <h3 data-i18n="cap.see.t">See</h3>
+      <p data-i18n="cap.see.d">Capture the primary display through WGC, identify the foreground executable, resolve its owning Rule, and return a verified artifact with capture provenance.</p>
+    </article>
+    <article class="capability-card">
+      <header><span class="cap-icon" aria-hidden="true">⌁</span><span class="status status-partial" data-i18n="status.partial">Partially available</span></header>
+      <h3 data-i18n="cap.act.t">Act</h3>
+      <p data-i18n="cap.act.d">Send bounded, foreground-bound keyboard and pointer operations. Completion proves the input operation—not that the application accepted the intended result.</p>
+    </article>
+    <article class="capability-card">
+      <header><span class="cap-icon" aria-hidden="true">›_</span><span class="status status-partial" data-i18n="status.partial">Partially available</span></header>
+      <h3 data-i18n="cap.run.t">Run</h3>
+      <p data-i18n="cap.run.d">Execute structured process operations, uploaded PowerShell files, or bounded Starlark automation with durable results and explicit cancellation contracts.</p>
+    </article>
+    <article class="capability-card">
+      <header><span class="cap-icon" aria-hidden="true">⇄</span><span class="status status-optional" data-i18n="status.optional">Available · optional</span></header>
+      <h3 data-i18n="cap.files.t">Move data</h3>
+      <p data-i18n="cap.files.d">Transfer files through the independent SFTP-only filesystem runtime. It is a data plane—not an SSH shell or hidden execution fallback.</p>
+    </article>
+    <article class="capability-card">
+      <header><span class="cap-icon" aria-hidden="true">◎</span><span class="status status-mixed" data-i18n="status.mixed">Available + partial</span></header>
+      <h3 data-i18n="cap.observe.t">Observe</h3>
+      <p data-i18n="cap.observe.d">Inspect processes and services today. Optional event, invocation, Evidence, and Visual Log paths add durable history at their documented maturity levels.</p>
+    </article>
+    <article class="capability-card">
+      <header><span class="cap-icon" aria-hidden="true">↗</span><span class="status status-mixed" data-i18n="status.mixed">Available + partial</span></header>
+      <h3 data-i18n="cap.connect.t">Connect</h3>
+      <p data-i18n="cap.connect.d">Reach the runtime over a trusted LAN. AssistGUI can report endpoints and manage an optional Tailscale route; that integration remains partially available.</p>
+    </article>
+  </div>
+  <div class="maturity-note" role="note">
+    <strong data-i18n="cap.maturity.t">Maturity is part of the contract.</strong>
+    <span data-i18n="cap.maturity.d">“Partial” means a real path exists with documented work still deferred. Declaration-only registrations and draft designs are not presented here as running features.</span>
+  </div>
+</section>
+
 <!-- ============ THE LOOP ============ -->
 <section id="loop" class="section">
   <p class="section-kicker" data-i18n="loop.kicker">How it works</p>
@@ -136,59 +179,6 @@
       <p data-i18n="loop.5.d">Every step lands in an append-only event journal; 1 FPS Evidence and the Gemma index let the agent replay, locate the fault, and repair the action.</p>
     </li>
   </ol>
-</section>
-
-<!-- ============ RUNTIME ============ -->
-<section id="runtime" class="section section-alt">
-  <p class="section-kicker" data-i18n="rt.kicker">What the runtime provides</p>
-  <h2 data-i18n="rt.title">Ground truth for your agent</h2>
-  <div class="pillar-grid">
-    <article class="pillar">
-      <h3><span class="pillar-tag">EYE</span><span data-i18n="rt.p1.t">Perception</span></h3>
-      <ul>
-        <li data-i18n="rt.p1.1">Windows Graphics Capture + D3D11, HDR tone-mapped to SDR</li>
-        <li data-i18n="rt.p1.2">Resident PP-OCRv6 DirectML workers, declared per Rule</li>
-        <li data-i18n="rt.p1.3">ScreenParser v2 ONNX detector on hash-pinned frames</li>
-        <li data-i18n="rt.p1.4">Reference-density screen regions mapped through a 16:9 viewport</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">CORE</span><span data-i18n="rt.p2.t">Execution</span></h3>
-      <ul>
-        <li data-i18n="rt.p2.1">Sandboxed Starlark script packages with strict limits</li>
-        <li data-i18n="rt.p2.2">Package-owned native DLLs via a generic Windows amd64 FFI</li>
-        <li data-i18n="rt.p2.3">Finite and streaming actions with durable invocation IDs</li>
-        <li data-i18n="rt.p2.4">Append-only event journal with authenticated loopback replay</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">HAND</span><span data-i18n="rt.p3.t">Control</span></h3>
-      <ul>
-        <li data-i18n="rt.p3.1">Foreground-bound scan-code key injection, one press at a time</li>
-        <li data-i18n="rt.p3.2">Game key bindings resolved live from the active .binds preset</li>
-        <li data-i18n="rt.p3.3">Logical UI moves selected by the supervising model</li>
-        <li data-i18n="rt.p3.4">Action OSD overlay shows the live action without stealing focus</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">LAW</span><span data-i18n="rt.p4.t">Contracts</span></h3>
-      <ul>
-        <li data-i18n="rt.p4.1">Manifest, input, and output schemas validated on every call</li>
-        <li data-i18n="rt.p4.2">UNKNOWN is a first-class result — evidence is never invented</li>
-        <li data-i18n="rt.p4.3">SHA-256 pinned models and artifacts, verified before use</li>
-        <li data-i18n="rt.p4.4">Bad requests fail explicitly; nothing degrades silently</li>
-      </ul>
-    </article>
-    <article class="pillar">
-      <h3><span class="pillar-tag">INDEX</span><span data-i18n="rt.p5.t">Visual Log</span></h3>
-      <ul>
-        <li data-i18n="rt.p5.1">Bounded 1 FPS Evidence recordings — MP4 segments, SHA-256 manifest</li>
-        <li data-i18n="rt.p5.2">Contact sheets and UTC-range ZIP export for fast localization</li>
-        <li data-i18n="rt.p5.3">On-demand gemma-4-e4b-it-8bit scene index over a LAN oMLX endpoint</li>
-        <li data-i18n="rt.p5.4">Untrusted index only — verification always lands on authoritative Evidence</li>
-      </ul>
-    </article>
-  </div>
 </section>
 
 <!-- ============ THREE-LINE DESIGN ============ -->
