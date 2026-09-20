@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using WindowsAgent.AssistGui.Backend;
@@ -7,6 +8,8 @@ namespace WindowsAgent.AssistGui;
 
 public sealed partial class MainWindow : Window
 {
+    private const int InitialWidth = 720;
+    private const int InitialHeight = 640;
     private readonly BackendClient _backend = new();
     private readonly ObservableCollection<string> _progress = [];
     private AgentSnapshot? _snapshot;
@@ -20,7 +23,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 640));
+        ResizeToEffectivePixels(InitialWidth, InitialHeight);
         AppWindow.Closing += (_, args) =>
         {
             if (_operationActive && !_allowClose)
@@ -33,6 +36,18 @@ public sealed partial class MainWindow : Window
         Root.Loaded += Root_Loaded;
         RefreshControls();
     }
+
+    private void ResizeToEffectivePixels(int width, int height)
+    {
+        var windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        var dpi = GetDpiForWindow(windowHandle);
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(
+            checked((int)Math.Round(width * dpi / 96.0)),
+            checked((int)Math.Round(height * dpi / 96.0))));
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr windowHandle);
 
     private async void Root_Loaded(object sender, RoutedEventArgs e)
     {

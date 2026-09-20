@@ -77,6 +77,18 @@ func TestAssistGUIIsFrameworkDependentAndUsesOfficialPrerequisiteUX(t *testing.T
 	}
 }
 
+func TestAssistGUIIsPerMonitorDPIAware(t *testing.T) {
+	manifest := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "app.manifest"))
+	for _, required := range []string{
+		`<dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>`,
+		`<dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>`,
+	} {
+		if !strings.Contains(manifest, required) {
+			t.Fatalf("AssistGUI manifest is missing per-monitor DPI contract %q", required)
+		}
+	}
+}
+
 func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 	project := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "WindowsAssistGUI.csproj"))
 	if strings.Contains(project, "CommunityToolkit.WinUI.Controls.SettingsControls") {
@@ -138,6 +150,9 @@ func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 
 	codeBehind := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml.cs"))
 	for _, required := range []string{
+		`ResizeToEffectivePixels(InitialWidth, InitialHeight)`,
+		`WinRT.Interop.WindowNative.GetWindowHandle(this)`,
+		`GetDpiForWindow(windowHandle)`,
 		`_snapshot.Tailscale.Status is "starting" or "online" or "stopping"`,
 		`var showOperationOverlay = command != BackendCommands.Inspect`,
 		`OperationOverlay.Visibility = showOperationOverlay ? Visibility.Visible : Visibility.Collapsed`,
