@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WindowsAgent — Let your agent build the assist</title>
-<meta name="description" content="A two-speed runtime where AI agents author and execute actions for Windows games.">
+<title>WindowsAgent — A structured Windows runtime for AI agents</title>
+<meta name="description" content="Install WindowsAgent with AssistGUI and connect an AI agent to structured Windows capture, execution, file, input, observation, and advanced game capabilities.">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,16 +16,15 @@
     <span>WindowsAgent</span>
   </a>
   <nav class="nav-links">
-    <a href="#loop" data-i18n="nav.loop">The Loop</a>
-    <a href="#runtime" data-i18n="nav.runtime">Runtime</a>
-    <a href="#design" data-i18n="nav.design">Design</a>
-    <a href="#rules" data-i18n="nav.rules">Rules</a>
-    <a href="#game" data-i18n="nav.game">The Game</a>
-    <a href="#metagame" data-i18n="nav.metagame">Meta-game</a>
-    <a href="#quickstart" data-i18n="nav.quickstart">Quick Start</a>
+    <a href="#assistgui" data-i18n="nav.install">Install</a>
+    <a href="#capabilities" data-i18n="nav.capabilities">Capabilities</a>
+    <a href="#windows-control" data-i18n="nav.control">Windows Control</a>
+    <a href="#agents" data-i18n="nav.agents">Built for Agents</a>
+    <a href="#advanced" data-i18n="nav.advanced">Games</a>
+    <a href="#developers" data-i18n="nav.developers">Developers</a>
   </nav>
   <div class="nav-actions">
-    <button id="lang-toggle" class="lang-toggle" type="button" aria-label="Switch language">中文</button>
+    <button id="lang-toggle" class="lang-toggle" type="button" aria-label="Switch language" data-i18n-aria-label="lang.toggle">中文</button>
     <a class="btn btn-ghost btn-sm" href="https://github.com/qoli/WindowsAgent">GitHub</a>
   </div>
 </header>
@@ -409,33 +408,58 @@
   </div>
 </section>
 
-<!-- ============ QUICK START ============ -->
-<section id="quickstart" class="section section-alt">
-  <p class="section-kicker" data-i18n="qs.kicker">Quick start</p>
-  <h2 data-i18n="qs.title">From clone to first capture</h2>
+<!-- ============ DEVELOPERS ============ -->
+<section id="developers" class="section section-alt">
+  <p class="section-kicker" data-i18n="dev.kicker">Developers and operators</p>
+  <h2 data-i18n="dev.title">Build, inspect, and extend WindowsAgent</h2>
+  <p class="section-sub" data-i18n="dev.sub">AssistGUI is the normal installation path. Use the repository path when you need to build the runtime, inspect its contracts, develop a Rule, or contribute code.</p>
   <div class="qs-grid">
     <div class="qs-step">
-      <h3 data-i18n="qs.1.t">1 · Build</h3>
+      <h3 data-i18n="dev.1.t">1 · Build from source</h3>
       <pre><code>go test ./...
-./scripts/build-windows-capture-agent.sh</code></pre>
+./scripts/build-windows-capture-agent.sh \
+  --skip-assist-gui --skip-catalog</code></pre>
     </div>
     <div class="qs-step">
-      <h3 data-i18n="qs.2.t">2 · Run in the signed-in session</h3>
+      <h3 data-i18n="dev.2.t">2 · Run in the signed-in session</h3>
       <pre><code>.\.build\windows-capture-agent-console.exe `
   --rules-dir (Resolve-Path .\.build\Rules)</code></pre>
     </div>
     <div class="qs-step">
-      <h3 data-i18n="qs.3.t">3 · Capture &amp; invoke</h3>
+      <h3 data-i18n="dev.3.t">3 · Create a capture</h3>
       <pre><code>curl.exe --data-binary '{"include_cursor":true}' `
-  http://127.0.0.1:8787/v1/captures
-
-curl.exe --data-binary '{"actionId":"elite-dangerous/ship-status","inputs":{}}' `
-  http://127.0.0.1:8787/v1/actions/invoke</code></pre>
+  http://127.0.0.1:8787/v1/captures</code></pre>
     </div>
   </div>
+  <div class="resource-grid">
+    <a href="https://github.com/qoli/WindowsAgent">
+      <strong data-i18n="dev.repo.t">GitHub repository</strong>
+      <span data-i18n="dev.repo.d">Source, releases, and project README</span>
+    </a>
+    <a href="https://github.com/qoli/WindowsAgent#http-api">
+      <strong data-i18n="dev.api.t">API and runtime guide</strong>
+      <span data-i18n="dev.api.d">Current commands, HTTP surface, and project map</span>
+    </a>
+    <a href="https://github.com/qoli/WindowsAgent/tree/main/docs/design">
+      <strong data-i18n="dev.design.t">Design registry</strong>
+      <span data-i18n="dev.design.d">Canonical maturity for maintained designs</span>
+    </a>
+    <a href="https://github.com/qoli/WindowsAgent/tree/main/.agents/skills">
+      <strong data-i18n="dev.skills.t">Agent Skills</strong>
+      <span data-i18n="dev.skills.d">Repository-owned development and operating workflows</span>
+    </a>
+    <a href="https://github.com/qoli/WindowsAgent/blob/main/SECURITY.md">
+      <strong data-i18n="dev.security.t">Security</strong>
+      <span data-i18n="dev.security.d">Trust boundaries and vulnerability reporting</span>
+    </a>
+    <a href="https://github.com/qoli/WindowsAgent/blob/main/CONTRIBUTING.md">
+      <strong data-i18n="dev.contrib.t">Contributing</strong>
+      <span data-i18n="dev.contrib.d">How to propose and validate a change</span>
+    </a>
+  </div>
   <div class="warning" role="note">
-    <strong data-i18n="qs.warn.t">Trusted networks only.</strong>
-    <span data-i18n="qs.warn.d">The HTTP server listens on 0.0.0.0:8787 without authentication, TLS, or CORS by default. Anyone who can reach that port can trigger captures and read foreground process metadata. Use it only on a trusted LAN or private overlay network.</span>
+    <strong data-i18n="dev.warn.t">Trusted networks only.</strong>
+    <span data-i18n="dev.warn.d">The Capture Agent listens on 0.0.0.0:8787 without authentication or TLS by default. Reachability is the trust boundary for capture, execution, and enabled input surfaces.</span>
   </div>
 </section>
 
@@ -446,6 +470,7 @@ curl.exe --data-binary '{"actionId":"elite-dangerous/ship-status","inputs":{}}' 
     <span>WindowsAgent · MIT License</span>
     <nav>
       <a href="https://github.com/qoli/WindowsAgent">GitHub</a>
+      <a href="https://github.com/qoli/WindowsAgent/releases/latest/download/windows-assist-gui.zip" data-i18n="footer.download">Download</a>
       <a href="https://github.com/qoli/WindowsAgent/blob/main/CONTRIBUTING.md" data-i18n="footer.contrib">Contributing</a>
       <a href="https://github.com/qoli/WindowsAgent/blob/main/SECURITY.md" data-i18n="footer.security">Security</a>
       <a href="https://github.com/qoli/WindowsAgent/tree/main/docs/design" data-i18n="footer.design">Design docs</a>
