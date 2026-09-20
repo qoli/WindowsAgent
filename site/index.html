@@ -147,6 +147,59 @@
   </div>
 </section>
 
+<!-- ============ WINDOWS CONTROL ============ -->
+<section id="windows-control" class="section section-alt">
+  <p class="section-kicker" data-i18n="control.kicker">Normal Windows control</p>
+  <h2 data-i18n="control.title">One route from your agent to a Windows PC</h2>
+  <p class="section-sub" data-i18n="control.sub">WindowsAgent exposes the Windows capabilities an agent needs through one runtime instead of requiring a custom stack of unrelated capture, file-transfer, execution, and input bridges.</p>
+  <div class="control-map" role="img" aria-label="An AI agent connects over a trusted LAN or Tailscale network to WindowsAgent, which exposes capture, inspection, files, execution, input, and evidence capabilities." data-i18n-aria-label="control.map.label">
+    <div class="control-node control-client">
+      <span class="control-node-label" data-i18n="control.map.from">FROM</span>
+      <strong data-i18n="control.map.agent">AI agent</strong>
+      <small data-i18n="control.map.agent.d">Mac or another trusted machine</small>
+    </div>
+    <div class="control-route">
+      <span data-i18n="control.map.route">trusted LAN or Tailscale</span>
+      <span class="control-route-line" aria-hidden="true"></span>
+      <span class="control-route-arrow" aria-hidden="true">›</span>
+    </div>
+    <div class="control-node control-runtime">
+      <span class="control-node-label" data-i18n="control.map.to">ON WINDOWS</span>
+      <strong>WindowsAgent</strong>
+      <small data-i18n="control.map.runtime.d">Signed-in interactive session</small>
+      <ul>
+        <li data-i18n="control.map.capture">capture</li>
+        <li data-i18n="control.map.inspect">inspect</li>
+        <li data-i18n="control.map.files">files</li>
+        <li data-i18n="control.map.execute">execute</li>
+        <li data-i18n="control.map.input">input</li>
+        <li data-i18n="control.map.evidence">evidence</li>
+      </ul>
+    </div>
+  </div>
+  <div class="workflow-grid">
+    <article>
+      <span class="workflow-num">01</span>
+      <h3 data-i18n="control.w1.t">Understand the current state</h3>
+      <p data-i18n="control.w1.d">Capture the desktop, identify the foreground application, and inspect the process and service snapshot before deciding what to do.</p>
+    </article>
+    <article>
+      <span class="workflow-num">02</span>
+      <h3 data-i18n="control.w2.t">Perform a bounded task</h3>
+      <p data-i18n="control.w2.d">Transfer files, run a structured command or uploaded PowerShell workflow, then use foreground-bound keyboard or pointer input where supported.</p>
+    </article>
+    <article>
+      <span class="workflow-num">03</span>
+      <h3 data-i18n="control.w3.t">Check what happened</h3>
+      <p data-i18n="control.w3.d">Read the operation result and, where the capability provides it, inspect durable events or Evidence instead of assuming a sent command achieved the goal.</p>
+    </article>
+  </div>
+  <div class="warning" role="note">
+    <strong data-i18n="control.warn.t">Private network boundary.</strong>
+    <span data-i18n="control.warn.d">The runtime is not a public remote-desktop service. Its HTTP and SFTP endpoints are unauthenticated by default; use them only on a trusted LAN or private overlay and keep them off the public Internet.</span>
+  </div>
+</section>
+
 <!-- ============ THE LOOP ============ -->
 <section id="loop" class="section">
   <p class="section-kicker" data-i18n="loop.kicker">How it works</p>

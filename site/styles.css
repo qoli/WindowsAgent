@@ -193,6 +193,55 @@ body {
 }
 .maturity-note strong { color: var(--text); }
 
+/* ---------- normal Windows control ---------- */
+.control-map {
+  display: grid; grid-template-columns: minmax(180px, 0.72fr) minmax(180px, 0.5fr) minmax(320px, 1.35fr);
+  gap: 1.2rem; align-items: center;
+  margin-bottom: 1.3rem; padding: 1.4rem;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 16px;
+}
+.control-node {
+  display: flex; flex-direction: column; min-width: 0;
+  padding: 1.25rem; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel);
+}
+.control-client { border-color: rgba(183, 140, 255, 0.35); }
+.control-runtime { border-color: var(--cyan-dim); }
+.control-node-label {
+  margin-bottom: 0.5rem; color: var(--muted);
+  font-family: var(--mono); font-size: 0.67rem; letter-spacing: 0.12em;
+}
+.control-node strong { font-size: 1.15rem; }
+.control-node small { color: var(--muted); }
+.control-node ul {
+  display: flex; flex-wrap: wrap; gap: 0.42rem;
+  margin-top: 1rem; list-style: none;
+}
+.control-node li {
+  padding: 0.18rem 0.5rem; border: 1px solid rgba(56, 225, 255, 0.2); border-radius: 5px;
+  color: var(--cyan); background: rgba(56, 225, 255, 0.05);
+  font-family: var(--mono); font-size: 0.7rem;
+}
+.control-route {
+  display: grid; grid-template-columns: 1fr auto; align-items: center;
+  color: var(--muted); font-family: var(--mono); font-size: 0.7rem;
+  text-align: center;
+}
+.control-route > span:first-child { grid-column: 1 / -1; margin-bottom: 0.4rem; }
+.control-route-line { display: block; height: 1px; background: var(--cyan-dim); }
+.control-route-arrow { color: var(--cyan); font-size: 1.5rem; line-height: 0; }
+.workflow-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+.workflow-grid article {
+  padding: 1.3rem; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--panel);
+}
+.workflow-num { color: var(--orange); font-family: var(--mono); font-size: 0.72rem; }
+.workflow-grid h3 { margin: 0.55rem 0 0.45rem; font-size: 1rem; }
+.workflow-grid p { color: var(--muted); font-size: 0.88rem; }
+
 /* ---------- terminal ---------- */
 .hero-terminal {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
@@ -423,6 +472,12 @@ body {
   .pillar-grid, .rules-grid, .qs-grid { grid-template-columns: 1fr; }
   .assist-grid { grid-template-columns: 1fr 1fr; }
   .capability-grid { grid-template-columns: 1fr 1fr; }
+  .control-map { grid-template-columns: 1fr; }
+  .control-route { grid-template-columns: 1fr; justify-items: center; }
+  .control-route > span:first-child { grid-column: auto; }
+  .control-route-line { width: 1px; height: 2rem; }
+  .control-route-arrow { transform: rotate(90deg); }
+  .workflow-grid { grid-template-columns: 1fr; }
   .game-intro, .game-gallery, .game-video-pair { grid-template-columns: 1fr; }
   .trio { grid-template-columns: 1fr; }
   .nav-links { display: none; }
