@@ -200,38 +200,50 @@
   </div>
 </section>
 
-<!-- ============ THE LOOP ============ -->
-<section id="loop" class="section">
-  <p class="section-kicker" data-i18n="loop.kicker">How it works</p>
-  <h2 data-i18n="loop.title">The agent is the developer — and the pilot</h2>
-  <p class="section-sub" data-i18n="loop.sub">One capture is the agent's single perception entry point. From there the agent reads the rule, authors or invokes an action, and receives durable evidence back.</p>
+<!-- ============ BUILT FOR AGENTS ============ -->
+<section id="agents" class="section">
+  <p class="section-kicker" data-i18n="agent.kicker">Built for agents</p>
+  <h2 data-i18n="agent.title">Observable operations, not an opaque shell and a guess</h2>
+  <p class="section-sub" data-i18n="agent.sub">An AI agent needs to know what it addressed, what was accepted, what finished, and what still needs independent verification. WindowsAgent makes those boundaries explicit.</p>
   <ol class="loop-grid">
     <li class="loop-card">
       <span class="loop-num">01</span>
-      <h3 data-i18n="loop.1.t">Perceive</h3>
-      <p data-i18n="loop.1.d">WGC captures the primary monitor; every artifact carries foreground process metadata and a SHA-256 hash.</p>
+      <h3 data-i18n="agent.1.t">Know the owner</h3>
+      <p data-i18n="agent.1.d">Foreground executable identity selects the owning capability boundary. A window title or visible text does not silently choose a Rule.</p>
     </li>
     <li class="loop-card">
       <span class="loop-num">02</span>
-      <h3 data-i18n="loop.2.t">Navigate</h3>
-      <p data-i18n="loop.2.d">The capture resolves the foreground game to its Rule plugin — AGENTS.md guidance plus a live action catalog.</p>
+      <h3 data-i18n="agent.2.t">Bound the operation</h3>
+      <p data-i18n="agent.2.d">Structured inputs, declared permissions, limits, deadlines, and result schemas keep each operation reviewable.</p>
     </li>
     <li class="loop-card">
       <span class="loop-num">03</span>
-      <h3 data-i18n="loop.3.t">Author</h3>
-      <p data-i18n="loop.3.d">The agent writes Starlark script packages and declares actions; manifests are validated against strict schemas.</p>
+      <h3 data-i18n="agent.3.t">Fail explicitly</h3>
+      <p data-i18n="agent.3.d">Protocol, permission, schema, process, and artifact failures stay failures. The runtime does not hide them behind guessed state or silent provider changes.</p>
     </li>
     <li class="loop-card">
       <span class="loop-num">04</span>
-      <h3 data-i18n="loop.4.t">Execute</h3>
-      <p data-i18n="loop.4.d">Finite actions return one validated result; streaming actions run reflex loops with explicit evidence gates.</p>
+      <h3 data-i18n="agent.4.t">Keep durable state</h3>
+      <p data-i18n="agent.4.d">Where a capability supports it, invocation IDs and ordered events let an agent resume observation instead of inferring progress from timing.</p>
     </li>
     <li class="loop-card">
       <span class="loop-num">05</span>
-      <h3 data-i18n="loop.5.t">Review</h3>
-      <p data-i18n="loop.5.d">Every step lands in an append-only event journal; 1 FPS Evidence and the Gemma index let the agent replay, locate the fault, and repair the action.</p>
+      <h3 data-i18n="agent.5.t">Verify the postcondition</h3>
+      <p data-i18n="agent.5.d">A sent command proves only the command. When the goal matters, inspect the declared result or independent Evidence instead of assuming application success.</p>
     </li>
   </ol>
+  <div class="outcome-ladder" aria-label="Outcome levels from transport through final user goal" data-i18n-aria-label="agent.ladder.label">
+    <span data-i18n="agent.ladder.1">transport accepted</span>
+    <i aria-hidden="true">→</i>
+    <span data-i18n="agent.ladder.2">runtime completed</span>
+    <i aria-hidden="true">→</i>
+    <span data-i18n="agent.ladder.3">execution result</span>
+    <i aria-hidden="true">→</i>
+    <span data-i18n="agent.ladder.4">application accepted</span>
+    <i aria-hidden="true">→</i>
+    <span data-i18n="agent.ladder.5">user goal verified</span>
+  </div>
+  <p class="outcome-note" data-i18n="agent.ladder.note">These are distinct claims. Not every operation supplies every layer of evidence; its own contract defines what can be proven.</p>
 </section>
 
 <!-- ============ THREE-LINE DESIGN ============ -->

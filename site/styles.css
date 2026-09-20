@@ -295,6 +295,18 @@ body {
 }
 .loop-card h3 { font-size: 1.05rem; margin-bottom: 0.5rem; }
 .loop-card p { font-size: 0.87rem; color: var(--muted); }
+.outcome-ladder {
+  display: flex; align-items: center; justify-content: center; gap: 0.55rem;
+  margin-top: 1.3rem; padding: 1rem; overflow-x: auto;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.outcome-ladder span {
+  flex: 0 0 auto; padding: 0.25rem 0.6rem; border-radius: 5px;
+  color: var(--text); background: var(--bg);
+  font-family: var(--mono); font-size: 0.7rem;
+}
+.outcome-ladder i { flex: 0 0 auto; color: var(--cyan); font-style: normal; }
+.outcome-note { margin-top: 0.75rem; color: var(--muted); font-size: 0.85rem; text-align: center; }
 
 /* ---------- pillars ---------- */
 .pillar-grid {
