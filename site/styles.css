@@ -27,6 +27,12 @@ body {
 
 ::selection { background: var(--cyan-dim); }
 
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
 /* ---------- nav ---------- */
 .nav {
   position: sticky; top: 0; z-index: 50;
@@ -506,7 +512,7 @@ body {
   transition: border-color 0.15s, transform 0.15s;
 }
 .resource-grid a:hover, .resource-grid a:focus-visible {
-  border-color: var(--cyan-dim); transform: translateY(-2px); outline: none;
+  border-color: var(--cyan-dim); transform: translateY(-2px);
 }
 .resource-grid span { color: var(--muted); font-size: 0.82rem; }
 
@@ -524,6 +530,17 @@ body {
 
 /* ---------- responsive ---------- */
 @media (max-width: 960px) {
+  .nav { flex-wrap: wrap; gap: 0.65rem 1rem; }
+  .nav-actions { margin-left: auto; }
+  .nav-links {
+    display: flex; order: 3; flex: 1 0 100%;
+    gap: 1rem; margin-left: 0; padding: 0.25rem 0 0.15rem;
+    overflow-x: auto; scrollbar-width: thin;
+  }
+  .nav-links::-webkit-scrollbar { height: 3px; }
+  .nav-links::-webkit-scrollbar-track { background: transparent; }
+  .nav-links::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; }
+  .nav-links a { flex: 0 0 auto; }
   .hero-inner { grid-template-columns: 1fr; gap: 2.5rem; }
   .loop-grid { grid-template-columns: repeat(2, 1fr); }
   .pillar-grid, .rules-grid, .qs-grid, .resource-grid { grid-template-columns: 1fr; }
@@ -538,7 +555,6 @@ body {
   .game-intro, .game-gallery, .game-video-pair { grid-template-columns: 1fr; }
   .trio { grid-template-columns: 1fr; }
   .advanced-flow, .extend-callout { grid-template-columns: 1fr; }
-  .nav-links { display: none; }
   .assist-heading { align-items: start; flex-direction: column; }
 }
 
