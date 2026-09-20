@@ -465,13 +465,8 @@ button:focus-visible {
 .game-gallery figcaption {
   font-size: 0.85rem; color: var(--muted); padding-top: 0.7rem;
 }
-.game-video-pair {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem;
-  margin-bottom: 1.6rem; align-items: start;
-}
-.game-video-pair .game-video { margin: 0; }
 .game-gallery {
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: minmax(0, 720px);
   gap: 1.2rem; align-items: start;
 }
 .game-gallery figure { margin: 0; }
@@ -552,7 +547,7 @@ button:focus-visible {
   .control-route-line { width: 1px; height: 2rem; }
   .control-route-arrow { transform: rotate(90deg); }
   .workflow-grid { grid-template-columns: 1fr; }
-  .game-intro, .game-gallery, .game-video-pair { grid-template-columns: 1fr; }
+  .game-intro, .game-gallery { grid-template-columns: 1fr; }
   .trio { grid-template-columns: 1fr; }
   .advanced-flow, .extend-callout { grid-template-columns: 1fr; }
   .assist-heading { align-items: start; flex-direction: column; }

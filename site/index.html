@@ -57,7 +57,7 @@
       <span class="setup-arrow" aria-hidden="true">↓</span>
       <div class="setup-step">
         <span class="setup-number">02</span>
-        <div><strong data-i18n="assist.flow.2.t">Install and start</strong><span data-i18n="assist.flow.2.d">Manage the runtime and Watchdog</span></div>
+        <div><strong data-i18n="assist.flow.2.t">Install and start</strong><span data-i18n="assist.flow.2.d">Manage the WindowsAgent runtime</span></div>
       </div>
       <span class="setup-arrow" aria-hidden="true">↓</span>
       <div class="setup-step">
@@ -87,7 +87,7 @@
     <li>
       <span>02</span>
       <h3 data-i18n="assist.2.t">Install and manage</h3>
-      <p data-i18n="assist.2.d">Install, update, repair, uninstall, start, or stop WindowsAgent. Inspect installed version plus Capture Agent and Watchdog state.</p>
+      <p data-i18n="assist.2.d">Install, update, repair, uninstall, start, or stop WindowsAgent. Inspect the installed version and WindowsAgent running state.</p>
     </li>
     <li>
       <span>03</span>
@@ -277,7 +277,7 @@
       <p class="dual-role" data-i18n="ds.index.role">1 FPS Evidence + gemma-4-e4b-it-8bit</p>
       <ul>
         <li data-i18n="ds.index.1">Bounded 1 FPS 1080p recordings — MP4 segments, SHA-256 manifest, contact sheets</li>
-        <li data-i18n="ds.index.2">On-demand Gemma scene index, one frame per tick, over a LAN oMLX endpoint</li>
+        <li data-i18n="ds.index.2">Passive Gemma scene index, one fresh Evidence frame per tick, over a LAN oMLX endpoint</li>
         <li data-i18n="ds.index.3">An untrusted locator: narrows the interval, never authoritative evidence</li>
         <li data-i18n="ds.index.4">Failure-isolated — a bad description drops one sample; recording never stops</li>
       </ul>
@@ -362,29 +362,7 @@
     </video>
     <figcaption data-i18n="game.video.cap">Filmed off the living-room TV: the agent owns flight controls through supercruise while the Action OSD narrates every gate — zero model calls in the fast path.</figcaption>
   </figure>
-  <div class="game-video-pair">
-    <figure class="game-video">
-      <video controls preload="none" playsinline poster="assets/ed-live-supercruise-assist-poster.jpg">
-        <source src="assets/ed-live-supercruise-assist.mp4" type="video/mp4">
-      </video>
-      <figcaption data-i18n="game.video2.cap">The runtime in the loop: supercruise-assist-to-destination clears its preflight gates, then aligns to the destination with gated key pulses — every event mirrored live in the OSD and streaming log below.</figcaption>
-    </figure>
-    <figure class="game-video">
-      <video controls preload="none" playsinline poster="assets/ed-live-dock-at-station-poster.jpg">
-        <source src="assets/ed-live-dock-at-station.mp4" type="video/mp4">
-      </video>
-      <figcaption data-i18n="game.video3.cap">dock-at-station, no game autopilot: the agent holds 75% throttle on the advance until range is confirmed, then opens the station contacts panel and requests docking through the game UI.</figcaption>
-    </figure>
-  </div>
   <div class="game-gallery">
-    <figure>
-      <img loading="lazy" src="assets/ed-tablet-departure-plan.jpg" alt="Tablet showing the agent planning a station departure with Elite Dangerous cockpit captures">
-      <figcaption data-i18n="game.p1.cap">Supervising from a tablet: the agent verifies the cockpit HUD, then leave-station owns the whole AUTO LAUNCH flow — the planner just watches the events.</figcaption>
-    </figure>
-    <figure>
-      <img loading="lazy" src="assets/ed-tablet-evidence-debug.jpg" alt="Tablet showing the agent debugging a button classifier with 1 fps evidence frames">
-      <figcaption data-i18n="game.p2.cap">Debugging with evidence: the Gemma index narrows the interval; 1 fps frames confirm a button classifier honestly reporting UNKNOWN — repaired in place, never guessed around.</figcaption>
-    </figure>
     <figure>
       <img loading="lazy" src="assets/ed-osd-supercruise-assist.jpg" alt="Close-up of the Action OSD overlay on Elite Dangerous during supercruise assist">
       <figcaption data-i18n="game.p3.cap">Up close: the supercruise-assist-to-destination OSD — preflight gates, destination alignment, flight-control ownership.</figcaption>
