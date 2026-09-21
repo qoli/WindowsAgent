@@ -6,58 +6,53 @@ Use the source-compatible env file at:
 ${WINDOWS_AGENT_PC_ENV:-$HOME/.config/windowsagent/pc.env}
 ```
 
-Load it without printing its contents:
+Load it through the skill-owned resolver rather than assembling transport
+configuration from the file:
 
 ```bash
-pc_env="${WINDOWS_AGENT_PC_ENV:-$HOME/.config/windowsagent/pc.env}"
-set -a
-source "$pc_env"
-set +a
+skill_root="${CODEX_HOME:-$HOME/.codex}/skills/use-windows-pc"
+source "$skill_root/scripts/resolve-pc.sh"
 ```
 
-## Required fields
+## Required PC identity
+
+```text
+WINDOWS_AGENT_HOST
+```
+
+The value is one reachable trusted-LAN or private-overlay hostname, IPv4
+address, or IPv6 address. Do not include a URL scheme, port, path, or SSH user.
+The resolver derives the normal Capture Agent and SFTP endpoints, fixed SFTP
+protocol username, Harness installation root, and persistent local host-key
+state. Those derived values are implementation details, not fields in this
+file.
+
+For an existing legacy file, run the bundled
+`scripts/migrate-pc-env.sh` once. It accepts only the standard HTTP/SFTP
+constants and one matching legacy host, preserves the optional fields below,
+and keeps the file private with mode `0600`.
+
+## Optional label and capability-specific transport
 
 ```text
 WINDOWS_AGENT_PC_NAME
-WINDOWS_AGENT_HTTP_ORIGIN
-WINDOWS_AGENT_REPO
-WINDOWS_AGENT_CAPTURE_HELPER
-WINDOWS_AGENT_SFTP_HOST
-WINDOWS_AGENT_SFTP_PORT
-WINDOWS_AGENT_SFTP_USER
-WINDOWS_AGENT_SFTP_HOST_KEY_SHA256
-WINDOWS_AGENT_SFTP_KNOWN_HOSTS
-WINDOWS_AGENT_SFTP_STAGING_DIR
-WINDOWS_AGENT_WINDOWS_STAGING_DIR
-```
-
-- `WINDOWS_AGENT_HTTP_ORIGIN` is the trusted-LAN or private-overlay origin of
-  the Capture Agent, including scheme and port.
-- `WINDOWS_AGENT_REPO` is the local checkout containing the console clients.
-- `WINDOWS_AGENT_CAPTURE_HELPER` is the maintained local fresh-capture helper.
-- `WINDOWS_AGENT_SFTP_STAGING_DIR` is the SFTP spelling of the private staging
-  directory, such as a path below `/c:/...`.
-- `WINDOWS_AGENT_WINDOWS_STAGING_DIR` is the native Windows spelling of that
-  same directory for `windows-exec ps1`.
-
-The SFTP and Windows staging values must identify the same directory. The env
-owns this mapping because it depends on the configured Windows identity.
-
-## Optional fields
-
-```text
 WINDOWS_AGENT_EVENT_WEB_ORIGIN
 WINDOWS_AGENT_ADMIN_SSH_HOST
 WINDOWS_AGENT_PI_SSH_HOST
 ```
 
-Use Event Web only when its health or UI is relevant. Use administrative SSH
-only for an explicitly authorized deployment or diagnostic workflow; it is not
-an execution fallback. `WINDOWS_AGENT_PI_SSH_HOST` is the OpenSSH destination
-used only to tunnel the loopback delegated Pi API and PI WEB. Do not infer it
-from the administrative target when it is absent, even if one deployment uses
-the same Windows account.
+`WINDOWS_AGENT_PC_NAME` is only a human-readable label. It never selects the
+target and is not required to operate the PC.
 
-No password, private key, bearer token, or host-key private material belongs in
-this file. Capability-specific tokens may remain in their existing private
-operator files and should be read only by the workflow that requires them.
+The other optional values do not redefine PC identity. Event Web may have a
+deployment-specific listener, while administrative SSH and the delegated Pi
+tunnel may require an SSH config alias or `user@host` destination. Use them
+only for those explicitly selected capabilities. Do not infer one SSH
+destination from the other and do not use either as an execution or file-plane
+fallback.
+
+No password, private key, bearer token, pre-provisioned host-key fingerprint,
+repository path, helper path, known-hosts path, port constant, protocol
+username, or staging-path mapping belongs in this file. Capability-specific
+tokens remain in their installer-owned private files and are read only by the
+workflow that requires them.

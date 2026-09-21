@@ -1,14 +1,15 @@
 ---
 name: use-windows-pc
-description: "Operate the user-configured Windows PC through WindowsAgent capture, SFTP, process execution, Starlark, Rule-owned Actions, or the independent Pi/pi-ai delegated agent with PI WEB and computer-use. Use for live PC inspection or manipulation, file transfer, commands, deterministic automation, application capabilities, and general work that should run as a supervised Windows sub-agent. Read PC identity and endpoints from the private user env file; do not use this skill to develop WindowsAgent Core or a Rule package."
+description: "Operate the single user-configured Windows PC through WindowsAgent capture, SFTP, process execution, Starlark, Rule-owned Actions, or the independent Pi/pi-ai delegated agent with PI WEB and computer-use. Use for live PC inspection or manipulation, file transfer, commands, deterministic automation, application capabilities, and general work that should run as a supervised Windows sub-agent. Read only PC identity from the private user env file and derive normal endpoints from that host; do not use this skill to develop WindowsAgent Core or a Rule package."
 ---
 
 # Use Windows PC
 
 Operate one explicitly configured Windows PC without teaching the public skill
-which private host it is. Resolve the PC and all local dependencies from the
-user-owned env file, then select the narrowest WindowsAgent capability that
-owns the requested result.
+which private host it is. Resolve one host identity from the user-owned env
+file, derive normal service addresses, and resolve local dependencies from the
+skill bundle before selecting the narrowest WindowsAgent capability that owns
+the requested result.
 
 ## Resolve the configured PC
 
@@ -19,14 +20,14 @@ ${WINDOWS_AGENT_PC_ENV:-$HOME/.config/windowsagent/pc.env}
 ```
 
 Read [references/pc-env.md](references/pc-env.md) before the first operation in
-a task. Load the file in the local shell and use its values unchanged. Do not
-guess a hostname, IP address, repository path, staging directory, username, or
-host-key fingerprint from examples, previous tasks, SSH config, or visible
-Windows content.
+a task. Source `scripts/resolve-pc.sh`; it loads the file without printing it
+and derives the normal HTTP and SFTP service addresses, fixed SFTP protocol
+user, Harness root, and local known-hosts state. Do not assemble those values
+from examples, previous tasks, SSH config, or visible Windows content.
 
-If the env file or a field needed by the selected capability is absent, report
-that configuration dependency explicitly. Do not switch to another PC or
-transport.
+If the env file, its required host, or an optional field genuinely needed by a
+selected capability is absent, report that dependency explicitly. Do not
+switch to another PC or transport.
 
 The env file is private operator configuration. Never print its complete
 contents, commit it, copy it into a Rule, or place its machine-specific values
@@ -36,7 +37,7 @@ in this skill.
 
 Use only the capability needed for the requested outcome:
 
-- **Current desktop and foreground:** use the configured capture helper. A
+- **Current desktop and foreground:** use the bundled `scripts/capture.sh`. A
   fresh capture is the authority for current visible state and Rule matching.
 - **Filesystem:** use `windows-sftp-v1` for listing, stat, upload, download,
   rename, mkdir, and deletion. SFTP acts through the SFTP process token and is
@@ -84,9 +85,9 @@ steering, cancelling, or opening a delegated Pi task.
 
 Before a state-dependent operation:
 
-1. Load the PC env.
+1. Source the bundled resolver and require its single configured host.
 2. Require `GET $WINDOWS_AGENT_HTTP_ORIGIN/healthz` to return `status: ok`.
-3. Request a new capture through `WINDOWS_AGENT_CAPTURE_HELPER`.
+3. Request a new capture through the bundled `scripts/capture.sh`.
 4. Read the returned foreground identity and Rule status; do not infer either
    from a process list, window title alone, or an older screenshot.
 
@@ -106,10 +107,11 @@ Keep executable arguments as separate repeatable `--arg` values, environment
 entries as separate `--env NAME=VALUE` values, and stdin as a file. Never join
 them into a raw command string merely for convenience.
 
-For SFTP, verify the live Ed25519 host fingerprint against
-`WINDOWS_AGENT_SFTP_HOST_KEY_SHA256` before accepting a new host-key entry.
-Authentication must be SSH `none` with the configured fixed protocol username;
-do not try local keys or passwords as an alternate path.
+For SFTP, use the bundled `scripts/sftp.sh`. It persists the first observed
+server key in Harness-local known-hosts state and rejects a later key change.
+No fingerprint is pre-provisioned in PC configuration. Authentication must be
+SSH `none` with the fixed protocol username; do not try local keys or passwords
+as an alternate path.
 
 For `run`, `ps1`, direct key input, Starlark, and Actions, preserve the
 invocation ID, durable terminal state, output or typed error, and event cursor

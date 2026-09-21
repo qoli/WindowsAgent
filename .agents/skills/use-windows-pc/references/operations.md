@@ -1,6 +1,15 @@
 # Windows PC operation forms
 
-Load `pc.env` as described in [pc-env.md](pc-env.md) before using these forms.
+Resolve the one configured PC before using these forms:
+
+```bash
+skill_root="${CODEX_HOME:-$HOME/.codex}/skills/use-windows-pc"
+source "$skill_root/scripts/resolve-pc.sh"
+```
+
+The resolver requires only `WINDOWS_AGENT_HOST` from PC identity. It derives
+the normal HTTP origin, SFTP host/port/fixed user, Harness root, and local
+known-hosts state.
 
 ## Health and fresh desktop capture
 
@@ -8,54 +17,39 @@ Load `pc.env` as described in [pc-env.md](pc-env.md) before using these forms.
 curl --fail --silent --show-error \
   "$WINDOWS_AGENT_HTTP_ORIGIN/healthz"
 
-python3 "$WINDOWS_AGENT_CAPTURE_HELPER" --json
+"$skill_root/scripts/capture.sh"
 ```
 
-Use the returned `png_path` when visual inspection is required. Preserve the
-capture ID, timestamp, foreground executable, Rule status, and artifact
-metadata in acceptance evidence.
+The maintained capture helper creates a current capture, downloads it through
+its owned recovery-aware workflow, and emits the capture metadata plus local
+`image_path`. Preserve its capture ID, timestamp, foreground executable, Rule
+status, and artifact metadata in acceptance evidence. If it fails, report its
+exact error; do not replace it with direct HTTP calls or an older image.
 
 ## SFTP filesystem operations
 
-Verify the server identity before accepting or using a new entry:
+Use the bundled wrapper:
 
 ```bash
-observed_fingerprint="$(
-  ssh-keyscan -T 5 -p "$WINDOWS_AGENT_SFTP_PORT" -t ed25519 \
-    "$WINDOWS_AGENT_SFTP_HOST" 2>/dev/null |
-  ssh-keygen -lf - -E sha256 |
-  awk 'NR == 1 { print $2 }'
-)"
-
-test "$observed_fingerprint" = "$WINDOWS_AGENT_SFTP_HOST_KEY_SHA256"
+"$skill_root/scripts/sftp.sh"
 ```
 
-Connect only through the SFTP subsystem and SSH `none` authentication:
+The wrapper derives the host, port `2022`, and fixed protocol user
+`windowsagent`. It uses SSH `none` authentication, automatically records the
+first observed server key in Harness-local known-hosts state, and rejects a
+later key change. No fingerprint or known-hosts path is provisioned in
+`pc.env`.
 
-```bash
-mkdir -p "$(dirname "$WINDOWS_AGENT_SFTP_KNOWN_HOSTS")"
-
-sftp \
-  -o PreferredAuthentications=none \
-  -o PubkeyAuthentication=no \
-  -o PasswordAuthentication=no \
-  -o StrictHostKeyChecking=accept-new \
-  -o UserKnownHostsFile="$WINDOWS_AGENT_SFTP_KNOWN_HOSTS" \
-  -P "$WINDOWS_AGENT_SFTP_PORT" \
-  "$WINDOWS_AGENT_SFTP_USER@$WINDOWS_AGENT_SFTP_HOST"
-```
-
-Virtual `/` contains Windows drive roots. Use the configured SFTP staging path
-for temporary scripts and payloads rather than guessing a Windows profile.
-Verify important transfers with a digest on both sides or by downloading and
-comparing the exact bytes. Clean up only files created for the authorized task.
+Virtual `/` contains Windows drive roots. Verify important transfers with a
+digest on both sides or by downloading and comparing the exact bytes. Clean up
+only files created for the authorized task.
 
 ## Direct process execution
 
-Run the console client from its Go module root:
+Run the bundled console client from the Harness root:
 
 ```bash
-cd "$WINDOWS_AGENT_REPO"
+cd "$WINDOWS_AGENT_HARNESS_ROOT"
 
 go run ./cmd/windows-exec run \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
@@ -75,9 +69,9 @@ go run ./cmd/windows-exec run \
   --timeout 30s
 ```
 
-Use `--stdin-file` for exact stdin bytes. Use `--max-output-bytes` only when the
-task has a real output bound. A nonzero child exit code is result data; a typed
-`EXEC_*` error is a runtime failure.
+Use `--stdin-file` for exact stdin bytes. Use `--max-output-bytes` only when
+the task has a real output bound. A nonzero child exit code is result data; a
+typed `EXEC_*` error is a runtime failure.
 
 For creation-only work:
 
@@ -94,18 +88,18 @@ afterward.
 
 ## Uploaded PowerShell file
 
-Upload the script through SFTP to `WINDOWS_AGENT_SFTP_STAGING_DIR`. Then invoke
-the native path for the same file:
+Use the bundled staging adapter with one local script path:
 
 ```bash
-cd "$WINDOWS_AGENT_REPO"
-
-go run ./cmd/windows-exec ps1 \
-  --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
-  --script-path "$WINDOWS_AGENT_WINDOWS_STAGING_DIR\\task.ps1" \
+"$skill_root/scripts/ps1.sh" /absolute/local/task.ps1 \
   --arg -Mode \
   --arg Inspect
 ```
+
+The adapter owns the temporary SFTP and native-Windows path mapping, uploads
+the script, invokes `windows-exec ps1`, and removes the staged copy. Neither
+spelling of the staging directory is part of PC configuration or an operator
+input.
 
 The runtime uses built-in Windows PowerShell 5.1 with `-File`. Do not silently
 select `pwsh`, inline the file with `-Command`, or fall back to SSH execution.
@@ -118,7 +112,7 @@ Obtain a fresh capture immediately before the press, then pass its exact
 foreground identity without deriving it from a title or process inventory:
 
 ```bash
-cd "$WINDOWS_AGENT_REPO"
+cd "$WINDOWS_AGENT_HARNESS_ROOT"
 
 go run ./cmd/windows-key press \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
@@ -142,7 +136,7 @@ For a general multi-step workflow, author a package under a task-local
 directory and invoke it with:
 
 ```bash
-cd "$WINDOWS_AGENT_REPO"
+cd "$WINDOWS_AGENT_HARNESS_ROOT"
 
 go run ./cmd/windows-starlark-invoke \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \

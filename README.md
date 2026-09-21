@@ -356,8 +356,8 @@ Install the elevated SFTP-only filesystem process:
   -ExecutablePath .\.build\windows-sftp.exe
 ```
 
-After verifying the generated Ed25519 host key out of band, connect with the
-fixed protocol username:
+Connect with the fixed protocol username. The maintained Harness client records
+the first observed Ed25519 host key and rejects later changes:
 
 ```bash
 sftp -P 2022 windowsagent@<windows-host>
@@ -618,7 +618,7 @@ listener:
 | Visual Log | `127.0.0.1:8789` | bearer token except health | read-only status |
 | Evidence Recorder | `127.0.0.1:8792` | bearer token except health | finite runs, status, UTC range ZIP, contact sheet |
 | SFTP health | `127.0.0.1:8793` | none | health only |
-| SFTP | `0.0.0.0:2022` | SSH `none`; pinned host identity | filesystem operations only |
+| SFTP | `0.0.0.0:2022` | SSH `none`; persistent host identity | filesystem operations only |
 
 Event and Evidence token files, journals, captures, video, OCR results, model
 keys, delegated-task data, and logs are private operator state. Do not commit
@@ -656,8 +656,8 @@ the [OpenCode black-box acceptance contract](docs/testing/opencode-black-box-acc
 - Network reachability is the trust boundary for port `8787`. Structured
   requests and foreground validation improve correctness; they do not provide
   authentication or authorization.
-- SFTP accepts no client credential. Verify its persistent host key out of band
-  and restrict network reachability independently.
+- SFTP accepts no client credential. Clients persist the first observed host
+  key and reject later key changes; restrict network reachability independently.
 - Event, Web, Visual Log, Evidence, and delegated Pi processes use separate
   authenticated control planes. Do not reuse their tokens or expose loopback
   listeners through the Capture Agent.

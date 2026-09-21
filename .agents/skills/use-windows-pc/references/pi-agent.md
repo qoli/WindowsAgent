@@ -11,12 +11,14 @@ a failed WindowsAgent capability.
 
 ## Load the configured transport
 
-Load `pc.env` as described in [pc-env.md](pc-env.md), then require both
-`WINDOWS_AGENT_REPO` and `WINDOWS_AGENT_PI_SSH_HOST`. Do not substitute the
+Resolve the configured PC as described in [pc-env.md](pc-env.md), then require
+the capability-specific `WINDOWS_AGENT_PI_SSH_HOST`. Do not substitute the
 administrative SSH target or guess a Windows path.
 
 ```bash
-pi_client="$WINDOWS_AGENT_REPO/scripts/windows-agent-pi-client.sh"
+skill_root="${CODEX_HOME:-$HOME/.codex}/skills/use-windows-pc"
+source "$skill_root/scripts/resolve-pc.sh"
+pi_client="$WINDOWS_AGENT_HARNESS_ROOT/scripts/windows-agent-pi-client.sh"
 test -x "$pi_client"
 test -n "$WINDOWS_AGENT_PI_SSH_HOST"
 ```
