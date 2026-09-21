@@ -89,6 +89,40 @@ func TestAssistGUIIsPerMonitorDPIAware(t *testing.T) {
 	}
 }
 
+func TestAssistGUIUsesOneTruncatedSessionLogBesideTheExecutable(t *testing.T) {
+	logger := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "SessionLog.cs"))
+	for _, required := range []string{
+		`public const string FileName = "windows-assist-gui.log"`,
+		`Environment.ProcessPath`,
+		`Path.GetDirectoryName(executablePath)`,
+		`new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read)`,
+		`AutoFlush = true`,
+		`new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)`,
+	} {
+		if !strings.Contains(logger, required) {
+			t.Fatalf("AssistGUI session log is missing contract %q", required)
+		}
+	}
+
+	app := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "App.xaml.cs"))
+	if strings.Index(app, "if (_alreadyRunning)") > strings.Index(app, "_log = SessionLog.Create()") {
+		t.Fatal("AssistGUI must not truncate the active session log when a second instance exits")
+	}
+
+	window := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml.cs"))
+	for _, required := range []string{
+		`_log.Info("command-start"`,
+		`_log.Info("backend-progress"`,
+		`_log.Info("command-result"`,
+		`_log.Error("operation-error"`,
+		`authKeyProvided = !string.IsNullOrWhiteSpace(settings?.TailscaleAuthKey)`,
+	} {
+		if !strings.Contains(window, required) {
+			t.Fatalf("AssistGUI session log is missing behavior or error event %q", required)
+		}
+	}
+}
+
 func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 	project := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "WindowsAssistGUI.csproj"))
 	if strings.Contains(project, "CommunityToolkit.WinUI.Controls.SettingsControls") {

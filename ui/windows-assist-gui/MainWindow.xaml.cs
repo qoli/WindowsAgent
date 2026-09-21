@@ -11,6 +11,7 @@ public sealed partial class MainWindow : Window
     private const int InitialWidth = 720;
     private const int InitialHeight = 640;
     private readonly BackendClient _backend = new();
+    private readonly SessionLog _log;
     private readonly ObservableCollection<string> _progress = [];
     private AgentSnapshot? _snapshot;
     private bool _operationActive;
@@ -18,8 +19,9 @@ public sealed partial class MainWindow : Window
     private bool _loaded;
     private bool _allowClose;
 
-    public MainWindow()
+    internal MainWindow(SessionLog log)
     {
+        _log = log;
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -29,8 +31,12 @@ public sealed partial class MainWindow : Window
             if (_operationActive && !_allowClose)
             {
                 args.Cancel = true;
+                _log.Warning("window-close-blocked", new { reason = "operation-active" });
                 ShowNotice(InfoBarSeverity.Warning, "Wait for the current WindowsAgent operation to finish before closing AssistGUI.");
+                return;
             }
+
+            _log.Info("session-closing");
         };
         ProgressItems.ItemsSource = _progress;
         Root.Loaded += Root_Loaded;
@@ -76,6 +82,7 @@ public sealed partial class MainWindow : Window
                 "This removes the installed WindowsAgent runtime and its owned Scheduled Tasks. User data is preserved.",
                 "Uninstall"))
         {
+            _log.Info("command-cancelled", new { command = BackendCommands.Uninstall });
             return;
         }
 
@@ -98,6 +105,7 @@ public sealed partial class MainWindow : Window
                 "This stops all installed WindowsAgent runtime processes, including Tailscale access. The installation, Scheduled Tasks, settings, and user data are preserved. A remote connection may be interrupted.",
                 "Stop WindowsAgent"))
         {
+            _log.Info("command-cancelled", new { command = BackendCommands.Stop });
             return;
         }
 
@@ -170,6 +178,13 @@ public sealed partial class MainWindow : Window
         try
         {
             var request = BackendRequest.Create(command, settings);
+            _log.Info("command-start", new
+            {
+                requestId = request.RequestId,
+                command,
+                watchdogStartAtSignIn = settings?.WatchdogStartAtSignIn,
+                authKeyProvided = !string.IsNullOrWhiteSpace(settings?.TailscaleAuthKey),
+            });
             var execution = _backend.ExecuteAsync(request, HandleBackendEvent);
             if (!string.IsNullOrWhiteSpace(settings?.TailscaleAuthKey))
             {
@@ -185,6 +200,15 @@ public sealed partial class MainWindow : Window
                 ApplySnapshot(result.Snapshot);
             }
 
+            _log.Info("command-result", new
+            {
+                requestId = request.RequestId,
+                command,
+                result.Message,
+                result.CloseGui,
+                snapshot = result.Snapshot is null ? null : SnapshotSummary(result.Snapshot),
+            });
+
             if (command != BackendCommands.Inspect)
             {
                 ShowNotice(InfoBarSeverity.Success, result.Message);
@@ -198,19 +222,19 @@ public sealed partial class MainWindow : Window
         }
         catch (BackendOperationException exception)
         {
-            ShowError(exception.Code, exception.Message, exception.Details);
+            ShowError(exception.Code, exception.Message, exception.Details, exception);
         }
         catch (BackendProtocolException exception)
         {
-            ShowError("BACKEND_PROTOCOL_ERROR", exception.Message, null);
+            ShowError("BACKEND_PROTOCOL_ERROR", exception.Message, null, exception);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            ShowError("OPERATION_CANCELLED", "The operation was cancelled.", null);
+            ShowError("OPERATION_CANCELLED", "The operation was cancelled.", null, exception);
         }
         catch (Exception exception)
         {
-            ShowError("GUI_OPERATION_FAILED", exception.Message, null);
+            ShowError("GUI_OPERATION_FAILED", exception.Message, null, exception);
         }
         finally
         {
@@ -223,6 +247,27 @@ public sealed partial class MainWindow : Window
 
     private void HandleBackendEvent(BackendEvent backendEvent)
     {
+        switch (backendEvent)
+        {
+            case ProgressEvent progress:
+                _log.Info("backend-progress", new
+                {
+                    requestId = progress.RequestId,
+                    progress.Sequence,
+                    progress.Phase,
+                    progress.Message,
+                });
+                break;
+            case SnapshotEvent snapshot:
+                _log.Info("backend-snapshot", new
+                {
+                    requestId = snapshot.RequestId,
+                    snapshot.Sequence,
+                    snapshot = SnapshotSummary(snapshot.Snapshot),
+                });
+                break;
+        }
+
         DispatcherQueue.TryEnqueue(() =>
         {
             switch (backendEvent)
@@ -316,8 +361,9 @@ public sealed partial class MainWindow : Window
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
-    private void ShowError(string code, string message, string? details)
+    private void ShowError(string code, string message, string? details, Exception? exception = null)
     {
+        _log.Error("operation-error", code, message, details, exception);
         var fullMessage = string.IsNullOrWhiteSpace(details)
             ? $"{code}: {message}"
             : $"{code}: {message}{Environment.NewLine}{details}";
@@ -332,6 +378,20 @@ public sealed partial class MainWindow : Window
     }
 
     private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+    private static object SnapshotSummary(AgentSnapshot snapshot) => new
+    {
+        snapshot.Installed,
+        snapshot.Version,
+        captureRunning = snapshot.Capture.Running,
+        watchdogInstalled = snapshot.Watchdog.Installed,
+        watchdogRunning = snapshot.Watchdog.Running,
+        snapshot.Watchdog.StartAtSignIn,
+        lanEndpointCount = snapshot.LanEndpoints.Count,
+        tailscaleStatus = snapshot.Tailscale.Status,
+        tailscaleIpv4Assigned = !string.IsNullOrWhiteSpace(snapshot.Tailscale.Ipv4),
+        tailscaleIpv6Assigned = !string.IsNullOrWhiteSpace(snapshot.Tailscale.Ipv6),
+    };
 
     private static string Capitalize(string value) =>
         value.Length == 0 ? value : char.ToUpperInvariant(value[0]) + value[1..];

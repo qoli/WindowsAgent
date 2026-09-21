@@ -149,6 +149,13 @@ result. Success or error is then reported through the page InfoBar, so failures
 do not disappear with the transient progress surface. Implementation details
 such as the sibling backend executable are not user-facing content.
 
+AssistGUI also writes one `windows-assist-gui.log` JSON-lines file beside its
+executable. After single-instance ownership is established, every real GUI
+launch truncates that file before recording the current session's commands,
+backend progress, concrete state summaries, terminal results, cancellations,
+and errors. Records are flushed as they are written. Tailscale auth-key bytes
+never enter the log; only whether a key was supplied may be recorded.
+
 TailscaleAdapter is disabled by default. AssistGUI always reports Agent health
 and active private-LAN IPv4 endpoints. When the adapter is enabled it also
 reports `STARTING`, `ONLINE`, `STOPPING`, or `FAILED`, plus assigned Tailscale

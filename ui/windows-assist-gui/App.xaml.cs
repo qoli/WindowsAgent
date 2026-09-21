@@ -7,6 +7,7 @@ public partial class App : Application
     private const string SingleInstanceName = @"Local\WindowsAgent.AssistGUI";
 
     private Window? _window;
+    private SessionLog? _log;
     private readonly Mutex? _singleInstanceMutex;
     private readonly bool _alreadyRunning;
 
@@ -14,6 +15,8 @@ public partial class App : Application
     {
         _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceName, out var createdNew);
         _alreadyRunning = !createdNew;
+        UnhandledException += (_, args) =>
+            _log?.Error("unhandled-exception", "GUI_UNHANDLED_EXCEPTION", args.Message, exception: args.Exception);
         InitializeComponent();
     }
 
@@ -26,7 +29,13 @@ public partial class App : Application
             return;
         }
 
-        _window = new MainWindow();
+        _log = SessionLog.Create();
+        _log.Info("session-start", new
+        {
+            processId = Environment.ProcessId,
+            executable = Environment.ProcessPath,
+        });
+        _window = new MainWindow(_log);
         _window.Activate();
     }
 }
