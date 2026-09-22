@@ -23,12 +23,15 @@ The current authorities are:
   model.
 
 Publish every cataloged executable as an individual asset together with
-`windowsagent-release.json` and `SHA256SUMS`. The only archive is
-`windows-assist-gui.zip`, and it must contain the complete
-framework-dependent WinUI publish payload plus the sibling
-`windows-assist-backend.exe`. Do not create a Setup package or a
-complete-system archive. Do not treat the individually published GUI apphost
-EXE as runnable without its adjacent payload files.
+`windowsagent-release.json`, `SHA256SUMS`, the runnable
+`windows-assist-gui.zip`, and `windowsagent-user-skills.zip`. The AssistGUI
+archive must contain the complete framework-dependent WinUI publish payload
+plus the sibling `windows-assist-backend.exe`. The Skills archive must contain
+exactly the repository-owned stable end-user Skills and their required files;
+it must exclude repository developer Skills and experimental capabilities. Do
+not create a Setup package or a complete-system archive. Do not treat the
+individually published GUI apphost EXE as runnable without its adjacent payload
+files.
 
 The tag workflow owns release artifact production. Do not replace it with a
 local `gh release create`, manually upload locally built binaries, or modify an
@@ -80,6 +83,9 @@ release_dir="$(mktemp -d)"
   --version "${tag#v}" \
   --skip-assist-gui \
   --skip-catalog
+python3 scripts/build-user-skills-bundle.py \
+  --skills-dir .agents/skills \
+  --output "$release_dir/windowsagent-user-skills.zip"
 ```
 
 The tag workflow then builds the unpackaged framework-dependent WinUI frontend
@@ -125,12 +131,16 @@ After the workflow succeeds, read the release back through GitHub and require:
 - its tag and title match the selected version;
 - its target commit is the intended commit;
 - the asset set is exactly every cataloged `.exe` plus
-  `windows-assist-gui.zip`, `windowsagent-release.json`, and `SHA256SUMS`;
+  `windows-assist-gui.zip`, `windowsagent-user-skills.zip`,
+  `windowsagent-release.json`, and `SHA256SUMS`;
 - the catalog version and target are correct;
 - `SHA256SUMS` covers the cataloged executables; and
 - the downloaded bootstrap ZIP contains exactly the framework-dependent WinUI
   publish payload plus `windows-assist-backend.exe`; and
 - the ZIP's GUI and backend EXEs each match their downloaded catalog entries.
+- the Skills ZIP contains exactly `use-windows-pc`, `use-visual-log`, and
+  `tailscale-one-off-auth-key`, including their referenced files, and contains
+  no developer or experimental Skill.
 
 Use a fresh temporary directory for downloaded verification assets. GitHub
 workflow success alone is not public asset proof.

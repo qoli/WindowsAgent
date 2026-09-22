@@ -222,6 +222,16 @@ cannot run without the adjacent managed payload files and machine-installed
 frameworks. There is no traditional Setup package or archive of the complete
 multi-process system.
 
+Tagged releases also provide `windowsagent-user-skills.zip`, containing only
+the stable end-user Harness Skills `use-windows-pc`, `use-visual-log`, and
+`tailscale-one-off-auth-key` with their required files. It excludes repository
+developer Skills and experimental Starlark workflows. After installation,
+AssistGUI can copy a self-contained Harness initialization prompt using a
+selected visible LAN or Tailscale host; the Harness acquires this bundle,
+creates the private single-host configuration, and completes initial health,
+fresh-capture, and read-only execution acceptance without cloning this
+repository.
+
 `windows-capture-agent.exe` is the installable GUI artifact.
 `windows-capture-agent-console.exe` is for interactive diagnostics and must not
 replace the installed GUI build. Local clients such as `windows-exec.exe`,
@@ -239,8 +249,10 @@ performs Tailscale logout without removing the installation. Setup also
 controls whether Watchdog starts at sign-in. The GUI reports Installed/Not
 installed, Capture Agent and Watchdog Running/Stopped, version, LAN endpoints,
 and Tailscale status/IP. TailscaleAdapter is installed with the runtime but
-starts only after a non-empty auth key is supplied. This path still requires
-signed-in Windows acceptance before it is considered fully available; consult
+starts only after a non-empty auth key is supplied. Clean-Windows installation,
+interactive-session startup, health, fresh capture, and reboot/login recovery
+were accepted with the published v0.1.10 bootstrap. Tailscale enrollment and
+the remaining lifecycle cases retain separate acceptance boundaries; consult
 the
 [Assist GUI design](docs/design/assist-gui-release-distribution.md) for the
 current boundary.

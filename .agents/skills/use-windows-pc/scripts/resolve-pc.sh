@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Source this file to load the single-host PC contract and derive the normal
-# WindowsAgent service endpoints and Harness-owned paths.
+# WindowsAgent service endpoints and local Skill-owned state.
 
 windows_agent_config_error() {
   printf 'error: %s\n' "$*" >&2
@@ -80,25 +80,13 @@ fi
 windows_agent_http_host="${windows_agent_normalized_host%%$'\n'*}"
 windows_agent_sftp_host="${windows_agent_normalized_host#*$'\n'}"
 
-if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
-  windows_agent_resolver_path="${BASH_SOURCE[0]}"
-elif [[ -n "${ZSH_VERSION:-}" ]]; then
-  windows_agent_resolver_path="${(%):-%N}"
-else
-  windows_agent_config_error "resolve-pc.sh must be sourced from Bash or zsh"
-  return 1 2>/dev/null || exit 1
-fi
-windows_agent_skill_root="$(cd -- "$(dirname -- "$windows_agent_resolver_path")/.." && pwd -P)"
-windows_agent_harness_root="$(cd -- "$windows_agent_skill_root/../../.." && pwd -P)"
 windows_agent_state_root="${XDG_STATE_HOME:-$HOME/.local/state}/windowsagent"
 
 export WINDOWS_AGENT_HTTP_ORIGIN="http://${windows_agent_http_host}:8787"
 export WINDOWS_AGENT_SFTP_HOST="$windows_agent_sftp_host"
 export WINDOWS_AGENT_SFTP_PORT=2022
 export WINDOWS_AGENT_SFTP_USER=windowsagent
-export WINDOWS_AGENT_HARNESS_ROOT="$windows_agent_harness_root"
 export WINDOWS_AGENT_SFTP_KNOWN_HOSTS_FILE="$windows_agent_state_root/known_hosts"
 
 unset windows_agent_http_host windows_agent_sftp_host windows_agent_normalized_host
-unset windows_agent_skill_root windows_agent_resolver_path
-unset windows_agent_harness_root windows_agent_state_root
+unset windows_agent_state_root

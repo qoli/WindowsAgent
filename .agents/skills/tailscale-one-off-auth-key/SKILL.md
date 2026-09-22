@@ -1,13 +1,17 @@
 ---
 name: tailscale-one-off-auth-key
-description: Generate an actual one-off Tailscale auth key from the signed-in Admin Console in Arc, copy it to the macOS clipboard without exposing it, and verify the generated-key confirmation. Use for passwordless enrollment of one remote device into the current tailnet, especially temporary remote support; do not confuse auth keys with API access tokens, user invites, or device sharing.
+description: Generate one actual single-use Tailscale auth key through an interactive browser's existing signed-in Admin Console session, copy it to the local clipboard without exposing it, and verify the generated-key confirmation. Use for passwordless enrollment of one remote device into the current tailnet; do not confuse auth keys with API access tokens, user invites, or device sharing.
 ---
 
 # Tailscale One-Off Auth Key
 
 Generate the `tskey-auth` credential itself through the existing signed-in Tailscale Admin Console. Do not require the user to pre-create an API access token, OAuth client, Keychain item, environment variable, or local helper credential.
 
-Use `$arc-cdp-browser` and follow its required designated-worker contract. Work in the user's existing Arc session; do not launch a separate browser island.
+Use an available interactive browser capability that can reuse an existing
+signed-in session, read the current form state, click controls, and interact
+with the local clipboard. Do not require a specific browser implementation,
+and do not launch a separate browser session when the Harness can operate the
+user's current signed-in session.
 
 ## Required Outcome
 
@@ -30,7 +34,11 @@ Open:
 https://console.tailscale.com/admin/settings/keys
 ```
 
-Require the signed-in Admin Console. Verify the selected account or tailnet before generation. If multiple tailnets make the target ambiguous, stop and ask which one to use. If Arc redirects to the Tailscale login page, leave that page open and ask the user to sign in; do not choose another account or switch to an API-token implementation.
+Require the signed-in Admin Console. Verify the selected account or tailnet
+before generation. If multiple tailnets make the target ambiguous, stop and
+ask which one to use. If the browser redirects to the Tailscale login page,
+leave that page open and ask the user to sign in; do not choose another account
+or switch to an API-token implementation.
 
 Use the `Auth keys` section and `Generate auth key…`. Do not use `API access tokens`, `Generate access token`, OAuth clients, user invites, or device sharing.
 
@@ -57,13 +65,13 @@ In the `Generated new key` dialog:
 2. Click the dialog's `Copy` control.
 3. Check the clipboard locally without printing its contents. It must begin with the Tailscale auth-key prefix `tskey-auth-` and be non-empty.
 
-For example, the designated worker may run this verification; it emits only a boolean:
+For example, a macOS Harness may run this verification; it emits only a boolean:
 
 ```bash
 pbpaste | python3 -c 'import sys; value=sys.stdin.read(); print("valid_auth_key=" + str(value.startswith("tskey-auth-") and len(value) > len("tskey-auth-")))'
 ```
 
-Never print, transcribe, screenshot, log, or place the key in chat, tracked files, shell arguments, or tool summaries. Report only that it is in the Mac clipboard, together with the verified mode and expiry. Leave the confirmation dialog open unless the user asks to close it.
+Never print, transcribe, screenshot, log, or place the key in chat, tracked files, shell arguments, or tool summaries. Report only that it is in the local clipboard, together with the verified mode and expiry. Leave the confirmation dialog open unless the user asks to close it.
 
 ## Enroll The Remote Device
 

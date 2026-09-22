@@ -153,6 +153,9 @@ func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 		`HorizontalAlignment="Right"`,
 		`x:Name="TailscaleDisconnectedPanel"`,
 		`x:Name="TailscaleConnectedPanel"`,
+		`x:Name="SetupHostComboBox"`,
+		`x:Name="CopySetupPromptButton"`,
+		`AutomationProperties.Name="Copy WindowsAgent setup prompt"`,
 		`<Grid x:Name="OperationOverlay"`,
 		`Background="{ThemeResource SmokeFillColorDefaultBrush}"`,
 		`<ItemsControl x:Name="ProgressItems" />`,
@@ -182,7 +185,8 @@ func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 		}
 	}
 
-	codeBehind := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml.cs"))
+	codeBehind := readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "MainWindow.xaml.cs")) +
+		readContractFile(t, filepath.Join("..", "ui", "windows-assist-gui", "HarnessSetupPrompt.cs"))
 	for _, required := range []string{
 		`ResizeToEffectivePixels(InitialWidth, InitialHeight)`,
 		`WinRT.Interop.WindowNative.GetWindowHandle(this)`,
@@ -195,6 +199,12 @@ func TestAssistGUIUsesTheCompactGroupedSettingsVisualContract(t *testing.T) {
 		`TailscaleDisconnectedPanel.Visibility = installed && !tailscaleRunning`,
 		`TailscaleConnectedPanel.Visibility = installed && tailscaleRunning`,
 		`StartAtSignInCheckBox.IsChecked == true`,
+		`uri.Host.Trim('[', ']')`,
+		`Clipboard.SetContent(package)`,
+		`Clipboard.Flush()`,
+		`windowsagent-user-skills.zip`,
+		`use-windows-pc Skill`,
+		`Do not stop after describing setup steps`,
 	} {
 		if !strings.Contains(codeBehind, required) {
 			t.Fatalf("AssistGUI code-behind is missing compact interaction contract %q", required)

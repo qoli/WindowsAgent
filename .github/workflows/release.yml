@@ -17,6 +17,9 @@ jobs:
         with:
           go-version: "1.26.x"
           cache: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
       - name: Validate version tag
         id: version
         shell: bash
@@ -30,6 +33,8 @@ jobs:
       - name: Test runtime and release contracts
         run: |
           go test ./...
+          python3 -m unittest scripts/tests/test_use_windows_pc_skill.py scripts/tests/test_user_skills_bundle.py
+          dotnet run --project ui/windows-assist-gui/ContractTests/WindowsAssistGUI.ContractTests.csproj --configuration Release
           (cd runtimes/tailscale-adapter && GODEBUG=http2client=0 go test -mod=readonly ./...)
           go run ./cmd/windows-action-check --rules-dir Rules
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go vet ./...
@@ -121,6 +126,12 @@ jobs:
           if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) {
             throw "AssistGUI bootstrap ZIP does not match the framework-dependent GUI payload plus backend"
           }
+      - name: Package stable end-user Skills
+        shell: pwsh
+        run: >-
+          python scripts/build-user-skills-bundle.py
+          --skills-dir .agents/skills
+          --output .release/windowsagent-user-skills.zip
       - name: Publish individual release assets
         shell: pwsh
         env:
@@ -130,6 +141,7 @@ jobs:
             Get-ChildItem -LiteralPath .release -Filter *.exe | Sort-Object Name | ForEach-Object FullName
           )
           $assets += (Resolve-Path .release/windows-assist-gui.zip).Path
+          $assets += (Resolve-Path .release/windowsagent-user-skills.zip).Path
           $assets += (Resolve-Path .release/windowsagent-release.json).Path
           $assets += (Resolve-Path .release/SHA256SUMS).Path
           & gh release create $env:GITHUB_REF_NAME @assets `

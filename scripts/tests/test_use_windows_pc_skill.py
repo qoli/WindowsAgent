@@ -1,14 +1,124 @@
 import json
 import os
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import shlex
 import subprocess
+import sys
 import tempfile
+import threading
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / ".agents" / "skills" / "use-windows-pc"
 RESOLVER = SKILL / "scripts" / "resolve-pc.sh"
+CLIENT = SKILL / "scripts" / "windowsagent_client.py"
+TEMP_QUERY_RESPONSE = json.dumps({
+    "state": "COMPLETED",
+    "output": {"exitCode": 0, "stdout": {"text": "TEMP=D:\\Users\\Test User\\AppData\\Local\\Temp\r\n"}},
+})
+
+
+class PortableClientHandler(BaseHTTPRequestHandler):
+    requests = []
+
+    def log_message(self, _format, *_args):
+        pass
+
+    def json_response(self, status, payload, headers=None):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        self.requests.append(("GET", self.path, None))
+        if self.path == "/healthz":
+            self.json_response(200, {"status": "ok", "version": "test"})
+        elif self.path == "/v1/invocations/inv_test":
+            self.json_response(200, {"invocationId": "inv_test", "state": "COMPLETED", "output": {"ok": True}})
+        elif self.path == "/v1/captures/cap_test/content":
+            content = b"synthetic-image"
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        else:
+            self.json_response(404, {"error": {"code": "NOT_FOUND"}})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length) or b"null")
+        self.requests.append(("POST", self.path, payload))
+        if self.path == "/v1/captures":
+            self.json_response(201, {"id": "cap_test", "format": "png", "content_url": "/v1/captures/cap_test/content"})
+        elif self.path in ("/v1/executions/invoke", "/v1/key-inputs/invoke"):
+            self.json_response(
+                202,
+                {"invocationId": "inv_test", "state": "RUNNING", "stop": {"method": "POST", "url": "/v1/invocations/inv_test/stop"}},
+                {"Location": "/v1/invocations/inv_test"},
+            )
+        else:
+            self.json_response(404, {"error": {"code": "NOT_FOUND"}})
+
+
+class PortableClientTests(unittest.TestCase):
+    def setUp(self):
+        PortableClientHandler.requests = []
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), PortableClientHandler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.origin = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+
+    def run_client(self, *arguments):
+        return subprocess.run(
+            ["python3", str(CLIENT), "--url", self.origin, *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_health_capture_and_structured_execution_are_repo_independent(self):
+        health = self.run_client("health")
+        self.assertEqual(health.returncode, 0, health.stderr)
+        self.assertEqual(json.loads(health.stdout)["status"], "ok")
+        with tempfile.TemporaryDirectory() as temporary:
+            capture = self.run_client("capture", "--output-dir", temporary, "--profile", "native-png")
+            self.assertEqual(capture.returncode, 0, capture.stderr)
+            metadata = json.loads(capture.stdout)
+            self.assertEqual(Path(metadata["image_path"]).read_bytes(), b"synthetic-image")
+        execution = self.run_client("exec", "run", "--executable", r"C:\Windows\System32\whoami.exe")
+        self.assertEqual(execution.returncode, 0, execution.stderr)
+        request_payload = next(
+            payload for method, path, payload in PortableClientHandler.requests
+            if method == "POST" and path == "/v1/executions/invoke"
+        )
+        self.assertEqual(request_payload["operation"], "run")
+        self.assertEqual(request_payload["executable"], r"C:\Windows\System32\whoami.exe")
+
+    def test_key_press_preserves_fresh_foreground_identity(self):
+        completed = self.run_client(
+            "key", "press", "--key", "Key_Home", "--hold-ms", "40",
+            "--expected-process-id", "42", "--expected-executable-name", "app.exe",
+            "--expected-executable-path", r"C:\app.exe",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        request_payload = next(
+            payload for method, path, payload in PortableClientHandler.requests
+            if method == "POST" and path == "/v1/key-inputs/invoke"
+        )
+        self.assertEqual(request_payload["expectedForeground"]["processId"], 42)
 
 
 class UseWindowsPCContractTests(unittest.TestCase):
@@ -33,7 +143,6 @@ print(json.dumps({{
     "sftpHost": os.environ["WINDOWS_AGENT_SFTP_HOST"],
     "sftpPort": os.environ["WINDOWS_AGENT_SFTP_PORT"],
     "sftpUser": os.environ["WINDOWS_AGENT_SFTP_USER"],
-    "harnessRoot": os.environ["WINDOWS_AGENT_HARNESS_ROOT"],
     "knownHosts": os.environ["WINDOWS_AGENT_SFTP_KNOWN_HOSTS_FILE"],
 }}))
 PY
@@ -55,7 +164,6 @@ PY
         self.assertEqual(resolved["sftpHost"], "pc.example.test")
         self.assertEqual(resolved["sftpPort"], "2022")
         self.assertEqual(resolved["sftpUser"], "windowsagent")
-        self.assertEqual(Path(resolved["harnessRoot"]), ROOT)
         self.assertEqual(Path(resolved["knownHosts"]), root / "state" / "windowsagent" / "known_hosts")
 
     def test_ipv6_host_is_bracketed_only_for_http(self):
@@ -205,12 +313,36 @@ PY
             self.assertTrue(known_hosts.is_file())
             self.assertEqual(known_hosts.stat().st_mode & 0o777, 0o600)
 
-    def test_capture_wrapper_uses_the_maintained_harness_helper(self):
+    def test_capture_wrapper_uses_the_bundled_portable_client(self):
         wrapper = (SKILL / "scripts" / "capture.sh").read_text(encoding="utf-8")
-        self.assertIn("gameGuide/tools/pc_screenshot/capture_go_agent.py", wrapper)
-        self.assertIn("--agent-url \"$WINDOWS_AGENT_HTTP_ORIGIN\"", wrapper)
-        self.assertIn("--no-auto-restart", wrapper)
+        self.assertIn("windowsagent_client.py", wrapper)
+        self.assertIn("--url \"$WINDOWS_AGENT_HTTP_ORIGIN\"", wrapper)
         self.assertNotIn("curl ", wrapper)
+
+    def test_stable_skill_has_no_repository_or_experimental_dependency(self):
+        contents = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in SKILL.rglob("*")
+            if path.is_file() and path.suffix in (".md", ".sh", ".py", ".yaml")
+        )
+        for forbidden in (
+            "WINDOWS_AGENT_HARNESS_ROOT",
+            "go run ./cmd/",
+            "../gameGuide/tools/pc_screenshot",
+            "maintain-windowsagent-runtime",
+            "develop-windowsagent-rule",
+            "publish-windowsagent-release",
+            "windows-starlark-invoke",
+            "$arc-cdp-browser",
+        ):
+            self.assertNotIn(forbidden, contents)
+
+    def test_portable_client_is_shipped_with_the_skill(self):
+        client = SKILL / "scripts" / "windowsagent_client.py"
+        self.assertTrue(client.is_file())
+        self.assertIn("/v1/executions/invoke", client.read_text(encoding="utf-8"))
+        self.assertIn("/v1/key-inputs/invoke", client.read_text(encoding="utf-8"))
+        self.assertIn("/v1/captures", client.read_text(encoding="utf-8"))
 
     def test_capture_wrapper_rejects_target_and_recovery_overrides(self):
         for argument in ("--agent-url=http://other:8787", "--ssh-host=other", "--ssh-user=other", "--ssh-port=2222"):
@@ -283,8 +415,8 @@ PY
 
     def test_powershell_adapter_hides_staging_path_translation(self):
         helper = (SKILL / "scripts" / "ps1.sh").read_text(encoding="utf-8")
-        self.assertIn("sftp_stage_dir='/c:/Windows/Temp/WindowsAgentHarness'", helper)
-        self.assertIn(r"windows_stage_dir='C:\Windows\Temp\WindowsAgentHarness'", helper)
+        self.assertNotIn(r"C:\Windows\Temp", helper)
+        self.assertIn("--arg 'set TEMP'", helper)
         operations = (SKILL / "references" / "operations.md").read_text(encoding="utf-8")
         self.assertNotIn("WINDOWS_AGENT_SFTP_STAGING_DIR", operations)
         self.assertNotIn("WINDOWS_AGENT_WINDOWS_STAGING_DIR", operations)
@@ -299,7 +431,7 @@ PY
             binary_dir = root / "bin"
             binary_dir.mkdir()
             sftp_log = root / "sftp-batches"
-            go_log = root / "go-arguments"
+            client_log = root / "client-arguments"
             fake_sftp = binary_dir / "sftp"
             fake_sftp.write_text(
                 """#!/usr/bin/env bash
@@ -316,18 +448,24 @@ done
                 encoding="utf-8",
             )
             fake_sftp.chmod(0o755)
-            fake_go = binary_dir / "go"
-            fake_go.write_text(
-                "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >\"$WINDOWS_AGENT_TEST_GO_LOG\"\nprintf '%s\\n' '{\"state\":\"COMPLETED\"}'\n",
+            fake_python = binary_dir / "python3"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ \"${1:-}\" == *windowsagent_client.py ]]; then\n"
+                "  printf '%s\\n' \"$@\" >\"$WINDOWS_AGENT_TEST_CLIENT_LOG\"\n"
+                f"  printf '%s\\n' {shlex.quote(TEMP_QUERY_RESPONSE)}\n"
+                "  exit 0\n"
+                "fi\n"
+                f"exec {shlex.quote(sys.executable)} \"$@\"\n",
                 encoding="utf-8",
             )
-            fake_go.chmod(0o755)
+            fake_python.chmod(0o755)
             environment = {
                 **os.environ,
                 "WINDOWS_AGENT_PC_ENV": str(config),
                 "XDG_STATE_HOME": str(root / "state"),
                 "WINDOWS_AGENT_TEST_SFTP_LOG": str(sftp_log),
-                "WINDOWS_AGENT_TEST_GO_LOG": str(go_log),
+                "WINDOWS_AGENT_TEST_CLIENT_LOG": str(client_log),
                 "PATH": f"{binary_dir}:{os.environ['PATH']}",
             }
             completed = subprocess.run(
@@ -339,15 +477,17 @@ done
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(json.loads(completed.stdout)["state"], "COMPLETED")
-            go_arguments = go_log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(go_arguments[:4], ["run", "./cmd/windows-exec", "ps1", "--url"])
-            self.assertIn("http://pc.example.test:8787", go_arguments)
-            self.assertIn("--script-path", go_arguments)
-            self.assertTrue(any(value.startswith(r"C:\Windows\Temp\WindowsAgentHarness\task-") for value in go_arguments))
+            client_arguments = client_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(client_arguments[0].endswith("windowsagent_client.py"))
+            self.assertIn("http://pc.example.test:8787", client_arguments)
+            self.assertIn("exec", client_arguments)
+            self.assertIn("ps1", client_arguments)
+            self.assertIn("--script-path", client_arguments)
+            self.assertTrue(any(value.startswith(r"D:\Users\Test User\AppData\Local\Temp\task-") for value in client_arguments))
             batches = sftp_log.read_text(encoding="utf-8")
             self.assertIn("put ", batches)
             self.assertIn("rm ", batches)
-            self.assertIn("/c:/Windows/Temp/WindowsAgentHarness/task-", batches)
+            self.assertIn("/D:/Users/Test User/AppData/Local/Temp/task-", batches)
 
     def test_powershell_adapter_rejects_owned_flag_overrides(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -386,9 +526,17 @@ printf '%s' "$count" >"$WINDOWS_AGENT_TEST_SFTP_COUNT"
                 encoding="utf-8",
             )
             fake_sftp.chmod(0o755)
-            fake_go = binary_dir / "go"
-            fake_go.write_text("#!/usr/bin/env bash\nprintf '%s\\n' '{\"state\":\"COMPLETED\"}'\n", encoding="utf-8")
-            fake_go.chmod(0o755)
+            fake_python = binary_dir / "python3"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                "if [[ \"${1:-}\" == *windowsagent_client.py ]]; then\n"
+                f"  printf '%s\\n' {shlex.quote(TEMP_QUERY_RESPONSE)}\n"
+                "  exit 0\n"
+                "fi\n"
+                f"exec {shlex.quote(sys.executable)} \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
             completed = subprocess.run(
                 [str(SKILL / "scripts" / "ps1.sh"), str(local_script)],
                 check=False,

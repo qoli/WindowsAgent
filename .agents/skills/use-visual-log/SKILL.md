@@ -31,10 +31,23 @@ against the independent evidence layer before making a game-state claim.
 
 ## Read current configuration before operating
 
-Read the matched game's `Rules/<Executable.exe>/VisualLog/config.json`. Obtain
-the stream name, target executable, interval, frame-tap name, max-frame age,
-prompt, model ID, and output event types from that file; do not assume Elite
-Dangerous values for another game.
+Use a fresh capture through the bundled sibling
+[use-windows-pc Skill](../use-windows-pc/SKILL.md) and require a matched Rule.
+Read its returned Rule ID, then use the stable PowerShell-file adapter to fetch
+the installed Rule's current Visual Log configuration from the configured PC:
+
+```bash
+skill_root="${CODEX_HOME:-$HOME/.codex}/skills"
+"$skill_root/use-windows-pc/scripts/ps1.sh" \
+  "$skill_root/use-visual-log/scripts/read-config.ps1" \
+  --arg -RuleId \
+  --arg "$rule_id"
+```
+
+Obtain the stream name, target executable, interval, frame-tap name,
+max-frame age, prompt, model ID, and output event types from that live result;
+do not assume one game's values for another game. Do not read a repository
+checkout as a substitute for installed configuration.
 
 For operation-only work, do not edit the prompt, sampling, model, interval, or
 Evidence max-frame age. Those are game configuration and development decisions.
@@ -280,14 +293,3 @@ to the runtime operator, never to the supervising high-level model.
 - Authentication, process, frame-tap publication, model, journal, domain interpretation, and
   evidence verification are separate acceptance layers. Report each one
   separately.
-
-## Read deeper only when needed
-
-- Read the [visual-log runtime contract](../../../docs/design/visual-log-runtime.md)
-  before changing lifecycle, prompt, capture, or failure behavior.
-- Read the [event-stream contract](../../../docs/design/event-stream-runtime.md)
-  before changing range filtering, cursor semantics, or journal durability.
-- Read the [evidence-recorder contract](../../../docs/design/evidence-recorder-runtime.md)
-  before changing slot cadence, storage, range export, or failure behavior.
-- Read the [repository runtime overview](../../../README.md) for current
-  process flags, executable status, and public API surface.

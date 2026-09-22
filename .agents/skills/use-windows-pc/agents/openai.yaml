@@ -1,0 +1,4 @@
+interface:
+  display_name: "Use Windows PC"
+  short_description: "Operate one configured PC through WindowsAgent"
+  default_prompt: "Use $use-windows-pc to initialize or operate my configured Windows PC and verify the result."

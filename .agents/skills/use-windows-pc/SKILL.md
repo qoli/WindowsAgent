@@ -1,15 +1,15 @@
 ---
 name: use-windows-pc
-description: "Operate the single user-configured Windows PC through WindowsAgent capture, SFTP, process execution, Starlark, Rule-owned Actions, or the independent Pi/pi-ai delegated agent with PI WEB and computer-use. Use for live PC inspection or manipulation, file transfer, commands, deterministic automation, application capabilities, and general work that should run as a supervised Windows sub-agent. Read only PC identity from the private user env file and derive normal endpoints from that host; do not use this skill to develop WindowsAgent Core or a Rule package."
+description: "Operate one user-configured Windows PC through stable WindowsAgent capture, file transfer, structured process execution, bounded key input, installed Rule Actions, or the optional delegated Pi agent. Use for normal end-user Windows inspection and operation. Read only PC identity from the private user env file and derive normal endpoints from that host; report product defects instead of requiring repository-maintainer workflows."
 ---
 
 # Use Windows PC
 
 Operate one explicitly configured Windows PC without teaching the public skill
 which private host it is. Resolve one host identity from the user-owned env
-file, derive normal service addresses, and resolve local dependencies from the
-skill bundle before selecting the narrowest WindowsAgent capability that owns
-the requested result.
+file, derive normal service addresses, and use only clients shipped inside this
+skill before selecting the narrowest WindowsAgent capability that owns the
+requested result.
 
 ## Resolve the configured PC
 
@@ -22,12 +22,14 @@ ${WINDOWS_AGENT_PC_ENV:-$HOME/.config/windowsagent/pc.env}
 Read [references/pc-env.md](references/pc-env.md) before the first operation in
 a task. Source `scripts/resolve-pc.sh`; it loads the file without printing it
 and derives the normal HTTP and SFTP service addresses, fixed SFTP protocol
-user, Harness root, and local known-hosts state. Do not assemble those values
+user, and local known-hosts state. Do not assemble those values
 from examples, previous tasks, SSH config, or visible Windows content.
 
-If the env file, its required host, or an optional field genuinely needed by a
-selected capability is absent, report that dependency explicitly. Do not
-switch to another PC or transport.
+If the env file or `WINDOWS_AGENT_HOST` is absent and the user supplied a host
+through the AssistGUI setup prompt, create the private configuration as
+described in [references/setup.md](references/setup.md), then continue through
+initial acceptance. Otherwise report the missing dependency explicitly. Do
+not switch to another PC or transport.
 
 The env file is private operator configuration. Never print its complete
 contents, commit it, copy it into a Rule, or place its machine-specific values
@@ -56,11 +58,6 @@ Use only the capability needed for the requested outcome:
   This is the game-neutral `windows-key-action-v1` adapter for an explicit
   operator-selected key; it is not a substitute for domain behavior owned by
   a Rule Action.
-- **General multi-step Windows automation:** use one ephemeral
-  `windows-starlark-action-v1` package when the workflow can be described and
-  preflighted deterministically. Local execution performs package, syntax,
-  schema, and input preflight only; Windows owns all real execution and runtime
-  errors.
 - **Independent delegated work:** use `windows-agent-pi` when the Windows-side
   worker should plan, inspect, iterate, use its own workspace and computer-use,
   and stream durable progress back to the supervising host. Pi SDK/pi-ai owns
@@ -71,10 +68,8 @@ Use only the capability needed for the requested outcome:
   read the live Rule guidance and Action catalog, and invoke the highest-level
   Action whose postcondition owns the goal.
 
-SSH is not a fallback execution or file plane. The declared Pi SSH target is
-the intended transport for tunnelling the loopback-only delegated API and PI
-WEB; the administrative SSH target remains limited to explicitly authorized
-deployment or diagnosis.
+SSH is not a fallback execution or file plane. The optional Pi SSH target is
+used only to tunnel the loopback delegated API and PI WEB.
 
 Read [references/operations.md](references/operations.md) for conventional
 WindowsAgent command forms. Read
@@ -113,7 +108,7 @@ No fingerprint is pre-provisioned in PC configuration. Authentication must be
 SSH `none` with the fixed protocol username; do not try local keys or passwords
 as an alternate path.
 
-For `run`, `ps1`, direct key input, Starlark, and Actions, preserve the
+For `run`, `ps1`, direct key input, and Actions, preserve the
 invocation ID, durable terminal state, output or typed error, and event cursor
 when present. An HTTP 2xx, process creation, key injection, or uploaded file is
 not proof of an external application goal.
@@ -140,10 +135,11 @@ Do not modify Windows Firewall through this skill. Do not expose the default
 unauthenticated HTTP or SFTP listeners to the public Internet.
 
 When a Rule owns the requested domain behavior, do not replace it with
-primitive input or an improvised Starlark loop. When the runtime itself is
-broken, preserve the reproduction and switch to `maintain-windowsagent-runtime`.
-When a Rule or Action is missing or defective, switch to
-`develop-windowsagent-rule`.
+primitive input or improvised automation. If the runtime is defective,
+preserve the smallest useful reproduction and report a WindowsAgent runtime
+defect. If a Rule or Action is missing or defective, report the capability as
+unavailable or defective. This end-user Skill does not require or route into
+repository development Skills.
 
 ## Report the result by layer
 

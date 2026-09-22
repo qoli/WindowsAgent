@@ -215,6 +215,29 @@
 
             <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
 
+            <Grid Style="{StaticResource SettingsRowStyle}" ColumnSpacing="12">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="160" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="Harness setup" Style="{StaticResource RowLabelTextBlockStyle}" />
+              <ComboBox x:Name="SetupHostComboBox"
+                        Grid.Column="1"
+                        MinWidth="180"
+                        HorizontalAlignment="Stretch"
+                        PlaceholderText="No reachable host"
+                        AutomationProperties.Name="WindowsAgent host for Harness setup"
+                        SelectionChanged="SetupHostComboBox_SelectionChanged" />
+              <Button x:Name="CopySetupPromptButton"
+                      Grid.Column="2"
+                      Content="Copy setup prompt"
+                      AutomationProperties.Name="Copy WindowsAgent setup prompt"
+                      Click="CopySetupPromptButton_Click" />
+            </Grid>
+
+            <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+
             <Grid MinHeight="96" Padding="16,12" ColumnSpacing="16">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="160" />

@@ -16,14 +16,7 @@ done
 # shellcheck disable=SC1091
 source "$script_dir/resolve-pc.sh"
 
-capture_helper="$WINDOWS_AGENT_HARNESS_ROOT/../gameGuide/tools/pc_screenshot/capture_go_agent.py"
-if [[ ! -f "$capture_helper" ]]; then
-  printf 'error: bundled Windows PC capture helper is unavailable: %s\n' "$capture_helper" >&2
-  exit 1
-fi
-
-exec python3 "$capture_helper" \
-  --json \
-  --agent-url "$WINDOWS_AGENT_HTTP_ORIGIN" \
-  --no-auto-restart \
+exec python3 "$script_dir/windowsagent_client.py" \
+  --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  capture \
   "$@"

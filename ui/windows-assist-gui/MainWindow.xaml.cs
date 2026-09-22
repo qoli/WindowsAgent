@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 using WindowsAgent.AssistGui.Backend;
 
 namespace WindowsAgent.AssistGui;
@@ -13,6 +14,7 @@ public sealed partial class MainWindow : Window
     private readonly BackendClient _backend = new();
     private readonly SessionLog _log;
     private readonly ObservableCollection<string> _progress = [];
+    private readonly ObservableCollection<string> _setupHosts = [];
     private AgentSnapshot? _snapshot;
     private bool _operationActive;
     private bool _updatingStartupCheckBox;
@@ -39,6 +41,7 @@ public sealed partial class MainWindow : Window
             _log.Info("session-closing");
         };
         ProgressItems.ItemsSource = _progress;
+        SetupHostComboBox.ItemsSource = _setupHosts;
         Root.Loaded += Root_Loaded;
         RefreshControls();
     }
@@ -152,6 +155,22 @@ public sealed partial class MainWindow : Window
         await RunCommandAsync(BackendCommands.Inspect, null, "Refreshing WindowsAgent status");
 
     private void AuthKeyBox_PasswordChanged(object sender, RoutedEventArgs e) => RefreshControls();
+
+    private void SetupHostComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshControls();
+
+    private void CopySetupPromptButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_snapshot?.Installed != true || SetupHostComboBox.SelectedItem is not string host)
+        {
+            return;
+        }
+
+        var package = new DataPackage();
+        package.SetText(HarnessSetupPrompt.Build(host));
+        Clipboard.SetContent(package);
+        Clipboard.Flush();
+        ShowNotice(InfoBarSeverity.Success, "WindowsAgent setup prompt copied. Paste it into your Harness to finish initialization.");
+    }
 
     private Task RunConfiguredCommandAsync(string command, string title) =>
         RunCommandAsync(
@@ -284,6 +303,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplySnapshot(AgentSnapshot snapshot)
     {
+        var selectedHost = SetupHostComboBox.SelectedItem as string;
         _snapshot = snapshot;
         VersionValue.Text = snapshot.Version ?? "—";
         if (snapshot.Installed)
@@ -299,6 +319,17 @@ public sealed partial class MainWindow : Window
             .Where(value => !string.IsNullOrWhiteSpace(value));
         var addressText = string.Join(Environment.NewLine, addresses);
         TailscaleAddressesValue.Text = string.IsNullOrEmpty(addressText) ? "No Tailscale addresses" : addressText;
+        _setupHosts.Clear();
+        foreach (var host in HarnessSetupPrompt.Hosts(
+                     snapshot.LanEndpoints,
+                     snapshot.Tailscale.Ipv4,
+                     snapshot.Tailscale.Ipv6))
+        {
+            _setupHosts.Add(host);
+        }
+        SetupHostComboBox.SelectedItem = selectedHost is not null && _setupHosts.Contains(selectedHost)
+            ? selectedHost
+            : _setupHosts.FirstOrDefault();
         RefreshControls();
     }
 
@@ -336,6 +367,8 @@ public sealed partial class MainWindow : Window
         DisconnectTailscaleButton.IsEnabled = enabled && installed && tailscaleRunning;
         TailscaleDisconnectedPanel.Visibility = installed && !tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
         TailscaleConnectedPanel.Visibility = installed && tailscaleRunning ? Visibility.Visible : Visibility.Collapsed;
+        SetupHostComboBox.IsEnabled = enabled && installed && _setupHosts.Count > 0;
+        CopySetupPromptButton.IsEnabled = enabled && installed && SetupHostComboBox.SelectedItem is string;
         RefreshButton.IsEnabled = enabled;
     }
 

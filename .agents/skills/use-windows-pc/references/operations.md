@@ -8,8 +8,7 @@ source "$skill_root/scripts/resolve-pc.sh"
 ```
 
 The resolver requires only `WINDOWS_AGENT_HOST` from PC identity. It derives
-the normal HTTP origin, SFTP host/port/fixed user, Harness root, and local
-known-hosts state.
+the normal HTTP origin, SFTP host/port/fixed user, and local known-hosts state.
 
 ## Health and fresh desktop capture
 
@@ -20,8 +19,8 @@ curl --fail --silent --show-error \
 "$skill_root/scripts/capture.sh"
 ```
 
-The maintained capture helper creates a current capture, downloads it through
-its owned recovery-aware workflow, and emits the capture metadata plus local
+The maintained capture helper checks health, creates a current capture,
+downloads it through the stable API, and emits the capture metadata plus local
 `image_path`. Preserve its capture ID, timestamp, foreground executable, Rule
 status, and artifact metadata in acceptance evidence. If it fails, report its
 exact error; do not replace it with direct HTTP calls or an older image.
@@ -46,27 +45,27 @@ only files created for the authorized task.
 
 ## Direct process execution
 
-Run the bundled console client from the Harness root:
+Use the bundled portable client:
 
 ```bash
-cd "$WINDOWS_AGENT_HARNESS_ROOT"
-
-go run ./cmd/windows-exec run \
+python3 "$skill_root/scripts/windowsagent_client.py" \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  exec run \
   --executable 'C:\Windows\System32\whoami.exe'
 ```
 
 Keep every process argument distinct:
 
 ```bash
-go run ./cmd/windows-exec run \
+python3 "$skill_root/scripts/windowsagent_client.py" \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  exec run \
   --executable 'C:\Path\tool.exe' \
   --arg first \
   --arg 'value with spaces' \
   --env MODE=inspect \
   --cwd 'C:\WorkingDirectory' \
-  --timeout 30s
+  --execution-timeout 30
 ```
 
 Use `--stdin-file` for exact stdin bytes. Use `--max-output-bytes` only when
@@ -76,8 +75,9 @@ typed `EXEC_*` error is a runtime failure.
 For creation-only work:
 
 ```bash
-go run ./cmd/windows-exec start \
+python3 "$skill_root/scripts/windowsagent_client.py" \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  exec start \
   --executable 'C:\Path\Application.exe' \
   --window normal
 ```
@@ -96,8 +96,11 @@ Use the bundled staging adapter with one local script path:
   --arg Inspect
 ```
 
-The adapter owns the temporary SFTP and native-Windows path mapping, uploads
-the script, invokes `windows-exec ps1`, and removes the staged copy. Neither
+The adapter queries the execution user's TEMP directory through a fixed
+read-only process invocation, owns its SFTP and native-Windows path mapping,
+uploads the script, invokes `windows-exec ps1`, and removes the staged copy. It
+does not assume that a file uploaded into the system temporary directory is
+readable by the interactive user. Neither
 spelling of the staging directory is part of PC configuration or an operator
 input.
 
@@ -112,12 +115,11 @@ Obtain a fresh capture immediately before the press, then pass its exact
 foreground identity without deriving it from a title or process inventory:
 
 ```bash
-cd "$WINDOWS_AGENT_HARNESS_ROOT"
-
-go run ./cmd/windows-key press \
+python3 "$skill_root/scripts/windowsagent_client.py" \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  key press \
   --key Key_Home \
-  --hold 180ms \
+  --hold-ms 180 \
   --expected-process-id 1234 \
   --expected-executable-name Game.exe \
   --expected-executable-path 'C:\Games\Game.exe'
@@ -129,25 +131,6 @@ bounded scan-code press and release only; capture again when visible or domain
 acceptance matters. Foreground drift, an active lease conflict, injection
 failure, and release failure are terminal. Do not switch to a PowerShell,
 SSH, virtual-key, or window-message input path.
-
-## Starlark automation
-
-For a general multi-step workflow, author a package under a task-local
-directory and invoke it with:
-
-```bash
-cd "$WINDOWS_AGENT_HARNESS_ROOT"
-
-go run ./cmd/windows-starlark-invoke \
-  --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
-  --package /absolute/path/to/package \
-  --inputs /absolute/path/to/inputs.json
-```
-
-The local client proves package, syntax, schema, and inputs preflight. Follow
-the returned invocation status or watch URL to a durable terminal state.
-Runtime paths, permissions, processes, desktop state, and postconditions can be
-answered only by the configured Windows PC.
 
 ## Rule Actions
 

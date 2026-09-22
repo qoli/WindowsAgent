@@ -79,6 +79,14 @@ published `windows-assist-gui.exe` remains part of the executable catalog for
 identity and PE verification, but the ZIP is the runnable AssistGUI
 distribution because the apphost requires its adjacent managed payload files.
 
+The same tagged release also provides `windowsagent-user-skills.zip`. That
+archive contains exactly the stable end-user Harness Skills
+`use-windows-pc`, `use-visual-log`, and `tailscale-one-off-auth-key`, including
+their required references, scripts, and metadata. Repository developer Skills
+and experimental Starlark workflows are excluded. The archive is built from
+the tagged repository sources and is the acquisition target named by the
+AssistGUI Harness setup prompt.
+
 AssistGUI keeps `WindowsPackageType=None` and uses the Windows App SDK's
 default bootstrap auto-initialization. It does not call the bootstrap API,
 override the default `OnNoMatch_ShowUI` option, inspect installed runtime
@@ -137,6 +145,15 @@ Access groups the LAN endpoint and Tailscale controls. The Tailscale action area
 switches between auth-key plus Connect while inactive and Disconnect while
 `STARTING`, `ONLINE`, or `STOPPING`; status and assigned addresses remain in
 the same row.
+
+When WindowsAgent is installed and at least one LAN or Tailscale address is
+available, Access also exposes a host selector and one **Copy setup prompt**
+action. LAN URLs are reduced to their bare host and assigned Tailscale IPs are
+listed directly. The copied text names the selected host and instructs the
+Harness to acquire the stable Skills bundle, create its single-host private PC
+configuration, and complete health, fresh-capture, and normal read-only control
+acceptance. It does not duplicate ports, SFTP paths, repository paths, or other
+operational details owned by the Skills.
 
 The Status section header owns the explicit Refresh action; page commands do
 not compete with window chrome in the TitleBar. Initial inspection and manual
@@ -281,18 +298,49 @@ that could silently satisfy an acquisition request. No repository-owned
 prerequisite detector, MessageBox, runtime URL, or native bootstrapper was
 involved.
 
+On 2026-09-21, a fresh isolated Windows 11 acceptance VM then completed the
+published v0.1.10 path through catalog checksum verification, Install,
+`/healthz`, a fresh capture with matching identity and digest, interactive
+Session 1 process checks, and reboot/login Scheduled Task recovery. AssistGUI
+reported version 0.1.10, WindowsAgent Running, and start-at-sign-in enabled.
+The network-disconnected VM did not validate external LAN reachability or
+Tailscale enrollment.
+
+On 2026-09-22, the setup-prompt changes passed a native Windows x64 publish
+with .NET SDK 8.0.425, including the generated PRI and GUI PE subsystem check.
+The setup-prompt contract tests also passed on Windows, and the resulting
+payload passed the complete release-catalog build. The frontend project
+explicitly excludes the nested contract-test sources from its application
+compile items.
+
+The same build launched successfully in an interactive Windows Session 1.
+UI Automation confirmed that its host selector and copy-prompt button were
+present and disabled when runtime inspection returned no LAN endpoints and no
+Tailscale address. After the monitor output was restored, a fresh capture
+confirmed the validation GUI as foreground. Refresh then populated a selected
+LAN host and enabled copying. Invoking the real button populated the Windows
+clipboard with that host, the stable bundle URL, and the instruction to finish
+initialization, without operational ports or repository configuration details.
+
+The locally built bundle was extracted outside the checkout. Its own clients
+passed live health, fresh capture, read-only process execution, and PowerShell
+upload/execution/cleanup in Session 1. This exposed and fixed a staging
+permission defect: the PowerShell adapter now resolves the execution user's
+TEMP directory instead of assuming the system temporary directory is readable
+across the SFTP and interactive process tokens. The published Skill-download
+path remains pending the tagged release containing the bundle.
+
 ## Open Questions
 
 - Decide whether Authenticode is warranted after the bootstrap distribution
   and Defender false-positive behavior are validated independently.
-- Validate backend protocol and error rendering; adapter enrollment,
-  tailnet listener reachability, GUI state, logout, node removal; fresh
-  installation, Update, Repair, Uninstall, rollback, Start/Stop/Start,
-  Watchdog startup configuration, and two-bootstrap self-update in a signed-in
-  Windows session.
+- Validate backend error rendering; adapter enrollment, tailnet listener
+  reachability, logout, node removal; Update, Repair, Uninstall, rollback,
+  Start/Stop/Start, and two-bootstrap self-update in a signed-in Windows
+  session.
 
 ## Suggested Next Steps
 
-Perform live Windows acceptance for the bootstrap archive, fresh install,
-update, rollback, LAN access, and ephemeral Tailscale lifecycle before moving
-this design beyond Partially landed.
+Perform live Windows acceptance for update, rollback, external LAN access, and
+the ephemeral Tailscale lifecycle before moving this design beyond Partially
+landed.

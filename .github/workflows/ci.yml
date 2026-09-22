@@ -29,6 +29,11 @@ jobs:
           dotnet run
           --project runtimes/screenparser-directml/ScreenParser.DirectML.ContractTests/ScreenParser.DirectML.ContractTests.csproj
           --configuration Release
+      - name: Test AssistGUI Harness setup contract
+        run: >-
+          dotnet run
+          --project ui/windows-assist-gui/ContractTests/WindowsAssistGUI.ContractTests.csproj
+          --configuration Release
       - name: Test ScreenParser DirectML one-shot contract
         run: >-
           dotnet run
@@ -40,6 +45,11 @@ jobs:
         run: python3 -m unittest scripts/tests/test_deploy_windows_rules.py
       - name: Test binary deployment contract
         run: python3 -m unittest scripts/tests/test_deploy_windows_binaries.py
+      - name: Test WindowsAgent end-user Skills
+        run: >-
+          python3 -m unittest
+          scripts/tests/test_use_windows_pc_skill.py
+          scripts/tests/test_user_skills_bundle.py
 
   windows-cross-build:
     runs-on: ubuntu-latest
@@ -137,5 +147,5 @@ jobs:
           python3 tools/screenparser-runtime/publish.py
           --dotnet "$(command -v dotnet)"
           --output-dir "$PWD/.build/screenparser-directml"
-      - name: Build and catalog complete public executable set
-        run: ./scripts/build-windows-capture-agent.sh --output-dir "$PWD/.release" --version ci
+      - name: Build portable public executable set
+        run: ./scripts/build-windows-capture-agent.sh --output-dir "$PWD/.release" --version ci --skip-assist-gui --skip-catalog

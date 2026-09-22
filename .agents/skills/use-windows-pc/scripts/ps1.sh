@@ -36,7 +36,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck disable=SC1091
 source "$script_dir/resolve-pc.sh"
 
-for command_name in go mktemp; do
+for command_name in python3 mktemp; do
   command -v "$command_name" >/dev/null 2>&1 || {
     printf 'error: required command is unavailable: %s\n' "$command_name" >&2
     exit 1
@@ -46,8 +46,25 @@ done
 # This WindowsAgent-owned abstraction deliberately stays inside the helper: the
 # operator configures neither its SFTP spelling nor its native Windows spelling.
 stage_name="task-$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM.ps1"
-sftp_stage_dir='/c:/Windows/Temp/WindowsAgentHarness'
-windows_stage_dir='C:\Windows\Temp\WindowsAgentHarness'
+temp_result="$(python3 "$script_dir/windowsagent_client.py" \
+  --url "$WINDOWS_AGENT_HTTP_ORIGIN" exec run \
+  --executable 'C:\Windows\System32\cmd.exe' \
+  --arg /d --arg /c --arg 'set TEMP')"
+windows_stage_dir="$(printf '%s' "$temp_result" | python3 -c '
+import json, pathlib, sys
+result = json.load(sys.stdin)
+output = result.get("output", {})
+if result.get("state") != "COMPLETED" or output.get("exitCode") != 0:
+    raise SystemExit("error: could not query the Windows execution user temporary directory")
+values = [line[5:] for line in output.get("stdout", {}).get("text", "").splitlines() if line.upper().startswith("TEMP=")]
+if len(values) != 1:
+    raise SystemExit("error: Windows TEMP response must contain exactly one value")
+path = pathlib.PureWindowsPath(values[0])
+if not path.is_absolute() or len(path.drive) != 2 or any(c in values[0] for c in "\r\n\""):
+    raise SystemExit("error: Windows TEMP must be an absolute drive path safe for SFTP")
+print(str(path))
+')"
+sftp_stage_dir="$(printf '%s' "$windows_stage_dir" | python3 -c 'import sys; print("/" + sys.stdin.read().replace(chr(92), "/"))')"
 sftp_script_path="$sftp_stage_dir/$stage_name"
 windows_script_path="$windows_stage_dir\\$stage_name"
 upload_batch="$(mktemp "${TMPDIR:-/tmp}/windowsagent-sftp-upload.XXXXXX")"
@@ -77,14 +94,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 {
-  printf -- '-mkdir "%s"\n' "$sftp_stage_dir"
   printf 'put "%s" "%s"\n' "$local_script" "$sftp_script_path"
 } >"$upload_batch"
 remote_staged=1
 "$script_dir/sftp.sh" -q -b "$upload_batch"
 
-cd "$WINDOWS_AGENT_HARNESS_ROOT"
-go run ./cmd/windows-exec ps1 \
+python3 "$script_dir/windowsagent_client.py" \
   --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  exec ps1 \
   --script-path "$windows_script_path" \
   "$@"
