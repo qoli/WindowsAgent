@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "verified": {
+      "type": "boolean",
+      "const": true
+    },
+    "characters": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "elapsedMilliseconds": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "verified",
+    "characters",
+    "elapsedMilliseconds"
+  ],
+  "additionalProperties": false
+}

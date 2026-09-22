@@ -232,6 +232,11 @@ creates the private single-host configuration, and completes initial health,
 fresh-capture, and read-only execution acceptance without cloning this
 repository.
 
+The optional [experimental use-windows-starlark Skill](.agents/skills/use-windows-starlark/SKILL.md)
+covers caller-authored bounded process/filesystem packages. Its authoring
+stability remains under evaluation; it is excluded from the stable bundle and
+is not a prerequisite for ordinary PC onboarding.
+
 `windows-capture-agent.exe` is the installable GUI artifact.
 `windows-capture-agent-console.exe` is for interactive diagnostics and must not
 replace the installed GUI build. Local clients such as `windows-exec.exe`,
