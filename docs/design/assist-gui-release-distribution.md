@@ -327,8 +327,23 @@ passed live health, fresh capture, read-only process execution, and PowerShell
 upload/execution/cleanup in Session 1. This exposed and fixed a staging
 permission defect: the PowerShell adapter now resolves the execution user's
 TEMP directory instead of assuming the system temporary directory is readable
-across the SFTP and interactive process tokens. The published Skill-download
-path remains pending the tagged release containing the bundle.
+across the SFTP and interactive process tokens.
+
+The tag-driven v0.1.13 release subsequently completed public acceptance on
+2026-09-22: all 27 assets were downloaded, all 23 executable catalog sizes and
+SHA-256 digests matched, the bootstrap contained the complete 49-file payload,
+and all 17 Skill bundle files matched the tagged sources. The bundle preserves
+LF script line endings and Unix executable permissions when built on Windows.
+The setup prompt's public `latest/download` URL was used to acquire the Skills
+outside the repository; a new single-host configuration then passed health,
+fresh capture, and read-only execution against the existing installed runtime.
+The publicly downloaded AssistGUI also launched in Session 1 and passed the
+actual host-selection and clipboard-copy checks. This did not reinstall the
+PC runtime or repeat the previously completed clean-install acceptance.
+
+The preceding v0.1.12 tag was retained after its workflow failed in an existing
+streaming-test synchronization race. v0.1.13 fixes that test fixture's readiness
+signal without changing Action runtime behavior.
 
 ## Open Questions
 
