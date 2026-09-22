@@ -187,13 +187,15 @@ func (f *fakeExecutor) RunStreaming(ctx context.Context, invocation scriptlaunch
 	f.mu.Lock()
 	f.calls = append(f.calls, invocation.Capability)
 	f.mu.Unlock()
-	if f.started != nil {
-		f.once.Do(func() { close(f.started) })
-	}
 	if f.emit {
 		if _, err := reporter.Emit(ctx, "action.phase.changed", json.RawMessage(`{"phase":"WAITING"}`)); err != nil {
 			return actionlaunch.Result{}, err
 		}
+	}
+	// Cancellation tests waiting on started must observe the fixture's initial
+	// event already committed, rather than race cancellation against Emit.
+	if f.started != nil {
+		f.once.Do(func() { close(f.started) })
 	}
 	if f.panic != nil {
 		panic(f.panic)
