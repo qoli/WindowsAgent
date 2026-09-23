@@ -329,6 +329,13 @@ the installing user's elevated token. Packages cannot elevate themselves. For
 an explicit development installation without Watchdog ownership, pass
 `-StartupMode Standalone`.
 
+AssistGUI installs the Capture Agent with `Highest` after setup's UAC approval,
+so Agent execution can perform administrator operations in the signed-in session.
+Update migrates earlier Assist installations and Reinstall retains this setting.
+Setup verifies the API listener's executable, elevated token, user and interactive
+session before reporting success; a failed readiness check rolls back setup.
+The Watchdog and Event Stream keep their separate limited-user principals.
+
 Update only the installed Capture Agent binary set with the transactional
 updater:
 

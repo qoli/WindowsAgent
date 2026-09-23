@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,11 +17,10 @@ import (
 )
 
 func startApplyHandoff(operation, stage, catalogPath, dataDir string, startAtSignIn bool, clientPID, backendPID int) error {
-	helper := filepath.Join(stage, "windows-assist-backend.exe")
-	if info, err := os.Stat(helper); err != nil || !info.Mode().IsRegular() {
-		return fmt.Errorf("staged Assist backend is missing: %s", helper)
+	helper, arguments, err := prepareApplyHandoff(operation, stage, catalogPath, dataDir, startAtSignIn, clientPID, backendPID)
+	if err != nil {
+		return err
 	}
-	arguments := []string{"--assist-apply", operation, stage, catalogPath, dataDir, strconv.FormatBool(startAtSignIn), strconv.Itoa(clientPID), strconv.Itoa(backendPID)}
 	return shellExecuteElevated(helper, stage, arguments)
 }
 

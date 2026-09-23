@@ -22,6 +22,7 @@ func runInstaller(ctx context.Context, request Request, script string) error {
 	defer os.RemoveAll(scriptDir)
 	scripts := map[string]string{
 		"install.ps1":                       script,
+		"verify-runtime.ps1":                verifyRuntimeScript,
 		"install-windows-capture-agent.ps1": installerscripts.InstallWindowsCaptureAgent,
 		"sync-windows-agent-rule.ps1":       installerscripts.SyncWindowsAgentRule,
 		"install-windows-watchdog.ps1":      installerscripts.InstallWindowsWatchdog,

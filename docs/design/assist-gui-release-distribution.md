@@ -124,6 +124,24 @@ dependent GUI payload remains in the user-extracted bootstrap directory.
 
 ## AssistGUI setup surface
 
+Each setup request fetches the current official release catalog. A completed
+local stage may supply assets only when its entire catalog matches that fresh
+catalog and both checksums and executable contracts verify. Reuse is reported
+in progress, copies assets into a new transaction, and never reuses a running
+bootstrap executable. A corrupt matching cache fails explicitly. Incomplete or
+different releases do not match; without a matching cache, assets are downloaded
+from the catalog's official release location as usual.
+
+Assist setup's UAC-approved transaction installs the Capture Agent with an
+interactive `Highest` principal. Update migrates the existing Capture task's
+principal without changing its action or triggers; Reinstall uses the same
+elevated policy. Setup verifies the registered principal before success and
+restores the original task XML on failure. Success also requires the actual API
+listener to match the installed executable, an elevated token, and the setup
+user's interactive session. Watchdog and Event Stream remain
+limited-user processes. This does not introduce per-request elevation or change
+the network-reachability trust boundary of the Agent API.
+
 The Microsoft WinUI 3 Gallery `SettingsPage.xaml` at commit
 `abb8cb4cef04a5080f5c0396f67a7ec502b36179` remains a visual reference, not the
 product or runtime authority. AssistGUI uses a Mica window, TitleBar, section
@@ -225,6 +243,13 @@ configuration for Event Stream then Capture Agent. Existing Rules and user
 data are preserved. An existing task with the same name but a different
 ownership description is a terminal error. Rollback restores task XML,
 executables, release metadata, and Watchdog configuration.
+
+Update preserves the installed Watchdog target configuration. Optional companion
+executables remain part of the verified release even when they have no enabled
+Scheduled Task. The binary deployer retains task-derived paths for configured
+companions and uses the Capture Agent binary directory for unregistered
+companions; it still verifies the complete artifact set and requires every
+binary to stop before replacement.
 
 Watchdog is installed and started as part of setup. The user-facing checkbox
 controls whether its Scheduled Task has an at-sign-in trigger; it does not

@@ -65,3 +65,28 @@ func TestEmbeddedInstallerWrapsRepositoryInstallersAndRollback(t *testing.T) {
 		}
 	}
 }
+
+func TestAssistElevationMigrationIsTransactional(t *testing.T) {
+	backup := strings.Index(installerScript, "$previousTaskXML[$entry.Key] = Export-ScheduledTask")
+	migrate := strings.Index(installerScript, `Set-ScheduledTask -TaskName $agentTask -Principal $captureTask.Principal`)
+	deploy := strings.Index(installerScript, `$deployOutput = & powershell.exe`)
+	verify := strings.Index(installerScript, `[string]$installedTask.Principal.RunLevel -cne "Highest"`)
+	commit := strings.Index(installerScript, `Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue`)
+	readiness := strings.Index(installerScript, `$runtimeReadiness = Assert-AssistRuntimeReady`)
+	if backup < 0 || migrate <= backup || deploy <= migrate || verify <= deploy || readiness <= verify || commit <= readiness {
+		t.Fatal("elevation migration must retain rollback XML, precede restart, and verify before commit")
+	}
+	for _, required := range []string{
+		`$captureTask.Principal.RunLevel = "Highest"`,
+		`-StartupMode WatchdogManaged -AgentRunLevel Highest`,
+		`[string]$installedTask.Principal.LogonType -cne "Interactive"`,
+		`Register-ScheduledTask -TaskName $taskName -Xml $previousTaskXML[$taskName] -Force`,
+	} {
+		if !strings.Contains(installerScript, required) {
+			t.Fatalf("Assist elevation contract missing %q", required)
+		}
+	}
+	if strings.Contains(installerScript, "-AgentRunLevel Limited") {
+		t.Fatal("Assist must not reinstall the Agent with a filtered token")
+	}
+}

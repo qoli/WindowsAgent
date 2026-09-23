@@ -51,7 +51,7 @@ func Execute(ctx context.Context, request Request, emitter *Emitter) error {
 		if err := progress("download", "Downloading and verifying the WindowsAgent release"); err != nil {
 			return err
 		}
-		stage, catalogPath, err := stageRelease(ctx, dataDir)
+		stage, catalogPath, err := stageRelease(ctx, dataDir, progress)
 		if err != nil {
 			return fail("RELEASE_STAGE_FAILED", err)
 		}
@@ -206,15 +206,31 @@ func requestedWatchdogSetting(ctx context.Context, request Request, dataDir stri
 	return facts.WatchdogStartAtLogon, nil
 }
 
-func stageRelease(ctx context.Context, dataDir string) (string, string, error) {
+func stageRelease(ctx context.Context, dataDir string, progress func(string, string) error) (string, string, error) {
 	downloader := releasedownload.Client{HTTP: releasedownload.NewHTTP1Client()}
 	catalog, base, err := downloader.FetchCatalog(ctx, latestCatalogURL)
 	if err != nil {
 		return "", "", err
 	}
 	stage := filepath.Join(dataDir, "release-staging", catalog.Version+"-"+fmt.Sprint(time.Now().UTC().UnixNano()))
-	if err := downloader.Stage(ctx, base, catalog, stage, releasecatalog.InstallArtifact); err != nil {
+	if err := progress("verify-cache", "Checking previously downloaded assets against the current release catalog"); err != nil {
 		return "", "", err
+	}
+	reused, err := stageVerifiedCachedRelease(ctx, dataDir, stage, catalog)
+	if err != nil {
+		return "", "", err
+	}
+	if reused {
+		if err := progress("verified-cache", "Reusing locally verified release assets"); err != nil {
+			return "", "", err
+		}
+	} else {
+		if err := progress("download", "Downloading and verifying release assets"); err != nil {
+			return "", "", err
+		}
+		if err := downloader.Stage(ctx, base, catalog, stage, releasecatalog.InstallArtifact); err != nil {
+			return "", "", err
+		}
 	}
 	catalogPath := filepath.Join(stage, "windowsagent-release.json")
 	if err := writeMetadata(catalogPath, filepath.Join(stage, "SHA256SUMS"), catalog); err != nil {

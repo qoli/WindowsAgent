@@ -53,6 +53,14 @@ foreach ($entry in $taskContracts.GetEnumerator()) {
 $binDir = Join-Path $dataDir "bin"
 $rulesDir = Join-Path $dataDir "Rules"
 $installedAgent = Join-Path $binDir "windows-capture-agent.exe"
+$adapterArtifact = @($selected | Where-Object { $_.name -ceq "windows-tailscale-adapter.exe" })
+$adapterPath = Join-Path $binDir "windows-tailscale-adapter.exe"
+if ($adapterArtifact.Count -eq 1 -and (Test-Path -LiteralPath $adapterPath -PathType Leaf)) {
+    $adapterRunning = @(Get-Process -Name windows-tailscale-adapter -ErrorAction SilentlyContinue | Where-Object { $_.Path -and [IO.Path]::GetFullPath($_.Path) -ieq $adapterPath })
+    if ($adapterRunning.Count -gt 0 -and (Get-FileHash -LiteralPath $adapterPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$adapterArtifact[0].sha256) {
+        throw "TailscaleAdapter update requires Disconnect and a new auth key to reconnect; the active session has been preserved"
+    }
+}
 if ($operation -ceq "install" -and ((Test-Path -LiteralPath $installedAgent -PathType Leaf) -or $previousTaskXML.Count -ne 0)) { throw "WindowsAgent is already present; use Update or Repair" }
 if ($operation -ceq "update" -and -not (Test-Path -LiteralPath $installedAgent -PathType Leaf)) { throw "WindowsAgent installation is incomplete; use Repair" }
 if ($operation -ceq "update" -and (-not $previousTaskXML.ContainsKey($agentTask) -or -not $previousTaskXML.ContainsKey($eventTask) -or -not $previousTaskXML.ContainsKey($watchdogTask))) { throw "WindowsAgent installation is incomplete; use Repair" }
@@ -130,6 +138,18 @@ foreach ($file in $files) {
 $eventTokenFile = Join-Path $dataDir "event-api.token"
 $createdToken = -not (Test-Path -LiteralPath $eventTokenFile -PathType Leaf)
 
+function Copy-ChangedFile([string]$Source, [string]$Destination) {
+    # An identical running companion does not need replacing. In particular,
+    # disconnecting the ephemeral Tailscale adapter would destroy enrollment.
+    $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+    if ((Test-Path -LiteralPath $Destination -PathType Leaf) -and
+        (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash -ceq $sourceHash) { return }
+    Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    if ((Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash -cne $sourceHash) {
+        throw "copied file SHA-256 mismatch: $Destination"
+    }
+}
+
 function Wait-ExecutableExit([string]$Path) {
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
@@ -151,6 +171,11 @@ try {
         foreach ($task in $repairTasks) { Wait-ExecutableExit $task.Executable }
     }
     if ($operation -ceq "update") {
+        # Migrate existing Assist installations without changing task identity,
+        # arguments or triggers. The original XML above remains the rollback source.
+        $captureTask = Get-ScheduledTask -TaskName $agentTask -ErrorAction Stop
+        $captureTask.Principal.RunLevel = "Highest"
+        Set-ScheduledTask -TaskName $agentTask -Principal $captureTask.Principal | Out-Null
         & (Join-Path $PSScriptRoot "install-windows-watchdog.ps1") -ExecutablePath (Join-Path $binDir "windows-watchdog.exe") -ConfigPath $watchdogConfigInstalled -DataDir $dataDir -StartAtLogon:$watchdogStartAtLogon | Out-Null
         $deployedNames = @(
             "windows-capture-agent.exe", "windows-wgc-worker.exe", "windows-event-stream.exe",
@@ -161,7 +186,7 @@ try {
         )
         foreach ($file in $files | Where-Object { $_.Name -cnotin $deployedNames -and $_.Name -ne "watchdog-config.json" }) {
             New-Item -ItemType Directory -Path (Split-Path -Parent $file.Destination) -Force | Out-Null
-            Copy-Item -LiteralPath $file.Source -Destination $file.Destination -Force
+            Copy-ChangedFile -Source $file.Source -Destination $file.Destination
             if ($null -ne $file.Sha256 -and (Get-FileHash -LiteralPath $file.Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $file.Sha256) { throw "installed release artifact SHA-256 mismatch: $($file.Name)" }
         }
         $deployPayload = Join-Path $stage "deploy-payload"
@@ -185,11 +210,11 @@ try {
             throw "repository binary deployment did not report a preserved successful publication"
         }
     } else {
-        & (Join-Path $PSScriptRoot "install-windows-capture-agent.ps1") -ExecutablePath (Join-Path $stage "windows-capture-agent.exe") -RulesPath $bootstrapRules -AllowEmptyRules -DataDir $dataDir -Listen "0.0.0.0:8787" -EventListen "127.0.0.1:8788" -StartupMode WatchdogManaged -AgentRunLevel Limited | Out-Null
+        & (Join-Path $PSScriptRoot "install-windows-capture-agent.ps1") -ExecutablePath (Join-Path $stage "windows-capture-agent.exe") -RulesPath $bootstrapRules -AllowEmptyRules -DataDir $dataDir -Listen "0.0.0.0:8787" -EventListen "127.0.0.1:8788" -StartupMode WatchdogManaged -AgentRunLevel Highest | Out-Null
         $installerOwnedNames = @("windows-capture-agent.exe", "windows-wgc-worker.exe", "windows-event-stream.exe", "windows-observation-job.exe", "windows-observation-script-runner.exe", "windows-observer.exe", "windows-watchdog.exe", "watchdog-config.json")
         foreach ($file in $files | Where-Object { $_.Name -cnotin $installerOwnedNames }) {
             New-Item -ItemType Directory -Path (Split-Path -Parent $file.Destination) -Force | Out-Null
-            Copy-Item -LiteralPath $file.Source -Destination $file.Destination -Force
+            Copy-ChangedFile -Source $file.Source -Destination $file.Destination
             if ($null -ne $file.Sha256 -and (Get-FileHash -LiteralPath $file.Destination -Algorithm SHA256).Hash.ToLowerInvariant() -cne $file.Sha256) { throw "installed release artifact SHA-256 mismatch: $($file.Name)" }
         }
         & (Join-Path $PSScriptRoot "install-windows-watchdog.ps1") -ExecutablePath (Join-Path $stage "windows-watchdog.exe") -ConfigPath $watchdogConfigForSetup -DataDir $dataDir -StartAtLogon:$watchdogStartAtLogon | Out-Null
@@ -198,10 +223,16 @@ try {
             if ((Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$artifact.sha256) { throw "installed release artifact SHA-256 mismatch: $($artifact.name)" }
         }
     }
+    $installedTask = Get-ScheduledTask -TaskName $agentTask -ErrorAction Stop
+    if ([string]$installedTask.Principal.RunLevel -cne "Highest" -or [string]$installedTask.Principal.LogonType -cne "Interactive") {
+        throw "Assist Capture Agent must use an elevated interactive Scheduled Task"
+    }
     $health = Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8787/healthz" -TimeoutSec 2
     if (-not $health -or [string]$health.status -cne "ok") { throw "Capture Agent health verification failed after setup" }
+    . (Join-Path $PSScriptRoot "verify-runtime.ps1")
+    $runtimeReadiness = Assert-AssistRuntimeReady -ExecutablePath $agentExecutable
     Remove-Item -LiteralPath $backupDir -Recurse -Force -ErrorAction SilentlyContinue
-    [ordered]@{status=$operation.ToUpperInvariant(); version=[string]$catalog.version; watchdogStartAtLogon=$watchdogStartAtLogon; dataDir=$dataDir} | ConvertTo-Json -Compress
+    [ordered]@{status=$operation.ToUpperInvariant(); version=[string]$catalog.version; watchdogStartAtLogon=$watchdogStartAtLogon; dataDir=$dataDir; runtimeReadiness=$runtimeReadiness} | ConvertTo-Json -Compress
 } catch {
     $failure = $_
     $rollbackErrors = [Collections.Generic.List[string]]::new()
@@ -227,7 +258,7 @@ try {
     }
     foreach ($file in $files) {
         try {
-            if ($previousFiles.ContainsKey($file.Destination)) { Copy-Item -LiteralPath $previousFiles[$file.Destination] -Destination $file.Destination -Force }
+            if ($previousFiles.ContainsKey($file.Destination)) { Copy-ChangedFile -Source $previousFiles[$file.Destination] -Destination $file.Destination }
             else { Remove-Item -LiteralPath $file.Destination -Force -ErrorAction SilentlyContinue }
         } catch { $rollbackErrors.Add("restore $($file.Name): $($_.Exception.Message)") }
     }

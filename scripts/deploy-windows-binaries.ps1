@@ -23,6 +23,28 @@ $expectedNames = @(
     "windows-sftp.exe"
 )
 
+function Complete-InstalledBinaryMapping {
+    param([Parameter(Mandatory = $true)][hashtable]$Destinations)
+    foreach ($name in @("windows-capture-agent.exe", "windows-event-stream.exe", "windows-watchdog.exe")) {
+        if (-not $Destinations.ContainsKey($name) -or -not $Destinations[$name]) {
+            throw "installed Watchdog tasks do not identify required binary: $name"
+        }
+    }
+    $binDir = Split-Path -Parent $Destinations["windows-capture-agent.exe"]
+    foreach ($name in @("windows-wgc-worker.exe", "windows-observer.exe", "windows-observation-script-runner.exe", "windows-observation-job.exe")) {
+        if ($Destinations.ContainsKey($name)) { throw "Watchdog target unexpectedly owns internal binary: $name" }
+        $Destinations[$name] = Join-Path $binDir $name
+    }
+    # Optional companions are installed even when no task enables them. A
+    # configured task remains authoritative for its companion's installed path.
+    foreach ($name in @("windows-action-osd.exe", "windows-evidence-recorder.exe", "windows-visual-log.exe", "windows-event-web.exe", "windows-sftp.exe")) {
+        if (-not $Destinations.ContainsKey($name)) { $Destinations[$name] = Join-Path $binDir $name }
+    }
+    if ((($Destinations.Keys | Sort-Object) -join "`n") -cne (($expectedNames | Sort-Object) -join "`n")) {
+        throw "installed Watchdog tasks do not map the complete binary set"
+    }
+}
+
 function Get-Sha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -370,16 +392,7 @@ try {
         $targetTaskSnapshots[$taskName] = $snapshot
     }
 
-    $capturePath = $destinations["windows-capture-agent.exe"]
-    if (-not $capturePath) { throw "Watchdog config does not identify windows-capture-agent.exe" }
-    $binDir = Split-Path -Parent $capturePath
-    foreach ($name in @("windows-wgc-worker.exe", "windows-observer.exe", "windows-observation-script-runner.exe", "windows-observation-job.exe")) {
-        if ($destinations.ContainsKey($name)) { throw "Watchdog target unexpectedly owns internal binary: $name" }
-        $destinations[$name] = Join-Path $binDir $name
-    }
-    if ((($destinations.Keys | Sort-Object) -join "`n") -cne (($expectedNames | Sort-Object) -join "`n")) {
-        throw "installed Watchdog tasks do not map the complete binary set"
-    }
+    Complete-InstalledBinaryMapping -Destinations $destinations
 
     $binaryReceipt = @()
     $rootPrefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar

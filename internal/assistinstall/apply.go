@@ -16,6 +16,9 @@ import (
 //go:embed install.ps1
 var installerScript string
 
+//go:embed verify_runtime.ps1
+var verifyRuntimeScript string
+
 //go:embed uninstall.ps1
 var uninstallerScript string
 

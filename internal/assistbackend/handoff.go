@@ -90,14 +90,29 @@ func stageUninstallHelper(dataDir string) (string, error) {
 	return stageCurrentHelper(dataDir, "uninstall")
 }
 
-func stageCurrentHelper(dataDir, operation string) (string, error) {
-	executable, err := os.Executable()
+func prepareApplyHandoff(operation, stage, catalogPath, dataDir string, startAtSignIn bool, clientPID, backendPID int) (string, []string, error) {
+	// The release stage contains runtime artifacts only. The bootstrap backend
+	// must travel with the transaction so it can run after the GUI exits.
+	helper, err := copyCurrentHelperTo(stage)
 	if err != nil {
-		return "", fmt.Errorf("resolve Assist backend executable: %w", err)
+		return "", nil, err
 	}
+	arguments := []string{"--assist-apply", operation, stage, catalogPath, dataDir, strconv.FormatBool(startAtSignIn), strconv.Itoa(clientPID), strconv.Itoa(backendPID)}
+	return helper, arguments, nil
+}
+
+func stageCurrentHelper(dataDir, operation string) (string, error) {
 	stage := filepath.Join(dataDir, "release-staging", operation+"-"+fmt.Sprint(time.Now().UTC().UnixNano()))
 	if err := os.MkdirAll(stage, 0o700); err != nil {
 		return "", fmt.Errorf("create %s staging directory: %w", operation, err)
+	}
+	return copyCurrentHelperTo(stage)
+}
+
+func copyCurrentHelperTo(stage string) (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve Assist backend executable: %w", err)
 	}
 	destination := filepath.Join(stage, "windows-assist-backend.exe")
 	data, err := os.ReadFile(executable)
