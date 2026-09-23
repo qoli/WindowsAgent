@@ -3,7 +3,7 @@
 ## Status
 
 **Landed.** The versioned worker protocol, Agent-side generation
-owner, borderless persistent WGC/D3D11 runtime, build/install/update
+owner, borderless WGC/D3D11 runtime, build/install/update
 integration, capture-activity projection, and non-replay tests are
 implemented and accepted in the signed-in Windows session. Acceptance verified
 `borderlessAccess=allowed`, `borderRequired=false`, no yellow capture border,
@@ -14,10 +14,14 @@ Agent restart or request replay, and a healthy borderless second generation.
 ## Responsibility
 
 `windows-wgc-worker.exe` is the crash boundary for the Capture Agent's full
-and region captures. One healthy worker generation owns one primary-monitor
-WGC capture item/session, D3D11 device and immediate context, two-frame pool,
-and region compute shader. It executes all requests serially on the same locked
-Windows runtime thread and acquires a frame after accepting each request.
+and region captures. One healthy worker generation retains its primary-monitor
+WGC capture item, D3D11 device and immediate context, and region compute
+shader. It executes requests serially on the same locked Windows runtime thread.
+Each request creates and closes its own two-frame pool and capture session,
+acquiring a frame after that session starts. WGC can stop producing frames for
+an unchanged desktop; draining a resident pool and waiting for another frame
+made idle desktop captures time out even while the Agent remained healthy.
+The new pool cannot contain a frame from an earlier request.
 
 The Capture Agent owns the worker through private framed stdin/stdout. The
 worker is not a service, Watchdog target, Action, resident inference runtime,
@@ -30,7 +34,9 @@ Observer jobs retain their own capture lifecycles.
 The Agent starts and negotiates the initial worker generation during Agent
 startup with a bounded two-minute initialization deadline. The worker requests
 Windows borderless-capture access, sets `IsBorderRequired=false`, reads the
-property back, and only then starts capture. The initialize response reports
+property back, and only then starts its verification capture session. The
+session is closed after initialization. Every request session sets and reads
+back `IsBorderRequired=false` before starting. The initialize response reports
 `borderlessAccess=allowed` and `borderRequired=false`; the Agent verifies both.
 A denied permission, unsupported interface, deadline, or property mismatch
 fails initialization explicitly. There is no bordered-capture fallback.
@@ -51,6 +57,10 @@ cause and remain terminal. There is no capture backend, provider, algorithm,
 or cached-frame fallback.
 
 Worker stderr is bounded and forwarded into the Agent's runtime diagnostics.
+With WGC trace enabled, it records each operation's frame-wait start, frame
+arrival, and completion time. Any failure records its operation ID, exact
+session or frame stage, elapsed time, and error even when the request deadline
+wins the caller-side race.
 The installer and complete binary deployment path configure process-scoped
 Windows Error Reporting full dumps for both the Agent and worker. Dumps and
 runtime logs remain private operator data.

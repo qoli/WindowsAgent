@@ -26,11 +26,13 @@ const (
 )
 
 type persistentRequest struct {
-	ctx      context.Context
-	kind     persistentRequestKind
-	full     capture.Request
-	region   capture.RegionRequest
-	response chan persistentResponse
+	ctx         context.Context
+	kind        persistentRequestKind
+	full        capture.Request
+	region      capture.RegionRequest
+	response    chan persistentResponse
+	operationID uint64
+	trace       bool
 }
 
 type persistentResponse struct {
@@ -44,7 +46,7 @@ type persistentInitialization struct {
 	err    error
 }
 
-// PersistentStatus is the initialization contract for one live WGC session.
+// PersistentStatus is the initialization contract for the resident WGC runtime.
 // BorderlessAccess is "allowed" only after Windows grants the borderless
 // capability and IsBorderRequired has been set and read back as false.
 type PersistentStatus struct {
@@ -53,10 +55,9 @@ type PersistentStatus struct {
 	BorderRequired   bool
 }
 
-// PersistentCapturer owns one WGC session, D3D11 device/context, and region
-// shader for its complete lifetime. Every request is executed serially on the
-// same locked Windows runtime thread against a frame acquired after the
-// request was accepted.
+// PersistentCapturer keeps the WGC item, D3D11 device/context, and region
+// shader resident. Each serial request creates its own frame pool and capture
+// session so a static desktop still produces a frame after request acceptance.
 type PersistentCapturer struct {
 	logger   *slog.Logger
 	requests chan persistentRequest
@@ -157,8 +158,10 @@ func (c *PersistentCapturer) request(ctx context.Context, request persistentRequ
 	}
 	request.response = make(chan persistentResponse, 1)
 	operationID := c.sequence.Add(1)
+	request.operationID = operationID
+	request.trace = c.trace.Load()
 	started := time.Now()
-	if c.trace.Load() {
+	if request.trace {
 		c.logger.Info("persistent_wgc_request_started", "operation_id", operationID, "capture_kind", request.kind.String())
 	}
 	select {
@@ -170,7 +173,7 @@ func (c *PersistentCapturer) request(ctx context.Context, request persistentRequ
 	}
 	select {
 	case response := <-request.response:
-		if c.trace.Load() {
+		if request.trace {
 			attributes := []any{"operation_id", operationID, "capture_kind", request.kind.String(), "duration_ms", time.Since(started).Milliseconds()}
 			if response.err != nil {
 				attributes = append(attributes, "error", response.err)
@@ -305,14 +308,14 @@ func runPersistentSession(
 		initialized <- persistentInitialization{err: err}
 		return err
 	}
-	defer closeAndRelease(framePool)
+	defer func() { closeAndRelease(framePool) }()
 	session, err := createCaptureSession(framePool, item)
 	if err != nil {
 		err = capture.Failure("capture_session_failed", "failed to create the persistent capture session", err)
 		initialized <- persistentInitialization{err: err}
 		return err
 	}
-	defer closeAndRelease(session)
+	defer func() { closeAndRelease(session) }()
 	if err = setCursorCapture(session, false); err != nil {
 		err = capture.Failure("capture_session_failed", "failed to disable cursor capture", err)
 		initialized <- persistentInitialization{err: err}
@@ -345,12 +348,18 @@ func runPersistentSession(
 		BorderlessAccess: "allowed",
 		BorderRequired:   false,
 	}
+	// Initialization proves borderless access before the worker becomes ready.
+	// Keeping this frame pool would let a static desktop contribute an old frame
+	// to a later request, so requests start with their own empty pool.
+	closeAndRelease(session)
+	session = nil
+	closeAndRelease(framePool)
+	framePool = nil
 	initialized <- persistentInitialization{status: status}
-	logger.Info("persistent_wgc_session_started", "width", size.Width, "height", size.Height, "pixel_format", pixelFormatName,
+	logger.Info("persistent_wgc_runtime_started", "width", size.Width, "height", size.Height, "pixel_format", pixelFormatName,
 		"borderless_access", status.BorderlessAccess, "border_required", status.BorderRequired)
-	defer logger.Info("persistent_wgc_session_stopped")
+	defer logger.Info("persistent_wgc_runtime_stopped")
 
-	includeCursor := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -360,60 +369,90 @@ func runPersistentSession(
 				request.response <- persistentResponse{err: err}
 				continue
 			}
-			requestedCursor := request.kind == persistentFull && request.full.IncludeCursor
-			if requestedCursor != includeCursor {
-				if err := setCursorCapture(session, requestedCursor); err != nil {
-					request.response <- persistentResponse{err: capture.Failure("capture_session_failed", "failed to change persistent cursor capture", err)}
-					return err
-				}
-				includeCursor = requestedCursor
-			}
-			if err := drainFrames(framePool); err != nil {
-				request.response <- persistentResponse{err: err}
-				return err
-			}
-			frame, err := latestFrame(request.ctx, framePool)
-			if err != nil {
-				request.response <- persistentResponse{err: err}
-				return err
-			}
-			foregroundInfo, foregroundErr := foreground.Snapshot()
-			if foregroundErr != nil {
-				closeAndRelease(frame)
-				err = capture.Failure("foreground_process_unavailable", "failed to identify the foreground process at capture time", foregroundErr)
-				request.response <- persistentResponse{err: err}
-				continue
-			}
-			captured := capturedFrame{
-				frame: frame, device: device, context3D: context3D,
-				pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
-				display: target.desc, monitor: monitor, foreground: foregroundInfo,
-				width: int(size.Width), height: int(size.Height),
-			}
-			response := persistentResponse{}
-			switch request.kind {
-			case persistentFull:
-				response.full, response.err = captureFullFrame(captured, request.full)
-			case persistentRegion:
-				response.region, response.err = captureRegionFrame(captured, request.region, shader)
-			default:
-				response.err = errors.New("unknown persistent WGC request kind")
-			}
-			closeAndRelease(frame)
+			response := captureFreshRequest(request, logger, winRTDevice, item, size, pixelFormat,
+				device, context3D, pixelFormatName, target.desc, monitor, shader)
 			request.response <- response
 		}
 	}
 }
 
-func drainFrames(framePool unsafe.Pointer) error {
-	for {
-		var frame unsafe.Pointer
-		if err := callHRESULTWith(framePool, 7, uintptr(unsafe.Pointer(&frame))); err != nil {
-			return capture.Failure("capture_frame_failed", "failed to drain the persistent WGC frame pool", err)
+func captureFreshRequest(request persistentRequest, logger *slog.Logger, winRTDevice, item unsafe.Pointer,
+	size winapirt.SizeInt32, pixelFormat uint32, device, context3D unsafe.Pointer, pixelFormatName string,
+	display outputDesc1, monitor capture.Monitor, shader unsafe.Pointer,
+) (response persistentResponse) {
+	started := time.Now()
+	stage := "create_frame_pool"
+	defer func() {
+		if response.err != nil {
+			logger.Error("persistent_wgc_capture_failed", "operation_id", request.operationID,
+				"stage", stage, "duration_ms", time.Since(started).Milliseconds(), "error", response.err)
 		}
-		if frame == nil {
-			return nil
-		}
-		closeAndRelease(frame)
+	}()
+	framePool, err := createFreeThreadedFramePoolWithBuffers(winRTDevice, int32(pixelFormat), size, 2)
+	if err != nil {
+		response.err = capture.Failure("capture_session_failed", "failed to create request WGC frame pool", err)
+		return
 	}
+	defer closeAndRelease(framePool)
+	stage = "create_session"
+	session, err := createCaptureSession(framePool, item)
+	if err != nil {
+		response.err = capture.Failure("capture_session_failed", "failed to create request WGC session", err)
+		return
+	}
+	defer closeAndRelease(session)
+	stage = "configure_session"
+	requestedCursor := request.kind == persistentFull && request.full.IncludeCursor
+	if err = setCursorCapture(session, requestedCursor); err != nil {
+		response.err = capture.Failure("capture_session_failed", "failed to set request cursor capture", err)
+		return
+	}
+	if err = setBorderRequired(session, false); err != nil {
+		response.err = capture.Failure("capture_session_failed", "failed to verify request borderless capture", err)
+		return
+	}
+	stage = "start_capture"
+	if err = callHRESULT(session, 6); err != nil {
+		response.err = capture.Failure("capture_session_failed", "failed to start request WGC capture", err)
+		return
+	}
+	stage = "wait_for_frame"
+	if request.trace {
+		logger.Info("persistent_wgc_frame_wait_started", "operation_id", request.operationID,
+			"elapsed_ms", time.Since(started).Milliseconds())
+	}
+	frame, err := latestFrame(request.ctx, framePool)
+	if err != nil {
+		response.err = err
+		return
+	}
+	defer closeAndRelease(frame)
+	if request.trace {
+		logger.Info("persistent_wgc_frame_acquired", "operation_id", request.operationID,
+			"elapsed_ms", time.Since(started).Milliseconds())
+	}
+	stage = "foreground"
+	foregroundInfo, err := foreground.Snapshot()
+	if err != nil {
+		response.err = capture.Failure("foreground_process_unavailable", "failed to identify the foreground process at capture time", err)
+		return
+	}
+	captured := capturedFrame{frame: frame, device: device, context3D: context3D,
+		pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
+		display: display, monitor: monitor, foreground: foregroundInfo,
+		width: int(size.Width), height: int(size.Height)}
+	stage = "process_frame"
+	switch request.kind {
+	case persistentFull:
+		response.full, response.err = captureFullFrame(captured, request.full)
+	case persistentRegion:
+		response.region, response.err = captureRegionFrame(captured, request.region, shader)
+	default:
+		response.err = errors.New("unknown persistent WGC request kind")
+	}
+	if request.trace && response.err == nil {
+		logger.Info("persistent_wgc_capture_completed", "operation_id", request.operationID,
+			"duration_ms", time.Since(started).Milliseconds(), "capture_kind", request.kind.String())
+	}
+	return
 }

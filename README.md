@@ -81,8 +81,9 @@ are historical references and are not current runtime paths.
   identity, capture time, and resolved Rule navigation.
 - Capture failures remain explicit. There is no hidden GDI or alternate-provider
   fallback.
-- The WGC worker is crash-isolated and keeps its capture resources resident
-  across requests.
+- The WGC worker is crash-isolated and retains its device and monitor item
+  across requests. Each request starts a fresh WGC frame pool and session so
+  an unchanged desktop can still produce a current frame.
 
 ### Execution guarantees
 
