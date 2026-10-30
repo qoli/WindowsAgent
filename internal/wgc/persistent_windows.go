@@ -99,11 +99,19 @@ func NewPersistent(initializationContext context.Context, logger *slog.Logger) (
 	return capturer, nil
 }
 
-func (c *PersistentCapturer) Status(context.Context) (capture.Status, error) {
+func (c *PersistentCapturer) Status(ctx context.Context) (capture.Status, error) {
 	if c == nil {
 		return capture.Status{}, errors.New("persistent WGC capturer is required")
 	}
-	return c.status.Capture, nil
+	// Initialization metadata is a snapshot, not the current display mode.
+	return onWinRTThread(ctx, func() (capture.Status, error) {
+		target, err := findPrimaryDisplay()
+		if err != nil {
+			return capture.Status{}, err
+		}
+		defer release(target.adapter)
+		return capture.Status{Supported: c.status.Capture.Supported, Monitor: monitorFromDesc(target.desc)}, nil
+	})
 }
 
 func (c *PersistentCapturer) PersistentStatus() (PersistentStatus, error) {
@@ -369,7 +377,7 @@ func runPersistentSession(
 				request.response <- persistentResponse{err: err}
 				continue
 			}
-			response := captureFreshRequest(request, logger, winRTDevice, item, size, pixelFormat,
+			response := captureFreshRequest(request, logger, winRTDevice, item, &size, pixelFormat,
 				device, context3D, pixelFormatName, target.desc, monitor, shader)
 			request.response <- response
 		}
@@ -377,7 +385,7 @@ func runPersistentSession(
 }
 
 func captureFreshRequest(request persistentRequest, logger *slog.Logger, winRTDevice, item unsafe.Pointer,
-	size winapirt.SizeInt32, pixelFormat uint32, device, context3D unsafe.Pointer, pixelFormatName string,
+	size *winapirt.SizeInt32, pixelFormat uint32, device, context3D unsafe.Pointer, pixelFormatName string,
 	display outputDesc1, monitor capture.Monitor, shader unsafe.Pointer,
 ) (response persistentResponse) {
 	started := time.Now()
@@ -388,7 +396,7 @@ func captureFreshRequest(request persistentRequest, logger *slog.Logger, winRTDe
 				"stage", stage, "duration_ms", time.Since(started).Milliseconds(), "error", response.err)
 		}
 	}()
-	framePool, err := createFreeThreadedFramePoolWithBuffers(winRTDevice, int32(pixelFormat), size, 2)
+	framePool, err := createFreeThreadedFramePoolWithBuffers(winRTDevice, int32(pixelFormat), *size, 2)
 	if err != nil {
 		response.err = capture.Failure("capture_session_failed", "failed to create request WGC frame pool", err)
 		return
@@ -421,7 +429,12 @@ func captureFreshRequest(request persistentRequest, logger *slog.Logger, winRTDe
 		logger.Info("persistent_wgc_frame_wait_started", "operation_id", request.operationID,
 			"elapsed_ms", time.Since(started).Milliseconds())
 	}
-	frame, err := latestFrame(request.ctx, framePool)
+	frame, err := latestSizedFrame(request.ctx, framePool, winRTDevice, pixelFormat, 2, size,
+		func(before, after winapirt.SizeInt32) {
+			logger.Info("persistent_wgc_frame_pool_resized", "operation_id", request.operationID,
+				"previous_width", before.Width, "previous_height", before.Height,
+				"width", after.Width, "height", after.Height)
+		})
 	if err != nil {
 		response.err = err
 		return
@@ -437,6 +450,7 @@ func captureFreshRequest(request persistentRequest, logger *slog.Logger, winRTDe
 		response.err = capture.Failure("foreground_process_unavailable", "failed to identify the foreground process at capture time", err)
 		return
 	}
+	monitor.Width, monitor.Height = int(size.Width), int(size.Height)
 	captured := capturedFrame{frame: frame, device: device, context3D: context3D,
 		pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
 		display: display, monitor: monitor, foreground: foregroundInfo,

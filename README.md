@@ -83,6 +83,8 @@ are historical references and are not current runtime paths.
 - The WGC worker is crash-isolated and retains its device and monitor item
   across requests. Each request starts a fresh WGC frame pool and session so
   an unchanged desktop can still produce a current frame.
+- Display-mode size changes recreate WGC frame buffers before returning a
+  frame, so native captures and region coordinates follow the current size.
 
 ### Execution guarantees
 

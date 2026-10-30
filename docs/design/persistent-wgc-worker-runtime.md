@@ -41,6 +41,31 @@ back `IsBorderRequired=false` before starting. The initialize response reports
 A denied permission, unsupported interface, deadline, or property mismatch
 fails initialization explicitly. There is no bordered-capture fallback.
 
+## Display-mode changes
+
+The pool size follows each acquired frame's `ContentSize`, rather than the
+monitor size observed when the worker started. A size change makes the old
+surface clipped or padded; that frame is closed before `Recreate`, and only a
+new frame with matching pool and content dimensions can reach full encoding or
+region sampling. The latest size is retained for the next request's fresh
+pool. Repeated size changes remain bounded by the original request context and
+deadline, without restarting the worker or changing capture provider.
+
+The finite capture and Evidence paths use the same frame-size acquisition
+contract. Capture and region metadata use the accepted frame's dimensions;
+status queries read the current display mode instead of initialization
+metadata. Pool-resize logs record old/new dimensions and the persistent
+operation ID, without recording pixels or foreground details.
+
+The 2026-10-31 interactive acceptance observed 3840x2160, 2560x1440, and
+3840x2160 captures from one worker PID and start time in Session 1. Each image,
+current monitor status, and independent native display measurement agreed.
+The opt-in `TestWGCFramePoolResizeLive` also exercised undersized and oversized
+buffers against actual 3840x2160 WGC content, verifying replacement texture
+dimensions without changing the display mode. Portable tests cover exact
+2560x1440/3840x2160 transitions, release-before-recreate, consecutive changes,
+invalid content, native errors, and cancellation.
+
 ## Failure contract
 
 There is no capture-provider or in-process fallback. A protocol EOF or region

@@ -432,7 +432,11 @@ func (c *Capturer) Run(ctx context.Context, interval time.Duration, lifecycle vi
 				return struct{}{}, nil
 			}
 			slotContext, cancel := context.WithDeadline(ctx, next.Add(interval))
-			frame, frameErr := latestFrame(slotContext, framePool)
+			frame, frameErr := latestSizedFrame(slotContext, framePool, winRTDevice, pixelFormat, 2, &size,
+				func(before, after winapirt.SizeInt32) {
+					c.logger.Info("wgc_video_frame_pool_resized", "previous_width", before.Width, "previous_height", before.Height,
+						"width", after.Width, "height", after.Height)
+				})
 			cancel()
 			if ctx.Err() != nil {
 				if frame != nil {
@@ -445,6 +449,7 @@ func (c *Capturer) Run(ctx context.Context, interval time.Duration, lifecycle vi
 					return struct{}{}, err
 				}
 			} else {
+				monitor.Width, monitor.Height = int(size.Width), int(size.Height)
 				captured := capturedFrame{frame: frame, device: device, context3D: context3D, pixelFormat: pixelFormat, pixelFormatName: pixelFormatName, display: target.desc, monitor: monitor, width: int(size.Width), height: int(size.Height)}
 				region := capture.PixelRegion{Left: 0, Top: 0, Width: int(size.Width), Height: int(size.Height)}
 				videoPixels, readErr := readRegionPixelsWithShader(captured, region, 1920, 1080, videoShader)
@@ -520,6 +525,42 @@ func latestFrame(ctx context.Context, framePool unsafe.Pointer) (unsafe.Pointer,
 		closeAndRelease(frame)
 		frame = newer
 	}
+}
+
+func latestSizedFrame(ctx context.Context, framePool, device unsafe.Pointer, pixelFormat uint32, buffers int,
+	size *winapirt.SizeInt32, resized func(before, after winapirt.SizeInt32),
+) (unsafe.Pointer, error) {
+	current := frameSize{width: size.Width, height: size.Height}
+	frame, err := acquireSizedFrame(ctx, &current,
+		func(ctx context.Context) (unsafe.Pointer, frameSize, error) {
+			frame, err := latestFrame(ctx, framePool)
+			if err != nil {
+				return nil, frameSize{}, err
+			}
+			var content winapirt.SizeInt32
+			if err := callHRESULTWith(frame, 8, uintptr(unsafe.Pointer(&content))); err != nil {
+				closeAndRelease(frame)
+				return nil, frameSize{}, capture.Failure("capture_frame_failed", "failed to read WGC frame content size", err)
+			}
+			return frame, frameSize{width: content.Width, height: content.Height}, nil
+		}, closeAndRelease,
+		func(content frameSize) error {
+			next := winapirt.SizeInt32{Width: content.width, Height: content.height}
+			packedSize := uint64(uint32(next.Width)) | uint64(uint32(next.Height))<<32
+			if err := pixels.ValidatePackedSize(next.Width, next.Height, packedSize); err != nil {
+				return capture.Failure("capture_session_failed", "invalid resized WGC frame pool size", err)
+			}
+			if err := callHRESULTWith(framePool, 6, uintptr(device), uintptr(pixelFormat), uintptr(buffers), uintptr(packedSize)); err != nil {
+				return capture.Failure("capture_session_failed", "failed to resize WGC frame pool", err)
+			}
+			before := *size
+			*size = next
+			if resized != nil {
+				resized(before, next)
+			}
+			return nil
+		})
+	return frame, err
 }
 
 func fitInside(width, height, maxWidth, maxHeight int) (int, int) {
@@ -804,7 +845,7 @@ func captureFrameAttempt(
 		return capture.Failure("capture_session_failed", "failed to start WGC capture", err)
 	}
 
-	frame, err := waitForFrame(ctx, framePool)
+	frame, err := latestSizedFrame(ctx, framePool, winRTDevice, pixelFormat, 1, &size, nil)
 	if err != nil {
 		return err
 	}
@@ -819,6 +860,7 @@ func captureFrameAttempt(
 		)
 	}
 
+	monitor.Width, monitor.Height = int(size.Width), int(size.Height)
 	return process(capturedFrame{
 		frame: frame, device: device, context3D: context3D,
 		pixelFormat: pixelFormat, pixelFormatName: pixelFormatName,
