@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["clicks"],
+  "properties": {
+    "clicks": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["schemaVersion", "operation", "screenX", "screenY"],
+        "properties": {
+          "schemaVersion": {"const": 1},
+          "operation": {"const": "click"},
+          "screenX": {"type": "integer"},
+          "screenY": {"type": "integer"}
+        }
+      }
+    }
+  }
+}

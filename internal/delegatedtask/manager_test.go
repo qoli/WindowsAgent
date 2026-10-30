@@ -18,6 +18,7 @@ type fakeRuntime struct {
 	behaviors  []string
 	aborts     int
 	endOnAbort bool
+	abortErr   error
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -37,6 +38,9 @@ func (runtime *fakeRuntime) Prompt(_ context.Context, _ piweb.Session, text, beh
 }
 func (runtime *fakeRuntime) Abort(context.Context, piweb.Session) error {
 	runtime.aborts++
+	if runtime.abortErr != nil {
+		return runtime.abortErr
+	}
 	if runtime.endOnAbort {
 		runtime.events <- piweb.Event{Type: "agent.end", Seq: 1, Raw: []byte(`{"type":"agent.end","seq":1}`)}
 	}

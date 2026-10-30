@@ -50,6 +50,10 @@ func TestModelAcceptsDeclaredEphemeralStartProvenance(t *testing.T) {
 			actionID: actionrun.DirectKeyInputActionID,
 			payload:  `{"state":"RUNNING","actionId":"windows/direct-key-input","lifecycle":"linear","interruptible":true,"key":"Key_Home","holdMs":180,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"requestDigest":"789abc"}`,
 		},
+		{
+			actionID: actionrun.DirectPointerInputActionID,
+			payload:  `{"state":"RUNNING","actionId":"windows/direct-pointer-input","lifecycle":"linear","interruptible":true,"operation":"click","x":2000,"y":1000,"holdMs":40,"expectedForeground":{"processId":42,"executableName":"Game.exe","executablePath":"C:\\Games\\Game.exe"},"requestDigest":"789abc"}`,
+		},
 	}
 	for _, test := range tests {
 		model := &Model{}

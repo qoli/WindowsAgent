@@ -1,6 +1,6 @@
 ---
 name: use-windows-starlark
-description: "Experimental authoring, preflight, invocation, and evaluation of bounded caller-authored windows-starlark-action-v1 packages for general Windows process and filesystem workflows. Use for deterministic multi-step automation; excludes persistent Rules, game Actions, and repository development."
+description: "Experimental authoring, preflight, invocation, and evaluation of bounded caller-authored windows-starlark-action-v1 packages for Windows process, filesystem, and literal foreground-bound input workflows. Use for deterministic multi-step automation without Rule installation; excludes persistent Rules and repository development."
 ---
 
 # Use Windows Starlark — experimental
@@ -18,14 +18,18 @@ repository developer Skill is required.
 ## Choose the capability
 
 Use Starlark when one bounded deterministic workflow needs ordered Windows
-process/filesystem operations, conditional decisions, and a schema-checked
+process/filesystem or literal keyboard/pointer operations, cancellable waits,
+conditional decisions, and a schema-checked
 result. Use the ordinary PC Skill for a single capture, SFTP operation,
 managed process, PowerShell file, or literal key press. Use delegated Pi when
 the worker must plan and iterate rather than execute a known procedure.
 
-This runtime currently has no screen, key, pointer, OCR, Observer, or native
-FFI host API. Do not invent those APIs or bypass missing support with an input
-provider inside a child process. Existing installed Rule Actions retain their
+This runtime exposes `windows.input.press`, `windows.pointer.click`,
+`windows.pointer.click_current`, and `task.sleep` without a Rule. Literal input
+requires exact foreground identity and uses native primary-screen coordinates.
+It currently has no screen, OCR, Observer, or native FFI host API. Do not invent
+those APIs or bypass missing support with an input provider inside a child
+process. Existing installed Rule Actions retain their
 domain ownership. Persistent Rule plugins, game-specific Actions, observation
 packages, streaming Rule Actions, and Rule deployment/synchronization belong
 to a later product phase and repository development guidance; this Skill does

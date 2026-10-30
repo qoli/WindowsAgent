@@ -91,6 +91,8 @@ func (m *Model) Apply(event eventstream.Event) error {
 			ExpectedForeground  *inputaction.ExpectedForeground `json:"expectedForeground,omitempty"`
 			Key                 string                          `json:"key,omitempty"`
 			HoldMS              uint32                          `json:"holdMs,omitempty"`
+			X                   *int                            `json:"x,omitempty"`
+			Y                   *int                            `json:"y,omitempty"`
 		}
 		if err := decodeStrict(event.Payload, &payload); err != nil {
 			return fmt.Errorf("decode action.started payload: %w", err)

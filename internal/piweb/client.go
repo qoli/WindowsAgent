@@ -16,7 +16,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/strictjson"
 )
 
-const maxResponseBytes = 1 << 20
+const maxControlResponseBytes = 1 << 20
 
 type Session struct {
 	ID  string `json:"id"`
@@ -112,7 +112,10 @@ func (c *Client) Subscribe(ctx context.Context, session Session) (EventStream, e
 	if err != nil {
 		return EventStream{}, fmt.Errorf("subscribe to PI WEB session events: %w", err)
 	}
-	connection.SetReadLimit(maxResponseBytes)
+	// PI WEB computer-use events may contain complete screenshot payloads.
+	// Their durable journal representation is bounded separately by the task
+	// manager, which commits large originals as referenced artifacts.
+	connection.SetReadLimit(-1)
 	events := make(chan Event)
 	errorsChannel := make(chan error, 1)
 	go func() {
@@ -179,11 +182,11 @@ func (c *Client) request(ctx context.Context, method, relative string, body any,
 		return fmt.Errorf("call PI WEB: %w", err)
 	}
 	defer response.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxControlResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("read PI WEB response: %w", err)
 	}
-	if len(payload) > maxResponseBytes {
+	if len(payload) > maxControlResponseBytes {
 		return errors.New("PI WEB response exceeds 1 MiB")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {

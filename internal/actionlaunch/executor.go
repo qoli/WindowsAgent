@@ -51,8 +51,16 @@ func (e *Executor) RunDirectKey(ctx context.Context, request inputaction.DirectP
 	return e.input.PressDirect(ctx, request)
 }
 
+func (e *Executor) RunDirectPointer(ctx context.Context, request pointeraction.DirectClickRequest) (pointeraction.DirectClickResult, error) {
+	if e == nil || e.pointer == nil {
+		return pointeraction.DirectClickResult{}, errors.New("Action executor and pointer controller are required")
+	}
+	return e.pointer.ClickDirect(ctx, request)
+}
+
 type PointerExecutor interface {
 	Run(context.Context, *pointeraction.Package, map[string]any, string) (json.RawMessage, error)
+	ClickDirect(context.Context, pointeraction.DirectClickRequest) (pointeraction.DirectClickResult, error)
 }
 
 type Result struct {

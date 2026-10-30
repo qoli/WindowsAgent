@@ -11,6 +11,7 @@ Usage:
   windows-agent-pi-client.sh --ssh-host <user@windows-host> [options] message --task-id <id> --mode steer|followUp --text <text>
   windows-agent-pi-client.sh --ssh-host <user@windows-host> [options] cancel --task-id <id>
   windows-agent-pi-client.sh --ssh-host <user@windows-host> [options] web --task-id <id>
+  windows-agent-pi-client.sh --ssh-host <user@windows-host> [options] artifact --task-id <id> --artifact-id <sha256> --output <local-file>
 
 Options:
   --ssh-host <host>       Windows OpenSSH destination.
@@ -78,7 +79,7 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    submit|status|watch|message|cancel|web)
+    submit|status|watch|message|cancel|web|artifact)
       command_name="$1"
       shift
       break
@@ -103,6 +104,8 @@ prompt=""
 message_mode=""
 message_text=""
 after_sequence=0
+artifact_id=""
+artifact_output=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task-id)
@@ -135,6 +138,16 @@ while [[ $# -gt 0 ]]; do
       after_sequence="$2"
       shift 2
       ;;
+    --artifact-id)
+      require_value "$@"
+      artifact_id="$2"
+      shift 2
+      ;;
+    --output)
+      require_value "$@"
+      artifact_output="$2"
+      shift 2
+      ;;
     *)
       fail "unknown $command_name argument: $1"
       ;;
@@ -153,6 +166,11 @@ case "$command_name" in
     [[ "$task_id" =~ ^task_[0-9a-f]{32}$ ]] || fail "message requires a canonical --task-id"
     [[ "$message_mode" == "steer" || "$message_mode" == "followUp" ]] || fail "message requires --mode steer or followUp"
     [[ -n "$message_text" ]] || fail "message requires --text"
+    ;;
+  artifact)
+    [[ "$task_id" =~ ^task_[0-9a-f]{32}$ ]] || fail "artifact requires a canonical --task-id"
+    [[ "$artifact_id" =~ ^[0-9a-f]{64}$ ]] || fail "artifact requires a SHA-256 --artifact-id"
+    [[ -n "$artifact_output" ]] || fail "artifact requires --output"
     ;;
 esac
 [[ "$after_sequence" =~ ^[0-9]+$ ]] || fail "--after must be a non-negative integer"
@@ -174,7 +192,7 @@ cleanup() {
   if [[ "$tunnel_started" -eq 1 ]]; then
     ssh -S "$control_socket" -O exit "$ssh_host" >/dev/null 2>&1 || true
   fi
-  rm -f "$auth_header_file" "$control_socket"
+  rm -f "$auth_header_file" "$control_socket" "$temporary_dir/pi-event.json"
   rmdir "$temporary_dir" >/dev/null 2>&1 || true
 }
 
@@ -227,6 +245,19 @@ case "$command_name" in
     ;;
   cancel)
     curl_json --request POST "${base_url}/v1/delegated-tasks/${task_id}/cancel"
+    ;;
+  artifact)
+    curl_json --output "$temporary_dir/pi-event.json" "${base_url}/v1/delegated-tasks/${task_id}/artifacts/${artifact_id}"
+    python3 - "$temporary_dir/pi-event.json" "$artifact_output" "$artifact_id" <<'PY'
+import hashlib, json, pathlib, sys
+source, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+data = source.read_bytes()
+if hashlib.sha256(data).hexdigest() != sys.argv[3]:
+    raise SystemExit("PI event artifact SHA-256 mismatch")
+target.write_bytes(data)
+source.unlink()
+print(json.dumps({"path": str(target.resolve()), "sha256": sys.argv[3], "bytes": len(data)}))
+PY
     ;;
   web)
     task_json="$(curl_json "${base_url}/v1/delegated-tasks/${task_id}")"

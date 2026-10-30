@@ -61,6 +61,18 @@ def parser() -> argparse.ArgumentParser:
     press.add_argument("--expected-process-id", type=int, required=True)
     press.add_argument("--expected-executable-name", required=True)
     press.add_argument("--expected-executable-path", required=True)
+
+    pointer = commands.add_parser("pointer")
+    pointer_commands = pointer.add_subparsers(dest="pointer_operation", required=True)
+    for operation in ("click", "click-current-position"):
+        click = pointer_commands.add_parser(operation)
+        if operation == "click":
+            click.add_argument("--x", type=int, required=True)
+            click.add_argument("--y", type=int, required=True)
+        click.add_argument("--hold-ms", type=int, required=True)
+        click.add_argument("--expected-process-id", type=int, required=True)
+        click.add_argument("--expected-executable-name", required=True)
+        click.add_argument("--expected-executable-path", required=True)
     return root
 
 
@@ -256,6 +268,24 @@ def direct_key_payload(args):
     }
 
 
+def direct_pointer_payload(args):
+    if args.hold_ms <= 0 or args.expected_process_id <= 0:
+        raise ClientError("pointer click requires positive hold and process ID values")
+    payload = {
+        "schemaVersion": 1,
+        "expectedForeground": {
+            "processId": args.expected_process_id,
+            "executableName": args.expected_executable_name,
+            "executablePath": args.expected_executable_path,
+        },
+        "operation": args.pointer_operation,
+        "holdMs": args.hold_ms,
+    }
+    if args.pointer_operation == "click":
+        payload.update(x=args.x, y=args.y)
+    return payload
+
+
 def main() -> int:
     args = parser().parse_args()
     if args.timeout <= 0:
@@ -269,6 +299,10 @@ def main() -> int:
     elif args.command == "exec":
         result = wait_for_invocation(
             client, origin, args.timeout, "/v1/executions/invoke", execution_payload(args)
+        )
+    elif args.command == "pointer":
+        result = wait_for_invocation(
+            client, origin, args.timeout, "/v1/pointer-inputs/invoke", direct_pointer_payload(args)
         )
     else:
         result = wait_for_invocation(

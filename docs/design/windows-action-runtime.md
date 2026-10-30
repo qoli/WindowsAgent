@@ -7,12 +7,13 @@ implements serialized, foreground-bound keyboard presses and one non-blocking
 held-key lease through Windows scan-code `SendInput`. A host-owned direct press
 surface is implemented for callers that already hold a fresh exact foreground
 identity; installed-Agent Windows acceptance of that surface remains pending.
-Pointer input, direct leases, chords, and arbitrary key sequences remain
-deferred.
+Direct pointer clicks and ephemeral Starlark composition are implemented;
+their signed-in Windows acceptance remains pending. Direct leases and chords
+remain deferred.
 
 ## Boundary
 
-The runtime has two adapters over one controller, lock, foreground validator,
+The keyboard runtime has two adapters over one controller, lock, foreground validator,
 lease-conflict table, scan-code driver, and release behavior:
 
 - a Rule-owned package maps a schema-valid selection to one
@@ -125,9 +126,45 @@ diagnostic-only filename.
 
 ## Deferred
 
-- chords, multiple independent held-key leases, and arbitrary
-  multi-key sequences;
+- chords and multiple independent held-key leases;
 - direct operator leases; lease ownership, renewal, expiry, restart recovery,
   and release are not approximated with repeated direct presses;
 - authenticated remote Action invocation and a complete durable finite-action
   lifecycle journal.
+
+## Direct pointer and ephemeral composition
+
+`POST /v1/pointer-inputs/invoke` accepts `schemaVersion: 1`, an exact
+`expectedForeground` identity, `holdMs` from 1 through 2000, and either:
+
+- `operation: "click"` with nonnegative integer `x` and `y` in native
+  primary-monitor pixels; or
+- `operation: "click-current-position"` without coordinates.
+
+The driver rejects coordinates outside the current primary monitor. No
+1920x1080 reference mapping is applied to direct clicks. Both adapters use the
+same pointer controller and driver as Rule Actions. Pointer operations are
+serialized so another invocation cannot move the pointer between a move and
+its click. The controller checks exact foreground PID/name/path twice before
+injection. No Rule, manifest, or executable allowlist is required.
+
+Native clicks and current-pointer sampling temporarily use per-monitor-v2 DPI
+awareness on a pinned OS thread, then restore its previous context. Their
+coordinates therefore use WGC's physical-pixel space even with display scaling.
+
+The host-owned identity is `windows/direct-pointer-input` with the existing
+`windows-pointer-action-v1` runtime and common status, watch, stop, replay, and
+terminal events. Release failure takes precedence over cancellation and stays
+`INPUT_RELEASE_FAILED`; cancellation never claims a failed release was safe.
+
+Ephemeral `windows-starlark-action-v1` packages call those same controllers
+through `windows.input.press`, `windows.pointer.click`, and
+`windows.pointer.click_current`. `task.sleep(milliseconds=...)` is interruptible
+and shares the package wall-time deadline. Each input validates its own exact
+expected foreground, including after a wait. The script owns ordering and may
+report durable activity, while injection receipts prove only input completion.
+
+The threat boundary remains the existing trusted-network Agent listener and
+installed interactive-user token. This change permits literal operator-chosen
+input without Rule installation; it does not select a background process,
+activate a window, elevate the caller, or provide an alternate input backend.

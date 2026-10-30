@@ -132,6 +132,27 @@ acceptance matters. Foreground drift, an active lease conflict, injection
 failure, and release failure are terminal. Do not switch to a PowerShell,
 SSH, virtual-key, or window-message input path.
 
+## Direct foreground-pinned pointer click
+
+Use a fresh native-density capture and its exact foreground identity:
+
+```bash
+python3 "$skill_root/scripts/windowsagent_client.py" \
+  --url "$WINDOWS_AGENT_HTTP_ORIGIN" \
+  pointer click --x 800 --y 400 --hold-ms 40 \
+  --expected-process-id 1234 \
+  --expected-executable-name Game.exe \
+  --expected-executable-path 'C:\Games\Game.exe'
+```
+
+Replace example coordinates with native primary-screen pixels from the
+capture; do not scale through a Rule's reference viewport. Use
+`pointer click-current-position` with the same identity and hold arguments to
+click without moving. The endpoint is `/v1/pointer-inputs/invoke`; no Rule is
+needed. The client follows its invocation to the durable terminal result.
+Input completion proves the click and release; use a new capture to verify the
+application's response.
+
 ## Rule Actions
 
 After a fresh capture reports a matched Rule, follow the returned Rule guidance

@@ -22,6 +22,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/inputaction"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
@@ -62,6 +63,7 @@ type Executor interface {
 	ValidateAction(scriptlaunch.Invocation) (rules.Action, error)
 	Contract(string) (actionlaunch.Contract, error)
 	RunDirectKey(context.Context, inputaction.DirectPressRequest) (inputaction.DirectPressResult, error)
+	RunDirectPointer(context.Context, pointeraction.DirectClickRequest) (pointeraction.DirectClickResult, error)
 }
 
 type AutomationExecutor interface {
@@ -123,20 +125,21 @@ type run struct {
 	ctx                   context.Context
 	cancel                context.CancelFunc
 
-	mu                 sync.Mutex
-	eventMu            sync.Mutex
-	state              string
-	errorText          string
-	output             json.RawMessage
-	lastEventID        string
-	afterCursor        uint64
-	sequence           *actionsequence.Request
-	automationPackage  *windowsautomation.Package
-	automationInputs   map[string]any
-	executionRequest   *windowsexec.Request
-	directInputRequest *inputaction.DirectPressRequest
-	errorCode          string
-	errorStage         string
+	mu                   sync.Mutex
+	eventMu              sync.Mutex
+	state                string
+	errorText            string
+	output               json.RawMessage
+	lastEventID          string
+	afterCursor          uint64
+	sequence             *actionsequence.Request
+	automationPackage    *windowsautomation.Package
+	automationInputs     map[string]any
+	executionRequest     *windowsexec.Request
+	directInputRequest   *inputaction.DirectPressRequest
+	directPointerRequest *pointeraction.DirectClickRequest
+	errorCode            string
+	errorStage           string
 }
 
 // InvokeDirectKey starts one host-owned foreground-pinned key press. It uses
@@ -332,7 +335,7 @@ func (m *Manager) recoverInterrupted(ctx context.Context) error {
 }
 
 func isHostOwnedActionID(actionID string) bool {
-	return actionID == EphemeralStarlarkActionID || actionID == EphemeralExecutionActionID || actionID == DirectKeyInputActionID
+	return actionID == EphemeralStarlarkActionID || actionID == EphemeralExecutionActionID || actionID == DirectKeyInputActionID || actionID == DirectPointerInputActionID
 }
 
 func (m *Manager) Invoke(ctx context.Context, invocation scriptlaunch.Invocation) (Invocation, error) {
@@ -871,6 +874,7 @@ func (r *run) execute() {
 	isAutomation := r.automationPackage != nil
 	isExecution := r.executionRequest != nil
 	isDirectInput := r.directInputRequest != nil
+	isDirectPointer := r.directPointerRequest != nil
 	if isSequence {
 		defer r.manager.releaseSequence(r.action.RuleID, r.identity)
 	}
@@ -890,6 +894,14 @@ func (r *run) execute() {
 		runErr = err
 	} else if isDirectInput {
 		directResult, err := r.manager.executor.RunDirectKey(r.ctx, *r.directInputRequest)
+		if err == nil {
+			var output []byte
+			output, err = json.Marshal(directResult)
+			result = actionlaunch.Result{ActionID: r.action.ID, Runtime: r.action.Runtime, Output: output}
+		}
+		runErr = err
+	} else if isDirectPointer {
+		directResult, err := r.manager.executor.RunDirectPointer(r.ctx, *r.directPointerRequest)
 		if err == nil {
 			var output []byte
 			output, err = json.Marshal(directResult)
@@ -927,7 +939,7 @@ func (r *run) execute() {
 			"state": state, "error": runErr.Error(),
 			"errorCode": terminalErrorCode, "errorStage": terminalErrorStage,
 		}
-	case cancelled && isDirectInput && inputError != nil && inputError.Code == "INPUT_RELEASE_FAILED":
+	case cancelled && inputError != nil && inputError.Code == "INPUT_RELEASE_FAILED":
 		state, eventType = StateFailed, "action.failed"
 		terminalErrorCode, terminalErrorStage = inputError.Code, inputError.Stage
 		payload = map[string]any{
@@ -1000,6 +1012,9 @@ func (r *run) execute() {
 	}
 	if isDirectInput {
 		r.directInputRequest = nil
+	}
+	if isDirectPointer {
+		r.directPointerRequest = nil
 	}
 	r.state = state
 	if state == StateCompleted {
@@ -1186,7 +1201,7 @@ func (r *run) recoverPanic() {
 	} else if r.action.Runtime == windowsexec.RuntimeID {
 		payload["errorCode"] = "WINDOWS_EXECUTION_RUNTIME_PANICKED"
 		payload["errorStage"] = "executing-execution"
-	} else if r.action.ID == DirectKeyInputActionID {
+	} else if r.action.ID == DirectKeyInputActionID || r.action.ID == DirectPointerInputActionID {
 		payload["errorCode"] = "INPUT_RUNTIME_PANICKED"
 		payload["errorStage"] = "executing-input"
 	}
@@ -1197,6 +1212,7 @@ func (r *run) recoverPanic() {
 	r.automationInputs = nil
 	r.executionRequest = nil
 	r.directInputRequest = nil
+	r.directPointerRequest = nil
 	r.state = StateFailed
 	r.errorText = errorText
 	if r.action.Runtime == windowsautomation.RuntimeID {
@@ -1205,7 +1221,7 @@ func (r *run) recoverPanic() {
 	} else if r.action.Runtime == windowsexec.RuntimeID {
 		r.errorCode = "WINDOWS_EXECUTION_RUNTIME_PANICKED"
 		r.errorStage = "executing-execution"
-	} else if r.action.ID == DirectKeyInputActionID {
+	} else if r.action.ID == DirectKeyInputActionID || r.action.ID == DirectPointerInputActionID {
 		r.errorCode = "INPUT_RUNTIME_PANICKED"
 		r.errorStage = "executing-input"
 	}

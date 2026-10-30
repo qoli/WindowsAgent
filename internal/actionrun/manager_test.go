@@ -19,6 +19,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/inputaction"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
 	"github.com/qoli/WindowsAgent/internal/streamaction"
@@ -79,6 +80,20 @@ type fakeExecutor struct {
 	directStarted    chan struct{}
 	directRelease    chan struct{}
 	directOnce       sync.Once
+}
+
+func (f *fakeExecutor) RunDirectPointer(ctx context.Context, request pointeraction.DirectClickRequest) (pointeraction.DirectClickResult, error) {
+	if f.directStarted != nil {
+		f.directOnce.Do(func() { close(f.directStarted) })
+	}
+	if f.directRelease != nil {
+		select {
+		case <-ctx.Done():
+			return pointeraction.DirectClickResult{}, errors.Join(ctx.Err(), f.directErr)
+		case <-f.directRelease:
+		}
+	}
+	return pointeraction.DirectClickResult{SchemaVersion: 1, Operation: request.Operation, Foreground: request.ExpectedForeground, Button: "LEFT"}, f.directErr
 }
 
 func (f *fakeExecutor) RunDirectKey(ctx context.Context, request inputaction.DirectPressRequest) (inputaction.DirectPressResult, error) {

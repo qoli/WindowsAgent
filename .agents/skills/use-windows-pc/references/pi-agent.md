@@ -56,6 +56,19 @@ stream ends or the caller interrupts it. Resume with the last observed host
 sequence; host sequences are not PI WEB WebSocket sequences. Keep the task ID
 and cursor together when reporting progress.
 
+Large PI WEB events are retained as exact private artifacts. A progress
+payload may contain `piEventArtifact` instead of inline `piEvent`; preserve
+its original PI sequence and download the reference only when needed:
+
+```bash
+"$pi_client" artifact --task-id "$task_id" \
+  --artifact-id "$artifact_sha256" --output /absolute/private/pi-event.json
+```
+
+The client verifies SHA-256 and saves the raw event without printing embedded
+images. An event-stream or artifact failure remains terminal and records
+whether PI WEB acknowledged abort; do not infer the desktop state from it.
+
 ## Guide, interact, or cancel
 
 While a task is running, send `steer` when the active work needs redirection or

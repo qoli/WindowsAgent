@@ -58,6 +58,12 @@ type CurrentPointerClickRequest struct {
 	Hold time.Duration
 }
 
+// ScreenPointerClickRequest uses native pixels of the primary monitor.
+type ScreenPointerClickRequest struct {
+	X, Y int
+	Hold time.Duration
+}
+
 type PointerEvidence struct {
 	Backend        string
 	ReferenceX     int

@@ -58,6 +58,10 @@ Use only the capability needed for the requested outcome:
   This is the game-neutral `windows-key-action-v1` adapter for an explicit
   operator-selected key; it is not a substitute for domain behavior owned by
   a Rule Action.
+- **One literal mouse click:** after a fresh native-density capture, use the
+  bundled portable client's `pointer click` with native primary-screen `x/y`
+  and the exact foreground PID/name/path. `pointer click-current-position`
+  clicks without moving the cursor. A matched Rule is not required.
 - **Independent delegated work:** use `windows-agent-pi` when the Windows-side
   worker should plan, inspect, iterate, use its own workspace and computer-use,
   and stream durable progress back to the supervising host. Pi SDK/pi-ai owns
@@ -70,6 +74,14 @@ Use only the capability needed for the requested outcome:
 
 SSH is not a fallback execution or file plane. The optional Pi SSH target is
 used only to tunnel the loopback delegated API and PI WEB.
+
+An unmatched executable does not disable direct keyboard or pointer input.
+Do not require creating or deploying a Rule for an explicitly requested
+literal key press or visible-button click. A separately installed experimental
+`use-windows-starlark` Skill can author bounded sequences of these inputs and
+cancellable waits without a Rule; it is optional and not an onboarding
+prerequisite. Pi remains suitable when the delegated worker needs to plan and
+inspect for itself.
 
 Read [references/operations.md](references/operations.md) for conventional
 WindowsAgent command forms. Read

@@ -22,6 +22,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/capture"
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/inputaction"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -63,6 +64,7 @@ type ActionService interface {
 	InvokeStarlark(context.Context, *windowsautomation.Package, map[string]any) (actionrun.Invocation, error)
 	InvokeExecution(context.Context, windowsexec.Request) (actionrun.Invocation, error)
 	InvokeDirectKey(context.Context, inputaction.DirectPressRequest) (actionrun.Invocation, error)
+	InvokeDirectPointer(context.Context, pointeraction.DirectClickRequest) (actionrun.Invocation, error)
 	SequenceToolSchema(string) (actionsequence.ToolSchema, error)
 	Get(string) (actionrun.Invocation, error)
 	Stop(string) (actionrun.Invocation, error)
@@ -239,6 +241,8 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleExecutionInvoke)
 	case r.URL.Path == "/v1/key-inputs/invoke":
 		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleDirectKeyInvoke)
+	case r.URL.Path == "/v1/pointer-inputs/invoke":
+		s.requireMethod(recorder, r, requestID, http.MethodPost, s.handleDirectPointerInvoke)
 	case strings.HasPrefix(r.URL.Path, "/v1/action-invocations/"):
 		s.handleActionInvocationResource(recorder, r, requestID)
 	default:

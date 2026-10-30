@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/qoli/WindowsAgent/internal/eventstream"
+	"github.com/qoli/WindowsAgent/internal/windowsinput"
 	"go.starlark.net/starlark"
 	"go.starlark.net/starlarkstruct"
 	"go.starlark.net/syntax"
@@ -24,6 +25,8 @@ type Reporter interface {
 type Runner struct {
 	processes ProcessHost
 	files     FileHost
+	keyboard  KeyboardHost
+	pointer   PointerHost
 	now       func() time.Time
 }
 
@@ -36,6 +39,18 @@ func NewRunner(processes ProcessHost, files FileHost) (*Runner, error) {
 
 func NewLocalRunner() (*Runner, error) {
 	return NewRunner(OSProcessHost{}, OSFileHost{})
+}
+
+func NewInteractiveRunner(processes ProcessHost, files FileHost, keyboard KeyboardHost, pointer PointerHost) (*Runner, error) {
+	runner, err := NewRunner(processes, files)
+	if err != nil {
+		return nil, err
+	}
+	if keyboard == nil || pointer == nil {
+		return nil, errors.New("keyboard and pointer hosts are required")
+	}
+	runner.keyboard, runner.pointer = keyboard, pointer
+	return runner, nil
 }
 
 func (r *Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, reporter Reporter) (json.RawMessage, error) {
@@ -53,7 +68,7 @@ func (r *Runner) Run(ctx context.Context, pkg *Package, inputs map[string]any, r
 	}
 	runContext, cancel := context.WithTimeout(ctx, time.Duration(pkg.Manifest.Limits.WallTimeMS)*time.Millisecond)
 	defer cancel()
-	host := runtimeHost{ctx: runContext, pkg: pkg, processes: r.processes, files: r.files, reporter: reporter, now: r.now, started: r.now()}
+	host := runtimeHost{ctx: runContext, pkg: pkg, processes: r.processes, files: r.files, keyboard: r.keyboard, pointer: r.pointer, reporter: reporter, now: r.now, started: r.now()}
 	thread := &starlark.Thread{Name: pkg.Manifest.Title}
 	thread.SetMaxExecutionSteps(pkg.Manifest.Limits.MaxSteps)
 	thread.Print = func(*starlark.Thread, string) {}
@@ -110,6 +125,8 @@ type runtimeHost struct {
 	pkg       *Package
 	processes ProcessHost
 	files     FileHost
+	keyboard  KeyboardHost
+	pointer   PointerHost
 	reporter  Reporter
 	now       func() time.Time
 	started   time.Time
@@ -125,11 +142,19 @@ func (h *runtimeHost) predeclared() starlark.StringDict {
 		"mkdir": starlark.NewBuiltin("windows.fs.mkdir", h.fileMkdir), "copy": starlark.NewBuiltin("windows.fs.copy", h.fileCopy),
 		"move": starlark.NewBuiltin("windows.fs.move", h.fileMove), "remove": starlark.NewBuiltin("windows.fs.remove", h.fileRemove),
 	})
-	windowsModule := starlarkstruct.FromStringDict(starlark.String("windows"), starlark.StringDict{"process": process, "fs": filesystem})
+	input := starlarkstruct.FromStringDict(starlark.String("windows.input"), starlark.StringDict{
+		"press": starlark.NewBuiltin("windows.input.press", h.keyPress),
+	})
+	pointer := starlarkstruct.FromStringDict(starlark.String("windows.pointer"), starlark.StringDict{
+		"click":         starlark.NewBuiltin("windows.pointer.click", h.pointerClick),
+		"click_current": starlark.NewBuiltin("windows.pointer.click_current", h.pointerClickCurrent),
+	})
+	windowsModule := starlarkstruct.FromStringDict(starlark.String("windows"), starlark.StringDict{"process": process, "fs": filesystem, "input": input, "pointer": pointer})
 	taskModule := starlarkstruct.FromStringDict(starlark.String("task"), starlark.StringDict{
 		"activity":             starlark.NewBuiltin("task.activity", h.activity),
 		"elapsed_milliseconds": starlark.NewBuiltin("task.elapsed_milliseconds", h.elapsedMilliseconds),
 		"fail":                 starlark.NewBuiltin("task.fail", h.fail),
+		"sleep":                starlark.NewBuiltin("task.sleep", h.sleep),
 	})
 	return starlark.StringDict{"windows": windowsModule, "task": taskModule}
 }
@@ -438,8 +463,15 @@ func classifyRuntimeError(ctx context.Context, err error) error {
 	if errors.As(err, &typed) {
 		return typed
 	}
+	var inputError *windowsinput.Error
+	if errors.As(err, &inputError) && inputError.Code == "INPUT_RELEASE_FAILED" {
+		return &Error{Code: inputError.Code, Stage: inputError.Stage, Cause: err}
+	}
 	if ctx.Err() != nil {
 		return &Error{Code: cancellationCode(ctx.Err()), Stage: "executing-action", Cause: ctx.Err()}
+	}
+	if inputError != nil {
+		return &Error{Code: inputError.Code, Stage: inputError.Stage, Cause: err}
 	}
 	if strings.Contains(err.Error(), "too many steps") {
 		return &Error{Code: "AUTOMATION_STEP_LIMIT_EXCEEDED", Stage: "executing-action", Cause: err}

@@ -28,3 +28,7 @@ func (WindowsDriver) ClickReference(context.Context, PointerClickRequest) (Point
 func (WindowsDriver) ClickCurrent(context.Context, CurrentPointerClickRequest) (PointerEvidence, error) {
 	return PointerEvidence{}, errors.New("Windows pointer injection is supported only on Windows")
 }
+
+func (WindowsDriver) ClickScreen(context.Context, ScreenPointerClickRequest) (PointerEvidence, error) {
+	return PointerEvidence{}, errors.New("Windows pointer injection is supported only on Windows")
+}

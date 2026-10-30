@@ -12,7 +12,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [Observation script package](observation-script-package.md) | Landed | Validate external Starlark logic, task documentation, input/output schemas, Observer permissions, native DLL artifacts, and limits. |
 | [Windows observer protocol](observation-worker-protocol.md) | Landed | Unify finite read-only memory, file, and reference/native sampled screen-region calls behind framed process boundaries. |
 | [Script Runner native-library FFI](native-library-ffi.md) | Landed | Load package-owned DLL aliases and execute package-owned ABIs through a provider-neutral Windows amd64 FFI. |
-| [Starlark automation runtime](starlark-automation-runtime.md) | Partially landed | Upload and run one ephemeral, general Windows Starlark Action in the Agent's signed-in interactive session with process, filesystem, activity, cancellation, and durable-result contracts. |
+| [Starlark automation runtime](starlark-automation-runtime.md) | Partially landed | Upload an ephemeral Windows Starlark Action with process, filesystem, literal key/pointer input, cancellable waiting, and durable results; no Rule is required. |
 | [Windows execution runtime](windows-execution-runtime.md) | Partially landed | Run, detach-start, or invoke one uploaded PowerShell file through a structured, durable Agent-hosted process interface without Starlark package ceremony or command strings. |
 | [Windows process inventory](windows-process-inventory.md) | Landed | Return one read-only osquery-shaped process and service snapshot with PID-based relationships and no lifecycle control or semantic interpretation. |
 | [SFTP filesystem runtime](sftp-filesystem-runtime.md) | Landed | Expose a dedicated elevated Windows filesystem data plane through SFTP-only SSH with no client credentials, a persistent host key, and independent lifecycle health. |
@@ -32,7 +32,7 @@ Implementation and tests remain the source of truth when a document drifts.
 | [ScreenParser loop module](screenparser-loop-module.md) | Retired | Historical autonomous capture/inference/event-loop design, replaced by the on-demand Action. |
 | [Screen scene reducer](screen-scene-reducer.md) | Retired | Historical reducer for the retired raw ScreenParser event stream. |
 | [Mini reaction runtime](mini-reaction-runtime.md) | Draft | Subscribe a configured small VLM to events and allow only declared Game actions. |
-| [Windows action runtime](windows-action-runtime.md) | Partially landed | Execute serialized foreground-bound scan-code input through either a Rule-owned binding or one exact-foreground direct operator press. |
+| [Windows action runtime](windows-action-runtime.md) | Partially landed | Execute foreground-bound key and pointer input through Rule adapters, direct operator requests, or ephemeral Starlark composition. |
 
 Status meanings:
 

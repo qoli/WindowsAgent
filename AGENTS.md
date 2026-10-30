@@ -28,10 +28,13 @@ The maintained capability layers are:
    permission-free Starlark JSON mapping in-process for bounded composition. It
    cannot access Observer, native, input, pointer, Action, or stream APIs and
    does not replace isolated finite observation.
-4. **Actions** — a Rule v6 Action is the only executable game capability.
+4. **Actions** — a Rule v6 Action owns reusable game or application semantics.
    Finite Actions return one terminal result. Streaming Actions own bounded
    asynchronous observe/decide/operate workflows, durable events,
    cancellation, and failure compensation.
+   Literal foreground-bound key and pointer input also have host-owned
+   adapters and may be composed by ephemeral Starlark Actions without a Rule.
+   A missing Rule does not disable these generic input capabilities.
 5. **Ephemeral Action Sequences** — a Rule may allow one immutable, fully
    preflighted sequence of 1–20 existing Actions. A sequence has no variables,
    branches, loops, retries, nesting, persistence, or hidden provider change.

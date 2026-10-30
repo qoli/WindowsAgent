@@ -58,7 +58,8 @@ not `r.exitCode`. Keep operations inside `main` or helpers it calls.
 
 This is Starlark, not Python: no imports, `load()`, exceptions/try/finally,
 classes, or standard-library modules. `while` is enabled but must remain bounded
-by the task and declared limits. There is no sleep API. Ordinary Starlark
+by the task and declared limits. `task.sleep` waits within the invocation's
+wall-time budget and responds to cancellation. Ordinary Starlark
 builtins are available; the only host globals are `windows` and `task`.
 `print()` is discarded: use `task.activity` for durable progress. Return only
 JSON-compatible dictionaries with string keys, lists/tuples, strings, booleans,
@@ -67,7 +68,8 @@ None, signed 64-bit integers, or finite floats.
 ## Current host surface
 
 All host calls take **named arguments only**, except the no-argument elapsed
-clock. Defaults below describe optional arguments, not additional capabilities.
+clock and `task.sleep`, which also accepts positional milliseconds. Defaults
+below describe optional arguments, not additional capabilities.
 Use explicit Windows paths to avoid relying on the Agent's working directory;
 JSON Windows backslashes must be escaped.
 
@@ -82,12 +84,21 @@ JSON Windows backslashes must be escaped.
 | `windows.fs.copy(source=..., destination=..., overwrite=False)` | Copies file/directory; rejects source symlinks. Returns None. |
 | `windows.fs.move(source=..., destination=..., overwrite=False)` | Rename semantics, not an automatic cross-volume copy. Returns None. |
 | `windows.fs.remove(path=..., recursive=False)` | Deletes file/empty directory, or recursively when explicitly selected. Missing target fails. Returns None. |
+| `windows.input.press(expected_foreground=..., key=..., hold_ms=...)` | One literal key press and release; `hold_ms` is 1–1000. Returns the direct input receipt. No Rule is required. |
+| `windows.pointer.click(expected_foreground=..., x=..., y=..., hold_ms=...)` | Left click at native primary-monitor pixels; `hold_ms` is 1–2000. Returns actual coordinates, display dimensions, backend, and foreground. |
+| `windows.pointer.click_current(expected_foreground=..., hold_ms=...)` | Left click at the current primary-monitor position without moving. |
+| `task.sleep(milliseconds=...)` | Cancellable wait within `wallTimeMs`. Returns None. |
 | `task.activity(message=..., level=...)` | Emits `action.activity`, returns its durable sequence. Level is `info`, `warning`, or `error`. |
 | `task.elapsed_milliseconds()` | Nonnegative elapsed milliseconds. |
 | `task.fail(code=..., message=...)` | Terminates with caller-owned code and stage `task.fail`; code contains only uppercase ASCII letters, digits, underscores. |
 
 Activity/failure messages must be nonempty single lines, with no surrounding
 whitespace, tabs, or newlines. Avoid putting secrets in durable messages.
+
+`expected_foreground` is a dictionary containing `processId`, `executableName`,
+and `executablePath` from a fresh capture. Each input revalidates it. A wait
+does not preserve foreground ownership: a later mismatch fails before input.
+Each successful call proves injection only; verify UI goals independently.
 
 A nonzero process exit is data: explicitly test `result["exitCode"]` and use
 `task.fail` when the task considers it failure. Process start/wait/output,

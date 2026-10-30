@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/qoli/WindowsAgent/internal/foreground"
@@ -15,9 +16,11 @@ import (
 type Driver interface {
 	ClickReference(context.Context, windowsinput.PointerClickRequest) (windowsinput.PointerEvidence, error)
 	ClickCurrent(context.Context, windowsinput.CurrentPointerClickRequest) (windowsinput.PointerEvidence, error)
+	ClickScreen(context.Context, windowsinput.ScreenPointerClickRequest) (windowsinput.PointerEvidence, error)
 }
 
 type Controller struct {
+	mu         sync.Mutex
 	driver     Driver
 	foreground func() (foreground.Info, error)
 }
@@ -33,6 +36,8 @@ func (c *Controller) Run(ctx context.Context, pkg *Package, inputs map[string]an
 	if err := pkg.ValidateInput(inputs); err != nil {
 		return nil, fmt.Errorf("validate pointer Action inputs: %w", err)
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	holdMS := 40
 	var err error
 	if value, ok := inputs["holdMs"]; ok {

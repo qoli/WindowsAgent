@@ -151,7 +151,7 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("initialize Action executor: %w", err)
 	}
-	automationExecutor, err := windowsautomation.NewLocalRunner()
+	automationExecutor, err := windowsautomation.NewInteractiveRunner(windowsautomation.OSProcessHost{}, windowsautomation.OSFileHost{}, inputController, pointerController)
 	if err != nil {
 		return fmt.Errorf("initialize Starlark automation executor: %w", err)
 	}

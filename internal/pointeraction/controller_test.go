@@ -11,8 +11,18 @@ import (
 )
 
 type recordingPointerDriver struct {
-	request      windowsinput.PointerClickRequest
-	currentCalls int
+	request       windowsinput.PointerClickRequest
+	currentCalls  int
+	screenRequest windowsinput.ScreenPointerClickRequest
+	screenCalls   int
+	err           error
+}
+
+func (d *recordingPointerDriver) ClickScreen(_ context.Context, request windowsinput.ScreenPointerClickRequest) (windowsinput.PointerEvidence, error) {
+	d.screenRequest = request
+	d.screenCalls++
+	return windowsinput.PointerEvidence{Backend: windowsinput.BackendSendInputPointer, ScreenX: request.X, ScreenY: request.Y,
+		ScreenWidth: 2560, ScreenHeight: 1440, HoldMS: request.Hold.Milliseconds()}, d.err
 }
 
 func (d *recordingPointerDriver) ClickCurrent(_ context.Context, request windowsinput.CurrentPointerClickRequest) (windowsinput.PointerEvidence, error) {

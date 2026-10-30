@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["foreground", "first", "second", "pauseMs"],
+  "properties": {
+    "foreground": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["processId", "executableName", "executablePath"],
+      "properties": {
+        "processId": {"type": "integer", "minimum": 1},
+        "executableName": {"type": "string", "minLength": 1},
+        "executablePath": {"type": "string", "minLength": 1}
+      }
+    },
+    "first": {"$ref": "#/$defs/point"},
+    "second": {"$ref": "#/$defs/point"},
+    "pauseMs": {"type": "integer", "minimum": 0}
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "integer", "minimum": 0},
+        "y": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

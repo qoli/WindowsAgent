@@ -40,6 +40,7 @@ func (failure *eventHandlingError) Error() string { return failure.err.Error() }
 func (failure *eventHandlingError) Unwrap() error { return failure.err }
 
 type Journal interface {
+	Root() string
 	Append(context.Context, eventstream.AppendRequest) (eventstream.Event, error)
 	ReadStreamAfter(context.Context, uint64, string, int) ([]eventstream.Event, uint64, error)
 	WaitAfter(context.Context, uint64, int) ([]eventstream.Event, error)
@@ -152,7 +153,7 @@ func (m *Manager) Submit(ctx context.Context, request SubmitRequest) (Task, erro
 		return run.snapshot(), nil
 	}
 	if err := m.runtime.Prompt(ctx, session, request.Prompt, ""); err != nil {
-		run.fail("PI_WEB_PROMPT_FAILED", err)
+		run.failRuntime(session, "PI_WEB_PROMPT_FAILED", err)
 		return run.snapshot(), nil
 	}
 	run.setState(StateRunning)
@@ -369,7 +370,7 @@ func (run *taskRun) consume(session piweb.Session, stream piweb.EventStream) {
 				if errors.As(err, &handling) {
 					code = handling.code
 				}
-				run.fail(code, err)
+				run.failRuntime(session, code, err)
 				return
 			}
 		case err, ok := <-stream.Errors:
@@ -378,7 +379,7 @@ func (run *taskRun) consume(session piweb.Session, stream piweb.EventStream) {
 				continue
 			}
 			if err != nil && !run.manager.isClosed() && !terminal(run.snapshot().State) {
-				run.fail("PI_WEB_EVENT_STREAM_FAILED", err)
+				run.failRuntime(session, "PI_WEB_EVENT_STREAM_FAILED", err)
 			}
 			return
 		case <-run.ctx.Done():
@@ -386,7 +387,7 @@ func (run *taskRun) consume(session piweb.Session, stream piweb.EventStream) {
 		}
 	}
 	if !run.manager.isClosed() && !terminal(run.snapshot().State) {
-		run.fail("PI_WEB_EVENT_STREAM_ENDED", errors.New("PI WEB event stream ended before a terminal agent event"))
+		run.failRuntime(session, "PI_WEB_EVENT_STREAM_ENDED", errors.New("PI WEB event stream ended before a terminal agent event"))
 	}
 }
 
@@ -439,7 +440,7 @@ func (run *taskRun) handleEvent(event piweb.Event) error {
 				return invalidPiEvent(err)
 			}
 			if idle {
-				if err := run.appendPiEvent("task.completed", map[string]any{"state": StateCompleted, "piEvent": event.Raw}); err != nil {
+				if err := run.appendPiEvent("task.completed", map[string]any{"state": StateCompleted, "piEvent": event.Raw, "piEventType": event.Type, "piSequence": event.Seq}); err != nil {
 					return err
 				}
 				run.setState(StateCompleted)
@@ -458,7 +459,7 @@ func (run *taskRun) handleEvent(event piweb.Event) error {
 		return nil
 	case "agent.end":
 		if state == StateCancelling {
-			if err := run.appendPiEvent("task.cancelled", map[string]any{"state": StateCancelled, "piEvent": event.Raw}); err != nil {
+			if err := run.appendPiEvent("task.cancelled", map[string]any{"state": StateCancelled, "piEvent": event.Raw, "piEventType": event.Type, "piSequence": event.Seq}); err != nil {
 				return err
 			}
 			run.setState(StateCancelled)
@@ -479,7 +480,31 @@ func (run *taskRun) handleEvent(event piweb.Event) error {
 	return nil
 }
 
-func (run *taskRun) appendPiEvent(eventType string, payload any) error {
+func (run *taskRun) appendPiEvent(eventType string, payload map[string]any) error {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if err := eventstream.ValidateAppendRequest(run.eventRequest(eventType, encoded)); errors.Is(err, eventstream.ErrEventTooLarge) {
+		raw, ok := payload["piEvent"].(json.RawMessage)
+		if !ok {
+			return &eventHandlingError{code: "TASK_EVENT_JOURNAL_FAILED", err: err}
+		}
+		artifact, err := run.putEventArtifact(raw)
+		if err != nil {
+			return &eventHandlingError{code: "PI_WEB_EVENT_ARTIFACT_FAILED", err: err}
+		}
+		projected := make(map[string]any, len(payload))
+		for key, value := range payload {
+			if key != "piEvent" {
+				projected[key] = value
+			}
+		}
+		projected["piEventArtifact"] = artifact
+		payload = projected
+	} else if err != nil {
+		return &eventHandlingError{code: "TASK_EVENT_JOURNAL_FAILED", err: err}
+	}
 	if err := run.append(context.Background(), eventType, payload); err != nil {
 		return &eventHandlingError{code: "TASK_EVENT_JOURNAL_FAILED", err: err}
 	}
@@ -556,13 +581,41 @@ func (run *taskRun) fail(code string, cause error) {
 }
 
 func (run *taskRun) failLocked(code string, cause error) {
+	run.failDetailsLocked(code, cause, nil)
+}
+
+// Losing the supervising event stream must not leave a Pi session free to
+// continue mutating the desktop after its host task has been marked failed.
+func (run *taskRun) failRuntime(session piweb.Session, code string, cause error) {
+	run.eventMu.Lock()
+	defer run.eventMu.Unlock()
+	if terminal(run.snapshot().State) {
+		return
+	}
+	// Match the PI WEB HTTP response-header deadline used by the control plane.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	abortErr := run.manager.runtime.Abort(ctx, session)
+	details := map[string]any{"abortConfirmed": abortErr == nil}
+	if abortErr != nil {
+		details["abortError"] = abortErr.Error()
+		cause = fmt.Errorf("%w; abort PI WEB session: %v", cause, abortErr)
+	}
+	run.failDetailsLocked(code, cause, details)
+}
+
+func (run *taskRun) failDetailsLocked(code string, cause error, details map[string]any) {
 	run.mu.Lock()
 	if terminal(run.task.State) {
 		run.mu.Unlock()
 		return
 	}
 	run.mu.Unlock()
-	appendErr := run.append(context.Background(), "task.failed", map[string]any{"state": StateFailed, "errorCode": code, "error": cause.Error()})
+	payload := map[string]any{"state": StateFailed, "errorCode": code, "error": cause.Error()}
+	for key, value := range details {
+		payload[key] = value
+	}
+	appendErr := run.append(context.Background(), "task.failed", payload)
 	run.mu.Lock()
 	run.task.State, run.task.ErrorCode, run.task.Error = StateFailed, code, cause.Error()
 	if appendErr != nil {
@@ -577,12 +630,7 @@ func (run *taskRun) append(ctx context.Context, eventType string, payload any) e
 	if err != nil {
 		return err
 	}
-	unavailable := false
-	event, err := run.manager.journal.Append(ctx, eventstream.AppendRequest{
-		SessionID: run.task.TaskID, Stream: StreamName, Type: eventType, ObservedAt: run.manager.now().UTC(),
-		Source:     eventstream.Source{ModuleID: "windows-agent-pi", InstanceID: "delegated-task-manager", Runtime: "pi-web"},
-		Foreground: eventstream.Foreground{Available: &unavailable}, CorrelationID: run.task.TaskID, Payload: encoded,
-	})
+	event, err := run.manager.journal.Append(ctx, run.eventRequest(eventType, encoded))
 	if err != nil {
 		return err
 	}
@@ -590,6 +638,15 @@ func (run *taskRun) append(ctx context.Context, eventType string, payload any) e
 	run.task.LastSequence = event.Sequence
 	run.mu.Unlock()
 	return nil
+}
+
+func (run *taskRun) eventRequest(eventType string, encoded json.RawMessage) eventstream.AppendRequest {
+	unavailable := false
+	return eventstream.AppendRequest{
+		SessionID: run.task.TaskID, Stream: StreamName, Type: eventType, ObservedAt: run.manager.now().UTC(),
+		Source:     eventstream.Source{ModuleID: "windows-agent-pi", InstanceID: "delegated-task-manager", Runtime: "pi-web"},
+		Foreground: eventstream.Foreground{Available: &unavailable}, CorrelationID: run.task.TaskID, Payload: encoded,
+	}
 }
 
 func (run *taskRun) setState(state string) {

@@ -62,6 +62,7 @@ GET  /v1/delegated-tasks/<taskId>/events?after=<cursor>&limit=<n>
 GET  /v1/delegated-tasks/<taskId>/events/stream?after=<cursor>
 POST /v1/delegated-tasks/<taskId>/messages
 POST /v1/delegated-tasks/<taskId>/cancel
+GET  /v1/delegated-tasks/<taskId>/artifacts/<sha256>
 ```
 
 Task creation accepts strict JSON:
@@ -109,6 +110,24 @@ PI WEB WebSocket sequences. Paging and NDJSON streaming therefore survive host
 disconnects. If `windows-agent-pi` restarts with a non-terminal task in its
 journal, recovery commits `FAILED` with `ABORTED_BY_RUNTIME_RESTART`; it does
 not guess whether the old Pi session later finished.
+
+PI WEB WebSocket events can contain full computer-use screenshots and are not
+capped by the 1 MiB HTTP-control-response limit. Before committing an event,
+the manager validates the size of the complete journal envelope. An oversized
+`piEvent` is committed intact under the private delegated data root and
+replaced by `piEventArtifact` metadata containing SHA-256, byte length, media
+type, and its authenticated task-scoped download URL. The original PI event
+type and sequence remain in the journal projection. Lifecycle events are
+interpreted before projection, so large messages do not hide completion or
+attention state. Artifact reads verify the hash and survive journal reopen.
+This changes storage representation, not the event or its source.
+
+Event transport, validation, journal, or artifact-commit failure requests PI
+WEB abort before publishing `task.failed`. The terminal payload preserves the
+original error code and records `abortConfirmed` plus `abortError` when
+applicable. Abort acknowledgment is evidence of the control request, not an
+independently observed desktop postcondition. The adapter never retries the
+task or switches its provider after ambiguous input side effects.
 
 ## Evidence and ownership boundary
 

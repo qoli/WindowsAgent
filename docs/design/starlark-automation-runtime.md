@@ -4,7 +4,8 @@
 
 **Partially landed as `windows-starlark-action-v1`.** Package loading, local
 preflight, deterministic upload, asynchronous invocation, cancellation,
-durable events, process execution, and filesystem operations are implemented.
+durable events, process execution, filesystem operations, foreground-bound
+literal key/pointer input, and cancellable waiting are implemented.
 Signed-in interactive Windows acceptance remains required before this design
 can be classified as Landed.
 
@@ -48,6 +49,21 @@ The current host surface is:
 - `task.elapsed_milliseconds()` reports elapsed runtime time.
 - `task.fail(code=, message=)` terminates the Action with one caller-owned,
   typed failure code and stage.
+- `windows.input.press(expected_foreground=, key=, hold_ms=)` invokes the
+  shared direct key controller with an exact foreground identity.
+- `windows.pointer.click(expected_foreground=, x=, y=, hold_ms=)` performs a
+  left click in native primary-monitor pixels; `click_current` omits `x/y` and
+  does not move the cursor. Both use the shared pointer controller.
+- `task.sleep(milliseconds=)` waits within the declared wall-time budget and
+  responds to cancellation. It does not schedule a later task.
+
+Input calls require a dictionary with `processId`, `executableName`, and
+`executablePath` from a fresh foreground observation. Each call revalidates
+that identity, including after waits. An unmatched executable is supported;
+the runtime never resolves a Rule to authorize literal input. Input failures
+retain their `INPUT_*` code and stage, and a failed release remains a failure
+even during cancellation. See
+[the pointer-cycle example](../examples/windows-starlark-pointer-cycle/TASK.md).
 
 There is deliberately no command-string shell API and no PowerShell fallback.
 The package owns operation ordering and its real postcondition; a successful

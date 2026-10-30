@@ -23,6 +23,10 @@ type fakeTasks struct {
 	streamSent bool
 }
 
+func (tasks *fakeTasks) ReadArtifact(context.Context, string, string) ([]byte, error) {
+	return []byte(`{"type":"message.append","seq":7}`), nil
+}
+
 func (tasks *fakeTasks) Submit(_ context.Context, request delegatedtask.SubmitRequest) (delegatedtask.Task, error) {
 	tasks.task = delegatedtask.Task{TaskID: "task_1", State: delegatedtask.StateRunning, CWD: request.CWD, LastSequence: 2}
 	return tasks.task, nil
@@ -73,6 +77,25 @@ func TestServerRequiresAuthenticationAndCreatesTask(t *testing.T) {
 	server.Handler().ServeHTTP(result, request)
 	if result.Code != http.StatusCreated || result.Header().Get("Location") != "/v1/delegated-tasks/task_1" {
 		t.Fatalf("status=%d location=%q body=%s", result.Code, result.Header().Get("Location"), result.Body.String())
+	}
+}
+
+func TestPiEventArtifactsRequireAuthenticationAndReturnExactJSON(t *testing.T) {
+	api, _ := New(&fakeTasks{}, testToken)
+	for _, authenticated := range []bool{false, true} {
+		request := httptest.NewRequest(http.MethodGet, "/v1/delegated-tasks/task_1/artifacts/event_1", nil)
+		if authenticated {
+			request.Header.Set("Authorization", "Bearer "+testToken)
+		}
+		response := httptest.NewRecorder()
+		api.Handler().ServeHTTP(response, request)
+		if !authenticated {
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("unauthorized status=%d", response.Code)
+			}
+		} else if response.Code != http.StatusOK || response.Body.String() != `{"type":"message.append","seq":7}` || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
 	}
 }
 

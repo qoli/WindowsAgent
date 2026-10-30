@@ -37,9 +37,11 @@ restriction. Keep this endpoint inside the same trusted network boundary.
 declared finite or streaming Actions. For the Elite Dangerous Rule this now
 includes foreground-bound keyboard input through `ui-control`, `set-throttle`,
 and the supervised `leave-station` workflow. The game-neutral input runtime
-accepts only Rule-declared bindings, either literal canonical keys or logical
-controls resolved by a declared game binding source. It requires the exact
-owning foreground process and sends one scan-code press per finite invocation,
+uses Rule-declared bindings for domain Actions, either literal canonical keys
+or logical controls resolved by a declared game binding source. Direct key
+and pointer endpoints also accept literal operator-selected input without a
+Rule, and ephemeral Starlark packages can compose those calls. They require an
+exact caller-observed foreground PID/name/path and revalidate before input,
 but these constraints do not replace network access control. Do not expose
 port 8787 outside the trusted network boundary.
 

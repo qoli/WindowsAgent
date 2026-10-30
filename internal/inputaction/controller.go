@@ -38,11 +38,7 @@ const DirectSchemaVersion = 1
 
 // ExpectedForeground pins one direct key press to the foreground process that
 // the caller deliberately observed before requesting input.
-type ExpectedForeground struct {
-	ProcessID      uint32 `json:"processId"`
-	ExecutableName string `json:"executableName"`
-	ExecutablePath string `json:"executablePath"`
-}
+type ExpectedForeground = foreground.Identity
 
 // DirectPressRequest exposes the game-neutral key runtime without requiring a
 // Rule package. It deliberately retains the existing finite press bounds.
@@ -66,37 +62,14 @@ type DirectPressResult struct {
 
 // Error preserves a stable machine-readable failure boundary for direct key
 // input while retaining the underlying diagnostic cause.
-type Error struct {
-	Code  string
-	Stage string
-	Cause error
-}
-
-func (e *Error) Error() string {
-	if e == nil || e.Cause == nil {
-		return "direct key input failed"
-	}
-	return e.Cause.Error()
-}
-
-func (e *Error) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
+type Error = windowsinput.Error
 
 func (request DirectPressRequest) Validate() error {
 	if request.SchemaVersion != DirectSchemaVersion {
 		return errors.New("direct key press schemaVersion must equal 1")
 	}
-	if request.ExpectedForeground.ProcessID == 0 || request.ExpectedForeground.ExecutableName == "" || request.ExpectedForeground.ExecutablePath == "" ||
-		strings.TrimSpace(request.ExpectedForeground.ExecutableName) != request.ExpectedForeground.ExecutableName ||
-		strings.ContainsAny(request.ExpectedForeground.ExecutableName, `\\/`) ||
-		strings.TrimSpace(request.ExpectedForeground.ExecutablePath) != request.ExpectedForeground.ExecutablePath ||
-		!isAbsoluteWindowsPath(request.ExpectedForeground.ExecutablePath) ||
-		!strings.EqualFold(windowsPathBase(request.ExpectedForeground.ExecutablePath), request.ExpectedForeground.ExecutableName) {
-		return errors.New("expectedForeground requires a positive processId and matching canonical executableName and absolute executablePath")
+	if err := request.ExpectedForeground.Validate(); err != nil {
+		return err
 	}
 	if _, err := windowsinput.VirtualKey(request.Key); err != nil {
 		return fmt.Errorf("validate direct key: %w", err)
@@ -282,18 +255,6 @@ func matchesExpectedForeground(observed foreground.Info, expected ExpectedForegr
 
 func foregroundIdentity(info foreground.Info) ExpectedForeground {
 	return ExpectedForeground{ProcessID: info.ProcessID, ExecutableName: info.ExecutableName, ExecutablePath: info.ExecutablePath}
-}
-
-func isAbsoluteWindowsPath(value string) bool {
-	return len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) &&
-		value[1] == ':' && (value[2] == '\\' || value[2] == '/')
-}
-
-func windowsPathBase(value string) string {
-	if index := strings.LastIndexAny(value, `\\/`); index >= 0 {
-		return value[index+1:]
-	}
-	return value
 }
 
 func (c *Controller) runLease(ctx context.Context, pkg *Package, inputs map[string]any, ruleID, selection string, binding Binding) (json.RawMessage, error) {

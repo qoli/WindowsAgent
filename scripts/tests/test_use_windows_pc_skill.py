@@ -58,7 +58,7 @@ class PortableClientHandler(BaseHTTPRequestHandler):
         self.requests.append(("POST", self.path, payload))
         if self.path == "/v1/captures":
             self.json_response(201, {"id": "cap_test", "format": "png", "content_url": "/v1/captures/cap_test/content"})
-        elif self.path in ("/v1/executions/invoke", "/v1/key-inputs/invoke"):
+        elif self.path in ("/v1/executions/invoke", "/v1/key-inputs/invoke", "/v1/pointer-inputs/invoke"):
             self.json_response(
                 202,
                 {"invocationId": "inv_test", "state": "RUNNING", "stop": {"method": "POST", "url": "/v1/invocations/inv_test/stop"}},
@@ -119,6 +119,21 @@ class PortableClientTests(unittest.TestCase):
             if method == "POST" and path == "/v1/key-inputs/invoke"
         )
         self.assertEqual(request_payload["expectedForeground"]["processId"], 42)
+
+    def test_pointer_click_preserves_native_coordinates_and_identity(self):
+        completed = self.run_client(
+            "pointer", "click", "--x", "2000", "--y", "1000", "--hold-ms", "40",
+            "--expected-process-id", "42", "--expected-executable-name", "app.exe",
+            "--expected-executable-path", r"C:\app.exe",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = next(
+            body for method, path, body in PortableClientHandler.requests
+            if method == "POST" and path == "/v1/pointer-inputs/invoke"
+        )
+        self.assertEqual((payload["x"], payload["y"]), (2000, 1000))
+        self.assertEqual(payload["expectedForeground"]["processId"], 42)
+        self.assertNotIn("ruleId", payload)
 
 
 class UseWindowsPCContractTests(unittest.TestCase):

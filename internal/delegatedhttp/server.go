@@ -27,6 +27,7 @@ type TaskService interface {
 	Cancel(context.Context, string) (delegatedtask.Task, error)
 	Events(context.Context, string, uint64, int) ([]eventstream.Event, uint64, uint64, error)
 	WaitEvents(context.Context, string, uint64) ([]eventstream.Event, error)
+	ReadArtifact(context.Context, string, string) ([]byte, error)
 }
 
 type Server struct {
@@ -96,6 +97,23 @@ func (s *Server) serveHTTP(w http.ResponseWriter, request *http.Request) {
 	}
 	taskID := parts[2]
 	if len(parts) == 5 {
+		if parts[3] == "artifacts" {
+			if request.Method != http.MethodGet {
+				methodNotAllowed(w, http.MethodGet)
+				return
+			}
+			raw, err := s.tasks.ReadArtifact(request.Context(), taskID, parts[4])
+			if errors.Is(err, delegatedtask.ErrTaskNotFound) || errors.Is(err, delegatedtask.ErrArtifactNotFound) {
+				writeError(w, http.StatusNotFound, "artifact_not_found", err.Error())
+			} else if err != nil {
+				writeError(w, http.StatusInternalServerError, "artifact_read_failed", err.Error())
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_, _ = w.Write(raw)
+			}
+			return
+		}
 		if parts[3] != "events" || parts[4] != "stream" {
 			writeError(w, http.StatusNotFound, "route_not_found", "route not found")
 			return

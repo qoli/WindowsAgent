@@ -55,7 +55,7 @@ prose drifts.
 | Event Web and Action OSD | Available, optional | Independent read-only event projections |
 | SFTP filesystem runtime | Available, optional | Separate SFTP-only process and Windows token |
 | Assist GUI and executable release catalog | Partially available | Native access status, strict multi-EXE catalog, and optional ephemeral TailscaleAdapter |
-| General Starlark automation | Partially available | Ephemeral `windows-starlark-action-v1` package |
+| General Starlark automation | Partially available | Ephemeral process, filesystem, literal input, and cancellable waiting |
 | Direct process execution | Partially available | Structured `windows-exec-v1` operations |
 | Direct and Rule-owned input | Partially available | Foreground-bound key and pointer runtimes |
 | Event Stream | Partially available | Authenticated loopback append/replay journal |
@@ -514,6 +514,7 @@ POST /v1/action-sequences/invoke
 POST /v1/starlark-actions/invoke
 POST /v1/executions/invoke
 POST /v1/key-inputs/invoke
+POST /v1/pointer-inputs/invoke
 GET  /v1/action-invocations/{invocation-id}
 GET  /v1/action-invocations/{invocation-id}/events?after={cursor}
 POST /v1/action-invocations/{invocation-id}/stop
@@ -630,6 +631,31 @@ go run ./cmd/windows-key press \
 Foreground mismatch or drift, key conflicts, injection failure, and release
 failure remain explicit `INPUT_*` errors. Completion is evidence of the key
 operation only.
+
+Literal pointer input also works with an unmatched foreground executable:
+
+```bash
+python3 .agents/skills/use-windows-pc/scripts/windowsagent_client.py \
+  --url http://<windows-host>:8787 pointer click \
+  --x 800 --y 400 --hold-ms 40 \
+  --expected-process-id 1234 \
+  --expected-executable-name Game.exe \
+  --expected-executable-path 'C:\Games\Game.exe'
+```
+
+These example coordinates are native primary-monitor pixels; select real
+coordinates from a fresh native-density capture. The request is sent to
+`POST /v1/pointer-inputs/invoke` and follows the same durable status, watch,
+stop, and terminal-result contract as direct key input. Use
+`pointer click-current-position` to click without moving the cursor.
+
+For a bounded sequence of literal inputs and waits, a caller-authored
+`windows-starlark-action-v1` package can use `windows.input.press`,
+`windows.pointer.click`, `windows.pointer.click_current`, and `task.sleep`.
+Neither adapter resolves a Rule. Each input revalidates the caller's exact
+foreground PID/name/path. See the
+[two-point example](docs/examples/windows-starlark-pointer-cycle/TASK.md).
+Rule Actions continue to own domain bindings, classifiers, and postconditions.
 
 ### Companion APIs
 

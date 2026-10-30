@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"syscall"
 	"time"
 	"unsafe"
@@ -25,12 +26,13 @@ const (
 )
 
 var (
-	user32DLL            = syscall.NewLazyDLL("user32.dll")
-	sendInputProc        = user32DLL.NewProc("SendInput")
-	mapVirtualKeyProc    = user32DLL.NewProc("MapVirtualKeyW")
-	setCursorPosProc     = user32DLL.NewProc("SetCursorPos")
-	getCursorPosProc     = user32DLL.NewProc("GetCursorPos")
-	getSystemMetricsProc = user32DLL.NewProc("GetSystemMetrics")
+	user32DLL               = syscall.NewLazyDLL("user32.dll")
+	sendInputProc           = user32DLL.NewProc("SendInput")
+	mapVirtualKeyProc       = user32DLL.NewProc("MapVirtualKeyW")
+	setCursorPosProc        = user32DLL.NewProc("SetCursorPos")
+	getCursorPosProc        = user32DLL.NewProc("GetCursorPos")
+	getSystemMetricsProc    = user32DLL.NewProc("GetSystemMetrics")
+	setThreadDPIContextProc = user32DLL.NewProc("SetThreadDpiAwarenessContext")
 )
 
 type WindowsDriver struct{}
@@ -38,6 +40,43 @@ type WindowsDriver struct{}
 type screenPoint struct {
 	X int32
 	Y int32
+}
+
+func (WindowsDriver) ClickScreen(ctx context.Context, request ScreenPointerClickRequest) (PointerEvidence, error) {
+	if ctx == nil {
+		return PointerEvidence{}, errors.New("context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return PointerEvidence{}, err
+	}
+	if request.Hold <= 0 || request.Hold > 2*time.Second {
+		return PointerEvidence{}, errors.New("pointer hold duration must be between 1ms and 2s")
+	}
+	restore, err := nativePointerCoordinates()
+	if err != nil {
+		return PointerEvidence{}, err
+	}
+	defer restore()
+	width, _, _ := getSystemMetricsProc.Call(smCXScreen)
+	height, _, _ := getSystemMetricsProc.Call(smCYScreen)
+	if width == 0 || height == 0 {
+		return PointerEvidence{}, errors.New("GetSystemMetrics returned an empty primary display")
+	}
+	if request.X < 0 || request.Y < 0 || request.X >= int(width) || request.Y >= int(height) {
+		return PointerEvidence{}, fmt.Errorf("pointer position (%d,%d) is outside the primary display %dx%d", request.X, request.Y, width, height)
+	}
+	moved, _, moveErr := setCursorPosProc.Call(uintptr(request.X), uintptr(request.Y))
+	if moved == 0 {
+		if moveErr != nil && moveErr != syscall.Errno(0) {
+			return PointerEvidence{}, fmt.Errorf("SetCursorPos failed: %w", moveErr)
+		}
+		return PointerEvidence{}, errors.New("SetCursorPos failed")
+	}
+	if err := clickLeft(ctx, request.Hold); err != nil {
+		return PointerEvidence{}, err
+	}
+	return PointerEvidence{Backend: BackendSendInputPointer, ScreenX: request.X, ScreenY: request.Y,
+		ScreenWidth: int(width), ScreenHeight: int(height), HoldMS: request.Hold.Milliseconds()}, nil
 }
 
 func (WindowsDriver) ClickCurrent(ctx context.Context, request CurrentPointerClickRequest) (PointerEvidence, error) {
@@ -50,6 +89,11 @@ func (WindowsDriver) ClickCurrent(ctx context.Context, request CurrentPointerCli
 	if request.Hold <= 0 || request.Hold > 2*time.Second {
 		return PointerEvidence{}, errors.New("pointer hold duration must be between 1ms and 2s")
 	}
+	restore, err := nativePointerCoordinates()
+	if err != nil {
+		return PointerEvidence{}, err
+	}
+	defer restore()
 	width, _, _ := getSystemMetricsProc.Call(smCXScreen)
 	height, _, _ := getSystemMetricsProc.Call(smCYScreen)
 	if width == 0 || height == 0 {
@@ -70,6 +114,21 @@ func (WindowsDriver) ClickCurrent(ctx context.Context, request CurrentPointerCli
 		return PointerEvidence{}, err
 	}
 	return PointerEvidence{Backend: BackendSendInputPointer, ScreenX: int(point.X), ScreenY: int(point.Y), ScreenWidth: int(width), ScreenHeight: int(height), HoldMS: request.Hold.Milliseconds()}, nil
+}
+
+// Keep monitor dimensions and pointer coordinates in the same physical pixel
+// space as WGC. The DPI context belongs to an OS thread, not a Go goroutine.
+func nativePointerCoordinates() (func(), error) {
+	runtime.LockOSThread()
+	previous, _, err := setThreadDPIContextProc.Call(^uintptr(3)) // PER_MONITOR_AWARE_V2
+	if previous == 0 {
+		runtime.UnlockOSThread()
+		return nil, fmt.Errorf("set pointer thread per-monitor-v2 DPI awareness: %v", err)
+	}
+	return func() {
+		setThreadDPIContextProc.Call(previous)
+		runtime.UnlockOSThread()
+	}, nil
 }
 
 func (WindowsDriver) ClickReference(ctx context.Context, request PointerClickRequest) (PointerEvidence, error) {
@@ -131,7 +190,7 @@ func clickLeft(ctx context.Context, hold time.Duration) error {
 	}
 	releaseErr := sendMouseButton(mouseEventLeftUp)
 	if releaseErr != nil {
-		releaseErr = fmt.Errorf("send pointer left up: %w", releaseErr)
+		releaseErr = &ReleaseError{Cause: fmt.Errorf("send pointer left up: %w", releaseErr)}
 	}
 	return errors.Join(ctx.Err(), releaseErr)
 }

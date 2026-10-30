@@ -27,6 +27,7 @@ import (
 	"github.com/qoli/WindowsAgent/internal/eventstream"
 	"github.com/qoli/WindowsAgent/internal/foreground"
 	"github.com/qoli/WindowsAgent/internal/inputaction"
+	"github.com/qoli/WindowsAgent/internal/pointeraction"
 	"github.com/qoli/WindowsAgent/internal/processinventory"
 	"github.com/qoli/WindowsAgent/internal/rules"
 	"github.com/qoli/WindowsAgent/internal/scriptlaunch"
@@ -77,6 +78,12 @@ type fakeActionService struct {
 	directKey       inputaction.DirectPressRequest
 	directKeyResult actionrun.Invocation
 	directKeyErr    error
+	directPointer   pointeraction.DirectClickRequest
+}
+
+func (f *fakeActionService) InvokeDirectPointer(_ context.Context, request pointeraction.DirectClickRequest) (actionrun.Invocation, error) {
+	f.directPointer = request
+	return f.directKeyResult, f.directKeyErr
 }
 
 type fakeProcessCollector struct {

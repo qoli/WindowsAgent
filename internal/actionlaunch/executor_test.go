@@ -54,6 +54,10 @@ func (fakeInputExecutor) PressDirect(_ context.Context, request inputaction.Dire
 
 type fakePointerExecutor struct{}
 
+func (fakePointerExecutor) ClickDirect(context.Context, pointeraction.DirectClickRequest) (pointeraction.DirectClickResult, error) {
+	return pointeraction.DirectClickResult{SchemaVersion: 1}, nil
+}
+
 func (fakePointerExecutor) Run(context.Context, *pointeraction.Package, map[string]any, string) (json.RawMessage, error) {
 	return json.RawMessage(`{"schemaVersion":1}`), nil
 }
