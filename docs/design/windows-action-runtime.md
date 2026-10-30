@@ -6,10 +6,9 @@
 implements serialized, foreground-bound keyboard presses and one non-blocking
 held-key lease through Windows scan-code `SendInput`. A host-owned direct press
 surface is implemented for callers that already hold a fresh exact foreground
-identity; installed-Agent Windows acceptance of that surface remains pending.
-Direct pointer clicks and ephemeral Starlark composition are implemented;
-their signed-in Windows acceptance remains pending. Direct leases and chords
-remain deferred.
+identity. Direct pointer clicks and ephemeral Starlark composition are
+implemented and passed the signed-in Windows acceptance below. Direct leases
+and chords remain deferred.
 
 ## Boundary
 
@@ -168,3 +167,18 @@ The threat boundary remains the existing trusted-network Agent listener and
 installed interactive-user token. This change permits literal operator-chosen
 input without Rule installation; it does not select a background process,
 activate a window, elevate the caller, or provide an alternate input backend.
+
+## Interactive acceptance
+
+On 2026-10-31 the installed Agent passed a controlled Session 1 acceptance with
+an unmatched foreground executable at 2560x1440 and 175% display scaling.
+Direct coordinate clicks, current-position clicks, and Home presses changed
+the test window's independently recorded counters and visible labels. A
+mismatched foreground PID failed with `INPUT_FOREGROUND_MISMATCH` and left
+those counters unchanged.
+
+A two-point ephemeral Starlark Action completed both clicks and replayed
+exactly one terminal event. Cancelling another Action during `task.sleep`
+produced one `action.cancelled`; the second-click counter remained unchanged
+beyond the original wait. These cases validate literal input and workflow
+cancellation, not a game objective or native release-failure injection.

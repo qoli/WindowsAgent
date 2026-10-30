@@ -6,8 +6,9 @@
 preflight, deterministic upload, asynchronous invocation, cancellation,
 durable events, process execution, filesystem operations, foreground-bound
 literal key/pointer input, and cancellable waiting are implemented.
-Signed-in interactive Windows acceptance remains required before this design
-can be classified as Landed.
+Signed-in interactive Windows input and cancellation acceptance passed on
+2026-10-31. The process and filesystem acceptance below remains required
+before this design can be classified as Landed.
 
 ## Execution model
 
@@ -142,9 +143,14 @@ private overlay network; do not expose it directly to the public Internet.
 
 ## Remaining acceptance
 
-Live acceptance must verify the installed Agent hash and run level, a non-zero
-interactive Session ID, fresh capture and foreground health, a package upload,
-argv-preserving process execution, a filesystem mutation and read-back,
-cancellation, durable terminal replay, and an independently observed desktop
-postcondition. Local tests and a Windows cross-build are not substitutes for
+The 2026-10-31 controlled acceptance verified the installed Agent hashes,
+interactive Session 1, fresh capture and unmatched foreground identity,
+package upload, native-pixel pointer clicks, a literal Home press, cancellation
+during a wait, durable terminal replay, and independent window counters and
+captures. The cancelled workflow did not execute its second click after the
+original wait elapsed.
+
+Live acceptance must still verify the installed run level, argv-preserving
+process execution through this Starlark runtime, and a filesystem mutation
+with read-back. Local tests and a Windows cross-build are not substitutes for
 that signed-in-session evidence.

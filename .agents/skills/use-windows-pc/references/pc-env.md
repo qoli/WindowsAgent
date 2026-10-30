@@ -37,16 +37,13 @@ and keeps the file private with mode `0600`.
 ```text
 WINDOWS_AGENT_PC_NAME
 WINDOWS_AGENT_EVENT_WEB_ORIGIN
-WINDOWS_AGENT_PI_SSH_HOST
 ```
 
 `WINDOWS_AGENT_PC_NAME` is only a human-readable label. It never selects the
 target and is not required to operate the PC.
 
-The other optional values do not redefine PC identity. Event Web may have a
-deployment-specific listener, while the delegated Pi tunnel may require an SSH
-config alias or `user@host` destination. Use it only for delegated Pi and not
-as an execution or file-plane fallback.
+The Event Web origin does not redefine PC identity. Event Web may have a
+deployment-specific listener.
 
 No password, private key, bearer token, pre-provisioned host-key fingerprint,
 repository path, helper path, known-hosts path, port constant, protocol

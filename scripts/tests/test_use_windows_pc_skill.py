@@ -404,7 +404,7 @@ PY
                         "WINDOWS_AGENT_SFTP_KNOWN_HOSTS=/legacy/known_hosts",
                         "WINDOWS_AGENT_SFTP_STAGING_DIR=/c:/legacy",
                         r"WINDOWS_AGENT_WINDOWS_STAGING_DIR=C:\legacy",
-                        "WINDOWS_AGENT_PI_SSH_HOST=user@test-pc.example",
+                        "WINDOWS_AGENT_EVENT_WEB_ORIGIN=http://test-pc.example:8794",
                         "",
                     )
                 ),
@@ -422,7 +422,7 @@ PY
             migrated = config.read_text(encoding="utf-8")
             self.assertIn("WINDOWS_AGENT_HOST=test-pc.example", migrated)
             self.assertIn("WINDOWS_AGENT_PC_NAME=Test-PC", migrated)
-            self.assertIn("WINDOWS_AGENT_PI_SSH_HOST=user@test-pc.example", migrated)
+            self.assertIn("WINDOWS_AGENT_EVENT_WEB_ORIGIN=http://test-pc.example:8794", migrated)
             self.assertNotIn("WINDOWS_AGENT_HTTP_ORIGIN", migrated)
             self.assertNotIn("WINDOWS_AGENT_SFTP_HOST=", migrated)
             self.assertNotIn("WINDOWS_AGENT_REPO", migrated)

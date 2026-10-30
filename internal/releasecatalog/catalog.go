@@ -58,8 +58,6 @@ func Specs() []Spec {
 		{Name: "windows-observation-script-runner.exe", Role: "observation-script-runner", Class: ClassRuntimeRequired, Subsystem: SubsystemConsole},
 		{Name: "windows-observer.exe", Role: "observer", Class: ClassRuntimeRequired, Subsystem: SubsystemConsole},
 		{Name: "windows-action-osd.exe", Role: "action-osd", Class: ClassRuntimeOptional, Subsystem: SubsystemGUI},
-		{Name: "windows-agent-pi.exe", Role: "delegated-pi", Class: ClassRuntimeOptional, Subsystem: SubsystemGUI},
-		{Name: "windows-agent-pi-component.exe", Role: "delegated-pi-component", Class: ClassRuntimeOptional, Subsystem: SubsystemGUI},
 		{Name: "windows-watchdog.exe", Role: "watchdog", Class: ClassRuntimeOptional, Subsystem: SubsystemGUI},
 		{Name: "windows-visual-log.exe", Role: "visual-log", Class: ClassRuntimeOptional, Subsystem: SubsystemGUI},
 		{Name: "windows-evidence-recorder.exe", Role: "evidence-recorder", Class: ClassRuntimeOptional, Subsystem: SubsystemGUI},

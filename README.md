@@ -6,8 +6,8 @@ WindowsAgent is a Go runtime for capabilities that must execute inside a
 signed-in Windows user's interactive desktop session. It provides
 foreground-aware screen capture, bounded observation and decision runtimes,
 Rule-owned finite and streaming Actions, durable Action lifecycles, and
-independent companion processes for events, evidence, inference, file transfer,
-and delegated UI work.
+independent companion processes for events, evidence, inference, and file
+transfer.
 
 WindowsAgent is not a general remote-memory API or an unrestricted desktop
 control server. Generic Core code owns execution, isolation, validation, and
@@ -60,7 +60,6 @@ prose drifts.
 | Direct and Rule-owned input | Partially available | Foreground-bound key and pointer runtimes |
 | Event Stream | Partially available | Authenticated loopback append/replay journal |
 | Evidence Recorder and Visual Log | Partially available | Independent finite recorder and passive inference producer |
-| Delegated Pi agent | Partially available | Separate authenticated PI WEB control plane |
 | ScreenParser Action | Partially available | One hash-pinned frame per DirectML invocation |
 | Monitor and Reaction registration | Declaration and read-only catalog only | No scheduler or dispatcher is shipped |
 | Mini reaction runtime | Draft only | No end-to-end runtime is shipped |
@@ -117,7 +116,7 @@ WindowsAgent separates capability ownership into six layers:
 5. **Ephemeral composition** — an allowlisted Action Sequence runs an immutable
    set of already-correct Actions after complete preflight.
 6. **Independent processes** — Event Stream, Event Web, OSD, Evidence Recorder,
-   Visual Log, SFTP, Watchdog, and delegated Pi retain their own process and
+   Visual Log, SFTP, and Watchdog retain their own process and
    lifecycle boundaries.
 
 The Capture Agent may manage a resident inference worker while its owning Rule
@@ -208,7 +207,6 @@ The build script emits and verifies the expected Windows PE subsystem for:
 - observation Job, Script Runner, and Observer;
 - Event Stream, Event Web, Action OSD, Watchdog, Evidence Recorder, Visual Log,
   and SFTP;
-- the delegated Pi control and component executables.
 - the Go Assist backend, WinUI AssistGUI, and independent TailscaleAdapter.
 
 The build also emits `windowsagent-release.json` and `SHA256SUMS`. The catalog
@@ -420,14 +418,6 @@ configuration:
 The Watchdog owns process availability and dependency order only. Its own
 Scheduled Task has no automatic restart. A Watchdog crash leaves other modules
 running and requires explicit diagnosis.
-
-### Delegated Pi runtime
-
-The delegated Pi runtime is a separate authenticated loopback control plane.
-PI WEB owns its persistent SDK session and interactive questions; the Capture
-Agent does not absorb that agent loop. Prepare its pinned Node environment and
-install it using the commands in
-[`runtimes/windows-agent-pi/README.md`](runtimes/windows-agent-pi/README.md).
 
 ### ScreenParser Action
 
@@ -672,7 +662,7 @@ listener:
 | SFTP | `0.0.0.0:2022` | SSH `none`; persistent host identity | filesystem operations only |
 
 Event and Evidence token files, journals, captures, video, OCR results, model
-keys, delegated-task data, and logs are private operator state. Do not commit
+keys, and logs are private operator state. Do not commit
 or publish them.
 
 ## Rules and Actions
@@ -709,7 +699,7 @@ the [OpenCode black-box acceptance contract](docs/testing/opencode-black-box-acc
   authentication or authorization.
 - SFTP accepts no client credential. Clients persist the first observed host
   key and reject later key changes; restrict network reachability independently.
-- Event, Web, Visual Log, Evidence, and delegated Pi processes use separate
+- Event, Web, Visual Log, and Evidence processes use separate
   authenticated control planes. Do not reuse their tokens or expose loopback
   listeners through the Capture Agent.
 - The installers do not alter Windows Firewall.
@@ -745,8 +735,6 @@ internal/ocr*/                raw OCR Action and resident-worker contracts
 internal/event*/              event journal clients, HTTP API, and Web projection
 internal/evidence*/           finite recording lifecycle and authenticated API
 internal/visuallog*/          passive visual-log producer and status API
-internal/delegated*/          delegated-task lifecycle and host-facing API
-internal/piweb/               PI WEB HTTP and WebSocket adapter
 internal/sftpruntime/         SFTP-only server, host identity, and health
 internal/watchdog/            external process probes and bounded recovery
 internal/windowsautomation/   ephemeral general Windows Starlark runtime
@@ -756,7 +744,7 @@ internal/assistgui/           AssistGUI access-information model
 internal/assistlifecycle/     verified installed Watchdog start/stop lifecycle
 ui/windows-assist-gui/        unpackaged framework-dependent C# WinUI 3 frontend
 Rules/<Executable.exe>/       distributable Rule v6 packages and guidance
-runtimes/                     self-contained external inference, Pi, and Tailscale runtimes
+runtimes/                     self-contained external inference and Tailscale runtimes
 tools/                        model preparation, publishing, and diagnostics
 scripts/                      install, update, deploy, and operator helpers
 docs/design/                  maintained maturity registry and design documents

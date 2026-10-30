@@ -102,14 +102,6 @@ fi
     ./cmd/windows-key
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -trimpath -ldflags "-H=windowsgui" \
-    -o "${output_dir}/windows-agent-pi.exe" \
-    ./cmd/windows-agent-pi
-  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -trimpath -ldflags "-H=windowsgui" \
-    -o "${output_dir}/windows-agent-pi-component.exe" \
-    ./cmd/windows-agent-pi-component
-  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -trimpath -ldflags "-H=windowsgui" \
     -o "${output_dir}/windows-action-osd.exe" \
     ./cmd/windows-action-osd
   GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
@@ -190,10 +182,6 @@ python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-exec.exe" --expect console
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-key.exe" --expect console
-python3 "${script_dir}/verify-windows-pe-subsystem.py" \
-  "${output_dir}/windows-agent-pi.exe" --expect gui
-python3 "${script_dir}/verify-windows-pe-subsystem.py" \
-  "${output_dir}/windows-agent-pi-component.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \
   "${output_dir}/windows-action-osd.exe" --expect gui
 python3 "${script_dir}/verify-windows-pe-subsystem.py" \

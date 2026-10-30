@@ -48,7 +48,7 @@ This design owns:
 - the whole-release Install, Update, Repair, and Uninstall transaction; and
 - explicit Start and Stop operations through the installed Watchdog contract.
 
-It does not redefine Capture Agent, Event Stream, delegated Pi, Rule, Action,
+It does not redefine Capture Agent, Event Stream, Rule, Action,
 Watchdog, or inference-runtime semantics. It does not make Tailscale mandatory
 and does not silently select it when LAN access fails.
 
@@ -298,7 +298,7 @@ their protocol selection or silently replace the provider.
 ## Relationship to other designs
 
 The Capture Agent remains the signed-in interactive-session host. Event Stream,
-Watchdog, delegated Pi, and other companions retain their independent process
+Watchdog and other companions retain their independent process
 and control-plane contracts. This design publishes and installs those binaries;
 it does not absorb their implementations into AssistGUI.
 

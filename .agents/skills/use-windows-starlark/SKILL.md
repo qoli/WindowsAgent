@@ -21,8 +21,7 @@ Use Starlark when one bounded deterministic workflow needs ordered Windows
 process/filesystem or literal keyboard/pointer operations, cancellable waits,
 conditional decisions, and a schema-checked
 result. Use the ordinary PC Skill for a single capture, SFTP operation,
-managed process, PowerShell file, or literal key press. Use delegated Pi when
-the worker must plan and iterate rather than execute a known procedure.
+managed process, PowerShell file, or literal key or pointer input.
 
 This runtime exposes `windows.input.press`, `windows.pointer.click`,
 `windows.pointer.click_current`, and `task.sleep` without a Rule. Literal input

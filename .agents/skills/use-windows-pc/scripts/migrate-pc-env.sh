@@ -67,7 +67,7 @@ trap cleanup EXIT
 umask 077
 {
   printf 'WINDOWS_AGENT_HOST=%q\n' "$host"
-  for name in WINDOWS_AGENT_PC_NAME WINDOWS_AGENT_EVENT_WEB_ORIGIN WINDOWS_AGENT_ADMIN_SSH_HOST WINDOWS_AGENT_PI_SSH_HOST; do
+  for name in WINDOWS_AGENT_PC_NAME WINDOWS_AGENT_EVENT_WEB_ORIGIN WINDOWS_AGENT_ADMIN_SSH_HOST; do
     value="${!name:-}"
     [[ -z "$value" ]] || printf '%s=%q\n' "$name" "$value"
   done
