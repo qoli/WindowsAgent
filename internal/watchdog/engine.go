@@ -51,7 +51,7 @@ type Engine struct {
 type targetRuntime struct {
 	status            TargetStatus
 	restartAttempts   []time.Time
-	nextObservationAt time.Time
+	startupDeadline   time.Time
 	bootstrapped      bool
 	circuitOpenLogged bool
 }
@@ -123,12 +123,7 @@ func (e *Engine) Cycle(ctx context.Context) error {
 func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted time.Time) error {
 	runtime := e.targets[target.ID]
 	now := e.clock.Now()
-	if !runtime.bootstrapped && e.blockOnDependencies(target) {
-		return nil
-	}
-	if now.Before(runtime.nextObservationAt) {
-		runtime.status.State = StateGrace
-		runtime.status.Detail = "waiting for configured startup grace period"
+	if !runtime.bootstrapped && runtime.startupDeadline.IsZero() && e.blockOnDependencies(target) {
 		return nil
 	}
 	observation, err := e.observer.Observe(ctx, target)
@@ -149,7 +144,15 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 		runtime.status.Detail = observation.Detail
 		runtime.status.ConsecutiveFailures = 0
 		runtime.bootstrapped = true
+		runtime.startupDeadline = time.Time{}
+		runtime.status.StartupDeadline = nil
 		runtime.circuitOpenLogged = false
+		return nil
+	}
+	now = e.clock.Now()
+	if now.Before(runtime.startupDeadline) {
+		runtime.status.State = StateGrace
+		runtime.status.Detail = "initializing within configured startup budget: " + observation.Detail
 		return nil
 	}
 	runtime.status.ConsecutiveFailures++
@@ -221,7 +224,8 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	runtime.status.State = StateGrace
 	runtime.status.Detail = "scheduled task restart completed; waiting for startup grace period"
 	runtime.status.ConsecutiveFailures = 0
-	runtime.nextObservationAt = e.clock.Now().Add(time.Duration(target.Recovery.StartupGraceMS) * time.Millisecond)
+	runtime.startupDeadline = e.clock.Now().Add(time.Duration(target.Recovery.StartupGraceMS) * time.Millisecond)
+	runtime.status.StartupDeadline = timePointer(runtime.startupDeadline)
 	e.logger.Info("watchdog_recovery_completed", "target_id", target.ID,
 		"scheduled_task", target.Recovery.ScheduledTaskName, "startup_grace_ms", target.Recovery.StartupGraceMS)
 	return nil

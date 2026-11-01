@@ -82,7 +82,7 @@ $watchdogConfig = [ordered]@{
         [ordered]@{id="capture-agent"; desiredState="running"; startAfterHealthy=@("event-stream"); failureThreshold=3; probes=@(
             [ordered]@{type="process"; executablePath=$agentExecutable; requireInteractiveSession=$true},
             [ordered]@{type="http-json"; url="http://127.0.0.1:8787/healthz"; timeoutMs=2000; expectedStatusCode=200; expectedJsonStatus="ok"}
-        ); recovery=[ordered]@{scheduledTaskName=$agentTask; expectedTaskDescription=$agentDescription; maxAttempts=3; attemptWindowMs=300000; backoffMs=5000; actionTimeoutMs=20000; startupGraceMs=10000}}
+        ); recovery=[ordered]@{scheduledTaskName=$agentTask; expectedTaskDescription=$agentDescription; maxAttempts=3; attemptWindowMs=300000; backoffMs=5000; actionTimeoutMs=20000; startupGraceMs=125000}}
     )
 }
 [IO.File]::WriteAllText($watchdogConfigSource, ($watchdogConfig | ConvertTo-Json -Depth 12), [Text.UTF8Encoding]::new($false))

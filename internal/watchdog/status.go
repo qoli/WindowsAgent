@@ -54,6 +54,7 @@ type TargetStatus struct {
 	RestartAttempts     uint64         `json:"restartAttempts"`
 	LastObservedAt      *time.Time     `json:"lastObservedAt,omitempty"`
 	LastRecoveryAt      *time.Time     `json:"lastRecoveryAt,omitempty"`
+	StartupDeadline     *time.Time     `json:"startupDeadline,omitempty"`
 	Observation         map[string]any `json:"observation,omitempty"`
 }
 

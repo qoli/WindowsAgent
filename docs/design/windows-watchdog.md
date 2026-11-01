@@ -65,7 +65,22 @@ description, preventing a configuration typo from operating an unrelated
 task. Restart attempts have an explicit window, backoff, action timeout,
 startup grace period, and circuit breaker. The startup grace period begins
 after the Scheduled Task restart returns; time spent observing or stopping
-the previous process does not consume it. There is no alternate task lookup,
+the previous process does not consume it. Probes continue during this window:
+the first healthy observation ends startup protection immediately, while an
+unhealthy observation remains `STARTUP_GRACE` without counting as a runtime
+failure or causing another restart. The status exposes `startupDeadline` and
+the latest probe evidence. When that deadline expires, the configured failure
+threshold and recovery budget apply again. An observation error remains
+`OBSERVATION_FAILED`, never a successful readiness result.
+
+`startupGraceMs` is a per-target initialization budget, not a fixed delay or a
+steady-state HTTP timeout. Size it against the target's actual startup
+contract. Assist setup gives Capture Agent 125 seconds to cover its two-minute
+WGC initialization budget and five-second required Event Stream health check;
+early readiness avoids delaying dependents for that full duration. Existing
+operator-owned configurations remain explicit and are not silently rewritten.
+
+There is no alternate task lookup,
 PID-only kill, direct executable launch, guessed path, port substitution, or
 provider fallback.
 

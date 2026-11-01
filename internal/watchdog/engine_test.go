@@ -54,12 +54,12 @@ func TestEngineStartupGraceBeginsAfterSlowRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	recoveredAt := clock.now
-	for _, elapsed := range []time.Duration{0, 5*time.Second - time.Millisecond} {
+	for index, elapsed := range []time.Duration{0, 5*time.Second - time.Millisecond} {
 		clock.now = recoveredAt.Add(elapsed)
 		if err := engine.Cycle(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if observer.calls != 1 || recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateGrace {
+		if observer.calls != index+2 || recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateGrace {
 			t.Fatalf("after recovery + %s: observations=%d restarts=%d state=%s", elapsed, observer.calls, recoverer.calls, engine.targets["event-stream"].status.State)
 		}
 	}
@@ -68,8 +68,109 @@ func TestEngineStartupGraceBeginsAfterSlowRecovery(t *testing.T) {
 	if err := engine.Cycle(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if observer.calls != 2 || recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateHealthy {
+	if observer.calls != 4 || recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateHealthy {
 		t.Fatalf("after startup grace: observations=%d restarts=%d state=%s", observer.calls, recoverer.calls, engine.targets["event-stream"].status.State)
+	}
+}
+
+func TestEngineAllowsEarlyStartupReadiness(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	observer := &fakeObserver{observation: Observation{Healthy: false, Detail: "not listening yet"}}
+	recoverer := &fakeRecoverer{}
+	engine, err := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	engine.clock = clock
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	observer.observation = Observation{Healthy: true, Detail: "ready"}
+	clock.now = clock.now.Add(time.Second)
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recoverer.calls != 1 || observer.calls != 2 || engine.targets["event-stream"].status.State != StateHealthy {
+		t.Fatalf("early readiness: restarts=%d observations=%d state=%s", recoverer.calls, observer.calls, engine.targets["event-stream"].status.State)
+	}
+	// Once readiness is confirmed, normal failure detection resumes immediately.
+	observer.observation = Observation{Healthy: false, Detail: "stopped"}
+	for range 2 {
+		clock.now = clock.now.Add(time.Second)
+		if err := engine.Cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if recoverer.calls != 2 {
+		t.Fatalf("runtime failure restarts=%d", recoverer.calls)
+	}
+}
+
+func TestEngineProtectsSlowStartupUntilConfiguredDeadline(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	config.Targets[0].Recovery.MaxAttempts = 1
+	observer := &fakeObserver{observation: Observation{Healthy: false, Detail: "still initializing"}}
+	recoverer := &fakeRecoverer{}
+	engine, err := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	engine.clock = clock
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	started := clock.now
+	for _, elapsed := range []time.Duration{time.Second, 5*time.Second - time.Millisecond} {
+		clock.now = started.Add(elapsed)
+		if err := engine.Cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		status := engine.targets["event-stream"].status
+		if recoverer.calls != 1 || status.State != StateGrace || status.ConsecutiveFailures != 0 {
+			t.Fatalf("startup at %s: restarts=%d status=%+v", elapsed, recoverer.calls, status)
+		}
+	}
+	if observer.calls != 3 {
+		t.Fatalf("startup observations=%d", observer.calls)
+	}
+	clock.now = started.Add(5 * time.Second)
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateCircuitOpen {
+		t.Fatalf("expired startup budget: restarts=%d state=%s", recoverer.calls, engine.targets["event-stream"].status.State)
+	}
+}
+
+func TestEngineStartupObservationFailureRemainsExplicit(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	observer := &fakeObserver{observation: Observation{Healthy: false, Detail: "absent"}}
+	recoverer := &fakeRecoverer{}
+	engine, err := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	engine.clock = clock
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := engine.targets["event-stream"].status.StartupDeadline
+	if deadline == nil {
+		t.Fatal("startup deadline is not published")
+	}
+	observer.err = errors.New("process enumeration denied")
+	for _, elapsed := range []time.Duration{time.Second, 6 * time.Second} {
+		clock.now = deadline.Add(elapsed - 5*time.Second)
+		if err := engine.Cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		status := engine.targets["event-stream"].status
+		if recoverer.calls != 1 || status.State != StateObservationFailed || !strings.Contains(status.Detail, observer.err.Error()) || !status.StartupDeadline.Equal(*deadline) {
+			t.Fatalf("unverifiable startup: restarts=%d status=%+v", recoverer.calls, status)
+		}
 	}
 }
 
