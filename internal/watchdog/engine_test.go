@@ -23,13 +23,53 @@ func (f *fakeObserver) Observe(context.Context, Target) (Observation, error) {
 }
 
 type fakeRecoverer struct {
-	calls int
-	err   error
+	calls     int
+	err       error
+	onRestart func()
 }
 
 func (f *fakeRecoverer) RestartScheduledTask(context.Context, RecoveryConfig) error {
 	f.calls++
+	if f.onRestart != nil {
+		f.onRestart()
+	}
 	return f.err
+}
+
+func TestEngineStartupGraceBeginsAfterSlowRecovery(t *testing.T) {
+	config, err := ParseConfig([]byte(validConfigJSON()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	observer := &fakeObserver{observation: Observation{Healthy: false, Detail: "absent"}}
+	recoverer := &fakeRecoverer{onRestart: func() { clock.now = clock.now.Add(17 * time.Second) }}
+	engine, err := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.clock = clock
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recoveredAt := clock.now
+	for _, elapsed := range []time.Duration{0, 5*time.Second - time.Millisecond} {
+		clock.now = recoveredAt.Add(elapsed)
+		if err := engine.Cycle(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if observer.calls != 1 || recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateGrace {
+			t.Fatalf("after recovery + %s: observations=%d restarts=%d state=%s", elapsed, observer.calls, recoverer.calls, engine.targets["event-stream"].status.State)
+		}
+	}
+	observer.observation = Observation{Healthy: true, Detail: "ready"}
+	clock.now = recoveredAt.Add(5 * time.Second)
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if observer.calls != 2 || recoverer.calls != 1 || engine.targets["event-stream"].status.State != StateHealthy {
+		t.Fatalf("after startup grace: observations=%d restarts=%d state=%s", observer.calls, recoverer.calls, engine.targets["event-stream"].status.State)
+	}
 }
 
 type memoryStatusSink struct {

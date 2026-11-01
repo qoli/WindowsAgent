@@ -228,7 +228,7 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	runtime.status.State = StateGrace
 	runtime.status.Detail = "scheduled task restart completed; waiting for startup grace period"
 	runtime.status.ConsecutiveFailures = 0
-	runtime.nextObservationAt = now.Add(time.Duration(target.Recovery.StartupGraceMS) * time.Millisecond)
+	runtime.nextObservationAt = e.clock.Now().Add(time.Duration(target.Recovery.StartupGraceMS) * time.Millisecond)
 	e.logger.Info("watchdog_recovery_completed", "target_id", target.ID,
 		"scheduled_task", target.Recovery.ScheduledTaskName, "startup_grace_ms", target.Recovery.StartupGraceMS)
 	return nil

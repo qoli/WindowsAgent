@@ -61,7 +61,9 @@ After the configured threshold, the watchdog may restart only the exact
 Scheduled Task named by the target. Before mutation it verifies the task's
 description, preventing a configuration typo from operating an unrelated
 task. Restart attempts have an explicit window, backoff, action timeout,
-startup grace period, and circuit breaker. There is no alternate task lookup,
+startup grace period, and circuit breaker. The startup grace period begins
+after the Scheduled Task restart returns; time spent observing or stopping
+the previous process does not consume it. There is no alternate task lookup,
 PID-only kill, direct executable launch, guessed path, port substitution, or
 provider fallback.
 
