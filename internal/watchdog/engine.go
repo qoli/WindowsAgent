@@ -123,18 +123,8 @@ func (e *Engine) Cycle(ctx context.Context) error {
 func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted time.Time) error {
 	runtime := e.targets[target.ID]
 	now := e.clock.Now()
-	if !runtime.bootstrapped {
-		var blocked []string
-		for _, dependency := range target.StartAfterHealthy {
-			if e.targets[dependency].status.State != StateHealthy {
-				blocked = append(blocked, dependency)
-			}
-		}
-		if len(blocked) != 0 {
-			runtime.status.State = StateBlocked
-			runtime.status.Detail = "waiting for healthy startup targets: " + strings.Join(blocked, ", ")
-			return nil
-		}
+	if !runtime.bootstrapped && e.blockOnDependencies(target) {
+		return nil
 	}
 	if now.Before(runtime.nextObservationAt) {
 		runtime.status.State = StateGrace
@@ -173,6 +163,9 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 		"consecutive_failures", runtime.status.ConsecutiveFailures, "failure_threshold", threshold,
 		"bootstrap", !runtime.bootstrapped)
 	if runtime.status.ConsecutiveFailures < threshold {
+		return nil
+	}
+	if e.blockOnDependencies(target) {
 		return nil
 	}
 
@@ -232,6 +225,22 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	e.logger.Info("watchdog_recovery_completed", "target_id", target.ID,
 		"scheduled_task", target.Recovery.ScheduledTaskName, "startup_grace_ms", target.Recovery.StartupGraceMS)
 	return nil
+}
+
+func (e *Engine) blockOnDependencies(target Target) bool {
+	var blocked []string
+	for _, dependency := range target.StartAfterHealthy {
+		if e.targets[dependency].status.State != StateHealthy {
+			blocked = append(blocked, dependency)
+		}
+	}
+	if len(blocked) == 0 {
+		return false
+	}
+	runtime := e.targets[target.ID]
+	runtime.status.State = StateBlocked
+	runtime.status.Detail = "waiting for healthy startup targets: " + strings.Join(blocked, ", ")
+	return true
 }
 
 func (e *Engine) snapshot(state string, cycleStarted, cycleCompleted time.Time) Status {

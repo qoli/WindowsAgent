@@ -29,9 +29,11 @@ first cycle, the watchdog reconciles every explicit `desiredState: "running"`
 target in dependency order. An absent or unhealthy bootstrap target is acted on
 immediately rather than waiting for the steady-state failure threshold. A
 dependent target remains `BLOCKED` until every target in its
-`startAfterHealthy` list is observed healthy. Dependencies affect bootstrap
-only; they do not turn healthy independent processes into a shared failure
-domain after startup.
+`startAfterHealthy` list is observed healthy. The same dependency gate applies
+before every later recovery action. A blocked recovery does not consume an
+attempt. After bootstrap, healthy dependents continue to be observed normally
+when an upstream target is unhealthy; only a pending restart is blocked. This
+does not turn healthy independent processes into a shared failure domain.
 
 Independent resident control processes, including Evidence and Visual Log, may
 be explicit targets in that graph so their authenticated control APIs remain
@@ -198,5 +200,7 @@ selected automatically.
 - Exhausting the attempt budget enters `CIRCUIT_OPEN` without further actions.
 - An unreadable process snapshot enters `OBSERVATION_FAILED` without recovery.
 - A malformed or missing configuration prevents watchdog startup explicitly.
-- Startup dependencies are ordered deterministically; unresolved prerequisites
-  leave dependents `BLOCKED` without attempting their recovery action.
+- Startup and recovery dependencies are ordered deterministically; unresolved
+  prerequisites leave pending restarts `BLOCKED` without consuming attempts.
+- A healthy dependent stays healthy and is still observed when its prerequisite
+  fails; dependency changes alone do not restart it.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -170,10 +171,82 @@ func TestEngineBootstrapsInDependencyOrderWithoutWaitingForRuntimeThreshold(t *t
 	}
 }
 
-type targetObserverFixture struct{ health map[string]bool }
+func TestEngineRechecksDependenciesBeforeEveryRecovery(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		dependentHealthy bool
+		dependencyError  error
+		wantState        string
+		wantRecoveries   []string
+	}{
+		{name: "unhealthy dependent waits", wantState: StateBlocked, wantRecoveries: []string{"Agent Event Stream"}},
+		{name: "healthy dependent remains independent", dependentHealthy: true, wantState: StateHealthy, wantRecoveries: []string{"Agent Event Stream"}},
+		{name: "unverifiable dependency blocks recovery", dependencyError: errors.New("process enumeration denied"), wantState: StateBlocked},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := ParseConfig([]byte(validConfigJSON()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			config.Targets[0].FailureThreshold = 1
+			capture := config.Targets[0]
+			capture.ID = "capture-agent"
+			capture.StartAfterHealthy = []string{"event-stream"}
+			capture.Recovery.ScheduledTaskName = "Capture Agent"
+			config.Targets = append(config.Targets, capture)
+			observer := &targetObserverFixture{health: map[string]bool{"event-stream": true, "capture-agent": true}, errors: map[string]error{}, calls: map[string]int{}}
+			recoverer := &recordingRecoverer{}
+			engine, err := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+			engine.clock = clock
+			if err := engine.Cycle(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			observer.health["event-stream"] = false
+			observer.health["capture-agent"] = test.dependentHealthy
+			observer.errors["event-stream"] = test.dependencyError
+			clock.now = clock.now.Add(time.Second)
+			if err := engine.Cycle(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			dependent := engine.targets["capture-agent"]
+			if !slices.Equal(recoverer.targets, test.wantRecoveries) || dependent.status.State != test.wantState {
+				t.Fatalf("recoveries=%v state=%s", recoverer.targets, dependent.status.State)
+			}
+			if dependent.status.RestartAttempts != 0 || len(dependent.restartAttempts) != 0 || observer.calls["capture-agent"] != 2 {
+				t.Fatalf("dependent attempts=%d observations=%d", dependent.status.RestartAttempts, observer.calls["capture-agent"])
+			}
+			observer.health["event-stream"] = true
+			delete(observer.errors, "event-stream")
+			clock.now = clock.now.Add(6 * time.Second)
+			if err := engine.Cycle(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := slices.Clone(test.wantRecoveries)
+			if !test.dependentHealthy {
+				want = append(want, "Capture Agent")
+			}
+			if !slices.Equal(recoverer.targets, want) {
+				t.Fatalf("after dependency recovers: recoveries=%v want=%v", recoverer.targets, want)
+			}
+		})
+	}
+}
+
+type targetObserverFixture struct {
+	health map[string]bool
+	errors map[string]error
+	calls  map[string]int
+}
 
 func (f *targetObserverFixture) Observe(_ context.Context, target Target) (Observation, error) {
-	return Observation{Healthy: f.health[target.ID], Detail: target.ID}, nil
+	if f.calls != nil {
+		f.calls[target.ID]++
+	}
+	return Observation{Healthy: f.health[target.ID], Detail: target.ID}, f.errors[target.ID]
 }
 
 type recordingRecoverer struct{ targets []string }
