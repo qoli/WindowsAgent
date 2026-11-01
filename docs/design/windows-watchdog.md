@@ -237,14 +237,25 @@ Build the native fixture runner from the same checkout:
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c \
+  -ldflags=-H=windowsgui \
   -o .build/watchdog-acceptance.test.exe ./internal/watchdog
+python3 scripts/verify-windows-pe-subsystem.py \
+  .build/watchdog-acceptance.test.exe --expect gui
 ```
 
 Run it in the signed-in user's interactive Windows session:
 
 ```powershell
 $env:WINDOWSAGENT_WATCHDOG_LIVE_ACCEPTANCE = '1'
-.\watchdog-acceptance.test.exe -test.run='^TestWatchdogLiveAcceptance$' -test.v -test.timeout=90s
+$evidence = Join-Path ([IO.Path]::GetTempPath()) ('watchdog-acceptance-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $evidence | Out-Null
+$env:WINDOWSAGENT_WATCHDOG_DESKTOP_LOG = Join-Path $evidence 'desktop.jsonl'
+$process = Start-Process .\watchdog-acceptance.test.exe -WindowStyle Hidden -Wait -PassThru `
+  -ArgumentList '-test.run=^TestWatchdog(Acceptance|LiveAcceptance$)', '-test.v', '-test.timeout=90s' `
+  -RedirectStandardOutput (Join-Path $evidence 'stdout.log') `
+  -RedirectStandardError (Join-Path $evidence 'stderr.log')
+if ($process.ExitCode -ne 0) { throw "Acceptance failed; inspect $evidence" }
+Get-Content $env:WINDOWSAGENT_WATCHDOG_DESKTOP_LOG
 ```
 
 The runner creates two uniquely named, triggerless, limited-user Scheduled Tasks
@@ -255,3 +266,28 @@ It verifies the observed process-start counts, final readiness and interactive
 session, then removes its own Tasks and temporary files. Each fixture Task also
 has a two-minute execution limit. Installed target paths and configuration are
 outside the fixture's scope. Keep its runtime output outside the public checkout.
+
+The runner and copied Task helpers require the GUI PE subsystem and no attached
+console. A default console test build is rejected before any Task is registered;
+TaskSettings.Hidden hides the Task Scheduler entry, not the application's
+window. Every fixture PowerShell child uses `CREATE_NO_WINDOW` and `HideWindow`.
+The fixture never activates a window, changes a display mode, or restores focus.
+
+Before creating Tasks, a read-only desktop observer installs out-of-context
+WinEvent hooks for foreground and top-level window-show events, plus a hidden,
+non-activating top-level window for `WM_DISPLAYCHANGE`. Its JSONL trace includes
+UTC and elapsed timestamps, native WinEvent timestamps, foreground handles,
+PIDs, executable basenames, window classes, physical primary-display resolution,
+refresh rate, Task operations, and final change counts. Window titles and full
+executable paths are omitted. Observation continues through Task cleanup.
+`WINDOWSAGENT_WATCHDOG_DESKTOP_LOG` selects a new evidence file; if omitted, the
+runner creates and reports a private temporary log that survives fixture cleanup.
+
+Keep the current foreground and display configuration stable during acceptance.
+Any foreground change, console-show event, visible fixture-owned window, or
+display-change event cancels further recovery work, retains its evidence, and
+fails acceptance even if the original foreground or resolution returns. Cleanup
+still runs. Other applications or user interaction can therefore fail this
+strict desktop check; the trace records the observed change without assigning
+causality. This synthetic desktop acceptance does not prove game-specific
+fullscreen or frame-generation compatibility.

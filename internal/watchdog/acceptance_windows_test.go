@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,8 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,12 +29,20 @@ type liveFixture struct {
 	StartupDelayMS int
 }
 
+type liveProcessStart struct {
+	ObservedAt    time.Time `json:"observedAt"`
+	PID           int       `json:"pid"`
+	Session       uint32    `json:"session"`
+	ConsoleWindow uintptr   `json:"consoleWindow"`
+}
+
 // Invoked only by the isolated Scheduled Tasks created by the opt-in test.
 func TestWatchdogLiveHelperProcess(t *testing.T) {
 	args := flag.Args()
 	if len(args) != 2 || args[0] != "watchdog-acceptance-helper" {
 		t.Skip("Scheduled Task fixture only")
 	}
+	liveRequireWindowless(t)
 	data, err := os.ReadFile(args[1])
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +55,12 @@ func TestWatchdogLiveHelperProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fmt.Fprintf(starts, "%d\n", os.Getpid())
+	var session uint32
+	if err := windows.ProcessIdToSessionId(uint32(os.Getpid()), &session); err != nil {
+		t.Fatal(err)
+	}
+	console, _, _ := liveGetConsoleWindow.Call()
+	err = json.NewEncoder(starts).Encode(liveProcessStart{time.Now().UTC(), os.Getpid(), session, console})
 	closeErr := starts.Close()
 	if err != nil || closeErr != nil {
 		t.Fatalf("record start: write=%v close=%v", err, closeErr)
@@ -65,9 +78,17 @@ func TestWatchdogLiveHelperProcess(t *testing.T) {
 	t.Fatal(server.ListenAndServe())
 }
 
-type liveTaskRecoverer struct{ upstream string }
+type liveTaskRecoverer struct {
+	upstream string
+	desktop  *liveDesktopTrace
+}
 
-func (r liveTaskRecoverer) RestartScheduledTask(ctx context.Context, recovery RecoveryConfig) error {
+func (r liveTaskRecoverer) RestartScheduledTask(ctx context.Context, recovery RecoveryConfig) (resultErr error) {
+	started := time.Now()
+	r.desktop.record("recovery", map[string]any{"task": recovery.ScheduledTaskName, "state": "starting"})
+	defer func() {
+		r.desktop.record("recovery", map[string]any{"task": recovery.ScheduledTaskName, "state": "returned", "success": resultErr == nil, "durationMs": time.Since(started).Milliseconds()})
+	}()
 	if err := (WindowsTaskRecoverer{}).RestartScheduledTask(ctx, recovery); err != nil {
 		return err
 	}
@@ -89,6 +110,9 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 	if os.Getenv("WINDOWSAGENT_WATCHDOG_LIVE_ACCEPTANCE") != "1" {
 		t.Skip("opt-in interactive Windows acceptance")
 	}
+	// Check before registering or launching any Task. The Tasks execute copies
+	// of this binary; TaskSettings.Hidden does not hide a console window.
+	binary := liveRequireWindowless(t)
 	var session uint32
 	if err := windows.ProcessIdToSessionId(uint32(os.Getpid()), &session); err != nil || session == 0 {
 		t.Fatalf("interactive session=%d error=%v", session, err)
@@ -108,14 +132,10 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	binary, err := os.ReadFile(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ctx, interrupt := context.WithCancelCause(ctx)
+	defer interrupt(nil)
+	desktop := liveWatchDesktop(t, root, interrupt)
+	desktop.record("runner", map[string]any{"pid": os.Getpid(), "session": session, "peSubsystem": 2, "consoleWindow": 0})
 	driver := filepath.Join(root, "tasks.ps1")
 	if err := os.WriteFile(driver, []byte(liveTaskDriver), 0600); err != nil {
 		t.Fatal(err)
@@ -160,8 +180,8 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 		}
 		name := "WindowsAgent Acceptance " + filepath.Base(filepath.Dir(root)) + " " + id
 		tasks[id] = name
-		liveTask(t, driver, "Register", name, description, path, settings)
-		t.Cleanup(func() { liveTask(t, driver, "Delete", name, description, "", "") })
+		liveTask(t, desktop, driver, "Register", name, description, path, settings)
+		t.Cleanup(func() { liveTask(t, desktop, driver, "Delete", name, description, "", "") })
 		interactive := true
 		target := Target{ID: id, DesiredState: "running", FailureThreshold: 1,
 			Probes: []ProbeConfig{
@@ -175,6 +195,7 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 		}
 		config.Targets = append(config.Targets, target)
 	}
+	desktop.record("phase", map[string]string{"name": "initial_recovery"})
 	logFile, err := os.Create(filepath.Join(root, "watchdog.jsonl"))
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +205,7 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err := NewEngine(config, observer, liveTaskRecoverer{upstream: tasks["upstream"]}, FileStatusSink{Name: filepath.Join(root, "status.json")}, slog.New(slog.NewJSONHandler(logFile, nil)))
+	engine, err := NewEngine(config, observer, liveTaskRecoverer{upstream: tasks["upstream"], desktop: desktop}, FileStatusSink{Name: filepath.Join(root, "status.json")}, slog.New(slog.NewJSONHandler(logFile, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,6 +231,7 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 			t.Fatalf("initialization restarted %s %d times", id, starts)
 		}
 	}
+	desktop.record("phase", map[string]string{"name": "dependency_recovery"})
 	if err := os.WriteFile(fixtures["upstream"].Control, []byte("unhealthy"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -247,22 +269,24 @@ func TestWatchdogLiveAcceptance(t *testing.T) {
 	}
 	liveWaitHealthy(t, ctx, engine)
 	for _, id := range []string{"upstream", "dependent"} {
-		if starts := liveStarts(t, fixtures[id].Starts); starts != 2 {
-			t.Fatalf("recovery restarted %s %d times", id, starts)
+		starts := liveReadStarts(t, fixtures[id].Starts)
+		if len(starts) != 2 {
+			t.Fatalf("recovery restarted %s %d times", id, len(starts))
 		}
+		desktop.record("fixture_starts", map[string]any{"fixture": id, "starts": starts})
 	}
 	encoded, err := json.Marshal(engine.snapshot(StateIdle, time.Now(), time.Now()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("interactiveSession=%d cpuPressureWorkers=%d cpuPressureMax=8s schemaVersion=%d final=%s", session, runtime.NumCPU(), SchemaVersion, encoded)
+	t.Logf("interactiveSession=%d consoleWindow=0 cpuPressureWorkers=%d cpuPressureMax=8s schemaVersion=%d final=%s", session, runtime.NumCPU(), SchemaVersion, encoded)
 }
 
 func liveWaitHealthy(t *testing.T, ctx context.Context, engine *Engine) {
 	t.Helper()
 	for {
 		if err := ctx.Err(); err != nil {
-			t.Fatalf("acceptance deadline: %v targets=%+v", err, engine.snapshot(StateIdle, time.Time{}, time.Time{}).Targets)
+			t.Fatalf("acceptance stopped: %v targets=%+v", context.Cause(ctx), engine.snapshot(StateIdle, time.Time{}, time.Time{}).Targets)
 		}
 		if err := engine.Cycle(ctx); err != nil {
 			t.Fatal(err)
@@ -278,21 +302,43 @@ func liveWaitHealthy(t *testing.T, ctx context.Context, engine *Engine) {
 }
 
 func liveStarts(t *testing.T, path string) int {
+	return len(liveReadStarts(t, path))
+}
+
+func liveReadStarts(t *testing.T, path string) []liveProcessStart {
 	t.Helper()
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return len(strings.Fields(string(data)))
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var starts []liveProcessStart
+	for {
+		var start liveProcessStart
+		if err := decoder.Decode(&start); err == io.EOF {
+			return starts
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if start.PID == 0 || start.Session == 0 || start.ConsoleWindow != 0 {
+			t.Fatalf("invalid windowless helper evidence: %+v", start)
+		}
+		starts = append(starts, start)
+	}
 }
 
-func liveTask(t *testing.T, driver, operation, name, description, binary, settings string) {
+func liveTask(t *testing.T, desktop *liveDesktopTrace, driver, operation, name, description, binary, settings string) {
 	t.Helper()
+	desktop.record("task", map[string]string{"operation": operation, "name": name, "state": "starting"})
 	args := []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", driver, "-Operation", operation, "-Name", name, "-Description", description}
 	if operation == "Register" {
 		args = append(args, "-Binary", binary, "-Settings", settings)
 	}
-	output, err := exec.Command("powershell.exe", args...).CombinedOutput()
+	command := exec.Command("powershell.exe", args...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	output, err := command.CombinedOutput()
+	desktop.record("task", map[string]any{"operation": operation, "name": name, "state": "returned", "success": err == nil})
 	if err != nil {
 		t.Fatalf("fixture Task %s %s: %v %s", operation, name, err, output)
 	}
