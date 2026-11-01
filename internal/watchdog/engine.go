@@ -128,17 +128,20 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	}
 	observation, err := e.observer.Observe(ctx, target)
 	runtime.status.LastObservedAt = timePointer(now)
+	runtime.status.LastObservationDurationMS = e.clock.Now().Sub(now).Milliseconds()
 	if err != nil {
 		runtime.status.State = StateObservationFailed
 		runtime.status.Detail = err.Error()
 		runtime.status.Observation = nil
-		e.logger.Error("watchdog_observation_failed", "target_id", target.ID, "error", err)
+		e.logger.Error("watchdog_observation_failed", "target_id", target.ID, "error", err,
+			"duration_ms", runtime.status.LastObservationDurationMS)
 		return nil
 	}
 	runtime.status.Observation = observation.Data
 	if observation.Healthy {
 		if runtime.status.State != StateHealthy {
-			e.logger.Info("watchdog_target_healthy", "target_id", target.ID, "detail", observation.Detail)
+			e.logger.Info("watchdog_target_healthy", "target_id", target.ID, "detail", observation.Detail,
+				"duration_ms", runtime.status.LastObservationDurationMS, "observation", observation.Data)
 		}
 		runtime.status.State = StateHealthy
 		runtime.status.Detail = observation.Detail
@@ -164,7 +167,8 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	}
 	e.logger.Warn("watchdog_target_unhealthy", "target_id", target.ID, "detail", observation.Detail,
 		"consecutive_failures", runtime.status.ConsecutiveFailures, "failure_threshold", threshold,
-		"bootstrap", !runtime.bootstrapped)
+		"bootstrap", !runtime.bootstrapped, "duration_ms", runtime.status.LastObservationDurationMS,
+		"observation", observation.Data)
 	if runtime.status.ConsecutiveFailures < threshold {
 		return nil
 	}
@@ -207,27 +211,33 @@ func (e *Engine) observeTarget(ctx context.Context, target Target, cycleStarted 
 	if err := e.sink.Write(e.snapshot(StateObserving, cycleStarted, time.Time{})); err != nil {
 		return fmt.Errorf("write watchdog recovery state: %w", err)
 	}
+	recoveryStarted := e.clock.Now()
 	e.logger.Warn("watchdog_recovery_started", "target_id", target.ID,
-		"scheduled_task", target.Recovery.ScheduledTaskName)
-	if err := e.recoverer.RestartScheduledTask(recoveryContext, target.Recovery); err != nil {
+		"scheduled_task", target.Recovery.ScheduledTaskName, "attempt", runtime.status.RestartAttempts+1,
+		"observation", runtime.status.Observation)
+	recoveryErr := e.recoverer.RestartScheduledTask(recoveryContext, target.Recovery)
+	runtime.status.LastRecoveryDurationMS = e.clock.Now().Sub(recoveryStarted).Milliseconds()
+	if recoveryErr != nil {
 		runtime.restartAttempts = append(runtime.restartAttempts, now)
 		runtime.status.RestartAttempts++
-		runtime.status.LastRecoveryAt = timePointer(now)
+		runtime.status.LastRecoveryAt = timePointer(recoveryStarted)
 		runtime.status.State = StateRecoveryFailed
-		runtime.status.Detail = err.Error()
-		e.logger.Error("watchdog_recovery_failed", "target_id", target.ID, "error", err)
+		runtime.status.Detail = recoveryErr.Error()
+		e.logger.Error("watchdog_recovery_failed", "target_id", target.ID, "error", recoveryErr,
+			"duration_ms", runtime.status.LastRecoveryDurationMS)
 		return nil
 	}
 	runtime.restartAttempts = append(runtime.restartAttempts, now)
 	runtime.status.RestartAttempts++
-	runtime.status.LastRecoveryAt = timePointer(now)
+	runtime.status.LastRecoveryAt = timePointer(recoveryStarted)
 	runtime.status.State = StateGrace
 	runtime.status.Detail = "scheduled task restart completed; waiting for startup grace period"
 	runtime.status.ConsecutiveFailures = 0
 	runtime.startupDeadline = e.clock.Now().Add(time.Duration(target.Recovery.StartupGraceMS) * time.Millisecond)
 	runtime.status.StartupDeadline = timePointer(runtime.startupDeadline)
 	e.logger.Info("watchdog_recovery_completed", "target_id", target.ID,
-		"scheduled_task", target.Recovery.ScheduledTaskName, "startup_grace_ms", target.Recovery.StartupGraceMS)
+		"scheduled_task", target.Recovery.ScheduledTaskName, "startup_grace_ms", target.Recovery.StartupGraceMS,
+		"duration_ms", runtime.status.LastRecoveryDurationMS, "startup_deadline", runtime.startupDeadline)
 	return nil
 }
 

@@ -421,6 +421,10 @@ The Watchdog owns process availability and dependency order only. Its own
 Scheduled Task has no automatic restart. A Watchdog crash leaves other modules
 running and requires explicit diagnosis.
 
+Each recovery checks its declared dependencies and probes readiness within a
+per-target startup budget before applying normal failure thresholds. See the
+[Watchdog contract and interactive acceptance](docs/design/windows-watchdog.md).
+
 ### ScreenParser Action
 
 Install the finite ScreenParser runtime and pinned model for the owning Rule:

@@ -174,8 +174,15 @@ bounded one-second window when Windows reports access denied or a sharing
 violation. It never switches to an in-place or non-atomic write; a non-transient
 error or exhausted retry budget remains terminal and preserves the cause.
 
-The JSONL log records target transitions and recovery decisions. Neither
-status nor logging depends on Event Stream, so an Event Stream failure cannot
+The JSONL log records target transitions and recovery decisions. Unhealthy
+observations preserve the exact probe evidence, including process PID/session,
+per-probe duration, and the configured HTTP timeout and transport error when
+the request fails. Status also exposes the latest total observation and
+recovery durations. Recovery logs identify the attempt, duration, and startup
+deadline so slow Task Scheduler calls can be distinguished from slow target
+initialization. Event Stream logs its PID and `journal-open` phase before
+scanning the journal, and records startup duration or the original scan error.
+Neither status nor logging depends on Event Stream, so an Event Stream failure cannot
 blind the watchdog.
 
 ## Installation
@@ -219,3 +226,32 @@ selected automatically.
   prerequisites leave pending restarts `BLOCKED` without consuming attempts.
 - A healthy dependent stays healthy and is still observed when its prerequisite
   fails; dependency changes alone do not restart it.
+- Readiness can finish the startup window early; repeated unhealthy observations
+  within the configured startup budget do not restart the initializing process.
+- A slow restart does not consume the startup budget, and an expired startup
+  budget still respects the configured failure threshold and recovery limits.
+
+### Opt-in interactive Windows acceptance
+
+Build the native fixture runner from the same checkout:
+
+```bash
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c \
+  -o .build/watchdog-acceptance.test.exe ./internal/watchdog
+```
+
+Run it in the signed-in user's interactive Windows session:
+
+```powershell
+$env:WINDOWSAGENT_WATCHDOG_LIVE_ACCEPTANCE = '1'
+.\watchdog-acceptance.test.exe -test.run='^TestWatchdogLiveAcceptance$' -test.v -test.timeout=90s
+```
+
+The runner creates two uniquely named, triggerless, limited-user Scheduled Tasks
+with synthetic loopback HTTP targets. It exercises the production process
+inspector, Task Scheduler recoverer, status sink, slow initialization, and
+dependency recovery under eight seconds of below-normal-priority CPU pressure.
+It verifies the observed process-start counts, final readiness and interactive
+session, then removes its own Tasks and temporary files. Each fixture Task also
+has a two-minute execution limit. Installed target paths and configuration are
+outside the fixture's scope. Keep its runtime output outside the public checkout.

@@ -38,6 +38,7 @@ func NewTargetObserver(httpClient *http.Client, processInspector ProcessInspecto
 func (o *TargetObserver) Observe(ctx context.Context, target Target) (Observation, error) {
 	data := make(map[string]any, len(target.Probes))
 	for index, probe := range target.Probes {
+		started := time.Now()
 		var observation Observation
 		var err error
 		switch probe.Type {
@@ -51,6 +52,7 @@ func (o *TargetObserver) Observe(ctx context.Context, target Target) (Observatio
 		if err != nil {
 			return Observation{}, fmt.Errorf("target %s probe %d (%s): %w", target.ID, index, probe.Type, err)
 		}
+		observation.Data["durationMs"] = time.Since(started).Milliseconds()
 		data[fmt.Sprintf("probe%d", index)] = observation.Data
 		if !observation.Healthy {
 			return Observation{Healthy: false, Detail: observation.Detail, Data: data}, nil
@@ -91,7 +93,7 @@ func (o *TargetObserver) observeHTTP(ctx context.Context, probe ProbeConfig) (Ob
 	response, err := o.httpClient.Do(request)
 	if err != nil {
 		return Observation{Healthy: false, Detail: "configured HTTP health request failed",
-			Data: map[string]any{"url": probe.URL, "error": err.Error()}}, nil
+			Data: map[string]any{"url": probe.URL, "timeoutMs": probe.TimeoutMS, "error": err.Error()}}, nil
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxHealthResponseBytes+1))

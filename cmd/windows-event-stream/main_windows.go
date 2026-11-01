@@ -56,12 +56,25 @@ func run() error {
 	if err := validateLoopbackListen(listen); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Dir(logFile), 0o700); err != nil {
+		return fmt.Errorf("create event log directory: %w", err)
+	}
+	logOutput, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open event log file: %w", err)
+	}
+	defer logOutput.Close()
+	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
 	token, err := readToken(tokenFile)
 	if err != nil {
 		return err
 	}
+	initializationStarted := time.Now()
+	logger.Info("event_stream_initializing", "stage", "journal-open", "pid", os.Getpid())
 	store, err := eventstream.Open(dataDir)
 	if err != nil {
+		logger.Error("event_stream_initialization_failed", "stage", "journal-open", "pid", os.Getpid(),
+			"duration_ms", time.Since(initializationStarted).Milliseconds(), "error", err)
 		return fmt.Errorf("open event journal: %w", err)
 	}
 	defer store.Close()
@@ -74,15 +87,6 @@ func run() error {
 		return fmt.Errorf("listen on %s: %w", listen, err)
 	}
 	defer listener.Close()
-	if err := os.MkdirAll(filepath.Dir(logFile), 0o700); err != nil {
-		return fmt.Errorf("create event log directory: %w", err)
-	}
-	logOutput, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("open event log file: %w", err)
-	}
-	defer logOutput.Close()
-	logger := slog.New(slog.NewJSONHandler(logOutput, nil))
 	server := &http.Server{
 		Handler:           api.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -97,7 +101,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger.Info("event_stream_started", "listen", listener.Addr().String(), "root", store.Root(), "last_sequence", last)
+	logger.Info("event_stream_started", "listen", listener.Addr().String(), "root", store.Root(), "last_sequence", last,
+		"pid", os.Getpid(), "startup_duration_ms", time.Since(initializationStarted).Milliseconds())
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

@@ -3,6 +3,7 @@ package watchdog
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -16,11 +17,62 @@ type fakeObserver struct {
 	observation Observation
 	err         error
 	calls       int
+	onObserve   func()
 }
 
 func (f *fakeObserver) Observe(context.Context, Target) (Observation, error) {
 	f.calls++
+	if f.onObserve != nil {
+		f.onObserve()
+	}
 	return f.observation, f.err
+}
+
+func TestEnginePreservesProbeCauseAndRecoveryTimingInLogs(t *testing.T) {
+	config, _ := ParseConfig([]byte(validConfigJSON()))
+	clock := &fakeClock{now: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)}
+	observer := &fakeObserver{
+		observation: Observation{Healthy: false, Detail: "health request failed", Data: map[string]any{
+			"probe0": map[string]any{"pid": 42, "sessionId": 1},
+			"probe1": map[string]any{"error": "context deadline exceeded", "timeoutMs": 1500},
+		}},
+		onObserve: func() { clock.now = clock.now.Add(1500 * time.Millisecond) },
+	}
+	recoverer := &fakeRecoverer{onRestart: func() { clock.now = clock.now.Add(17 * time.Second) }}
+	var logs bytes.Buffer
+	engine, err := NewEngine(config, observer, recoverer, &memoryStatusSink{}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.clock = clock
+	if err := engine.Cycle(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status := engine.targets["event-stream"].status
+	if status.LastObservationDurationMS != 1500 || status.LastRecoveryDurationMS != 17000 {
+		t.Fatalf("timing evidence=%+v", status)
+	}
+	records := map[string]map[string]any{}
+	decoder := json.NewDecoder(&logs)
+	for decoder.More() {
+		var record map[string]any
+		if err := decoder.Decode(&record); err != nil {
+			t.Fatal(err)
+		}
+		records[record["msg"].(string)] = record
+	}
+	unhealthy := records["watchdog_target_unhealthy"]
+	if unhealthy["duration_ms"] != float64(1500) {
+		t.Fatalf("unhealthy=%v", unhealthy)
+	}
+	evidence := unhealthy["observation"].(map[string]any)
+	if evidence["probe0"].(map[string]any)["pid"] != float64(42) || evidence["probe1"].(map[string]any)["error"] != "context deadline exceeded" {
+		t.Fatalf("probe evidence=%v", evidence)
+	}
+	completed := records["watchdog_recovery_completed"]
+	if completed["duration_ms"] != float64(17000) || completed["startup_deadline"] == nil {
+		t.Fatalf("recovery=%v", completed)
+	}
 }
 
 type fakeRecoverer struct {

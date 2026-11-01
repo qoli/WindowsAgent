@@ -47,15 +47,17 @@ type WatchdogStatus struct {
 }
 
 type TargetStatus struct {
-	ID                  string         `json:"id"`
-	State               string         `json:"state"`
-	Detail              string         `json:"detail,omitempty"`
-	ConsecutiveFailures uint32         `json:"consecutiveFailures"`
-	RestartAttempts     uint64         `json:"restartAttempts"`
-	LastObservedAt      *time.Time     `json:"lastObservedAt,omitempty"`
-	LastRecoveryAt      *time.Time     `json:"lastRecoveryAt,omitempty"`
-	StartupDeadline     *time.Time     `json:"startupDeadline,omitempty"`
-	Observation         map[string]any `json:"observation,omitempty"`
+	ID                        string         `json:"id"`
+	State                     string         `json:"state"`
+	Detail                    string         `json:"detail,omitempty"`
+	ConsecutiveFailures       uint32         `json:"consecutiveFailures"`
+	RestartAttempts           uint64         `json:"restartAttempts"`
+	LastObservedAt            *time.Time     `json:"lastObservedAt,omitempty"`
+	LastRecoveryAt            *time.Time     `json:"lastRecoveryAt,omitempty"`
+	StartupDeadline           *time.Time     `json:"startupDeadline,omitempty"`
+	LastObservationDurationMS int64          `json:"lastObservationDurationMs"`
+	LastRecoveryDurationMS    int64          `json:"lastRecoveryDurationMs"`
+	Observation               map[string]any `json:"observation,omitempty"`
 }
 
 type FileStatusSink struct {
